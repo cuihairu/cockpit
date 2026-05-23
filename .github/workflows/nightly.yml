@@ -40,12 +40,12 @@ jobs:
           go build -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o dist/cockpit-agent ./cmd/cockpit-agent
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
