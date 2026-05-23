@@ -51,7 +51,7 @@ func printVersion() {
 
 func handleServer() {
 	cmd := flag.NewFlagSet("server", flag.ExitOnError)
-	addr := cmd.String("addr", "0.0.0.0:8080", "监听地址")
+	addr := cmd.String("addr", "0.0.0.0:9000", "监听地址")
 	dataDir := cmd.String("data", "./data", "数据目录")
 	help := cmd.Bool("h", false, "显示帮助")
 
