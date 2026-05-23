@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard'
 import Resources from './pages/Resources'
 import Agents from './pages/Agents'
 import Settings from './pages/Settings'
+import logo from '@/assets/logo.svg'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,7 +28,7 @@ const App = () => {
       <BrowserRouter>
         <ProLayout
           title="Cockpit"
-          logo="/logo.svg"
+          logo={logo}
           layout="mix"
           splitMenus={true}
           navTheme="light"
