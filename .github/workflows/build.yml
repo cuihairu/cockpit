@@ -69,6 +69,7 @@ jobs:
         run: go mod download
 
       - name: Build Server
+        shell: bash
         env:
           GOOS: ${{ matrix.os == 'windows' && 'windows' || matrix.os == 'darwin' && 'darwin' || 'linux' }}
           GOARCH: ${{ matrix.arch }}
