@@ -216,10 +216,25 @@ func (a *Agent) detectLocation() protocol.Location {
 		Zone:   "unknown",
 	}
 
-	// TODO: 实现位置检测逻辑
-	// - 检查 IP 地理位置
-	// - 检查配置文件
-	// - 检查环境变量
+	// 从配置读取
+	if a.config != nil && a.config.Region != "" {
+		loc.Region = a.config.Region
+	}
+	if a.config != nil && a.config.Zone != "" {
+		loc.Zone = a.config.Zone
+	}
+
+	// 从环境变量读取
+	if loc.Region == "unknown" {
+		if region := os.Getenv("COCKPIT_REGION"); region != "" {
+			loc.Region = region
+		}
+	}
+	if loc.Zone == "unknown" {
+		if zone := os.Getenv("COCKPIT_ZONE"); zone != "" {
+			loc.Zone = zone
+		}
+	}
 
 	return loc
 }

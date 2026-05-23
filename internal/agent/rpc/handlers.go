@@ -3,6 +3,7 @@ package rpc
 import (
 	"fmt"
 	"log"
+	"runtime"
 	"sync"
 	"time"
 
@@ -123,7 +124,15 @@ func joinMethod(parts []string) string {
 
 // ============ System Provider (内置) ============
 
-type SystemProvider struct{}
+type SystemProvider struct {
+	startTime time.Time
+}
+
+func NewSystemProvider() *SystemProvider {
+	return &SystemProvider{
+		startTime: time.Now(),
+	}
+}
 
 func (p *SystemProvider) Type() string { return "system" }
 
@@ -144,9 +153,15 @@ func (p *SystemProvider) Call(action string, params map[string]interface{}) (int
 }
 
 func (p *SystemProvider) Status(params map[string]interface{}) (interface{}, error) {
+	// 计算 Agent 运行时间
+	uptime := time.Since(p.startTime)
+
 	return map[string]interface{}{
-		"status": "ok",
-		"uptime": "TODO",
+		"status":     "ok",
+		"uptime":     uptime.String(),
+		"go_version": runtime.Version(),
+		"os":         runtime.GOOS,
+		"arch":       runtime.GOARCH,
 	}, nil
 }
 
