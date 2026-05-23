@@ -135,8 +135,9 @@ jobs:
 
       - name: Merge coverage profiles
         run: |
-          grep -l "^mode:" coverage/*.out | sort | xargs grep -h "^mode:" | head -1 > coverage/full.out
-          grep -l "^mode:" coverage/*.out | sort | xargs grep -h -v "^mode:" >> coverage/full.out
+          rm -f coverage/full.out
+          (ls coverage/*.out 2>/dev/null | grep -v full.out | xargs grep -h "^mode:" | head -1 || echo "mode: atomic") > coverage/full.out
+          ls coverage/*.out 2>/dev/null | grep -v full.out | xargs grep -h -v "^mode:" >> coverage/full.out
 
       - name: Generate report
         run: |
