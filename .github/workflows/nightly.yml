@@ -62,8 +62,8 @@ jobs:
           tar czf cockpit-linux-amd64-nightly.tar.gz cockpit cockpit-agent
           cd ..
 
-          # 打包 web 资源
-          tar czf dist/cockpit-web-linux-amd64-nightly.tar.gz -C web/dist .
+          # 打包 web 资源（跨平台）
+          tar czf dist/cockpit-web-nightly.tar.gz -C web/dist .
 
       - name: Delete old nightly releases
         env:
@@ -91,7 +91,7 @@ jobs:
             --notes "Automated nightly build. This release is overwritten daily." \
             --latest=false \
             dist/cockpit-linux-amd64-nightly.tar.gz \
-            dist/cockpit-web-linux-amd64-nightly.tar.gz
+            dist/cockpit-web-nightly.tar.gz
 
       - name: Upload server artifact
         uses: actions/upload-artifact@v7
