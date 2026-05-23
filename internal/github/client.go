@@ -103,7 +103,7 @@ type WorkflowRun struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	StartedAt      time.Time `json:"run_started_at"`
-	CompletedAt    time.Time `json:"updated_at"`
+	CompletedAt    time.Time `json:"-"` // 从 UpdatedAt 推导
 	RunNumber      int       `json:"run_number"`
 	RunAttempt     int       `json:"run_attempt"`
 	Event          string    `json:"event"`
@@ -485,8 +485,15 @@ func (w *WorkflowRun) IsPending() bool {
 
 // GetDuration returns workflow run duration
 func (w *WorkflowRun) GetDuration() time.Duration {
-	if w.CompletedAt.IsZero() {
+	// 对于已完成的运行，UpdatedAt 作为完成时间
+	endTime := w.UpdatedAt
+	if w.IsCompleted() {
+		endTime = w.UpdatedAt
+	} else if !w.UpdatedAt.IsZero() {
 		return time.Since(w.StartedAt)
 	}
-	return w.CompletedAt.Sub(w.StartedAt)
+	if endTime.IsZero() {
+		return time.Since(w.StartedAt)
+	}
+	return endTime.Sub(w.StartedAt)
 }
