@@ -10,6 +10,7 @@
 [![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](https://github.com/cuihairu/cockpit/releases)
 [![macOS](https://img.shields.io/badge/macOS-000000?logo=apple)](https://github.com/cuihairu/cockpit/releases)
 [![Windows](https://img.shields.io/badge/Windows-00A4EF?logo=windows)](https://github.com/cuihairu/cockpit/releases)
+[![OpenWrt](https://img.shields.io/badge/OpenWrt-00B5E2?logo=openwrt)](https://github.com/cuihairu/cockpit/releases)
 
 ## 介绍
 
