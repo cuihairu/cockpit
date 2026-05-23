@@ -5,6 +5,9 @@ export default defineConfig({
   description: '个人混合基础设施控制台',
   lang: 'zh-CN',
 
+  // 忽略死链检查（部分文档尚未完成）
+  ignoreDeadLinks: true,
+
   themeConfig: {
     nav: [
       { text: '指南', link: '/guide/introduction' },
