@@ -45,11 +45,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Remove web/node_modules (Windows path issue)
-        shell: bash
-        run: |
-          rm -rf web/node_modules || true
-
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
