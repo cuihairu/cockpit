@@ -90,7 +90,6 @@ jobs:
             --title "Nightly Build" \
             --notes "Automated nightly build. This release is overwritten daily." \
             --latest=false \
-            --clobber \
             dist/cockpit-linux-amd64-nightly.tar.gz \
             dist/cockpit-web-linux-amd64-nightly.tar.gz
 
