@@ -6,6 +6,11 @@
 [![Docs](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml)
 [![codecov](https://codecov.io/gh/cuihairu/cockpit/branch/main/graph/badge.svg)](https://codecov.io/gh/cuihairu/cockpit)
 
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](https://github.com/cuihairu/cockpit/releases)
+[![macOS](https://img.shields.io/badge/macOS-000000?logo=apple)](https://github.com/cuihairu/cockpit/releases)
+[![Windows](https://img.shields.io/badge/Windows-00A4EF?logo=windows)](https://github.com/cuihairu/cockpit/releases)
+
 ## 介绍
 
 Cockpit 是一个针对个人混合基础设施的管理平台，提供：
