@@ -90,6 +90,7 @@ func (d *DB) Close() error {
 // migrate 执行数据库迁移
 func (d *DB) migrate() error {
 	return d.db.AutoMigrate(
+		&User{},
 		&Agent{},
 		&ComputeInstance{},
 		&Domain{},

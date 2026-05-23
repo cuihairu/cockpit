@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
@@ -34,6 +35,10 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleAgentGet(w, r, strings.TrimPrefix(path, "/agents/"))
 	case strings.HasPrefix(path, "/resources/"):
 		s.handleResources(w, r, strings.TrimPrefix(path, "/resources/"))
+	case path == "/users":
+		s.handleUsersList(w, r)
+	case strings.HasPrefix(path, "/users/"):
+		s.handleUserActions(w, r, strings.TrimPrefix(path, "/users/"))
 	default:
 		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 	}
@@ -332,4 +337,75 @@ func (s *Server) handleError(w http.ResponseWriter, r *http.Request, status int,
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": message,
 	})
+}
+
+// handleUsersList 获取用户列表
+func (s *Server) handleUsersList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	users, err := s.db.ListUsers()
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to list users")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, users)
+}
+
+// handleUserActions 处理用户操作
+func (s *Server) handleUserActions(w http.ResponseWriter, r *http.Request, path string) {
+	parts := strings.Split(path, "/")
+
+	if len(parts) == 0 {
+		s.handleError(w, r, http.StatusNotFound, "User not specified")
+		return
+	}
+
+	userID := parts[0]
+
+	switch r.Method {
+	case http.MethodDelete:
+		s.handleUserDelete(w, r, userID)
+	default:
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
+// handleUserDelete 删除用户
+func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request, id string) {
+	// 获取当前用户
+	user, ok := auth.GetUserFromContext(r)
+	if !ok {
+		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	// 查询目标用户
+	targetUser, err := s.db.GetUserByID(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "User not found")
+		return
+	}
+
+	// 不能删除自己
+	if targetUser.Username == user.Username {
+		s.handleError(w, r, http.StatusBadRequest, "Cannot delete yourself")
+		return
+	}
+
+	// 只有管理员可以删除用户
+	if user.Username != "admin" && user.Username != targetUser.Username {
+		s.handleError(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	if err := s.db.DeleteUser(id); err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to delete user")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"message": "User deleted"})
 }

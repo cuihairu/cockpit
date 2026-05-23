@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,6 +17,13 @@ import (
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/gorilla/websocket"
 )
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
 
 // Server WebSocket 服务器
 type Server struct {
@@ -67,8 +75,17 @@ func NewServer(cfg Config) *Server {
 
 // Start 启动服务器
 func (s *Server) Start() error {
-	// 初始化认证
-	auth.Init()
+	// 初始化认证（设置数据库）
+	auth.InitDB(s.db)
+
+	// 初始化管理员用户
+	adminUser := getEnv("ADMIN_USERNAME", "admin")
+	adminPass := getEnv("ADMIN_PASSWORD", "admin")
+	if err := auth.InitAdmin(s.db, adminUser, adminPass); err != nil {
+		log.Printf("Warning: Failed to init admin user: %v", err)
+	} else {
+		log.Printf("Admin user initialized: %s", adminUser)
+	}
 
 	mux := http.NewServeMux()
 
@@ -80,16 +97,14 @@ func (s *Server) Start() error {
 
 	// 需要认证的 API 路由
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		// 登录接口不需要认证
+		// 登录相关接口不需要认证
 		if strings.HasPrefix(r.URL.Path, "/api/auth/") {
-			if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/refresh" {
-				if r.URL.Path == "/api/auth/login" {
-					auth.HandleLogin(w, r)
-				} else {
-					auth.HandleRefresh(w, r)
-				}
-				return
+			if r.URL.Path == "/api/auth/login" {
+				auth.HandleLogin(w, r)
+			} else if r.URL.Path == "/api/auth/refresh" {
+				auth.HandleRefresh(w, r)
 			}
+			return
 		}
 		// 其他 API 需要认证
 		auth.Middleware(s.serveAPI)(w, r)

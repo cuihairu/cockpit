@@ -3,8 +3,8 @@ package auth
 import (
 	"encoding/json"
 	"net/http"
-	"os"
-	"strings"
+
+	"github.com/cuihairu/cockpit/internal/storage"
 )
 
 // LoginRequest 登录请求
@@ -21,30 +21,17 @@ type LoginResponse struct {
 	Username  string `json:"username"`
 }
 
-// defaultUser 默认用户（从环境变量读取）
-var defaultUser = struct {
-	Username string
-	Password string
-}{
-	Username: getEnv("ADMIN_USERNAME", "admin"),
-	Password: getEnv("ADMIN_PASSWORD", "admin"),
+// DB 存储接口（在运行时注入）
+var DB *storage.DB
+
+// InitDB 初始化数据库连接
+func InitDB(db *storage.DB) {
+	DB = db
 }
 
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// Init 初始化认证
-func Init() {
-	if username := os.Getenv("ADMIN_USERNAME"); username != "" {
-		defaultUser.Username = username
-	}
-	if password := os.Getenv("ADMIN_PASSWORD"); password != "" {
-		defaultUser.Password = password
-	}
+// InitAdmin 初始化管理员用户
+func InitAdmin(db *storage.DB, username, password string) error {
+	return db.InitAdminUser(username, password)
 }
 
 // HandleLogin 处理登录
@@ -61,13 +48,14 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 验证用户名密码
-	if req.Username != defaultUser.Username || req.Password != defaultUser.Password {
+	user, err := DB.VerifyPassword(req.Username, req.Password)
+	if err != nil {
 		http.Error(w, `{"error":"Invalid username or password"}`, http.StatusUnauthorized)
 		return
 	}
 
 	// 生成 token
-	token, err := GenerateToken("admin", req.Username)
+	token, err := GenerateToken(user.ID, user.Username)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to generate token"}`, http.StatusInternalServerError)
 		return
@@ -76,9 +64,9 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	// 返回 token
 	response := LoginResponse{
 		Token:     token,
-		ExpiresAt: 0, // 前端可以根据返回时间计算
-		UserID:    "admin",
-		Username:  req.Username,
+		ExpiresAt: 0,
+		UserID:    user.ID,
+		Username:  user.Username,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -98,7 +86,7 @@ func HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	tokenString := authHeader[7:] // Remove "Bearer " prefix
 
 	newToken, err := RefreshToken(tokenString)
 	if err != nil {
