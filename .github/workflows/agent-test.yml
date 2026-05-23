@@ -62,6 +62,7 @@ jobs:
         with:
           files: ./coverage.out
           flags: agent
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
       - name: Upload coverage report
