@@ -24,8 +24,8 @@
 *.so.*
 
 
-# Fortran module files
-*.mod
+# Fortran module files (but not Go's go.mod)
+*.fmod
 *.smod
 
 # Compiled Static libraries
