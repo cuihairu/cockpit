@@ -9,6 +9,7 @@ on:
       - 'internal/agent/**'
       - 'cmd/cockpit-agent/**'
       - '.github/workflows/agent-test.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
