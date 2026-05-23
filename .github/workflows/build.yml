@@ -43,6 +43,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: true
+          sparse-checkout-partial: true
+
+      - name: Configure sparse checkout (exclude web/node_modules)
+        shell: bash
+        run: |
+          git sparse-checkout set /* !web/node_modules
 
       - name: Set up Go
         uses: actions/setup-go@v6
