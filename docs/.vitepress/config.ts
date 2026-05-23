@@ -5,6 +5,9 @@ export default defineConfig({
   description: '个人混合基础设施控制台',
   lang: 'zh-CN',
 
+  // GitHub Pages 使用子路径部署
+  base: '/cockpit/',
+
   // 忽略死链检查（部分文档尚未完成）
   ignoreDeadLinks: true,
 
