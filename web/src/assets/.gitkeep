@@ -1,0 +1,15 @@
+# Assets Directory
+
+Place your static assets here:
+- logo.png
+- logo.svg
+- favicon.ico
+- images/
+- fonts/
+
+Usage in components:
+```tsx
+import logo from '@/assets/logo.png';
+
+<img src={logo} alt="Logo" />
+```
