@@ -7,9 +7,11 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/gorilla/websocket"
@@ -65,19 +67,36 @@ func NewServer(cfg Config) *Server {
 
 // Start 启动服务器
 func (s *Server) Start() error {
+	// 初始化认证
+	auth.Init()
+
 	mux := http.NewServeMux()
 
-	// API 路由
+	// 公开路由
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/api/auth/login", auth.HandleLogin)
+	mux.HandleFunc("/api/auth/refresh", auth.HandleRefresh)
+
+	// 需要认证的 API 路由
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		// 登录接口不需要认证
+		if strings.HasPrefix(r.URL.Path, "/api/auth/") {
+			if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/refresh" {
+				if r.URL.Path == "/api/auth/login" {
+					auth.HandleLogin(w, r)
+				} else {
+					auth.HandleRefresh(w, r)
+				}
+				return
+			}
+		}
+		// 其他 API 需要认证
+		auth.Middleware(s.serveAPI)(w, r)
+	})
 
 	// Web UI (SPA) - 必须放在最后作为 fallback
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// API 请求返回 404
-		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
-			s.serveAPI(w, r)
-			return
-		}
 		s.spaHandler().ServeHTTP(w, r)
 	})
 
