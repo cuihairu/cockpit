@@ -38,11 +38,21 @@ jobs:
           go build -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o dist/cockpit ./cmd/cockpit
           go build -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o dist/cockpit-agent ./cmd/cockpit-agent
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Build Web
         working-directory: web
         run: |
-          npm ci
-          npm run build
+          pnpm install
+          pnpm run build
 
       - name: Package Linux
         run: |
