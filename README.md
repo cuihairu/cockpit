@@ -4,6 +4,7 @@
 
 [![Go](https://github.com/cuihairu/cockpit/actions/workflows/go.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/go.yml)
 [![Docs](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml)
+[![codecov](https://codecov.io/gh/cuihairu/cockpit/branch/main/graph/badge.svg)](https://codecov.io/gh/cuihairu/cockpit)
 
 ## 介绍
 
