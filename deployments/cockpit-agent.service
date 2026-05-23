@@ -1,0 +1,39 @@
+[Unit]
+Description=Cockpit Agent - Infrastructure Monitoring Agent
+Documentation=https://github.com/cuihairu/cockpit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cockpit
+Group=cockpit
+
+# 环境配置文件
+EnvironmentFile=/etc/default/cockpit-agent
+
+# 启动命令
+ExecStart=/usr/local/bin/cockpit-agent start \
+    -server "${SERVER_URL}" \
+    -region "${REGION}" \
+    -zone "${ZONE}" \
+    -id "${AGENT_ID}"
+
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cockpit-agent
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cockpit-agent
+
+# 资源限制
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

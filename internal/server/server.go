@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
+	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/gorilla/websocket"
 )
 
@@ -18,6 +20,7 @@ type Server struct {
 	addr     string
 	registry *Registry
 	codec    *protocol.Codec
+	db       *storage.DB
 	upgrader websocket.Upgrader
 
 	mu      sync.RWMutex
@@ -27,17 +30,26 @@ type Server struct {
 
 // Config 服务器配置
 type Config struct {
-	Addr string // 监听地址，如 "0.0.0.0:8080"
+	Addr    string // 监听地址，如 "0.0.0.0:8080"
+	DataDir string // 数据目录
 }
 
 // NewServer 创建新服务器
 func NewServer(cfg Config) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// 打开数据库
+	dbPath := filepath.Join(cfg.DataDir, "cockpit.db")
+	db, err := storage.Open(storage.Config{Path: dbPath})
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+
 	return &Server{
 		addr:     cfg.Addr,
 		registry: NewRegistry(),
 		codec:    protocol.NewCodec(),
+		db:       db,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				// 生产环境应该验证 Origin
@@ -54,8 +66,20 @@ func NewServer(cfg Config) *Server {
 // Start 启动服务器
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
+
+	// API 路由
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/health", s.handleHealth)
+
+	// Web UI (SPA) - 必须放在最后作为 fallback
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// API 请求返回 404
+		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+			s.serveAPI(w, r)
+			return
+		}
+		s.spaHandler().ServeHTTP(w, r)
+	})
 
 	server := &http.Server{
 		Addr:    s.addr,
@@ -63,6 +87,7 @@ func (s *Server) Start() error {
 	}
 
 	log.Printf("Server starting on %s", s.addr)
+	log.Printf("Web UI: http://%s", s.addr)
 
 	// 启动清理协程
 	go s.cleanupLoop()
@@ -73,6 +98,9 @@ func (s *Server) Start() error {
 // Shutdown 关闭服务器
 func (s *Server) Shutdown() {
 	s.cancel()
+	if s.db != nil {
+		s.db.Close()
+	}
 }
 
 // handleWebSocket 处理 WebSocket 连接
@@ -121,6 +149,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		// 如果已存在，先注销旧的
 		s.registry.Unregister(agentID)
 		s.registry.Register(agent)
+	}
+
+	// 持久化到数据库
+	if err := s.db.UpsertAgent(toStorageAgent(agent)); err != nil {
+		log.Printf("Failed to persist agent to database: %v", err)
 	}
 
 	log.Printf("Agent registered: %s at %s/%s", agentID, reg.Location.Region, reg.Location.Zone)
@@ -266,5 +299,38 @@ func (s *Server) CallAgent(agentID, method string, params map[string]interface{}
 		return resp, nil
 	case <-time.After(30 * time.Second):
 		return nil, fmt.Errorf("response timeout")
+	}
+}
+
+// toStorageAgent 将 Agent 转换为存储模型
+func toStorageAgent(agent *Agent) *storage.Agent {
+	capabilities := make([]storage.Capability, len(agent.Capabilities))
+	for i, cap := range agent.Capabilities {
+		// 将 Metadata 转换为 Config (map[string]interface{})
+		config := make(map[string]interface{})
+		for k, v := range cap.Metadata {
+			config[k] = v
+		}
+		if cap.Endpoint != "" {
+			config["endpoint"] = cap.Endpoint
+		}
+
+		capabilities[i] = storage.Capability{
+			Type:    cap.Type,
+			Version: cap.Version,
+			Config:  config,
+		}
+	}
+
+	return &storage.Agent{
+		ID:           agent.ID,
+		Hostname:     agent.Hostname,
+		IP:           agent.IP,
+		Region:       agent.Location.Region,
+		Zone:         agent.Location.Zone,
+		Version:      "",  // Agent 当前没有版本字段
+		Capabilities: capabilities,
+		Status:       "online",
+		LastSeen:     agent.LastSeen,
 	}
 }

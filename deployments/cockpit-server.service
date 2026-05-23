@@ -1,0 +1,30 @@
+[Unit]
+Description=Cockpit Server - Infrastructure Management Server
+Documentation=https://github.com/cuihairu/cockpit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cockpit
+Group=cockpit
+ExecStart=/usr/local/bin/cockpit server start
+
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cockpit
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cockpit
+
+# 资源限制
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

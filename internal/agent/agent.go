@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/agent/detector"
+	"github.com/cuihairu/cockpit/internal/agent/rpc"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/gorilla/websocket"
 )
@@ -19,6 +20,7 @@ type Agent struct {
 	serverURL string
 	conn      *websocket.Conn
 	codec     *protocol.Codec
+	rpc       *rpc.Handler
 
 	// 注册信息
 	agentID  string
@@ -49,12 +51,13 @@ func NewAgent(cfg Config) *Agent {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Agent{
-		serverURL:   cfg.ServerURL,
-		codec:       protocol.NewCodec(),
+		serverURL:    cfg.ServerURL,
+		codec:        protocol.NewCodec(),
+		rpc:          rpc.NewHandler(),
 		capabilities: []protocol.Capability{},
-		ctx:         ctx,
-		cancel:      cancel,
-		config:      &cfg,
+		ctx:          ctx,
+		cancel:       cancel,
+		config:       &cfg,
 	}
 }
 
@@ -323,22 +326,27 @@ func (a *Agent) handlePing(msg *protocol.Message) {
 
 // handleRPCRequest 处理 RPC 请求
 func (a *Agent) handleRPCRequest(msg *protocol.Message) {
-	// TODO: 实现 RPC 请求处理
 	log.Printf("RPC request: %v", msg.Payload)
 
-	// 暂时返回未实现错误
-	resp := protocol.NewMessage(protocol.MessageTypeRPCResponse, map[string]any{
-		"status": "error",
-		"error":  "not implemented",
-	})
-	resp.ID = msg.ID
+	// 使用 RPC 处理器
+	resp, err := a.rpc.Handle(msg)
+	if err != nil {
+		log.Printf("RPC error: %v", err)
+		resp = protocol.NewMessage(protocol.MessageTypeRPCResponse, map[string]any{
+			"status": "error",
+			"error":  err.Error(),
+		})
+		resp.ID = msg.ID
+	}
 
 	a.mu.RLock()
 	conn := a.conn
 	a.mu.RUnlock()
 
 	if conn != nil {
-		a.codec.WriteMessage(conn, resp)
+		if err := a.codec.WriteMessage(conn, resp); err != nil {
+			log.Printf("Send RPC response failed: %v", err)
+		}
 	}
 }
 

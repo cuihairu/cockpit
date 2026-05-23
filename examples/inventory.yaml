@@ -1,0 +1,130 @@
+# Cockpit Infrastructure Inventory
+version: v1
+
+metadata:
+  name: "My Home Lab"
+  description: "Personal hybrid infrastructure"
+  labels:
+    environment: home
+    owner: "me"
+
+# 地域定义
+regions:
+  home:
+    name: "Home"
+    description: "Home network infrastructure"
+    labels:
+      tier: "edge"
+    zones:
+      datacenter-a:
+        name: "Data Center A"
+        description: "Server room in basement"
+        agents:
+          pve01:
+            name: "Proxmox VE Server 01"
+            hostname: "pve01.home.local"
+            ip: "192.168.1.10"
+            labels:
+              role: "hypervisor"
+            capabilities:
+              - pve
+              - vm
+              - container
+            config:
+              api_endpoint: "https://192.168.1.10:8006"
+              api_token: "${PROXMOX_TOKEN}"
+
+          docker01:
+            name: "Docker Host 01"
+            hostname: "docker01.home.local"
+            ip: "192.168.1.20"
+            labels:
+              role: "container"
+            capabilities:
+              - docker
+            config:
+              docker_socket: "/var/run/docker.sock"
+
+          openwrt-router:
+            name: "OpenWrt Router"
+            hostname: "router.home.local"
+            ip: "192.168.1.1"
+            labels:
+              role: "gateway"
+            capabilities:
+              - openwrt
+              - firewall
+            config:
+              ssh_port: 22
+              ssh_user: "root"
+
+  jiangsu-huaian:
+    name: "Jiangsu Huaian"
+    description: "Cloud VPS in Jiangsu"
+    labels:
+      tier: "cloud"
+    zones:
+      vps-zone:
+        name: "VPS Zone"
+        endpoints:
+          - "https://api.vps-provider.com"
+        agents:
+          vps01:
+            name: "VPS 01"
+            hostname: "vps01.example.com"
+            ip: "1.2.3.4"
+            labels:
+              role: "web"
+            capabilities:
+              - docker
+              - web
+
+# 域名定义
+domains:
+  example-com:
+    id: "example-com"
+    domain: "example.com"
+    provider: "cloudflare"
+    agent: "vps01"
+    autoRenew: true
+    labels:
+      tier: "production"
+    certificates:
+      - id: "example-com-wildcard"
+        domain: "*.example.com"
+        provider: "letsencrypt"
+        agent: "vps01"
+        autoRenew: true
+        renewBeforeDays: 30
+
+  home-local:
+    id: "home-local"
+    domain: "home.local"
+    provider: "internal"
+    agent: "pve01"
+    labels:
+      tier: "internal"
+
+# 资源引用
+resources:
+  pve-vm-agent: &pve-vm-agent
+    type: "vm"
+    agent: "pve01"
+    template: "ubuntu-22.04"
+    cpu: 2
+    memory: 2048
+    disk: 40
+
+# 可以在其他文件中引用此模板
+templates:
+  ubuntu-22.04:
+    id: "ubuntu-22.04"
+    description: "Ubuntu 22.04 Template"
+    labels:
+      os: "ubuntu"
+      version: "22.04"
+    spec:
+      image: "ubuntu-22.04-cloudimg"
+      ssh_keys:
+        - "ssh-rsa AAAA..."
+      cloud_init: true

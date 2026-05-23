@@ -1,0 +1,117 @@
+import axios, { AxiosInstance } from 'axios'
+import type {
+  Agent,
+  ApiResponse,
+  ComputeInstance,
+  Domain,
+  Certificate,
+  Service,
+  Gateway,
+  Storage,
+  PaginatedResponse,
+} from '@/types'
+
+class ApiService {
+  private client: AxiosInstance
+
+  constructor() {
+    this.client = axios.create({
+      baseURL: '/api',
+      timeout: 30000,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    // 响应拦截器
+    this.client.interceptors.response.use(
+      (response) => response.data,
+      (error) => {
+        console.error('API Error:', error)
+        return Promise.reject(error)
+      },
+    )
+  }
+
+  // ========== Agent ==========
+  async getAgents(): Promise<Agent[]> {
+    return this.client.get<any, Agent[]>('/agents')
+  }
+
+  async getAgent(id: string): Promise<Agent> {
+    return this.client.get<any, Agent>(`/agents/${id}`)
+  }
+
+  // ========== 计算实例 ==========
+  async getComputeInstances(params?: {
+    region?: string
+    zone?: string
+    type?: string
+  }): Promise<PaginatedResponse<ComputeInstance>> {
+    return this.client.get<any, PaginatedResponse<ComputeInstance>>('/resources/compute-instances', {
+      params,
+    })
+  }
+
+  async getComputeInstance(id: string): Promise<ComputeInstance> {
+    return this.client.get<any, ComputeInstance>(`/resources/compute-instances/${id}`)
+  }
+
+  // ========== 域名 ==========
+  async getDomains(): Promise<PaginatedResponse<Domain>> {
+    return this.client.get<any, PaginatedResponse<Domain>>('/resources/domains')
+  }
+
+  async getDomain(id: string): Promise<Domain> {
+    return this.client.get<any, Domain>(`/resources/domains/${id}`)
+  }
+
+  // ========== 证书 ==========
+  async getCertificates(): Promise<PaginatedResponse<Certificate>> {
+    return this.client.get<any, PaginatedResponse<Certificate>>('/resources/certificates')
+  }
+
+  async getCertificate(id: string): Promise<Certificate> {
+    return this.client.get<any, Certificate>(`/resources/certificates/${id}`)
+  }
+
+  // ========== 服务 ==========
+  async getServices(): Promise<PaginatedResponse<Service>> {
+    return this.client.get<any, PaginatedResponse<Service>>('/resources/services')
+  }
+
+  async getService(id: string): Promise<Service> {
+    return this.client.get<any, Service>(`/resources/services/${id}`)
+  }
+
+  // ========== Gateway ==========
+  async getGateways(): Promise<PaginatedResponse<Gateway>> {
+    return this.client.get<any, PaginatedResponse<Gateway>>('/resources/gateways')
+  }
+
+  async getGateway(id: string): Promise<Gateway> {
+    return this.client.get<any, Gateway>(`/resources/gateways/${id}`)
+  }
+
+  // ========== 存储 ==========
+  async getStorages(): Promise<PaginatedResponse<Storage>> {
+    return this.client.get<any, PaginatedResponse<Storage>>('/resources/storages')
+  }
+
+  async getStorage(id: string): Promise<Storage> {
+    return this.client.get<any, Storage>(`/resources/storages/${id}`)
+  }
+
+  // ========== 系统状态 ==========
+  async getStatus(): Promise<{
+    services: { running: number; down: number; unknown: number }
+    domains: { valid: number; expiring: number }
+    certificates: { valid: number; expiring: number }
+    infrastructure: { total: number; online: number }
+  }> {
+    return this.client.get<any, any>('/status')
+  }
+}
+
+// 导出单例
+export const api = new ApiService()
