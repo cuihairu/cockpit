@@ -23,14 +23,50 @@ class ApiService {
       },
     })
 
+    // 请求拦截器 - 添加 token
+    this.client.interceptors.request.use(
+      (config) => {
+        const token = localStorage.getItem('token')
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`
+        }
+        return config
+      },
+      (error) => Promise.reject(error)
+    )
+
     // 响应拦截器
     this.client.interceptors.response.use(
       (response) => response.data,
       (error) => {
+        if (error.response?.status === 401) {
+          // Token 过期，清除并跳转登录
+          localStorage.removeItem('token')
+          localStorage.removeItem('username')
+          window.location.href = '/login'
+        }
         console.error('API Error:', error)
         return Promise.reject(error)
-      },
+      }
     )
+  }
+
+  // ========== 认证 ==========
+  async login(username: string, password: string) {
+    return this.client.post<{ token: string; user_id: string; username: string }>('/auth/login', {
+      username,
+      password,
+    })
+  }
+
+  async logout() {
+    localStorage.removeItem('token')
+    localStorage.removeItem('username')
+    window.location.href = '/login'
+  }
+
+  async refreshToken() {
+    return this.client.post<{ token: string }>('/auth/refresh')
   }
 
   // ========== Agent ==========
