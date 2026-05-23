@@ -12,6 +12,8 @@ export default defineConfig({
   ignoreDeadLinks: true,
 
   themeConfig: {
+    logo: '/logo.svg',
+
     nav: [
       { text: '指南', link: '/guide/introduction' },
       { text: '参考', link: '/reference/schema' },
