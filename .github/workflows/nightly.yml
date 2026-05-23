@@ -82,18 +82,11 @@ jobs:
 
           # 发布 nightly release (覆盖旧的)
           gh release create nightly \
-            --title "Nightly Build $(date +%Y-%m-%d)" \
-            --notes "Automated nightly build from $(date +%Y-%m-%d)
-
-          This is an automated build that may be unstable.
-
-          **Note**: This release is overwritten daily." \
+            --title "Nightly Build" \
+            --notes "Automated nightly build. This release is overwritten daily." \
             --latest=false \
-            dist/cockpit-linux-amd64-nightly.tar.gz \
-            || {
-            # 如果创建失败（已存在），则更新
-            gh release upload nightly --clobber dist/cockpit-linux-amd64-nightly.tar.gz
-          }
+            --clobber \
+            dist/cockpit-linux-amd64-nightly.tar.gz
 
       - name: Upload server artifact
         uses: actions/upload-artifact@v7
