@@ -1,0 +1,85 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            cc: gcc
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            cc: gcc-aarch64-linux-gnu
+
+          # macOS (AMD64 only, GitHub Actions doesn't have ARM64 macOS runners yet)
+          - os: darwin
+            arch: amd64
+            runner: macos-latest
+            cc: clang
+
+          # Windows
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            cc: gcc
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc sqlite3
+
+      - name: Install cross-compiler (Linux ARM64)
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CC=gcc-aarch64-linux-gnu" >> $GITHUB_ENV
+          echo "GOARCH=arm64" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build Server
+        env:
+          GOOS: ${{ matrix.os == 'windows' && 'windows' || matrix.os == 'darwin' && 'darwin' || 'linux' }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: ${{ matrix.os == 'windows' && '0' || '1' }}
+        run: |
+          mkdir -p dist
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            go build -ldflags="-s -w" -o dist/cockpit.exe ./cmd/cockpit
+            go build -ldflags="-s -w" -o dist/cockpit-agent.exe ./cmd/cockpit-agent
+          else
+            go build -ldflags="-s -w" -o dist/cockpit ./cmd/cockpit
+            go build -ldflags="-s -w" -o dist/cockpit-agent ./cmd/cockpit-agent
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cockpit-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*
+          retention-days: 7

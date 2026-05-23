@@ -1,0 +1,98 @@
+name: Nightly Build
+
+on:
+  schedule:
+    # 每天 UTC 0:00 执行
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    name: Nightly Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Install sqlite dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc sqlite3
+
+      - name: Build Server
+        run: |
+          mkdir -p dist
+          go build -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o dist/cockpit ./cmd/cockpit
+          go build -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o dist/cockpit-agent ./cmd/cockpit-agent
+
+      - name: Build Web
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package Linux
+        run: |
+          cd dist
+          tar czf cockpit-linux-amd64-nightly.tar.gz cockpit cockpit-agent
+
+      - name: Delete old nightly releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 删除旧的 nightly release
+          gh release list --limit 100 | grep nightly || true
+          release_id=$(gh api repos/:owner/:repo/releases/tags/nightly --jq '.id' 2>/dev/null || echo "")
+          if [ -n "$release_id" ]; then
+            gh release delete "$release_id" -y || true
+          fi
+          git tag -d nightly || true
+          git push origin :refs/tags/nightly || true
+
+      - name: Create Nightly Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 创建 nightly tag
+          git tag -f nightly
+          git push -f origin nightly
+
+          # 发布 nightly release (覆盖旧的)
+          gh release create nightly \
+            --title "Nightly Build $(date +%Y-%m-%d)" \
+            --notes "Automated nightly build from $(date +%Y-%m-%d)
+
+          This is an automated build that may be unstable.
+
+          **Note**: This release is overwritten daily." \
+            --latest=false \
+            dist/cockpit-linux-amd64-nightly.tar.gz \
+            || {
+            # 如果创建失败（已存在），则更新
+            gh release upload nightly --clobber dist/cockpit-linux-amd64-nightly.tar.gz
+          }
+
+      - name: Upload server artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cockpit-nightly
+          path: dist/cockpit
+          retention-days: 7
+
+      - name: Upload agent artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cockpit-agent-nightly
+          path: dist/cockpit-agent
+          retention-days: 7

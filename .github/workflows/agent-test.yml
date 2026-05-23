@@ -1,0 +1,156 @@
+name: Agent Test
+
+on:
+  push:
+    branches: [main]
+    pull_request:
+    paths:
+      - 'internal/agent/**'
+      - 'cmd/cockpit-agent/**'
+      - '.github/workflows/agent-test.yml'
+
+jobs:
+  test-agent:
+    name: Test Agent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc sqlite3
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run go vet
+        run: go vet ./internal/agent/... ./cmd/cockpit-agent/...
+
+      - name: Run tests with coverage
+        run: |
+          go test ./internal/agent/... ./cmd/cockpit-agent/... -coverprofile=coverage.out -covermode=atomic -v
+
+      - name: Check coverage threshold (80%)
+        run: |
+          coverage=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Agent coverage: ${coverage}%"
+          if (( $(echo "$coverage < 80" | bc -l) )); then
+            echo "Coverage ${coverage}% is below 80% threshold"
+            exit 1
+          fi
+          echo "Coverage ${coverage}% meets threshold"
+
+      - name: Generate coverage report
+        run: go tool cover -html=coverage.out -o coverage.html
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: agent
+          fail_ci_if_error: false
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-coverage-report
+          path: coverage.html
+          retention-days: 30
+
+  # 集成测试 - 测试 RPC 通信
+  integration-test:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc sqlite3
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build agent
+        run: go build -o dist/cockpit-agent ./cmd/cockpit-agent
+
+      - name: Run agent
+        run: |
+          mkdir -p data
+          ./dist/cockpit-agent --config /dev/null --data ./data &
+          AGENT_PID=$!
+          sleep 5
+          kill $AGENT_PID || true
+
+      - name: Test RPC handlers
+        run: go test ./internal/agent/rpc/... -v
+
+  # 单元测试覆盖检查
+  coverage-check:
+    name: Coverage Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc sqlite3
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Test each package with coverage
+        run: |
+          mkdir -p coverage
+          for pkg in $(go list ./internal/agent/... ./cmd/cockpit-agent/...); do
+            echo "Testing $pkg"
+            output=$(go test "$pkg" -coverprofile=coverage/"$(echo $pkg | tr '/' '_')".out -covermode=atomic 2>&1)
+            echo "$output"
+          done
+
+      - name: Merge coverage profiles
+        run: |
+          grep -l "^mode:" coverage/*.out | sort | xargs grep -h "^mode:" | head -1 > coverage/full.out
+          grep -l "^mode:" coverage/*.out | sort | xargs grep -h -v "^mode:" >> coverage/full.out
+
+      - name: Generate report
+        run: |
+          go tool cover -func=coverage/full.out | tee coverage/report.txt
+          go tool cover -html=coverage/full.out -o coverage/full.html
+
+      - name: Check overall coverage
+        run: |
+          coverage=$(go tool cover -func=coverage/full.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Overall agent coverage: ${coverage}%"
+          if (( $(echo "$coverage < 80" | bc -l) )); then
+            echo "Coverage ${coverage}% is below 80% threshold"
+            exit 1
+          fi
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-coverage
+          path: coverage/
+          retention-days: 30
