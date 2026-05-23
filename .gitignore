@@ -67,3 +67,23 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Node.js / Web
+node_modules/
+dist/
+*.log
+.DS_Store
+.env.local
+.vscode/
+
+# Go binaries
+cockpit
+cockpit-agent
+*.exe
+
+# Database
+*.db
+*.db-journal
+
+# Embedded web assets (generated)
+embed/web/dist/
