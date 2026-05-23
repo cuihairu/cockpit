@@ -3,11 +3,15 @@ name: Agent Test
 on:
   push:
     branches: [main]
-    pull_request:
+  pull_request:
+    branches: [main]
     paths:
       - 'internal/agent/**'
       - 'cmd/cockpit-agent/**'
       - '.github/workflows/agent-test.yml'
+
+permissions:
+  contents: read
 
 jobs:
   test-agent:
