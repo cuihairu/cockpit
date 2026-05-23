@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.os }} ${{ matrix.arch }}
+    name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.runner }}
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -21,25 +21,13 @@ jobs:
         include:
           # Linux
           - os: linux
-            arch: amd64
             runner: ubuntu-latest
-            cc: gcc
-          - os: linux
-            arch: arm64
-            runner: ubuntu-latest
-            cc: gcc-aarch64-linux-gnu
-
-          # macOS (AMD64 only, GitHub Actions doesn't have ARM64 macOS runners yet)
+          # macOS
           - os: darwin
-            arch: amd64
             runner: macos-latest
-            cc: clang
-
           # Windows
           - os: windows
-            arch: amd64
             runner: windows-latest
-            cc: gcc
 
     steps:
       - name: Checkout code
@@ -56,23 +44,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc sqlite3
 
-      - name: Install cross-compiler (Linux ARM64)
-        if: matrix.os == 'linux' && matrix.arch == 'arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          echo "CC=gcc-aarch64-linux-gnu" >> $GITHUB_ENV
-          echo "GOARCH=arm64" >> $GITHUB_ENV
-          echo "CGO_ENABLED=1" >> $GITHUB_ENV
-
       - name: Download dependencies
         run: go mod download
 
-      - name: Build Server
+      - name: Build
         shell: bash
         env:
           GOOS: ${{ matrix.os == 'windows' && 'windows' || matrix.os == 'darwin' && 'darwin' || 'linux' }}
-          GOARCH: ${{ matrix.arch }}
+          GOARCH: amd64
           CGO_ENABLED: ${{ matrix.os == 'windows' && '0' || '1' }}
         run: |
           mkdir -p dist
@@ -87,6 +66,6 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: cockpit-${{ matrix.os }}-${{ matrix.arch }}
+          name: cockpit-${{ matrix.os }}-amd64
           path: dist/*
           retention-days: 7
