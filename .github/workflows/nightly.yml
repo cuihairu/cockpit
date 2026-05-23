@@ -57,21 +57,25 @@ jobs:
 
       - name: Package Linux
         run: |
+          # 打包二进制文件
           cd dist
           tar czf cockpit-linux-amd64-nightly.tar.gz cockpit cockpit-agent
+          cd ..
+
+          # 打包 web 资源
+          tar czf dist/cockpit-web-linux-amd64-nightly.tar.gz -C web/dist .
 
       - name: Delete old nightly releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # 删除旧的 nightly release
-          gh release list --limit 100 | grep nightly || true
           release_id=$(gh api repos/:owner/:repo/releases/tags/nightly --jq '.id' 2>/dev/null || echo "")
           if [ -n "$release_id" ]; then
             gh release delete "$release_id" -y || true
           fi
-          git tag -d nightly || true
-          git push origin :refs/tags/nightly || true
+          git tag -d nightly 2>/dev/null || true
+          git push origin :refs/tags/nightly 2>/dev/null || true
 
       - name: Create Nightly Release
         env:
@@ -87,7 +91,8 @@ jobs:
             --notes "Automated nightly build. This release is overwritten daily." \
             --latest=false \
             --clobber \
-            dist/cockpit-linux-amd64-nightly.tar.gz
+            dist/cockpit-linux-amd64-nightly.tar.gz \
+            dist/cockpit-web-linux-amd64-nightly.tar.gz
 
       - name: Upload server artifact
         uses: actions/upload-artifact@v7
