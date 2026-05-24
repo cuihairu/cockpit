@@ -10,6 +10,10 @@ updates:
       - "cuihairu"
     assignees:
       - "cuihairu"
+    ignore:
+      # Ignore docker/docker CVEs - project doesn't use docker cp functionality
+      - dependency-name: "github.com/docker/docker"
+        update-types: ["version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"]
 
   # Enable version updates for GitHub Actions
   - package-ecosystem: "github-actions"

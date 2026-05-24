@@ -9,6 +9,11 @@
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
+  "pnpm": {
+    "overrides": {
+      "path-to-regexp": "^8.4.0"
+    }
+  },
   "dependencies": {
     "@ant-design/icons": "^6.2.3",
     "@ant-design/pro-components": "^2.8.10",
