@@ -140,8 +140,8 @@ const MainLayout = () => {
   return (
     <ProLayout
       {...settings}
-      title="Cockpit"
-      logo={logo}
+      title=""
+      logo={null}
       navTheme="light"
       headerTheme="light"
       contentWidth="Fluid"
@@ -150,6 +150,24 @@ const MainLayout = () => {
         path: '/',
         routes: menuData,
       }}
+      // 顶部 Header 内容
+      headerContentRender={() => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+          {/* Logo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <img src={logo} alt="Cockpit" style={{ width: 32, height: 32 }} />
+            <span style={{ fontSize: 18, fontWeight: 600, color: '#1D2129' }}>Cockpit</span>
+          </div>
+          {/* 搜索框 */}
+          <Input.Search
+            placeholder="搜索资源、文档..."
+            style={{ width: 400 }}
+            size="middle"
+            bordered={false}
+            onSearch={(value) => console.log('Search:', value)}
+          />
+        </div>
+      )}
       menuItemRender={(menuItemProps, defaultDom) => {
         return (
           <a
@@ -164,59 +182,27 @@ const MainLayout = () => {
           </a>
         )
       }}
-      // 头部内容 - 阿里云风格搜索栏
-      headerContentRender={() => (
-        <div style={{ display: 'flex', alignItems: 'center', flex: 1, maxWidth: 500 }}>
-          <Input.Search
-            placeholder="搜索资源、文档..."
-            style={{ width: 445 }}
-            size="large"
-            bordered={false}
-            onSearch={(value) => console.log('Search:', value)}
-          />
-        </div>
-      )}
-      // 右侧操作区域
+      // 右侧操作区域 - 用户头像和通知
       actionsRender={() => [
         <Button
           key="docs"
           type="text"
           icon={<QuestionCircleOutlined />}
+          style={{ color: '#86909C' }}
           onClick={() => window.open('https://github.com/cuihairu/cockpit', '_blank')}
         >
           文档
         </Button>,
-        <Button
-          key="github"
-          type="text"
-          icon={<GithubOutlined />}
-          onClick={() => window.open('https://github.com/cuihairu/cockpit', '_blank')}
-        >
-          GitHub
-        </Button>,
         <NotificationDropdown key="notifications" />,
+        // 用户头像
+        <Dropdown key="user" menu={{ items: userMenuItems }} placement="bottomRight">
+          <Space style={{ cursor: 'pointer', padding: '4px 12px', borderRadius: '8px', transition: 'all 0.3s' }}
+            className="user-dropdown">
+            <Avatar size="small" icon={<UserOutlined />} />
+            <span style={{ color: '#1D2129' }}>{user?.username || 'Admin'}</span>
+          </Space>
+        </Dropdown>,
       ]}
-      // 用户头像
-      avatarProps={{
-        src: undefined,
-        icon: <UserOutlined />,
-        title: user?.username || 'Admin',
-        size: 'small',
-        render: (_, dom) => (
-          <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-            <Space style={{ cursor: 'pointer' }}>
-              <Avatar size="small" icon={<UserOutlined />} />
-              <span>{user?.username || 'Admin'}</span>
-            </Space>
-          </Dropdown>
-        ),
-      }}
-      // 底部
-      footerRender={() => (
-        <div style={{ textAlign: 'center', color: '#999', fontSize: 12 }}>
-          © 2026 Cockpit - 个人混合基础设施控制台
-        </div>
-      )}
     >
       <Routes>
         <Route path="/" element={<Dashboard />} />
