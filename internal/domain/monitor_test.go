@@ -307,3 +307,455 @@ func TestInfoEmpty(t *testing.T) {
 		t.Error("DNSSec should be false")
 	}
 }
+
+// ============ Info Method Tests ============
+
+func TestInfoShouldAlert(t *testing.T) {
+	tests := []struct {
+		name     string
+		info     *Info
+		warnDays int
+		expected bool
+	}{
+		{
+			name: "expired domain",
+			info: &Info{
+				Domain:    "expired.com",
+				IsExpired: true,
+				DaysLeft:  -1,
+			},
+			warnDays: 30,
+			expected: true,
+		},
+		{
+			name: "expiring soon",
+			info: &Info{
+				Domain:    "expiring.com",
+				IsExpired: false,
+				DaysLeft:  7,
+			},
+			warnDays: 30,
+			expected: true,
+		},
+		{
+			name: "not expiring",
+			info: &Info{
+				Domain:    "safe.com",
+				IsExpired: false,
+				DaysLeft:  100,
+			},
+			warnDays: 30,
+			expected: false,
+		},
+		{
+			name: "exactly at warning",
+			info: &Info{
+				Domain:    "warning.com",
+				IsExpired: false,
+				DaysLeft:  30,
+			},
+			warnDays: 30,
+			expected: true,
+		},
+		{
+			name: "negative days (expired)",
+			info: &Info{
+				Domain:    "past.com",
+				IsExpired: true,
+				DaysLeft:  -100,
+			},
+			warnDays: 30,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.info.ShouldAlert(tt.warnDays)
+			if result != tt.expected {
+				t.Errorf("ShouldAlert() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestInfoGetStatus(t *testing.T) {
+	tests := []struct {
+		name     string
+		info     *Info
+		expected string
+	}{
+		{
+			name: "expired",
+			info: &Info{
+				Expires:   time.Now().Add(-24 * time.Hour),
+				IsExpired: true,
+			},
+			expected: "expired",
+		},
+		{
+			name: "critical",
+			info: &Info{
+				Expires:   time.Now().Add(3 * 24 * time.Hour),
+				IsExpired: false,
+				DaysLeft:  3,
+			},
+			expected: "critical",
+		},
+		{
+			name: "warning",
+			info: &Info{
+				Expires:   time.Now().Add(15 * 24 * time.Hour),
+				IsExpired: false,
+				DaysLeft:  15,
+			},
+			expected: "warning",
+		},
+		{
+			name: "ok",
+			info: &Info{
+				Expires:   time.Now().Add(60 * 24 * time.Hour),
+				IsExpired: false,
+				DaysLeft:  60,
+			},
+			expected: "ok",
+		},
+		{
+			name: "unknown",
+			info: &Info{
+				Expires: time.Time{},
+			},
+			expected: "unknown",
+		},
+		{
+			name: "expiring now",
+			info: &Info{
+				Expires:   time.Now(),
+				IsExpired: false,
+				DaysLeft:  0,
+			},
+			expected: "expiring",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.info.GetStatus()
+			if result != tt.expected {
+				t.Errorf("GetStatus() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetTLD(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	tests := []struct {
+		domain   string
+		expected string
+	}{
+		{"example.com", "com"},
+		{"test.co.uk", "uk"},
+		{"sub.domain.org", "org"},
+		{"a.b.c.d.e.f.g.net", "net"},
+		{"example.io", "io"},
+		{"localhost", ""},
+		{"nodots", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.domain, func(t *testing.T) {
+			result := m.GetTLD(tt.domain)
+			if result != tt.expected {
+				t.Errorf("GetTLD(%q) = %v, want %v", tt.domain, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetWhoisServer(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	tests := []struct {
+		tld      string
+		expected string
+	}{
+		{"com", "whois.verisign-grs.com"},
+		{"net", "whois.verisign-grs.com"},
+		{"org", "whois.pir.org"},
+		{"io", "whois.nic.io"},
+		{"co", "whois.nic.co"},
+		{"ai", "whois.nic.ai"},
+		{"cn", "whois.cnnic.cn"},
+		{"uk", "whois.nic.uk"},
+		{"de", "whois.denic.de"},
+		{"unknown", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.tld, func(t *testing.T) {
+			result := m.GetWhoisServer(tt.tld)
+			if result != tt.expected {
+				t.Errorf("GetWhoisServer(%q) = %v, want %v", tt.tld, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCheckMultiple(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	domains := []string{
+		"invalid", // Should fail validation
+		"nodots",  // Should fail validation
+	}
+
+	results := m.CheckMultiple(domains)
+
+	if results == nil {
+		t.Fatal("CheckMultiple() should not return nil")
+	}
+
+	if len(results) != len(domains) {
+		t.Errorf("CheckMultiple() returned %d results, want %d", len(results), len(domains))
+	}
+
+	// All should have -1 DaysLeft (error)
+	for domain, info := range results {
+		if info == nil {
+			t.Errorf("Result for %s should not be nil", domain)
+			continue
+		}
+		if info.DaysLeft != -1 {
+			t.Errorf("Domain %s: DaysLeft = %d, want -1", domain, info.DaysLeft)
+		}
+	}
+}
+
+func TestBatchCheck(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	domains := []string{
+		"invalid", // Should fail
+	}
+
+	result := m.BatchCheck(domains)
+
+	if result == nil {
+		t.Fatal("BatchCheck() should not return nil")
+	}
+
+	if result.Success == nil {
+		t.Error("Success slice should not be nil")
+	}
+
+	if result.Failed == nil {
+		t.Error("Failed slice should not be nil")
+	}
+}
+
+func TestBatchCheckValid(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	// Test with valid domains that will fail whois
+	domains := []string{"example.com"}
+
+	result := m.BatchCheck(domains)
+
+	if result == nil {
+		t.Fatal("BatchCheck() should not return nil")
+	}
+
+	// Since whois is not available, all should fail
+	if len(result.Failed) == 0 && m.whoisPath == "" {
+		t.Log("No whois path, all domains should fail")
+	}
+}
+
+func TestCheckWithServer(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	// Should not panic even with invalid whois
+	_, err := m.CheckWithServer("example.com", "whois.example.com")
+	if err == nil {
+		t.Log("CheckWithServer() succeeded (whois might be available)")
+	}
+}
+
+func TestParseWhoisBasic(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	whoisOutput := `
+Registrar: Example Registrar
+Creation Date: 2020-01-01
+Expiration Date: 2025-01-01
+Name Server: ns1.example.com
+Name Server: ns2.example.com
+Domain Status: clientTransferProhibited
+DNSSEC: unsigned
+`
+
+	info, err := m.parseWhois("example.com", whoisOutput)
+	if err != nil {
+		t.Fatalf("parseWhois() error = %v", err)
+	}
+
+	if info.Domain != "example.com" {
+		t.Errorf("Domain = %v, want example.com", info.Domain)
+	}
+
+	if info.Registrar != "Example Registrar" {
+		t.Errorf("Registrar = %v, want Example Registrar", info.Registrar)
+	}
+}
+
+func TestParseWhoisEmpty(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	info, err := m.parseWhois("example.com", "")
+	if err != nil {
+		t.Fatalf("parseWhois() with empty output error = %v", err)
+	}
+
+	if info == nil {
+		t.Fatal("parseWhois() should not return nil")
+	}
+
+	if info.Domain != "example.com" {
+		t.Errorf("Domain = %v, want example.com", info.Domain)
+	}
+}
+
+func TestParseDateFormats(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	dateStrings := []struct {
+		input  string
+		valid  bool
+	}{
+		{"2020-01-01", true},
+		{"2020-01-01T00:00:00Z", true},
+		{"01-01-2020", true},
+		{"01/01/2020", true},
+		{"2020/01/01", true},
+		{"01-Jan-2020", true},
+		{"01.01.2020", true},
+		{"invalid", false},
+	}
+
+	for _, tt := range dateStrings {
+		t.Run(tt.input, func(t *testing.T) {
+			result := m.parseDate(tt.input)
+			if tt.valid && result.IsZero() {
+				t.Errorf("parseDate(%q) should return valid date", tt.input)
+			}
+		})
+	}
+}
+
+func TestDNSInfoStruct(t *testing.T) {
+	info := &DNSInfo{
+		Domain:     "example.com",
+		ARecords:   []string{"1.2.3.4"},
+		AAAARecords: []string{"2001:db8::1"},
+		MXRecords:  []string{"mail.example.com"},
+		TXTRecords: []string{"v=spf1 include:_spf.example.com ~all"},
+		NSRecords:  []string{"ns1.example.com"},
+		CNAME:      "alias.example.com",
+	}
+
+	if info.Domain != "example.com" {
+		t.Errorf("Domain = %v, want example.com", info.Domain)
+	}
+
+	if len(info.ARecords) != 1 {
+		t.Errorf("ARecords length = %d, want 1", len(info.ARecords))
+	}
+
+	if info.CNAME != "alias.example.com" {
+		t.Errorf("CNAME = %v, want alias.example.com", info.CNAME)
+	}
+}
+
+func TestDNSInfoEmpty(t *testing.T) {
+	info := &DNSInfo{}
+
+	if info.Domain != "" {
+		t.Error("Domain should be empty")
+	}
+
+	if len(info.ARecords) != 0 {
+		t.Error("ARecords should be empty")
+	}
+}
+
+func TestBatchCheckResultStruct(t *testing.T) {
+	result := &BatchCheckResult{
+		Success: []*Info{
+			{Domain: "success.com"},
+		},
+		Failed: []string{
+			"failed.com",
+		},
+	}
+
+	if len(result.Success) != 1 {
+		t.Errorf("Success length = %d, want 1", len(result.Success))
+	}
+
+	if len(result.Failed) != 1 {
+		t.Errorf("Failed length = %d, want 1", len(result.Failed))
+	}
+}
+
+func TestIsAvailable(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	// Test with invalid whois - will check DNS instead
+	available, err := m.IsAvailable("nonexistent-domain-12345.com")
+	if err != nil {
+		t.Logf("IsAvailable() error (expected): %v", err)
+	}
+
+	// Result depends on DNS
+	_ = available
+}
+
+func TestCheckDNS(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	// This will do actual DNS lookups
+	info, err := m.CheckDNS("localhost")
+	if err != nil {
+		t.Logf("CheckDNS() error: %v", err)
+	}
+
+	if info == nil {
+		t.Log("CheckDNS() returned nil (may be expected)")
+	} else {
+		if info.Domain != "localhost" {
+			t.Errorf("Domain = %v, want localhost", info.Domain)
+		}
+	}
+}
+
+func TestConcurrentBatchChecks(t *testing.T) {
+	m := NewMonitor(Config{})
+
+	done := make(chan bool, 3)
+
+	for i := 0; i < 3; i++ {
+		go func() {
+			result := m.BatchCheck([]string{"example.com"})
+			if result == nil {
+				t.Error("BatchCheck() should not return nil")
+			}
+			done <- true
+		}()
+	}
+
+	for i := 0; i < 3; i++ {
+		<-done
+	}
+}

@@ -1,6 +1,12 @@
 package audit
 
 import (
+	"os"
+
+	"github.com/cuihairu/cockpit/internal/storage"
+)
+
+import (
 	"testing"
 )
 
@@ -225,5 +231,225 @@ func TestLogEntryAllCombinations(t *testing.T) {
 
 	if count != 6 {
 		t.Errorf("Created %d entries, want 6", count)
+	}
+}
+
+// ============ Logger Tests ============
+
+func TestNewLogger(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+	if logger == nil {
+		t.Fatal("NewLogger() should not return nil")
+	}
+
+	if logger.db == nil {
+		t.Error("logger.db should not be nil")
+	}
+}
+
+func TestLoggerLogSuccess(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	err = logger.LogSuccess("testuser", ActionCreate, "agent", "agent-1", map[string]interface{}{"test": "data"}, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Errorf("LogSuccess() error = %v", err)
+	}
+}
+
+func TestLoggerLogFailure(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	err = logger.LogFailure("testuser", ActionDelete, "agent", "agent-1", map[string]interface{}{"error": "not found"}, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Errorf("LogFailure() error = %v", err)
+	}
+}
+
+func TestLoggerLogLoginSuccess(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	err = logger.LogLogin("testuser", true, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Errorf("LogLogin() success error = %v", err)
+	}
+}
+
+func TestLoggerLogLoginFailure(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	err = logger.LogLogin("testuser", false, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Errorf("LogLogin() failure error = %v", err)
+	}
+}
+
+func TestLoggerLogLogout(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	err = logger.LogLogout("testuser", "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Errorf("LogLogout() error = %v", err)
+	}
+}
+
+func TestLoggerLogResource(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	err = logger.LogResource("testuser", ActionUpdate, "agent", "agent-1", map[string]interface{}{"status": "online"}, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Errorf("LogResource() error = %v", err)
+	}
+}
+
+func TestLoggerLogWithNilDetails(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	err = logger.LogSuccess("testuser", ActionView, "agent", "", nil, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Errorf("LogSuccess() with nil details error = %v", err)
+	}
+}
+
+func TestLoggerLogAllActions(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	actions := []string{
+		ActionLogin, ActionLogout, ActionCreate, ActionUpdate,
+		ActionDelete, ActionView, ActionExport, ActionImport,
+		ActionStart, ActionStop, ActionRestart,
+	}
+
+	for _, action := range actions {
+		err = logger.LogSuccess("testuser", action, "test", "1", nil, "127.0.0.1", "test-agent")
+		if err != nil {
+			t.Errorf("LogSuccess() for action %s error = %v", action, err)
+		}
+	}
+}
+
+func TestLoggerLogWithUserID(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	entry := &LogEntry{
+		UserID:   123,
+		Username: "testuser",
+		Action:   ActionCreate,
+		Resource: "agent",
+		Status:   StatusSuccess,
+	}
+
+	err = logger.Log(entry)
+	if err != nil {
+		t.Errorf("Log() error = %v", err)
 	}
 }

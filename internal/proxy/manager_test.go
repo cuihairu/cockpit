@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -789,4 +790,232 @@ func TestCleanupIdleConnections(t *testing.T) {
 	// This test just verifies the method doesn't panic
 	// Actual idle connection cleanup would require more setup
 	manager.cleanupIdleConnections()
+}
+
+// ============ Additional Manager Tests ============
+
+func TestManagerSendToAgentDelegation(t *testing.T) {
+	mockServer := newMockServerInterface()
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	manager := NewManager(mockServer, db)
+
+	// Set up mock to verify message was sent
+	var receivedMsg *protocol.Message
+	mockServer.sendToAgentFn = func(agentID string, msg *protocol.Message) error {
+		if agentID == "agent-1" {
+			receivedMsg = msg
+		}
+		return nil
+	}
+
+	msg := protocol.NewMessage(protocol.MessageTypeProxyNew, map[string]interface{}{
+		"test": "data",
+	})
+
+	err = manager.SendToAgent("agent-1", msg)
+	if err != nil {
+		t.Errorf("SendToAgent() error = %v", err)
+	}
+
+	if receivedMsg == nil {
+		t.Error("Message should be sent to agent")
+	}
+}
+
+func TestGetProxyStatusRunningProxy(t *testing.T) {
+	mockServer := newMockServerInterface()
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	manager := NewManager(mockServer, db)
+
+	// Create a proxy config
+	proxyConfig := &storage.Proxy{
+		ID:         "test-proxy",
+		Name:       "Test Proxy",
+		AgentID:    "agent-1",
+		ProxyType:  "tcp",
+		RemotePort: 0,
+		Target:     "localhost:8080",
+		Enabled:    true,
+	}
+	db.CreateProxy(proxyConfig)
+
+	err = manager.StartProxy(proxyConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.StopProxy(proxyConfig.ID)
+
+	status, err := manager.GetProxyStatus(proxyConfig.ID)
+	if err != nil {
+		t.Fatalf("GetProxyStatus() error = %v", err)
+	}
+
+	if status["name"] != "Test Proxy" {
+		t.Errorf("name = %v, want Test Proxy", status["name"])
+	}
+
+	if status["status"] != "running" {
+		t.Errorf("status = %v, want running", status["status"])
+	}
+}
+
+func TestGetAllStatusWithProxies(t *testing.T) {
+	mockServer := newMockServerInterface()
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	manager := NewManager(mockServer, db)
+
+	// Create multiple proxies
+	for i := 1; i <= 2; i++ {
+		proxyConfig := &storage.Proxy{
+			ID:         fmt.Sprintf("proxy-%d", i),
+			Name:       fmt.Sprintf("Proxy %d", i),
+			AgentID:    "agent-1",
+			ProxyType:  "tcp",
+			RemotePort: 0,
+			Target:     "localhost:8080",
+			Enabled:    true,
+		}
+		db.CreateProxy(proxyConfig)
+
+		err = manager.StartProxy(proxyConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer manager.StopProxy(proxyConfig.ID)
+	}
+
+	status := manager.GetAllStatus()
+
+	if len(status) != 2 {
+		t.Errorf("GetAllStatus() returned %d items, want 2", len(status))
+	}
+}
+
+func TestProxyStopNilListener(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	proxy := &Proxy{
+		config: &storage.Proxy{
+			ID: "test-proxy",
+		},
+		listener: nil,
+		conns:     make(map[string]*ProxyConn),
+		ctx:       ctx,
+		cancel:    cancel,
+	}
+
+	// Should not panic
+	proxy.Stop()
+}
+
+func TestProxyStopWithConnections(t *testing.T) {
+	conn1, conn2 := net.Pipe()
+	defer conn2.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	proxyConn := &ProxyConn{
+		ID:      "conn-1",
+		ProxyID: "proxy-1",
+		Conn:    conn1,
+		AgentID: "agent-1",
+		Created: time.Now(),
+	}
+
+	proxy := &Proxy{
+		config: &storage.Proxy{
+			ID: "test-proxy",
+		},
+		listener: nil,
+		conns: map[string]*ProxyConn{
+			"conn-1": proxyConn,
+		},
+		ctx:    ctx,
+		cancel: cancel,
+	}
+
+	proxy.Stop()
+
+	// Connection should be closed
+	if !proxyConn.closed.Load() {
+		t.Error("Connection should be closed after proxy stop")
+	}
+
+	if len(proxy.conns) != 0 {
+		t.Error("Connections should be cleared after proxy stop")
+	}
+}
+
+func TestManagerRunningState(t *testing.T) {
+	mockServer := newMockServerInterface()
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	manager := NewManager(mockServer, db)
+
+	// Initially not running
+	if manager.running.Load() {
+		t.Error("Manager should not be running initially")
+	}
+
+	// Start
+	err = manager.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !manager.running.Load() {
+		t.Error("Manager should be running after Start()")
+	}
+
+	// Try to start again (should fail)
+	err = manager.Start()
+	if err == nil {
+		t.Error("Second Start() should return error")
+	}
+
+	// Stop
+	manager.Stop()
+
+	if manager.running.Load() {
+		t.Error("Manager should not be running after Stop()")
+	}
 }
