@@ -1,17 +1,18 @@
 import { useState } from 'react'
-import { Form, Input, Button, Card, message } from 'antd'
+import { Form, Input, Button, message, Checkbox } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useUser } from '@/contexts/UserContext'
 import logo from '@/assets/logo.svg'
-import './index.css'
+import './index.less'
 
 const Login = () => {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const { login } = useUser()
+  const [form] = Form.useForm()
 
-  const onFinish = async (values: { username: string; password: string }) => {
+  const onFinish = async (values: { username: string; password: string; remember?: boolean }) => {
     setLoading(true)
     try {
       await login(values.username, values.password)
@@ -26,17 +27,29 @@ const Login = () => {
 
   return (
     <div className="login-container">
-      <Card className="login-card">
-        <div className="login-header">
+      <div className="login-background">
+        <div className="login-bg-circle circle-1"></div>
+        <div className="login-bg-circle circle-2"></div>
+        <div className="login-bg-circle circle-3"></div>
+      </div>
+      <div className="login-box">
+        <div className="login-logo-section">
           <img src={logo} alt="Cockpit" className="login-logo" />
-          <h1>Cockpit</h1>
-          <p>个人混合基础设施控制台</p>
+          <h1 className="login-title">Cockpit</h1>
+          <p className="login-subtitle">个人混合基础设施控制台</p>
         </div>
         <Form
+          form={form}
           name="login"
           onFinish={onFinish}
           autoComplete="off"
           size="large"
+          initialValues={{
+            username: 'admin',
+            password: 'admin',
+            remember: true
+          }}
+          className="login-form"
         >
           <Form.Item
             name="username"
@@ -45,7 +58,7 @@ const Login = () => {
             <Input
               prefix={<UserOutlined />}
               placeholder="用户名"
-              defaultValue="admin"
+              bordered={false}
             />
           </Form.Item>
           <Form.Item
@@ -55,19 +68,24 @@ const Login = () => {
             <Input.Password
               prefix={<LockOutlined />}
               placeholder="密码"
-              defaultValue="admin"
+              bordered={false}
             />
           </Form.Item>
           <Form.Item>
-            <Button type="primary" htmlType="submit" block loading={loading}>
-              登录
+            <Form.Item name="remember" valuePropName="checked" noStyle>
+              <Checkbox>记住账号</Checkbox>
+            </Form.Item>
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" block loading={loading} className="login-button">
+              登 录
             </Button>
           </Form.Item>
         </Form>
         <div className="login-footer">
           <p>默认账号: admin / admin</p>
         </div>
-      </Card>
+      </div>
     </div>
   )
 }
