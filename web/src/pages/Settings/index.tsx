@@ -163,7 +163,8 @@ const Settings = () => {
   ]
 
   return (
-    <Card title="系统设置">
+    <div className="page-container">
+      <Card title="系统设置">
       <Tabs
         items={[
           {
@@ -186,6 +187,7 @@ const Settings = () => {
         ]}
       />
     </Card>
+    </div>
   )
 }
 

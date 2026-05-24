@@ -256,9 +256,11 @@ func TestContextCancellation(t *testing.T) {
 func TestConfigLabels(t *testing.T) {
 	cfg := Config{
 		ServerURL: "ws://localhost:8080",
-		Labels: map[string]string{
-			"env":     "test",
-			"cluster": "test-cluster",
+		Labels: map[string]interface{}{
+			"env":       "production",
+			"services":  []string{"docker", "kubernetes"},
+			"gpu":       true,
+			"cores":     8,
 		},
 	}
 
@@ -268,8 +270,17 @@ func TestConfigLabels(t *testing.T) {
 		t.Error("expected labels to be initialized")
 	}
 
-	if len(agent.config.Labels) != 2 {
-		t.Errorf("expected 2 labels, got %d", len(agent.config.Labels))
+	if len(agent.config.Labels) != 4 {
+		t.Errorf("expected 4 labels, got %d", len(agent.config.Labels))
+	}
+
+	// 检查数组类型的 label
+	if services, ok := agent.config.Labels["services"].([]string); ok {
+		if len(services) != 2 {
+			t.Errorf("expected 2 services, got %d", len(services))
+		}
+	} else {
+		t.Error("services should be []string")
 	}
 }
 

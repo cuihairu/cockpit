@@ -364,7 +364,8 @@ const Resources = () => {
   ]
 
   return (
-    <Card
+    <div className="page-container">
+      <Card
       title="资源管理"
       extra={
         <Space>
@@ -379,6 +380,7 @@ const Resources = () => {
     >
       <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
     </Card>
+    </div>
   )
 }
 

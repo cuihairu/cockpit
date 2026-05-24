@@ -11,6 +11,7 @@ import (
 
 	"github.com/cuihairu/cockpit/internal/agent/detector"
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
+	"github.com/cuihairu/cockpit/internal/proxy"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/gorilla/websocket"
 )
@@ -21,6 +22,8 @@ type Agent struct {
 	conn      *websocket.Conn
 	codec     *protocol.Codec
 	rpc       *rpc.Handler
+	collector *Collector   // 系统信息采集器
+	proxyHandler *proxy.Handler // 代理处理器
 
 	// 注册信息
 	agentID  string
@@ -39,11 +42,11 @@ type Agent struct {
 
 // Config Agent 配置
 type Config struct {
-	ServerURL   string            `json:"server_url"`
-	AgentID     string            `json:"agent_id,omitempty"`
-	Region      string            `json:"region,omitempty"`
-	Zone        string            `json:"zone,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
+	ServerURL   string                 `json:"server_url"`
+	AgentID     string                 `json:"agent_id,omitempty"`
+	Region      string                 `json:"region,omitempty"`
+	Zone        string                 `json:"zone,omitempty"`
+	Labels      map[string]interface{} `json:"labels,omitempty"`
 }
 
 // NewAgent 创建新 Agent
@@ -54,6 +57,8 @@ func NewAgent(cfg Config) *Agent {
 		serverURL:    cfg.ServerURL,
 		codec:        protocol.NewCodec(),
 		rpc:          rpc.NewHandler(),
+		collector:    NewCollector(),
+		proxyHandler: proxy.NewHandler(),
 		capabilities: []protocol.Capability{},
 		ctx:          ctx,
 		cancel:       cancel,
@@ -99,6 +104,9 @@ func (a *Agent) Start() error {
 // Stop 停止 Agent
 func (a *Agent) Stop() {
 	a.cancel()
+	if a.proxyHandler != nil {
+		a.proxyHandler.Stop()
+	}
 	if a.conn != nil {
 		a.conn.Close()
 	}
@@ -120,6 +128,9 @@ func (a *Agent) connect() error {
 	a.conn = conn
 	a.connected = true
 	a.mu.Unlock()
+
+	// 启动代理处理器
+	a.proxyHandler.Start(conn)
 
 	log.Printf("Connected to server")
 	return nil
@@ -179,10 +190,12 @@ func (a *Agent) register() error {
 	hostname, _ := os.Hostname()
 
 	payload := map[string]any{
-		"agentId":      a.agentID,
-		"location":     a.location,
-		"capabilities": a.capabilities,
-		"hostname":     hostname,
+		"agentId":        a.agentID,
+		"location":       a.location,
+		"capabilities":   a.capabilities,
+		"hostname":       hostname,
+		"virtualization": DetectVirtualization(),
+		"labels":         a.config.Labels,
 	}
 
 	// 发送注册消息
@@ -264,10 +277,18 @@ func (a *Agent) sendHeartbeat() {
 		return
 	}
 
-	msg := protocol.NewMessage(protocol.MessageTypeHeartbeat, map[string]any{
+	payload := map[string]any{
 		"agentId": a.agentID,
 		"status":  "online",
-	})
+	}
+
+	// 采集系统信息（不阻塞，快速采样）
+	if a.collector != nil {
+		systemInfo := a.collector.CollectBasic()
+		payload["systemInfo"] = systemInfo
+	}
+
+	msg := protocol.NewMessage(protocol.MessageTypeHeartbeat, payload)
 
 	if err := a.codec.WriteMessage(conn, msg); err != nil {
 		log.Printf("Send heartbeat failed: %v", err)
@@ -317,6 +338,12 @@ func (a *Agent) handleMessage(msg *protocol.Message) {
 	case protocol.MessageTypeHeartbeat:
 		// 心跳响应
 		log.Printf("Heartbeat acknowledged")
+	case protocol.MessageTypeProxyNew:
+		a.proxyHandler.HandleProxyNew(msg)
+	case protocol.MessageTypeProxyData:
+		a.proxyHandler.HandleProxyData(msg)
+	case protocol.MessageTypeProxyClose:
+		a.proxyHandler.HandleProxyClose(msg)
 	default:
 		log.Printf("Unknown message type: %s", msg.Type)
 	}

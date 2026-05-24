@@ -15,8 +15,10 @@ import (
 	"github.com/cuihairu/cockpit/internal/alert"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/protocol"
+	"github.com/cuihairu/cockpit/internal/proxy"
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/gorilla/websocket"
+	"github.com/cuihairu/cockpit/internal/audit"
 )
 
 func getEnv(key, defaultValue string) string {
@@ -28,15 +30,17 @@ func getEnv(key, defaultValue string) string {
 
 // Server WebSocket 服务器
 type Server struct {
-	addr     string
-	registry *Registry
-	codec    *protocol.Codec
-	db       *storage.DB
-	upgrader websocket.Upgrader
+	addr      string
+	registry  *Registry
+	codec     *protocol.Codec
+	db        *storage.DB
+	audit     *audit.Logger
+	proxyMgr  *proxy.Manager
+	upgrader  websocket.Upgrader
 
-	mu      sync.RWMutex
-	ctx     context.Context
-	cancel  context.CancelFunc
+	mu     sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // Config 服务器配置
@@ -61,6 +65,8 @@ func NewServer(cfg Config) *Server {
 		registry: NewRegistry(),
 		codec:    protocol.NewCodec(),
 		db:       db,
+		audit:    audit.NewLogger(db),
+		proxyMgr: proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				// 生产环境应该验证 Origin
@@ -90,10 +96,24 @@ func (s *Server) Start() error {
 
 	mux := http.NewServeMux()
 
+	// 设置代理管理器的 ServerInterface
+	s.proxyMgr = proxy.NewManager(s, s.db)
+
+	// 注册审计日志 API
+	s.registerAuditAPI(mux)
+
+	// 注册代理 API
+	s.registerProxyAPI(mux)
+		// 注册系统指标 API
+		s.registerMetricsAPI(mux)
+
+		// 注册远程连接 API
+		s.registerRemoteAPI(mux)
+
 	// 公开路由
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/health", s.handleHealth)
-	mux.HandleFunc("/api/auth/login", auth.HandleLogin)
+	mux.HandleFunc("/api/auth/login", s.handleLoginWithAudit)
 	mux.HandleFunc("/api/auth/refresh", auth.HandleRefresh)
 
 	// 需要认证的 API 路由
@@ -101,7 +121,7 @@ func (s *Server) Start() error {
 		// 登录相关接口不需要认证
 		if strings.HasPrefix(r.URL.Path, "/api/auth/") {
 			if r.URL.Path == "/api/auth/login" {
-				auth.HandleLogin(w, r)
+				s.handleLoginWithAudit(w, r)
 			} else if r.URL.Path == "/api/auth/refresh" {
 				auth.HandleRefresh(w, r)
 			}
@@ -116,9 +136,12 @@ func (s *Server) Start() error {
 		s.spaHandler().ServeHTTP(w, r)
 	})
 
+	// 应用审计中间件
+	handler := s.AuditMiddleware(mux)
+
 	server := &http.Server{
 		Addr:    s.addr,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	log.Printf("Server starting on %s", s.addr)
@@ -129,6 +152,8 @@ func (s *Server) Start() error {
 
 	// 启动警告检查协程
 	go s.alertCheckLoop()
+		// 启动系统指标清理协程
+		go s.metricsCleanupLoop()
 
 	return server.ListenAndServe()
 }
@@ -136,6 +161,9 @@ func (s *Server) Start() error {
 // Shutdown 关闭服务器
 func (s *Server) Shutdown() {
 	s.cancel()
+	if s.proxyMgr != nil {
+		s.proxyMgr.Stop()
+	}
 	if s.db != nil {
 		s.db.Close()
 	}
@@ -243,6 +271,12 @@ func (s *Server) handleMessage(agent *Agent, msg *protocol.Message) {
 		s.handleHeartbeat(agent, msg)
 	case protocol.MessageTypeRPCResponse:
 		s.handleRPCResponse(msg)
+	case protocol.MessageTypeProxyData:
+		s.handleProxyData(agent, msg)
+	case protocol.MessageTypeProxyClose:
+		s.handleProxyClose(agent, msg)
+	case protocol.MessageTypeProxyError:
+		s.handleProxyError(agent, msg)
 	default:
 		log.Printf("Unknown message type: %s from agent %s", msg.Type, agent.ID)
 	}
@@ -251,6 +285,16 @@ func (s *Server) handleMessage(agent *Agent, msg *protocol.Message) {
 // handleHeartbeat 处理心跳
 func (s *Server) handleHeartbeat(agent *Agent, msg *protocol.Message) {
 	agent.Heartbeat()
+
+	// 解析心跳负载，检查是否包含系统信息
+	if msg.Payload != nil {
+		if systemInfoRaw, ok := msg.Payload["systemInfo"]; ok {
+			// 尝试解析系统信息
+			if systemInfoMap, ok := systemInfoRaw.(map[string]interface{}); ok {
+				s.handleSystemInfo(agent.ID, systemInfoMap)
+			}
+		}
+	}
 
 	// 发送 ACK
 	resp := protocol.NewMessage(protocol.MessageTypeHeartbeat, map[string]interface{}{
@@ -263,6 +307,130 @@ func (s *Server) handleHeartbeat(agent *Agent, msg *protocol.Message) {
 	case agent.Send <- resp:
 	default:
 		log.Printf("Agent %s send channel full", agent.ID)
+	}
+}
+
+// handleSystemInfo 处理系统信息
+func (s *Server) handleSystemInfo(agentID string, systemInfo map[string]interface{}) {
+	now := time.Now()
+
+	// 保存历史指标
+	metric := &storage.SystemMetric{
+		AgentID:   agentID,
+		Timestamp: now,
+	}
+
+	// 解析 CPU 信息
+	if v, ok := systemInfo["cpuUsage"].(float64); ok {
+		metric.CPUUsage = v
+	}
+	if v, ok := systemInfo["cpuCores"].(float64); ok {
+		metric.CPUCores = int(v)
+	}
+	if v, ok := systemInfo["cpuFreqMhz"].(float64); ok {
+		metric.CPUFreqMHz = v
+	}
+
+	// 解析内存信息
+	if v, ok := systemInfo["memTotal"].(float64); ok {
+		metric.MemTotal = uint64(v)
+	}
+	if v, ok := systemInfo["memUsed"].(float64); ok {
+		metric.MemUsed = uint64(v)
+	}
+	if v, ok := systemInfo["memAvailable"].(float64); ok {
+		metric.MemAvailable = uint64(v)
+	}
+	if v, ok := systemInfo["memUsagePercent"].(float64); ok {
+		metric.MemUsagePercent = v
+	}
+
+	// 解析磁盘信息
+	if v, ok := systemInfo["diskTotal"].(float64); ok {
+		metric.DiskTotal = uint64(v)
+	}
+	if v, ok := systemInfo["diskUsed"].(float64); ok {
+		metric.DiskUsed = uint64(v)
+	}
+	if v, ok := systemInfo["diskFree"].(float64); ok {
+		metric.DiskFree = uint64(v)
+	}
+	if v, ok := systemInfo["diskUsagePercent"].(float64); ok {
+		metric.DiskUsagePercent = v
+	}
+
+	// 解析网络信息
+	if v, ok := systemInfo["netBytesSent"].(float64); ok {
+		metric.NetBytesSent = uint64(v)
+	}
+	if v, ok := systemInfo["netBytesRecv"].(float64); ok {
+		metric.NetBytesRecv = uint64(v)
+	}
+
+	// 解析系统信息
+	if v, ok := systemInfo["osName"].(string); ok {
+		metric.OSName = v
+	}
+	if v, ok := systemInfo["osVersion"].(string); ok {
+		metric.OSVersion = v
+	}
+	if v, ok := systemInfo["arch"].(string); ok {
+		metric.Arch = v
+	}
+	if v, ok := systemInfo["uptime"].(float64); ok {
+		metric.Uptime = uint64(v)
+	}
+
+	// 解析负载信息
+	if v, ok := systemInfo["load1"].(float64); ok {
+		metric.Load1 = v
+	}
+	if v, ok := systemInfo["load5"].(float64); ok {
+		metric.Load5 = v
+	}
+	if v, ok := systemInfo["load15"].(float64); ok {
+		metric.Load15 = v
+	}
+
+	metric.CreatedAt = now
+
+	// 保存到数据库
+	if err := s.db.SaveSystemMetric(metric); err != nil {
+		log.Printf("Failed to save system metric for agent %s: %v", agentID, err)
+	}
+
+	// 更新快照
+	snapshot := &storage.SystemInfoSnapshot{
+		AgentID:         agentID,
+		CPUUsage:        metric.CPUUsage,
+		CPUCores:        metric.CPUCores,
+		CPUFreqMHz:      metric.CPUFreqMHz,
+		MemTotal:        metric.MemTotal,
+		MemUsed:         metric.MemUsed,
+		MemAvailable:    metric.MemAvailable,
+		MemUsagePercent: metric.MemUsagePercent,
+		DiskTotal:       metric.DiskTotal,
+		DiskUsed:        metric.DiskUsed,
+		DiskFree:        metric.DiskFree,
+		DiskUsagePercent: metric.DiskUsagePercent,
+		NetBytesSent:    metric.NetBytesSent,
+		NetBytesRecv:    metric.NetBytesRecv,
+		OSName:          metric.OSName,
+		OSVersion:       metric.OSVersion,
+		Arch:            metric.Arch,
+		Uptime:          metric.Uptime,
+		Load1:           metric.Load1,
+		Load5:           metric.Load5,
+		Load15:          metric.Load15,
+		UpdatedAt:       now,
+	}
+
+	if v, ok := systemInfo["hostname"].(string); ok {
+		snapshot.Hostname = v
+	}
+
+	if err := s.db.UpdateSystemInfoSnapshot(snapshot); err != nil {
+		log.Printf("Failed to update system info snapshot for agent %s: %v", agentID, err)
 	}
 }
 
@@ -360,17 +528,26 @@ func toStorageAgent(agent *Agent) *storage.Agent {
 		}
 	}
 
-	return &storage.Agent{
+	storageAgent := &storage.Agent{
 		ID:           agent.ID,
 		Hostname:     agent.Hostname,
 		IP:           agent.IP,
 		Region:       agent.Location.Region,
 		Zone:         agent.Location.Zone,
-		Version:      "",  // Agent 当前没有版本字段
+		Version:      "", // Agent 当前没有版本字段
 		Capabilities: capabilities,
 		Status:       "online",
 		LastSeen:     agent.LastSeen,
+		Labels:       agent.Labels,
 	}
+
+	// 添加虚拟化信息
+	if agent.Virtualization != nil {
+		storageAgent.VirtType = agent.Virtualization.Type
+		storageAgent.VirtRole = agent.Virtualization.Role
+	}
+
+	return storageAgent
 }
 
 // alertCheckLoop 定期检查并生成警告
@@ -413,4 +590,168 @@ func (s *Server) cleanupOldAlerts() {
 	generator := alert.NewGenerator(s.db)
 	generator.CleanupOldAlerts(30 * 24 * time.Hour) // 保留30天
 	log.Println("Old alerts cleaned up")
+}
+
+// handleLoginWithAudit 处理登录并记录审计日志
+func (s *Server) handleLoginWithAudit(w http.ResponseWriter, r *http.Request) {
+	// 创建一个 ResponseRecorder 来捕获响应状态码
+	recorder := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+	// 调用原始的登录处理函数
+	auth.HandleLogin(recorder, r)
+
+	// 根据响应状态码记录审计日志
+	username := r.FormValue("username")
+	if username == "" {
+		// 尝试从 JSON body 读取
+		if err := r.ParseForm(); err == nil {
+			username = r.FormValue("username")
+		}
+	}
+	if username == "" {
+		username = "unknown"
+	}
+
+	success := recorder.statusCode == http.StatusOK
+	s.audit.LogLogin(
+		username,
+		success,
+		s.getClientIP(r),
+		r.UserAgent(),
+	)
+}
+
+// ========== 代理管理相关方法 ==========
+
+// SendToAgent 发送消息给指定 Agent
+func (s *Server) SendToAgent(agentID string, msg *protocol.Message) error {
+	agent, exists := s.registry.Get(agentID)
+	if !exists {
+		return fmt.Errorf("agent %s not found", agentID)
+	}
+	return agent.SendMessage(msg)
+}
+
+// GetAgentConn 获取 Agent 连接
+func (s *Server) GetAgentConn(agentID string) (proxy.AgentConn, bool) {
+	agent, exists := s.registry.Get(agentID)
+	if !exists {
+		return nil, false
+	}
+	return agent, true
+}
+
+// handleProxyData 处理代理数据消息
+func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
+	if s.proxyMgr == nil {
+		return
+	}
+
+	proxyID, _ := msg.Payload["proxyId"].(string)
+	connID, _ := msg.Payload["connId"].(string)
+
+	// 检查是否是终端连接
+	terminalFlag, _ := msg.Payload["terminal"].(bool)
+	if terminalFlag || (len(proxyID) > 8 && proxyID[:8] == "terminal") {
+		// 解析数据
+		var data []byte
+		switch v := msg.Payload["data"].(type) {
+		case string:
+			data = []byte(v)
+		case []byte:
+			data = v
+		case []interface{}:
+			data = make([]byte, len(v))
+			for i, b := range v {
+				if f, ok := b.(float64); ok {
+					data[i] = byte(f)
+				}
+			}
+		}
+		// 转发给终端会话
+		if err := s.HandleTerminalData(connID, data); err != nil {
+			log.Printf("HandleTerminalData error: %v", err)
+		}
+		return
+	}
+
+	// 解析数据
+	var data []byte
+	switch v := msg.Payload["data"].(type) {
+	case string:
+		data = []byte(v)
+	case []byte:
+		data = v
+	case []interface{}:
+		data = make([]byte, len(v))
+		for i, b := range v {
+			if f, ok := b.(float64); ok {
+				data[i] = byte(f)
+			}
+		}
+	}
+
+	if err := s.proxyMgr.HandleProxyData(proxyID, connID, data); err != nil {
+		log.Printf("HandleProxyData error: %v", err)
+	}
+}
+
+// handleProxyClose 处理代理关闭消息
+func (s *Server) handleProxyClose(agent *Agent, msg *protocol.Message) {
+	if s.proxyMgr == nil {
+		return
+	}
+
+	proxyID, _ := msg.Payload["proxyId"].(string)
+	connID, _ := msg.Payload["connId"].(string)
+	reason, _ := msg.Payload["reason"].(string)
+
+	// 检查是否是终端连接
+	terminalFlag, _ := msg.Payload["terminal"].(bool)
+	if terminalFlag || (len(proxyID) > 8 && proxyID[:8] == "terminal") {
+		s.HandleTerminalClose(connID, reason)
+		return
+	}
+
+	s.proxyMgr.HandleProxyClose(proxyID, connID, reason)
+}
+
+// handleProxyError 处理代理错误消息
+func (s *Server) handleProxyError(agent *Agent, msg *protocol.Message) {
+	proxyID, _ := msg.Payload["proxyId"].(string)
+	errorMsg, _ := msg.Payload["error"].(string)
+
+	log.Printf("Proxy error from agent %s, proxy %s: %s", agent.ID, proxyID, errorMsg)
+}
+
+// metricsCleanupLoop 清理旧的系统指标
+func (s *Server) metricsCleanupLoop() {
+	// 每天凌晨3点清理
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	// 启动时先等待到下次清理时间
+	now := time.Now()
+	nextCleanup := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, now.Location())
+	if nextCleanup.Before(now) {
+		nextCleanup = nextCleanup.Add(24 * time.Hour)
+	}
+	time.Sleep(time.Until(nextCleanup))
+
+	for {
+		// 清理30天前的数据
+		count, err := s.db.CleanupOldMetrics(30 * 24 * time.Hour)
+		if err != nil {
+			log.Printf("Failed to cleanup old metrics: %v", err)
+		} else {
+			log.Printf("Cleaned up %d old metric records", count)
+		}
+
+		select {
+		case <-ticker.C:
+			// 继续下一次清理
+		case <-s.ctx.Done():
+			return
+		}
+	}
 }

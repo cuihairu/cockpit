@@ -21,6 +21,13 @@ type Agent struct {
 	CreatedAt    time.Time     `json:"createdAt"`
 	UpdatedAt    time.Time     `json:"updatedAt"`
 
+	// 虚拟化信息
+	VirtType     string `gorm:"index" json:"virtType"`     // kvm, vmware, docker, none
+	VirtRole     string `json:"virtRole"`                 // guest, host
+
+	// 标签（支持复杂类型）
+	Labels       map[string]interface{} `gorm:"serializer:json" json:"labels"`
+
 	// 关联资源
 	ComputeInstances []ComputeInstance `gorm:"foreignKey:AgentID" json:"-"`
 	Domains          []Domain          `gorm:"foreignKey:AgentID" json:"-"`

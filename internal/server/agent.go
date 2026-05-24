@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -10,15 +11,17 @@ import (
 
 // Agent 表示已连接的 Agent
 type Agent struct {
-	ID           string
-	Conn         *websocket.Conn
-	Location     protocol.Location
-	Capabilities []protocol.Capability
-	Hostname     string
-	IP           string
-	Send         chan *protocol.Message
-	mu           sync.RWMutex
-	LastSeen     time.Time
+	ID             string
+	Conn           *websocket.Conn
+	Location       protocol.Location
+	Capabilities   []protocol.Capability
+	Hostname       string
+	IP             string
+	Virtualization *protocol.VirtualizationInfo
+	Labels         map[string]interface{}
+	Send           chan *protocol.Message
+	mu             sync.RWMutex
+	LastSeen       time.Time
 }
 
 // NewAgent 创建新的 Agent 实例
@@ -40,6 +43,8 @@ func (a *Agent) Update(info *protocol.RegisterPayload) {
 	a.Capabilities = info.Capabilities
 	a.Hostname = info.Hostname
 	a.IP = info.IP
+	a.Virtualization = info.Virtualization
+	a.Labels = info.Labels
 	a.LastSeen = time.Now()
 }
 
@@ -101,4 +106,19 @@ func (a *Agent) IsOnline(timeout time.Duration) bool {
 func (a *Agent) Close() {
 	close(a.Send)
 	a.Conn.Close()
+}
+
+// AgentID 实现 proxy.AgentConn 接口
+func (a *Agent) AgentID() string {
+	return a.ID
+}
+
+//SendMessage 发送消息给 Agent
+func (a *Agent) SendMessage(msg *protocol.Message) error {
+	select {
+	case a.Send <- msg:
+		return nil
+	default:
+		return fmt.Errorf("agent %s send channel full", a.ID)
+	}
 }

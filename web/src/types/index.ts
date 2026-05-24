@@ -24,6 +24,11 @@ export interface Agent {
   ip: string
   status: 'online' | 'offline'
   lastSeen: string
+  // 虚拟化信息
+  virtType?: string  // kvm, vmware, qemu, docker, none
+  virtRole?: string  // guest (虚拟机), host (物理机)
+  // 标签（支持复杂类型）
+  labels?: Record<string, any>
 }
 
 // 能力定义

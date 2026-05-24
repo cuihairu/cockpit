@@ -99,6 +99,10 @@ func (d *DB) migrate() error {
 		&Service{},
 		&Gateway{},
 		&Storage{},
+		&AuditLog{},
+		&Proxy{},
+		&SystemMetric{},
+		&SystemInfoSnapshot{},
 	)
 }
 
@@ -451,6 +455,67 @@ func (d *DB) GetStats() (*Stats, error) {
 	d.db.Model(&Service{}).Where("status = ?", "down").Count(&stats.ServicesDown)
 
 	return stats, nil
+}
+
+// ============ 系统指标操作 ============
+
+// SaveSystemMetric 保存系统指标
+func (d *DB) SaveSystemMetric(metric *SystemMetric) error {
+	return d.db.Create(metric).Error
+}
+
+// UpdateSystemInfoSnapshot 更新系统信息快照
+func (d *DB) UpdateSystemInfoSnapshot(snapshot *SystemInfoSnapshot) error {
+	return d.db.Where("agent_id = ?", snapshot.AgentID).
+		Assign(snapshot).
+		FirstOrCreate(snapshot).Error
+}
+
+// GetSystemInfoSnapshot 获取系统信息快照
+func (d *DB) GetSystemInfoSnapshot(agentID string) (*SystemInfoSnapshot, error) {
+	var snapshot SystemInfoSnapshot
+	err := d.db.Where("agent_id = ?", agentID).First(&snapshot).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, ErrNotFound
+	}
+	return &snapshot, err
+}
+
+// ListSystemInfoSnapshots 获取所有系统信息快照
+func (d *DB) ListSystemInfoSnapshots() ([]*SystemInfoSnapshot, error) {
+	var snapshots []*SystemInfoSnapshot
+	err := d.db.Find(&snapshots).Error
+	return snapshots, err
+}
+
+// GetSystemMetrics 获取系统指标历史
+func (d *DB) GetSystemMetrics(agentID string, limit int, offset int) ([]*SystemMetric, error) {
+	var metrics []*SystemMetric
+	query := d.db.Where("agent_id = ?", agentID).Order("timestamp DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+	err := query.Find(&metrics).Error
+	return metrics, err
+}
+
+// GetSystemMetricsByTimeRange 获取指定时间范围的系统指标
+func (d *DB) GetSystemMetricsByTimeRange(agentID string, start, end time.Time) ([]*SystemMetric, error) {
+	var metrics []*SystemMetric
+	err := d.db.Where("agent_id = ? AND timestamp BETWEEN ? AND ?", agentID, start, end).
+		Order("timestamp ASC").
+		Find(&metrics).Error
+	return metrics, err
+}
+
+// CleanupOldMetrics 清理旧的系统指标记录
+func (d *DB) CleanupOldMetrics(retention time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-retention)
+	result := d.db.Where("timestamp < ?", cutoff).Delete(&SystemMetric{})
+	return result.RowsAffected, result.Error
 }
 
 // ============ 事务支持 ============

@@ -20,10 +20,65 @@ import {
   CloseCircleOutlined,
   ExclamationCircleOutlined,
   CodeOutlined,
+  CloudServerOutlined,
+  DesktopOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { Agent } from '@/types'
 import { api } from '@/services/api'
+import RemoteServicesCard from '@/components/RemoteServices'
+import TerminalModal, { type RemoteProtocol } from '@/components/TerminalModal'
+
+// 虚拟化类型显示配置
+const virtTypeConfig: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+  kvm: { label: 'KVM', icon: <CloudServerOutlined />, color: 'blue' },
+  vmware: { label: 'VMware', icon: <CloudServerOutlined />, color: 'green' },
+  qemu: { label: 'QEMU', icon: <CloudServerOutlined />, color: 'cyan' },
+  xen: { label: 'Xen', icon: <CloudServerOutlined />, color: 'purple' },
+  virtualbox: { label: 'VirtualBox', icon: <CloudServerOutlined />, color: 'orange' },
+  hyperv: { label: 'Hyper-V', icon: <CloudServerOutlined />, color: 'blue' },
+  docker: { label: 'Docker', icon: <CloudServerOutlined />, color: 'blue' },
+  lxc: { label: 'LXC', icon: <CloudServerOutlined />, color: 'geekblue' },
+  container: { label: '容器', icon: <CloudServerOutlined />, color: 'magenta' },
+  none: { label: '物理机', icon: <DesktopOutlined />, color: 'default' },
+}
+
+// 获取虚拟化显示信息
+const getVirtDisplay = (agent: Agent) => {
+  if (agent.virtRole === 'host' || agent.virtType === 'none') {
+    return virtTypeConfig.none
+  }
+  if (agent.virtType && virtTypeConfig[agent.virtType]) {
+    return virtTypeConfig[agent.virtType]
+  }
+  return { label: '未知', icon: <ExclamationCircleOutlined />, color: 'default' }
+}
+
+// 从 Agent 的 capabilities 中提取远程服务
+const getRemoteServices = (agent: Agent | null) => {
+  if (!agent || !agent.capabilities) return []
+  const remoteCap = agent.capabilities.find((cap) => cap.type === 'remote-services')
+  if (!remoteCap || !remoteCap.metadata) return []
+
+  const services: Array<{ protocol: 'ssh' | 'rdp' | 'vnc' | 'telnet' | 'ftp'; host: string; port: number; name: string; running: boolean }> = []
+
+  for (const [key, value] of Object.entries(remoteCap.metadata)) {
+    if (typeof value === 'object' && value !== null && 'running' in value) {
+      const service = value as { host: string; port: number; name: string; running: boolean }
+      if (service.running && ['ssh', 'rdp', 'vnc', 'telnet', 'ftp'].includes(key)) {
+        services.push({
+          protocol: key as 'ssh' | 'rdp' | 'vnc' | 'telnet' | 'ftp',
+          host: service.host || '127.0.0.1',
+          port: service.port,
+          name: service.name || `${key.toUpperCase()} Server`,
+          running: true,
+        })
+      }
+    }
+  }
+
+  return services
+}
 
 const Agents = () => {
   const [loading, setLoading] = useState(false)
@@ -32,8 +87,19 @@ const Agents = () => {
   const [searchText, setSearchText] = useState('')
   const [regionFilter, setRegionFilter] = useState<string | undefined>()
   const [statusFilter, setStatusFilter] = useState<string | undefined>()
+  const [virtFilter, setVirtFilter] = useState<string | undefined>()
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
   const [detailVisible, setDetailVisible] = useState(false)
+
+  // 终端相关状态
+  const [terminalVisible, setTerminalVisible] = useState(false)
+  const [terminalConfig, setTerminalConfig] = useState<{
+    agentId: string
+    host: string
+    port: number
+    protocol: RemoteProtocol
+    title: string
+  } | null>(null)
 
   const fetchAgents = async () => {
     setLoading(true)
@@ -71,8 +137,15 @@ const Agents = () => {
       filtered = filtered.filter((agent) => agent.status === statusFilter)
     }
 
+    if (virtFilter) {
+      filtered = filtered.filter((agent) => {
+        if (virtFilter === 'physical') return agent.virtRole === 'host' || agent.virtType === 'none'
+        return agent.virtType === virtFilter
+      })
+    }
+
     setFilteredAgents(filtered)
-  }, [searchText, regionFilter, statusFilter, agents])
+  }, [searchText, regionFilter, statusFilter, virtFilter, agents])
 
   // 获取所有地域
   const regions = Array.from(new Set(agents.map((a) => a.location?.region || 'unknown').filter(Boolean)))
@@ -118,6 +191,20 @@ const Agents = () => {
           </span>
         </Space>
       ),
+    },
+    {
+      title: '类型',
+      key: 'virtualization',
+      width: 120,
+      sorter: (a, b) => (a.virtType || '').localeCompare(b.virtType || ''),
+      render: (_, record) => {
+        const config = getVirtDisplay(record)
+        return (
+          <Tag icon={config.icon} color={config.color}>
+            {config.label}
+          </Tag>
+        )
+      },
     },
     {
       title: '能力',
@@ -192,8 +279,21 @@ const Agents = () => {
     setDetailVisible(true)
   }
 
+  // 打开终端
+  const openTerminal = (protocol: RemoteProtocol, host: string, port: number) => {
+    setTerminalConfig({
+      agentId: selectedAgent?.id || '',
+      host,
+      port,
+      protocol,
+      title: `${protocol.toUpperCase()} - ${host}:${port}`,
+    })
+    setTerminalVisible(true)
+  }
+
   return (
-    <Card
+    <div className="page-container">
+      <Card
       title="Agent 管理"
       extra={
         <Space>
@@ -235,6 +335,18 @@ const Agents = () => {
           <Select.Option value="online">在线</Select.Option>
           <Select.Option value="offline">离线</Select.Option>
         </Select>
+        <Select
+          placeholder="筛选类型"
+          style={{ width: 140 }}
+          value={virtFilter}
+          onChange={setVirtFilter}
+          allowClear
+        >
+          <Select.Option value="physical">物理机</Select.Option>
+          <Select.Option value="kvm">KVM</Select.Option>
+          <Select.Option value="vmware">VMware</Select.Option>
+          <Select.Option value="docker">Docker</Select.Option>
+        </Select>
       </Space>
 
       <Table
@@ -250,42 +362,112 @@ const Agents = () => {
         open={detailVisible}
         onCancel={() => setDetailVisible(false)}
         footer={null}
-        width={800}
+        width={900}
       >
         {selectedAgent && (
-          <Descriptions bordered column={2}>
-            <Descriptions.Item label="Agent ID" span={2}>
-              <code>{selectedAgent.id}</code>
-            </Descriptions.Item>
-            <Descriptions.Item label="主机名">{selectedAgent.hostname || '-'}</Descriptions.Item>
-            <Descriptions.Item label="IP 地址">{selectedAgent.ip || '-'}</Descriptions.Item>
-            <Descriptions.Item label="地域">{selectedAgent.location?.region || '-'}</Descriptions.Item>
-            <Descriptions.Item label="可用区">{selectedAgent.location?.zone || '-'}</Descriptions.Item>
-            <Descriptions.Item label="状态">
-              <Tag
-                color={selectedAgent.status === 'online' ? 'success' : 'default'}
-              >
-                {selectedAgent.status === 'online' ? '在线' : '离线'}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="最后连接">
-              {selectedAgent.lastSeen
-                ? new Date(selectedAgent.lastSeen * 1000).toLocaleString()
-                : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="能力" span={2}>
-              <Space size="small" wrap>
-                {(selectedAgent.capabilities || []).map((cap) => (
-                  <Tag key={cap} color="blue">
-                    {cap}
-                  </Tag>
-                ))}
-              </Space>
-            </Descriptions.Item>
-          </Descriptions>
+          <>
+            <Descriptions bordered column={2} style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="Agent ID" span={2}>
+                <code>{selectedAgent.id}</code>
+              </Descriptions.Item>
+              <Descriptions.Item label="主机名">{selectedAgent.hostname || '-'}</Descriptions.Item>
+              <Descriptions.Item label="IP 地址">{selectedAgent.ip || '-'}</Descriptions.Item>
+              <Descriptions.Item label="地域">{selectedAgent.location?.region || '-'}</Descriptions.Item>
+              <Descriptions.Item label="可用区">{selectedAgent.location?.zone || '-'}</Descriptions.Item>
+              <Descriptions.Item label="系统类型">
+                {(() => {
+                  const config = getVirtDisplay(selectedAgent)
+                  return (
+                    <Tag icon={config.icon} color={config.color}>
+                      {config.label} ({selectedAgent.virtRole === 'guest' ? '虚拟机' : '宿主机'})
+                    </Tag>
+                  )
+                })()}
+              </Descriptions.Item>
+              <Descriptions.Item label="状态">
+                <Tag
+                  color={selectedAgent.status === 'online' ? 'success' : 'default'}
+                >
+                  {selectedAgent.status === 'online' ? '在线' : '离线'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="最后连接">
+                {selectedAgent.lastSeen
+                  ? new Date(selectedAgent.lastSeen * 1000).toLocaleString()
+                  : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="能力" span={2}>
+                <Space size="small" wrap>
+                  {(selectedAgent.capabilities || []).map((cap) => (
+                    <Tag key={cap} color="blue">
+                      {cap}
+                    </Tag>
+                  ))}
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="标签" span={2}>
+                <LabelsDisplay labels={selectedAgent.labels} />
+              </Descriptions.Item>
+            </Descriptions>
+
+            {/* 远程服务卡片 */}
+            <RemoteServicesCard
+              agentId={selectedAgent.id}
+	              services={getRemoteServices(selectedAgent)}
+              loading={loading}
+              onConnect={openTerminal}
+            />
+          </>
         )}
       </Modal>
+
+      {/* 终端模态框 */}
+      {terminalConfig && (
+        <TerminalModal
+          visible={terminalVisible}
+          onClose={() => setTerminalVisible(false)}
+          agentId={terminalConfig.agentId}
+          host={terminalConfig.host}
+          port={terminalConfig.port}
+          protocol={terminalConfig.protocol}
+          title={terminalConfig.title}
+        />
+      )}
     </Card>
+  </div>
+  )
+}
+
+// 显示 Labels 的辅助组件
+const LabelsDisplay: React.FC<{ labels?: Record<string, any> }> = ({ labels }) => {
+  if (!labels || Object.keys(labels).length === 0) {
+    return <span style={{ color: '#999' }}>-</span>
+  }
+
+  return (
+    <Space size="small" wrap>
+      {Object.entries(labels).map(([key, value]) => {
+        let displayValue: string
+        let color = 'default'
+
+        if (Array.isArray(value)) {
+          displayValue = value.join(', ')
+          color = 'geekblue'
+        } else if (typeof value === 'boolean') {
+          displayValue = value ? '是' : '否'
+          color = value ? 'success' : 'default'
+        } else {
+          displayValue = String(value)
+          color = 'blue'
+        }
+
+        return (
+          <Tag key={key} color={color}>
+            <strong>{key}</strong>: {displayValue}
+          </Tag>
+        )
+      })}
+    </Space>
   )
 }
 

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import ProLayout from '@ant-design/pro-layout'
-import { Button, Dropdown, Avatar, Space, Input, Badge, Card, Row, Col, Statistic } from 'antd'
+import ProLayout, { PageHeader, ProLayoutProps } from '@ant-design/pro-layout'
+import { Button, Dropdown, Avatar, Space, Input, Badge, Breadcrumb } from 'antd'
 import {
   DashboardOutlined,
   CloudServerOutlined,
@@ -11,15 +11,17 @@ import {
   UserOutlined,
   LogoutOutlined,
   QuestionCircleOutlined,
-  GithubOutlined,
+  AppstoreOutlined,
   SearchOutlined,
   BellOutlined,
-  AppstoreOutlined,
+  HomeOutlined,
 } from '@ant-design/icons'
 import Dashboard from './pages/Dashboard'
 import Resources from './pages/Resources'
 import Agents from './pages/Agents'
 import Settings from './pages/Settings'
+import AuditLogs from './pages/AuditLogs'
+import Monitor from './pages/Monitor'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
 import { UserProvider, useUser } from './contexts/UserContext'
@@ -35,37 +37,10 @@ const queryClient = new QueryClient({
   },
 })
 
-// 受保护的路由组件
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { token } = useUser()
-  if (!token) {
-    return <Navigate to="/login" replace />
-  }
-  return <>{children}</>
-}
-
-// 主布局组件
-const MainLayout = () => {
-  const [pathname, setPathname] = useState(window.location.pathname)
-  const [settings, setSetting] = useState<{
-    fixSiderbar: boolean
-    layout: 'side' | 'top' | 'mix'
-    theme: 'light' | 'dark'
-    colorWeak: boolean
-  }>({
-    fixSiderbar: true,
-    layout: 'side',
-    theme: 'light',
-    colorWeak: false,
-  })
-  const { user, logout } = useUser()
-
-  const handleLogout = () => {
-    logout()
-    window.location.href = '/login'
-  }
-
-  const menuData = [
+// 路由配置
+const routeConfig: ProLayoutProps['route'] = {
+  path: '/',
+  routes: [
     {
       path: '/',
       name: '总览',
@@ -75,7 +50,7 @@ const MainLayout = () => {
       path: '/resources',
       name: '资源管理',
       icon: <AppstoreOutlined />,
-      children: [
+      routes: [
         {
           path: '/resources/compute',
           name: '计算实例',
@@ -108,11 +83,53 @@ const MainLayout = () => {
       icon: <ApiOutlined />,
     },
     {
+      path: '/monitor',
+      name: '系统监控',
+      icon: <DashboardOutlined />,
+    },
+    {
       path: '/settings',
       name: '设置',
       icon: <SettingOutlined />,
     },
-  ]
+  ],
+}
+
+// 受保护的路由组件
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const { token } = useUser()
+  if (!token) {
+    return <Navigate to="/login" replace />
+  }
+  return <>{children}</>
+}
+
+// 主布局组件
+const MainLayout = () => {
+  const location = useLocation()
+  const [pathname, setPathname] = useState(location.pathname)
+  const [settings, setSetting] = useState<{
+    fixSiderbar: boolean
+    layout: 'side' | 'top' | 'mix'
+    theme: 'light' | 'dark'
+    colorWeak: boolean
+  }>({
+    fixSiderbar: true,
+    layout: 'mix', // 阿里云风格：mix 布局
+    theme: 'light',
+    colorWeak: false,
+  })
+  const { user, logout } = useUser()
+
+  // 监听路由变化
+  useEffect(() => {
+    setPathname(location.pathname)
+  }, [location.pathname])
+
+  const handleLogout = () => {
+    logout()
+    window.location.href = '/login'
+  }
 
   // 用户菜单
   const userMenuItems = [
@@ -137,37 +154,63 @@ const MainLayout = () => {
     },
   ]
 
+  // 右侧内容区域
+  const RightContent = () => (
+    <Space size="middle">
+      <Button
+        type="text"
+        icon={<QuestionCircleOutlined />}
+        href="https://cuihairu.github.io/cockpit/"
+        target="_blank"
+        style={{ color: '#4E5969' }}
+      >
+        文档
+      </Button>
+      <NotificationDropdown />
+      <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
+        <Space style={{ cursor: 'pointer' }}>
+          <Avatar size="small" icon={<UserOutlined />} />
+          <span style={{ color: '#1D2129', fontSize: 14 }}>{user?.username || 'Admin'}</span>
+        </Space>
+      </Dropdown>
+    </Space>
+  )
+
+  // 头部内容渲染（搜索框）
+  const HeaderContent = () => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
+      <Input.Search
+        placeholder="搜索产品、文档、资源..."
+        style={{ maxWidth: 500, width: '100%' }}
+        size="middle"
+        onSearch={(value) => console.log('Search:', value)}
+      />
+    </div>
+  )
+
   return (
     <ProLayout
       {...settings}
-      title=""
-      logo={null}
+      title="Cockpit"
+      logo={logo}
       navTheme="light"
       headerTheme="light"
       contentWidth="Fluid"
       location={{ pathname }}
-      route={{
-        path: '/',
-        routes: menuData,
-      }}
-      // 顶部 Header 内容
-      headerContentRender={() => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          {/* Logo */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <img src={logo} alt="Cockpit" style={{ width: 32, height: 32 }} />
-            <span style={{ fontSize: 18, fontWeight: 600, color: '#1D2129' }}>Cockpit</span>
-          </div>
-          {/* 搜索框 */}
-          <Input.Search
-            placeholder="搜索资源、文档..."
-            style={{ width: 400 }}
-            size="middle"
-            bordered={false}
-            onSearch={(value) => console.log('Search:', value)}
-          />
+      route={routeConfig}
+      // 阿里云风格配置
+      fixedHeader
+      siderWidth={208}
+      headerContentRender={HeaderContent}
+      rightContentRender={RightContent}
+      // 顶部主菜单配置
+      headerTitleRender={(logo, title) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {logo}
+          {title}
         </div>
       )}
+      // 菜单点击处理
       menuItemRender={(menuItemProps, defaultDom) => {
         return (
           <a
@@ -175,41 +218,45 @@ const MainLayout = () => {
             onClick={(e) => {
               e.preventDefault()
               setPathname(menuItemProps.path || '/')
-              window.history.pushState({}, '', menuItemProps.path)
+              window.history.pushState({}, '', menuItemProps.path || '/')
             }}
           >
             {defaultDom}
           </a>
         )
       }}
-      // 右侧操作区域 - 用户头像和通知
-      actionsRender={() => [
-        <Button
-          key="docs"
-          type="text"
-          icon={<QuestionCircleOutlined />}
-          style={{ color: '#86909C' }}
-          onClick={() => window.open('https://github.com/cuihairu/cockpit', '_blank')}
-        >
-          文档
-        </Button>,
-        <NotificationDropdown key="notifications" />,
-        // 用户头像
-        <Dropdown key="user" menu={{ items: userMenuItems }} placement="bottomRight">
-          <Space style={{ cursor: 'pointer', padding: '4px 12px', borderRadius: '8px', transition: 'all 0.3s' }}
-            className="user-dropdown">
-            <Avatar size="small" icon={<UserOutlined />} />
-            <span style={{ color: '#1D2129' }}>{user?.username || 'Admin'}</span>
-          </Space>
-        </Dropdown>,
-      ]}
+      // 面包屑渲染
+      breadcrumbRender={(routers = []) => {
+        return [
+          {
+            path: '/',
+            breadcrumbName: '首页',
+          },
+          ...routers,
+        ]
+      }}
+      // 面包屑项渲染
+      itemRender={(route, params, routes, paths) => {
+        const first = routes.indexOf(route) === 0
+        return first ? (
+          <a href="/" onClick={(e) => { e.preventDefault(); setPathname('/') }}>
+            {route.breadcrumbName}
+          </a>
+        ) : (
+          <span>{route.breadcrumbName}</span>
+        )
+      }}
+      // 隐藏菜单头部的 logo 区域（因为顶部已经有了）
+      menuHeaderRender={false}
     >
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/resources" element={<Resources />} />
         <Route path="/resources/*" element={<Resources />} />
         <Route path="/agents" element={<Agents />} />
+        <Route path="/monitor" element={<Monitor />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/settings/audit-logs" element={<AuditLogs />} />
       </Routes>
     </ProLayout>
   )
