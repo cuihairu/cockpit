@@ -1,15 +1,16 @@
 import { useState } from 'react'
-import { Form, Input, Button, message, Checkbox } from 'antd'
+import { Form, Input, Button, App, Checkbox } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useUser } from '@/contexts/UserContext'
 import logo from '@/assets/logo.svg'
 import './index.less'
 
-const Login = () => {
+const LoginContent = () => {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const { login } = useUser()
+  const { message } = App.useApp()
   const [form] = Form.useForm()
 
   const onFinish = async (values: { username: string; password: string; remember?: boolean }) => {
@@ -87,6 +88,15 @@ const Login = () => {
         </div>
       </div>
     </div>
+  )
+}
+
+// 用 App 组件包裹以支持 message 上下文
+const Login = () => {
+  return (
+    <App>
+      <LoginContent />
+    </App>
   )
 }
 
