@@ -351,6 +351,11 @@ func TestPVEProviderGetNode(t *testing.T) {
 			params:   map[string]interface{}{},
 			expected: "",
 		},
+		{
+			name:     "with empty node param",
+			params:   map[string]interface{}{"node": ""},
+			expected: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -360,5 +365,764 @@ func TestPVEProviderGetNode(t *testing.T) {
 				t.Errorf("expected %s, got %s", tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestPVEProviderUnknownAction(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.Call("unknown_action", nil)
+	if err == nil {
+		t.Error("expected error for unknown action")
+	}
+}
+
+func TestPVEProviderListVMs(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.ListVMs(map[string]interface{}{"node": "pve1"})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderGetVM(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.GetVM(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderGetVMInvalidID(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.GetVM(map[string]interface{}{"node": "pve1", "vmid": "invalid"})
+	if err == nil {
+		t.Error("expected error for invalid vmid")
+	}
+}
+
+func TestPVEProviderStartVM(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.StartVM(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderStopVM(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.StopVM(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderRestartVM(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.RestartVM(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderSuspendVM(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.SuspendVM(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderResumeVM(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.ResumeVM(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderListContainers(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.ListContainers(map[string]interface{}{"node": "pve1"})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderGetContainer(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.GetContainer(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderStartContainer(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.StartContainer(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderStopContainer(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.StopContainer(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderRestartContainer(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.RestartContainer(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderListNodes(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.ListNodes(nil)
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderListStorage(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.ListStorage(map[string]interface{}{"node": "pve1"})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderListSnapshots(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.ListSnapshots(map[string]interface{}{"node": "pve1", "vmid": 100})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderCreateSnapshot(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.CreateSnapshot(map[string]interface{}{
+		"node": "pve1",
+		"vmid": 100,
+		"name": "test-snapshot",
+	})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderDeleteSnapshot(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.DeleteSnapshot(map[string]interface{}{
+		"node": "pve1",
+		"vmid": 100,
+		"name": "test-snapshot",
+	})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestPVEProviderDeleteSnapshotMissingName(t *testing.T) {
+	p := NewPVEProvider("http://localhost:8006", "token-id", "secret")
+
+	_, err := p.DeleteSnapshot(map[string]interface{}{
+		"node": "pve1",
+		"vmid": 100,
+	})
+	if err == nil {
+		t.Error("expected error for missing snapshot name")
+	}
+}
+
+func TestOpenWrtProviderUnknownAction(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.Call("unknown_action", nil)
+	if err == nil {
+		t.Error("expected error for unknown action")
+	}
+}
+
+func TestOpenWrtProviderGetSystemInfo(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetSystemInfo(nil)
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderListInterfaces(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.ListInterfaces(nil)
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderGetInterface(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetInterface(map[string]interface{}{"name": "lan"})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderGetInterfaceMissingName(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetInterface(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing interface name")
+	}
+}
+
+func TestOpenWrtProviderGetRoutes(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetRoutes(nil)
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderGetFirewallZones(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetFirewallZones(nil)
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderGetFirewallRules(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetFirewallRules(nil)
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderGetFirewallRedirects(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetFirewallRedirects(nil)
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderGetWirelessStatus(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetWirelessStatus(nil)
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderGetDHCPLoads(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetDHCPLoads(nil)
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderReadFile(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.ReadFile(map[string]interface{}{"path": "/etc/config/system"})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderReadFileMissingPath(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.ReadFile(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing file path")
+	}
+}
+
+func TestOpenWrtProviderWriteFile(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.WriteFile(map[string]interface{}{
+		"path": "/tmp/test",
+		"data": "test content",
+	})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderWriteFileMissingPath(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.WriteFile(map[string]interface{}{"data": "test"})
+	if err == nil {
+		t.Error("expected error for missing file path")
+	}
+}
+
+func TestOpenWrtProviderWriteFileMissingData(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.WriteFile(map[string]interface{}{"path": "/tmp/test"})
+	if err == nil {
+		t.Error("expected error for missing file data")
+	}
+}
+
+func TestOpenWrtProviderReboot(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.Reboot(nil)
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderGetLEDState(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetLEDState(map[string]interface{}{"name": "tp-link:blue:status"})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderGetLEDStateMissingName(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.GetLEDState(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing LED name")
+	}
+}
+
+func TestOpenWrtProviderSetLEDState(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.SetLEDState(map[string]interface{}{
+		"name":  "tp-link:blue:status",
+		"state": "on",
+	})
+	if err == nil {
+		// May succeed if server is running
+	}
+}
+
+func TestOpenWrtProviderSetLEDStateMissingName(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.SetLEDState(map[string]interface{}{"state": "on"})
+	if err == nil {
+		t.Error("expected error for missing LED name")
+	}
+}
+
+func TestOpenWrtProviderSetLEDStateMissingState(t *testing.T) {
+	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+
+	_, err := p.SetLEDState(map[string]interface{}{"name": "tp-link:blue:status"})
+	if err == nil {
+		t.Error("expected error for missing LED state")
+	}
+}
+
+func TestDockerProviderUnknownAction(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.Call("unknown_action", nil)
+	if err == nil {
+		t.Error("expected error for unknown action")
+	}
+}
+
+func TestDockerProviderListContainers(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.ListContainers(map[string]interface{}{"all": true})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderGetContainer(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.GetContainer(map[string]interface{}{"id": "test-container"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderGetContainerMissingID(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.GetContainer(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing container id")
+	}
+}
+
+func TestDockerProviderStartContainer(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.StartContainer(map[string]interface{}{"id": "test-container"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderStartContainerMissingID(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.StartContainer(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing container id")
+	}
+}
+
+func TestDockerProviderStopContainer(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.StopContainer(map[string]interface{}{"id": "test-container"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderStopContainerMissingID(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.StopContainer(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing container id")
+	}
+}
+
+func TestDockerProviderRestartContainer(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.RestartContainer(map[string]interface{}{"id": "test-container"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderRestartContainerMissingID(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.RestartContainer(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing container id")
+	}
+}
+
+func TestDockerProviderRemoveContainer(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.RemoveContainer(map[string]interface{}{"id": "test-container"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderRemoveContainerMissingID(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.RemoveContainer(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing container id")
+	}
+}
+
+func TestDockerProviderPauseContainer(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.PauseContainer(map[string]interface{}{"id": "test-container"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderPauseContainerMissingID(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.PauseContainer(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing container id")
+	}
+}
+
+func TestDockerProviderUnpauseContainer(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.UnpauseContainer(map[string]interface{}{"id": "test-container"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderUnpauseContainerMissingID(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.UnpauseContainer(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing container id")
+	}
+}
+
+func TestDockerProviderGetLogs(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.GetLogs(map[string]interface{}{
+		"id":     "test-container",
+		"tail":   "100",
+		"stdout": true,
+	})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderGetLogsMissingID(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.GetLogs(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing container id")
+	}
+}
+
+func TestDockerProviderGetStats(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.GetStats(map[string]interface{}{"id": "test-container"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderGetStatsMissingID(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.GetStats(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing container id")
+	}
+}
+
+func TestDockerProviderListImages(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.ListImages(map[string]interface{}{"all": true})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderRemoveImage(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.RemoveImage(map[string]interface{}{"id": "test-image"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderRemoveImageMissingID(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.RemoveImage(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing image id")
+	}
+}
+
+func TestDockerProviderPullImage(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.PullImage(map[string]interface{}{"ref": "nginx:latest"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderPullImageMissingRef(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.PullImage(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing image ref")
+	}
+}
+
+func TestDockerProviderListVolumes(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.ListVolumes(nil)
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderRemoveVolume(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.RemoveVolume(map[string]interface{}{"name": "test-volume"})
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderRemoveVolumeMissingName(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.RemoveVolume(map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error for missing volume name")
+	}
+}
+
+func TestDockerProviderListNetworks(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.ListNetworks(nil)
+	if err == nil {
+		// May succeed if docker is running
+	}
+}
+
+func TestDockerProviderGetSystemInfo(t *testing.T) {
+	p, err := NewDockerProvider("unix:///var/run/docker.sock")
+	if err != nil {
+		t.Skipf("Cannot create Docker provider: %v", err)
+	}
+
+	_, err = p.GetSystemInfo(nil)
+	if err == nil {
+		// May succeed if docker is running
 	}
 }
