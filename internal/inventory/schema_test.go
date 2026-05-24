@@ -235,13 +235,14 @@ func TestResolveRefZone(t *testing.T) {
 		t.Errorf("ResolveRef() error = %v", err)
 	}
 
-	region, ok := result.(*Zone)
+	region, ok := result.(*Region)
 	if !ok {
 		t.Fatal("Result should be a Region")
 	}
 
+	zone := region.Zones["zone1"]
 	if zone.Name != "Test Zone" {
-		t.Errorf("Region Name = %v, want 'Test Zone'", zone.Name)
+		t.Errorf("Zone Name = %v, want 'Test Zone'", zone.Name)
 	}
 }
 
