@@ -33,7 +33,7 @@ func Middleware(next http.HandlerFunc) http.HandlerFunc {
 
 		// 将用户信息存入 request context
 		ctx := r.Context()
-		ctx = contextWithUser(ctx, claims.UserID, claims.Username)
+		ctx = contextWithUser(ctx, claims.UserID, claims.Username, claims.Role)
 		r = r.WithContext(ctx)
 
 		next(w, r)
@@ -62,7 +62,7 @@ func OptionalMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		ctx = contextWithUser(ctx, claims.UserID, claims.Username)
+		ctx = contextWithUser(ctx, claims.UserID, claims.Username, claims.Role)
 		r = r.WithContext(ctx)
 
 		next(w, r)
@@ -74,8 +74,8 @@ type contextKey string
 
 const userKey contextKey = "user"
 
-func contextWithUser(ctx context.Context, userID, username string) context.Context {
-	return context.WithValue(ctx, userKey, UserInfo{UserID: userID, Username: username})
+func contextWithUser(ctx context.Context, userID, username, role string) context.Context {
+	return context.WithValue(ctx, userKey, UserInfo{UserID: userID, Username: username, Role: role})
 }
 
 // GetUserFromContext 从 context 获取用户信息
@@ -88,4 +88,5 @@ func GetUserFromContext(r *http.Request) (UserInfo, bool) {
 type UserInfo struct {
 	UserID   string
 	Username string
+	Role     string
 }

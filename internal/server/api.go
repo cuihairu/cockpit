@@ -36,7 +36,7 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/resources/"):
 		s.handleResources(w, r, strings.TrimPrefix(path, "/resources/"))
 	case path == "/users":
-		s.handleUsersList(w, r)
+		s.handleUsers(w, r)
 	case strings.HasPrefix(path, "/users/"):
 		s.handleUserActions(w, r, strings.TrimPrefix(path, "/users/"))
 	default:
@@ -339,13 +339,20 @@ func (s *Server) handleError(w http.ResponseWriter, r *http.Request, status int,
 	})
 }
 
+// handleUsers 处理用户列表和创建用户
+func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleUsersList(w, r)
+	case http.MethodPost:
+		s.handleUserCreate(w, r)
+	default:
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
 // handleUsersList 获取用户列表
 func (s *Server) handleUsersList(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
 	users, err := s.db.ListUsers()
 	if err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to list users")
@@ -353,6 +360,78 @@ func (s *Server) handleUsersList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, users)
+}
+
+// CreateUserRequest 创建用户请求
+type CreateUserRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Email    string `json:"email"`
+	Role     string `json:"role"`
+}
+
+// handleUserCreate 创建用户
+func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
+	// 获取当前用户
+	user, ok := auth.GetUserFromContext(r)
+	if !ok {
+		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	// 只有管理员可以创建用户
+	if user.Role != "admin" {
+		s.handleError(w, r, http.StatusForbidden, "Only admin can create users")
+		return
+	}
+
+	var req CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 验证输入
+	if req.Username == "" || req.Password == "" {
+		s.handleError(w, r, http.StatusBadRequest, "Username and password are required")
+		return
+	}
+
+	// 设置默认角色
+	if req.Role == "" {
+		req.Role = "user"
+	}
+
+	// 检查用户名是否已存在
+	_, err := s.db.GetUserByUsername(req.Username)
+	if err == nil {
+		s.handleError(w, r, http.StatusConflict, "Username already exists")
+		return
+	}
+
+	// 哈希密码
+	hashedPassword, err := storage.HashPassword(req.Password)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to hash password")
+		return
+	}
+
+	// 创建用户
+	newUser := &storage.User{
+		Username: req.Username,
+		Password: hashedPassword,
+		Email:    req.Email,
+		Role:     req.Role,
+	}
+
+	if err := s.db.CreateUser(newUser); err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to create user")
+		return
+	}
+
+	// 清除密码后返回
+	newUser.Password = ""
+	s.writeJSON(w, http.StatusCreated, newUser)
 }
 
 // handleUserActions 处理用户操作
@@ -365,9 +444,17 @@ func (s *Server) handleUserActions(w http.ResponseWriter, r *http.Request, path 
 	}
 
 	userID := parts[0]
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
 
-	switch r.Method {
-	case http.MethodDelete:
+	switch {
+	case action == "password" && r.Method == http.MethodPost:
+		s.handleUserChangePassword(w, r, userID)
+	case r.Method == http.MethodPut:
+		s.handleUserUpdate(w, r, userID)
+	case r.Method == http.MethodDelete:
 		s.handleUserDelete(w, r, userID)
 	default:
 		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
@@ -408,4 +495,125 @@ func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request, id str
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"message": "User deleted"})
+}
+
+// UpdateUserRequest 更新用户请求
+type UpdateUserRequest struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+// handleUserUpdate 更新用户
+func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request, id string) {
+	// 获取当前用户
+	user, ok := auth.GetUserFromContext(r)
+	if !ok {
+		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	// 查询目标用户
+	targetUser, err := s.db.GetUserByID(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "User not found")
+		return
+	}
+
+	var req UpdateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 只有管理员可以修改角色
+	if req.Role != "" && req.Role != targetUser.Role && user.Role != "admin" {
+		s.handleError(w, r, http.StatusForbidden, "Only admin can change role")
+		return
+	}
+
+	// 用户只能修改自己的邮箱，管理员可以修改任何人
+	if req.Email != "" && user.Username != targetUser.Username && user.Role != "admin" {
+		s.handleError(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	// 更新用户
+	targetUser.Email = req.Email
+	if req.Role != "" && user.Role == "admin" {
+		targetUser.Role = req.Role
+	}
+
+	if err := s.db.UpdateUser(targetUser); err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to update user")
+		return
+	}
+
+	targetUser.Password = ""
+	s.writeJSON(w, http.StatusOK, targetUser)
+}
+
+// ChangePasswordRequest 修改密码请求
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+// handleUserChangePassword 修改用户密码
+func (s *Server) handleUserChangePassword(w http.ResponseWriter, r *http.Request, id string) {
+	// 获取当前用户
+	user, ok := auth.GetUserFromContext(r)
+	if !ok {
+		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	// 查询目标用户
+	targetUser, err := s.db.GetUserByID(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "User not found")
+		return
+	}
+
+	// 只能修改自己的密码，管理员可以修改任何人的密码
+	if user.Username != targetUser.Username && user.Role != "admin" {
+		s.handleError(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	var req ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 验证新密码
+	if req.NewPassword == "" {
+		s.handleError(w, r, http.StatusBadRequest, "New password is required")
+		return
+	}
+
+	// 非管理员修改密码需要验证旧密码
+	if user.Role != "admin" {
+		// 验证旧密码
+		_, err := s.db.VerifyPassword(targetUser.Username, req.OldPassword)
+		if err != nil {
+			s.handleError(w, r, http.StatusUnauthorized, "Invalid old password")
+			return
+		}
+	}
+
+	// 哈希新密码
+	hashedPassword, err := storage.HashPassword(req.NewPassword)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to hash password")
+		return
+	}
+
+	// 更新密码
+	if err := s.db.UpdatePassword(id, hashedPassword); err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to update password")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Password updated"})
 }

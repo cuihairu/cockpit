@@ -24,11 +24,12 @@ func SetSecret(secret string) {
 type Claims struct {
 	UserID   string `json:"user_id"`
 	Username string `json:"username"`
+	Role     string `json:"role"`
 	jwt.RegisteredClaims
 }
 
 // GenerateToken 生成 JWT token
-func GenerateToken(userID, username string) (string, error) {
+func GenerateToken(userID, username, role string) (string, error) {
 	if len(jwtSecret) == 0 {
 		SetSecret("")
 	}
@@ -36,6 +37,7 @@ func GenerateToken(userID, username string) (string, error) {
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
+		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -80,5 +82,5 @@ func RefreshToken(tokenString string) (string, error) {
 		return tokenString, nil
 	}
 
-	return GenerateToken(claims.UserID, claims.Username)
+	return GenerateToken(claims.UserID, claims.Username, claims.Role)
 }

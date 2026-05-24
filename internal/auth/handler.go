@@ -55,7 +55,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 生成 token
-	token, err := GenerateToken(user.ID, user.Username)
+	token, err := GenerateToken(user.ID, user.Username, user.Role)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to generate token"}`, http.StatusInternalServerError)
 		return
