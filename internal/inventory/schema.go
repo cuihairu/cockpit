@@ -360,6 +360,9 @@ func (i *Inventory) Write(path string) error {
 
 // Merge 合并另一个 inventory
 func (i *Inventory) Merge(other *Inventory) {
+	if other == nil {
+		return
+	}
 	if other.Regions != nil {
 		if i.Regions == nil {
 			i.Regions = make(map[string]*Region)

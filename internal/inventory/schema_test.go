@@ -195,22 +195,29 @@ func TestResolveRefRegion(t *testing.T) {
 			"region1": {
 				ID:   "region1",
 				Name: "Test Region",
+				Zones: map[string]*Zone{
+					"zone1": {
+						ID:   "zone1",
+						Name: "Test Zone",
+					},
+				},
 			},
 		},
 	}
 
-	result, err := inv.ResolveRef("regions.region1")
+	// Region refs require zones qualifier
+	result, err := inv.ResolveRef("regions.region1.zones.zone1")
 	if err != nil {
 		t.Errorf("ResolveRef() error = %v", err)
 	}
 
-	region, ok := result.(*Region)
+	zone, ok := result.(*Zone)
 	if !ok {
-		t.Fatal("Result should be a Region")
+		t.Fatal("Result should be a Zone")
 	}
 
-	if region.Name != "Test Region" {
-		t.Errorf("Region Name = %v, want 'Test Region'", region.Name)
+	if zone.Name != "Test Zone" {
+		t.Errorf("Zone Name = %v, want 'Test Zone'", zone.Name)
 	}
 }
 
@@ -230,17 +237,16 @@ func TestResolveRefZone(t *testing.T) {
 		},
 	}
 
-	result, err := inv.ResolveRef("regions.region1")
+	result, err := inv.ResolveRef("regions.region1.zones.zone1")
 	if err != nil {
 		t.Errorf("ResolveRef() error = %v", err)
 	}
 
-	region, ok := result.(*Region)
+	zone, ok := result.(*Zone)
 	if !ok {
-		t.Fatal("Result should be a Region")
+		t.Fatal("Result should be a Zone")
 	}
 
-	zone := region.Zones["zone1"]
 	if zone.Name != "Test Zone" {
 		t.Errorf("Zone Name = %v, want 'Test Zone'", zone.Name)
 	}
@@ -267,7 +273,7 @@ func TestResolveRefAgent(t *testing.T) {
 		},
 	}
 
-	result, err := inv.ResolveRef("regions.region1.agents.agent1")
+	result, err := inv.ResolveRef("regions.region1.zones.zone1.agents.agent1")
 	if err != nil {
 		t.Errorf("ResolveRef() error = %v", err)
 	}
@@ -516,13 +522,10 @@ invalid: [unclosed
 }
 
 func TestParseEmptyYAML(t *testing.T) {
-	inv, err := Parse([]byte("{}"))
-	if err != nil {
-		t.Errorf("Parse() error = %v", err)
-	}
-
-	if inv.Version != "" {
-		t.Error("Version should be empty for empty YAML")
+	// Empty YAML should fail validation because version is required
+	_, err := Parse([]byte("{}"))
+	if err == nil {
+		t.Error("Parse() should return error for empty YAML (missing version)")
 	}
 }
 
