@@ -7,7 +7,29 @@ set -e
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# 解析参数
+ADDR="${ADDR:-0.0.0.0:9000}"
+DATADIR="${DATADIR:-./data}"
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -addr)
+      ADDR="$2"
+      shift 2
+      ;;
+    -data)
+      DATADIR="$2"
+      shift 2
+      ;;
+    *)
+      echo -e "${YELLOW}未知选项: $1${NC}"
+      exit 1
+      ;;
+  esac
+done
 
 echo -e "${GREEN}🔨 构建中...${NC}"
 go build -o ./bin/cockpit ./cmd/cockpit
@@ -24,7 +46,11 @@ if [ $? -eq 0 ]; then
     fi
 
     echo -e "${GREEN}🚀 启动服务...${NC}"
-    ./bin/cockpit
+    echo -e "${BLUE}地址: http://$ADDR${NC}"
+    echo -e "${BLUE}数据目录: $DATADIR${NC}"
+    echo ""
+
+    exec ./bin/cockpit -addr "$ADDR" -data "$DATADIR"
 else
     echo -e "${RED}❌ 构建失败${NC}"
     exit 1
