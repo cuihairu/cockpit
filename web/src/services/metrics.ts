@@ -101,7 +101,8 @@ metricsClient.interceptors.response.use(
 
 // 获取所有系统信息快照
 export async function getSystemSnapshots(): Promise<SystemInfoSnapshot[]> {
-  return metricsClient.get<any, SystemInfoSnapshot[]>('/metrics/snapshots');
+  const response = await metricsClient.get<any, { data: SystemInfoSnapshot[] }>('/metrics/snapshots');
+  return response?.data || [];
 }
 
 // 获取单个 Agent 的系统信息
@@ -118,7 +119,16 @@ export async function getMetricsHistory(
     limit?: number;
   },
 ): Promise<MetricsHistoryResponse> {
-  return metricsClient.get<any, MetricsHistoryResponse>(`/metrics/history?agent_id=${agentId}`, { params });
+  const response = await metricsClient.get<any, MetricsHistoryResponse>(
+    `/metrics/history?agent_id=${agentId}`,
+    { params }
+  );
+  return {
+    data: response?.data || [],
+    start: response?.start || 0,
+    end: response?.end || 0,
+    count: response?.count || 0,
+  };
 }
 
 // 格式化字节数
