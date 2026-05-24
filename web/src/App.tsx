@@ -166,12 +166,13 @@ const MainLayout = () => {
       }}
       // 头部内容 - 阿里云风格搜索栏
       headerContentRender={() => (
-        <div style={{ display: 'flex', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', flex: 1, maxWidth: 500 }}>
           <Input.Search
-            placeholder="搜索资源..."
-            style={{ width: 300 }}
+            placeholder="搜索资源、文档..."
+            style={{ width: 445 }}
+            size="large"
+            bordered={false}
             onSearch={(value) => console.log('Search:', value)}
-            enterButton={<SearchOutlined />}
           />
         </div>
       )}
