@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ProLayout, { PageHeader, ProLayoutProps } from '@ant-design/pro-layout'
 import { Button, Dropdown, Avatar, Space, Input, Badge, Breadcrumb } from 'antd'
@@ -108,6 +108,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 // 主布局组件
 const MainLayout = () => {
   const location = useLocation()
+  const navigate = useNavigate()
   const [pathname, setPathname] = useState(location.pathname)
   const [settings, setSetting] = useState<{
     fixSiderbar: boolean
@@ -139,8 +140,7 @@ const MainLayout = () => {
       icon: <UserOutlined />,
       label: '个人中心',
       onClick: () => {
-        setPathname('/profile')
-        window.history.pushState({}, '', '/profile')
+        navigate('/profile')
       },
     },
     {
@@ -148,8 +148,7 @@ const MainLayout = () => {
       icon: <SettingOutlined />,
       label: '设置',
       onClick: () => {
-        setPathname('/settings')
-        window.history.pushState({}, '', '/settings')
+        navigate('/settings')
       },
     },
     {
@@ -226,8 +225,7 @@ const MainLayout = () => {
             href={menuItemProps.path}
             onClick={(e) => {
               e.preventDefault()
-              setPathname(menuItemProps.path || '/')
-              window.history.pushState({}, '', menuItemProps.path || '/')
+              navigate(menuItemProps.path || '/')
             }}
           >
             {defaultDom}
@@ -248,7 +246,7 @@ const MainLayout = () => {
       itemRender={(route, params, routes, paths) => {
         const first = routes.indexOf(route) === 0
         return first ? (
-          <a href="/" onClick={(e) => { e.preventDefault(); setPathname('/') }}>
+          <a href="/" onClick={(e) => { e.preventDefault(); navigate('/') }}>
             {route.breadcrumbName}
           </a>
         ) : (
