@@ -20,6 +20,7 @@ import Dashboard from './pages/Dashboard'
 import Resources from './pages/Resources'
 import Agents from './pages/Agents'
 import Settings from './pages/Settings'
+import Profile from './pages/Profile'
 import AuditLogs from './pages/AuditLogs'
 import Monitor from './pages/Monitor'
 import Login from './pages/Login'
@@ -137,11 +138,19 @@ const MainLayout = () => {
       key: 'profile',
       icon: <UserOutlined />,
       label: '个人中心',
+      onClick: () => {
+        setPathname('/profile')
+        window.history.pushState({}, '', '/profile')
+      },
     },
     {
       key: 'settings',
       icon: <SettingOutlined />,
       label: '设置',
+      onClick: () => {
+        setPathname('/settings')
+        window.history.pushState({}, '', '/settings')
+      },
     },
     {
       type: 'divider' as const,
@@ -257,6 +266,7 @@ const MainLayout = () => {
         <Route path="/monitor" element={<Monitor />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/audit-logs" element={<AuditLogs />} />
+        <Route path="/profile" element={<Profile />} />
       </Routes>
     </ProLayout>
   )
