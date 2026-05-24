@@ -19,6 +19,7 @@ type LoginResponse struct {
 	ExpiresAt int64  `json:"expires_at"`
 	UserID    string `json:"user_id"`
 	Username  string `json:"username"`
+	Role      string `json:"role"`
 }
 
 // DB 存储接口（在运行时注入）
@@ -67,6 +68,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: 0,
 		UserID:    user.ID,
 		Username:  user.Username,
+		Role:      user.Role,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
