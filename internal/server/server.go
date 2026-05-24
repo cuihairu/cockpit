@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/alert"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/storage"
@@ -125,6 +126,9 @@ func (s *Server) Start() error {
 
 	// 启动清理协程
 	go s.cleanupLoop()
+
+	// 启动警告检查协程
+	go s.alertCheckLoop()
 
 	return server.ListenAndServe()
 }
@@ -367,4 +371,46 @@ func toStorageAgent(agent *Agent) *storage.Agent {
 		Status:       "online",
 		LastSeen:     agent.LastSeen,
 	}
+}
+
+// alertCheckLoop 定期检查并生成警告
+func (s *Server) alertCheckLoop() {
+	// 启动时立即执行一次
+	go func() {
+		time.Sleep(5 * time.Second) // 等待服务完全启动
+		s.runAlertChecks()
+	}()
+
+	// 每小时检查一次
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	// 每天凌晨2点清理旧警告
+	cleanupTicker := time.NewTicker(24 * time.Hour)
+	defer cleanupTicker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.runAlertChecks()
+		case <-cleanupTicker.C:
+			s.cleanupOldAlerts()
+		case <-s.ctx.Done():
+			return
+		}
+	}
+}
+
+// runAlertChecks 执行警告检查
+func (s *Server) runAlertChecks() {
+	generator := alert.NewGenerator(s.db)
+	generator.CheckAllChecks()
+	log.Println("Alert checks completed")
+}
+
+// cleanupOldAlerts 清理旧警告
+func (s *Server) cleanupOldAlerts() {
+	generator := alert.NewGenerator(s.db)
+	generator.CleanupOldAlerts(30 * 24 * time.Hour) // 保留30天
+	log.Println("Old alerts cleaned up")
 }
