@@ -1,10 +1,19 @@
-import { Card, Col, Row, Statistic, Table, Tag, Typography } from 'antd'
-import { PageContainer } from '@ant-design/pro-layout'
+import { Card, Row, Col, Statistic, Progress, Table, Tag, Space, Typography, Button } from 'antd'
+import {
+  CloudServerOutlined,
+  SafetyOutlined,
+  CheckCircleOutlined,
+  WarningOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/services/api'
 import type { ColumnsType } from 'antd/es/table'
+import './index.less'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 
 interface DashboardData {
   services: { running: number; down: number; unknown: number }
@@ -14,163 +23,175 @@ interface DashboardData {
 }
 
 const Dashboard = () => {
-  // 获取系统状态
-  const { data: status, isLoading } = useQuery({
+  const { data: status, refetch } = useQuery({
     queryKey: ['status'],
     queryFn: () => api.getStatus(),
+    refetchInterval: 30000,
   })
 
-  // 获取 Agent 列表
   const { data: agents } = useQuery({
     queryKey: ['agents'],
     queryFn: () => api.getAgents(),
   })
 
-  // Agent 表格列
+  const stats = status || {
+    services: { running: 0, down: 0, unknown: 0 },
+    domains: { valid: 0, expiring: 0 },
+    certificates: { valid: 0, expiring: 0 },
+    infrastructure: { total: 0, online: 0 },
+  }
+
+  const onlineRate = stats.infrastructure.total > 0
+    ? Math.round((stats.infrastructure.online / stats.infrastructure.total) * 100)
+    : 0
+
+  const resourceCards = [
+    {
+      title: '运行中服务',
+      value: stats.services.running,
+      suffix: '个',
+      icon: <CheckCircleOutlined />,
+      color: 'stat-card-green',
+    },
+    {
+      title: '异常服务',
+      value: stats.services.down,
+      suffix: '个',
+      icon: <WarningOutlined />,
+      color: 'stat-card-red',
+    },
+    {
+      title: '在线 Agent',
+      value: stats.infrastructure.online,
+      suffix: `/${stats.infrastructure.total}`,
+      icon: <CloudServerOutlined />,
+      color: 'stat-card-blue',
+    },
+    {
+      title: '有效域名',
+      value: stats.domains.valid,
+      suffix: '个',
+      icon: <SafetyOutlined />,
+      color: 'stat-card-purple',
+    },
+    {
+      title: '有效证书',
+      value: stats.certificates.valid,
+      suffix: '个',
+      icon: <SafetyOutlined />,
+      color: 'stat-card-cyan',
+    },
+    {
+      title: '即将过期',
+      value: stats.certificates.expiring,
+      suffix: '个',
+      icon: <WarningOutlined />,
+      color: 'stat-card-orange',
+    },
+  ]
+
   const agentColumns: ColumnsType<any> = [
-    {
-      title: 'Agent ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 200,
-    },
-    {
-      title: '位置',
-      key: 'location',
-      render: (_, record) => `${record.location?.region || '-'} / ${record.location?.zone || '-'}`,
-    },
     {
       title: '主机名',
       dataIndex: 'hostname',
       key: 'hostname',
+      render: (text: string) => (
+        <Space>
+          <CloudServerOutlined />
+          <span>{text}</span>
+        </Space>
+      ),
     },
     {
-      title: 'IP',
+      title: 'IP 地址',
       dataIndex: 'ip',
       key: 'ip',
     },
     {
-      title: '能力',
-      key: 'capabilities',
-      render: (_, record) => (
-        <>
-          {record.capabilities?.map((cap: any) => (
-            <Tag key={cap.type} color="blue">
-              {cap.type}
-            </Tag>
-          ))}
-        </>
-      ),
+      title: '区域',
+      key: 'location',
+      render: (_: any, record: any) => `${record.location?.region || '-'}/${record.location?.zone || '-'}`,
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
       render: (status: string) => (
-        <Tag color={status === 'online' ? 'success' : 'error'}>{status}</Tag>
+        <Tag color={status === 'online' ? 'success' : 'default'}>
+          {status === 'online' ? '在线' : '离线'}
+        </Tag>
+      ),
+    },
+    {
+      title: '能力',
+      dataIndex: 'capabilities',
+      key: 'capabilities',
+      render: (caps: string[]) => (
+        <Space size={4}>
+          {caps?.slice(0, 3).map((cap, i) => (
+            <Tag key={i} color="processing" style={{ fontSize: 11 }}>
+              {cap}
+            </Tag>
+          ))}
+          {caps?.length > 3 && <Tag>+{caps.length - 3}</Tag>}
+        </Space>
       ),
     },
   ]
 
   return (
-    <PageContainer
-      header={{
-        title: '仪表盘',
-      }}
-    >
-      <Row gutter={[16, 16]}>
-        {/* 统计卡片 */}
-        <Col xs={24} sm={12} md={6}>
-          <Card>
-            <Statistic
-              title="服务状态"
-              value={status?.services?.running || 0}
-              suffix={`/ ${status?.services?.down || 0} 个异常`}
-              loading={isLoading}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card>
-            <Statistic
-              title="域名"
-              value={status?.domains?.valid || 0}
-              suffix={`/ ${status?.domains?.expiring || 0} 个即将过期`}
-              loading={isLoading}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card>
-            <Statistic
-              title="证书"
-              value={status?.certificates?.valid || 0}
-              suffix={`/ ${status?.certificates?.expiring || 0} 个即将过期`}
-              loading={isLoading}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card>
-            <Statistic
-              title="基础设施"
-              value={status?.infrastructure?.online || 0}
-              suffix={`/ ${status?.infrastructure?.total || 0} 在线`}
-              loading={isLoading}
-            />
-          </Card>
-        </Col>
+    <div style={{ padding: '24px', background: '#f0f2f5', minHeight: '100vh' }}>
+      <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <Title level={3} style={{ margin: 0 }}>总览</Title>
+          <Text type="secondary">实时监控您的混合基础设施状态</Text>
+        </div>
+        <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+          刷新
+        </Button>
+      </div>
 
-        {/* Agent 列表 */}
-        <Col span={24}>
-          <Card title="在线 Agents">
-            <Table
-              columns={agentColumns}
-              dataSource={agents || []}
-              rowKey="id"
-              pagination={false}
-              size="small"
-            />
-          </Card>
-        </Col>
-
-        {/* 快捷入口 */}
-        <Col span={24}>
-          <Card title="快捷入口">
-            <Row gutter={16}>
-              <Col span={6}>
-                <a href="/resources/compute" target="_blank">
-                  <Card type="inner" hoverable>
-                    <Card.Meta title="计算实例" description="管理 PVE VM、LXC、VPS 等" />
-                  </Card>
-                </a>
-              </Col>
-              <Col span={6}>
-                <a href="/resources/domains" target="_blank">
-                  <Card type="inner" hoverable>
-                    <Card.Meta title="域名管理" description="查看域名到期、DNS 配置" />
-                  </Card>
-                </a>
-              </Col>
-              <Col span={6}>
-                <a href="/resources/certificates" target="_blank">
-                  <Card type="inner" hoverable>
-                    <Card.Meta title="SSL 证书" description="监控证书过期状态" />
-                  </Card>
-                </a>
-              </Col>
-              <Col span={6}>
-                <a href="/resources/services" target="_blank">
-                  <Card type="inner" hoverable>
-                    <Card.Meta title="服务状态" description="查看服务健康检查" />
-                  </Card>
-                </a>
-              </Col>
-            </Row>
-          </Card>
-        </Col>
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        {resourceCards.map((card, index) => (
+          <Col xs={24} sm={12} md={8} lg={4} key={index}>
+            <div className={`stat-card ${card.color}`}>
+              <div style={{ fontSize: 20, marginBottom: 8 }}>{card.icon}</div>
+              <Statistic
+                title={card.title}
+                value={card.value}
+                suffix={card.suffix}
+                valueStyle={{ fontSize: 24, fontWeight: 600 }}
+              />
+            </div>
+          </Col>
+        ))}
       </Row>
-    </PageContainer>
+
+      <Card style={{ marginBottom: 24 }} bordered={false}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+          <Title level={5} style={{ margin: 0 }}>基础设施健康度</Title>
+          <Text type="secondary">{onlineRate}% 在线</Text>
+        </div>
+        <Progress
+          percent={onlineRate}
+          strokeColor={{
+            '0%': '#108ee9',
+            '100%': '#87d068',
+          }}
+          status={onlineRate >= 80 ? 'success' : onlineRate >= 50 ? 'normal' : 'exception'}
+        />
+      </Card>
+
+      <Card title="Agent 列表" bordered={false} extra={<a href="/agents">查看全部</a>}>
+        <Table
+          dataSource={agents || []}
+          columns={agentColumns}
+          rowKey="id"
+          pagination={{ pageSize: 5 }}
+          size="small"
+        />
+      </Card>
+    </div>
   )
 }
 

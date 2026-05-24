@@ -1,0 +1,60 @@
+.stat-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 12px;
+  padding: 20px;
+  transition: all 0.3s;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+  }
+
+  .ant-statistic-title {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    margin-bottom: 8px;
+  }
+
+  .ant-statistic-content {
+    color: white;
+
+    .ant-statistic-content-value {
+      font-size: 28px;
+      font-weight: 600;
+    }
+
+    .ant-statistic-content-suffix {
+      font-size: 16px;
+      margin-left: 4px;
+    }
+  }
+}
+
+.stat-card-blue {
+  background: linear-gradient(135deg, #0064FA 0%, #00A8FF 100%);
+}
+
+.stat-card-green {
+  background: linear-gradient(135deg, #00A870 0%, #00D9A5 100%);
+}
+
+.stat-card-orange {
+  background: linear-gradient(135deg, #FF8800 0%, #FFAB40 100%);
+}
+
+.stat-card-red {
+  background: linear-gradient(135deg, #F53F3F 0%, #FF7875 100%);
+}
+
+.stat-card-purple {
+  background: linear-gradient(135deg, #722ED1 0%, #B37FEB 100%);
+}
+
+.stat-card-cyan {
+  background: linear-gradient(135deg, #13C2C2 0%, #36CFC9 100%);
+}

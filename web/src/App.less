@@ -1,0 +1,186 @@
+// 阿里云风格主题
+@primary-color: #0064FA; // 阿里云蓝
+@success-color: #00A870;
+@warning-color: #FF8800;
+@error-color: #F53F3F;
+@info-color: #0064FA;
+
+// 侧边栏样式
+.ant-pro-sider {
+  .ant-pro-sider-logo {
+    h1 {
+      color: @primary-color !important;
+      font-weight: 600;
+    }
+  }
+}
+
+// 顶部导航样式
+.ant-pro-global-header {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+// 菜单项样式
+.ant-menu-item-selected {
+  &::after {
+    border-right-color: @primary-color;
+  }
+}
+
+.ant-menu-item:hover {
+  color: @primary-color;
+}
+
+// 卡片样式阿里云化
+.ant-card {
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: all 0.3s;
+
+  &:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  }
+}
+
+// 统计数字卡片
+.stat-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 12px;
+  padding: 24px;
+  transition: all 0.3s;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+  }
+
+  .ant-statistic-title {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 14px;
+  }
+
+  .ant-statistic-content {
+    color: white;
+
+    .ant-statistic-content-value {
+      font-size: 32px;
+      font-weight: 600;
+    }
+  }
+}
+
+// 不同颜色的统计卡片
+.stat-card-blue {
+  background: linear-gradient(135deg, #0064FA 0%, #00A8FF 100%);
+}
+
+.stat-card-green {
+  background: linear-gradient(135deg, #00A870 0%, #00D9A5 100%);
+}
+
+.stat-card-orange {
+  background: linear-gradient(135deg, #FF8800 0%, #FFAB40 100%);
+}
+
+.stat-card-red {
+  background: linear-gradient(135deg, #F53F3F 0%, #FF7875 100%);
+}
+
+.stat-card-purple {
+  background: linear-gradient(135deg, #722ED1 0%, #B37FEB 100%);
+}
+
+.stat-card-cyan {
+  background: linear-gradient(135deg, #13C2C2 0%, #36CFC9 100%);
+}
+
+// 资源卡片
+.resource-card {
+  .ant-card-body {
+    padding: 16px;
+  }
+
+  .resource-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-bottom: 12px;
+  }
+
+  .resource-name {
+    font-size: 16px;
+    font-weight: 500;
+    color: #1f2937;
+    margin-bottom: 4px;
+  }
+
+  .resource-desc {
+    font-size: 12px;
+    color: #9ca3af;
+  }
+}
+
+// 表格样式
+.ant-table {
+  .ant-table-thead > tr > th {
+    background-color: #f9fafb;
+    font-weight: 600;
+    color: #374151;
+  }
+
+  .ant-table-tbody > tr:hover > td {
+    background-color: #f3f4f6;
+  }
+}
+
+// 标签样式
+.ant-tag {
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+
+  &.ant-tag-success {
+    background: #e6f7f2;
+    color: #00a870;
+    border-color: #b7ebc8;
+  }
+
+  &.ant-tag-warning {
+    background: #fff7e6;
+    color: #ff8800;
+    border-color: #ffd591;
+  }
+
+  &.ant-tag-error {
+    background: #ffe6e6;
+    color: #f53f3f;
+    border-color: #ffccc7;
+  }
+
+  &.ant-tag-processing {
+    background: #e6f7ff;
+    color: #0064fa;
+    border-color: #91d5ff;
+  }
+}
+
+// 页面容器
+.ant-pro-page-container {
+  .ant-pro-page-container-children-content {
+    margin: 0;
+  }
+}
+
+// 响应式
+@media (max-width: 768px) {
+  .ant-pro-global-header {
+    .ant-input-search {
+      display: none;
+    }
+  }
+}

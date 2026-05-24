@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ProLayout from '@ant-design/pro-layout'
-import { Button, Dropdown, Avatar, Space, Divider } from 'antd'
+import { Button, Dropdown, Avatar, Space, Input, Badge, Card, Row, Col, Statistic } from 'antd'
 import {
   DashboardOutlined,
   CloudServerOutlined,
@@ -12,6 +12,9 @@ import {
   LogoutOutlined,
   QuestionCircleOutlined,
   GithubOutlined,
+  SearchOutlined,
+  BellOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons'
 import Dashboard from './pages/Dashboard'
 import Resources from './pages/Resources'
@@ -21,6 +24,7 @@ import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
 import { UserProvider, useUser } from './contexts/UserContext'
 import logo from '@/assets/logo.svg'
+import './App.less'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,6 +47,17 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 // 主布局组件
 const MainLayout = () => {
   const [pathname, setPathname] = useState(window.location.pathname)
+  const [settings, setSetting] = useState<{
+    fixSiderbar: boolean
+    layout: 'side' | 'top' | 'mix'
+    theme: 'light' | 'dark'
+    colorWeak: boolean
+  }>({
+    fixSiderbar: true,
+    layout: 'side',
+    theme: 'light',
+    colorWeak: false,
+  })
   const { user, logout } = useUser()
 
   const handleLogout = () => {
@@ -50,16 +65,42 @@ const MainLayout = () => {
     window.location.href = '/login'
   }
 
-  const menuItems = [
+  const menuData = [
     {
       path: '/',
-      name: '仪表盘',
+      name: '总览',
       icon: <DashboardOutlined />,
     },
     {
       path: '/resources',
       name: '资源管理',
-      icon: <CloudServerOutlined />,
+      icon: <AppstoreOutlined />,
+      children: [
+        {
+          path: '/resources/compute',
+          name: '计算实例',
+        },
+        {
+          path: '/resources/domains',
+          name: '域名',
+        },
+        {
+          path: '/resources/certificates',
+          name: '证书',
+        },
+        {
+          path: '/resources/services',
+          name: '服务',
+        },
+        {
+          path: '/resources/gateways',
+          name: '网关',
+        },
+        {
+          path: '/resources/storages',
+          name: '存储',
+        },
+      ],
     },
     {
       path: '/agents',
@@ -98,17 +139,16 @@ const MainLayout = () => {
 
   return (
     <ProLayout
+      {...settings}
       title="Cockpit"
       logo={logo}
-      layout="mix"
-      splitMenus={true}
       navTheme="light"
       headerTheme="light"
       contentWidth="Fluid"
       location={{ pathname }}
       route={{
         path: '/',
-        routes: menuItems,
+        routes: menuData,
       }}
       menuItemRender={(menuItemProps, defaultDom) => {
         return (
@@ -124,6 +164,17 @@ const MainLayout = () => {
           </a>
         )
       }}
+      // 头部内容 - 阿里云风格搜索栏
+      headerContentRender={() => (
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <Input.Search
+            placeholder="搜索资源..."
+            style={{ width: 300 }}
+            onSearch={(value) => console.log('Search:', value)}
+            enterButton={<SearchOutlined />}
+          />
+        </div>
+      )}
       // 右侧操作区域
       actionsRender={() => [
         <Button
@@ -131,13 +182,17 @@ const MainLayout = () => {
           type="text"
           icon={<QuestionCircleOutlined />}
           onClick={() => window.open('https://github.com/cuihairu/cockpit', '_blank')}
-        />,
+        >
+          文档
+        </Button>,
         <Button
           key="github"
           type="text"
           icon={<GithubOutlined />}
           onClick={() => window.open('https://github.com/cuihairu/cockpit', '_blank')}
-        />,
+        >
+          GitHub
+        </Button>,
         <NotificationDropdown key="notifications" />,
       ]}
       // 用户头像
@@ -155,10 +210,17 @@ const MainLayout = () => {
           </Dropdown>
         ),
       }}
+      // 底部
+      footerRender={() => (
+        <div style={{ textAlign: 'center', color: '#999', fontSize: 12 }}>
+          © 2026 Cockpit - 个人混合基础设施控制台
+        </div>
+      )}
     >
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/resources" element={<Resources />} />
+        <Route path="/resources/*" element={<Resources />} />
         <Route path="/agents" element={<Agents />} />
         <Route path="/settings" element={<Settings />} />
       </Routes>
