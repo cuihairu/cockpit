@@ -58,7 +58,7 @@ const Login = () => {
             <Input
               prefix={<UserOutlined />}
               placeholder="用户名"
-              bordered={false}
+              variant="borderless"
             />
           </Form.Item>
           <Form.Item
@@ -68,7 +68,7 @@ const Login = () => {
             <Input.Password
               prefix={<LockOutlined />}
               placeholder="密码"
-              bordered={false}
+              variant="borderless"
             />
           </Form.Item>
           <Form.Item>

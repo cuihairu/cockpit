@@ -167,7 +167,7 @@ const Dashboard = () => {
         ))}
       </Row>
 
-      <Card style={{ marginBottom: 24 }} bordered={false}>
+      <Card style={{ marginBottom: 24 }} variant="borderless">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
           <Title level={5} style={{ margin: 0 }}>基础设施健康度</Title>
           <Text type="secondary">{onlineRate}% 在线</Text>
@@ -182,7 +182,7 @@ const Dashboard = () => {
         />
       </Card>
 
-      <Card title="Agent 列表" bordered={false} extra={<a href="/agents">查看全部</a>}>
+      <Card title="Agent 列表" variant="borderless" extra={<a href="/agents">查看全部</a>}>
         <Table
           dataSource={agents || []}
           columns={agentColumns}

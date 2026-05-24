@@ -366,7 +366,7 @@ const Agents = () => {
       >
         {selectedAgent && (
           <>
-            <Descriptions bordered column={2} style={{ marginBottom: 16 }}>
+            <Descriptions variant="bordered" column={2} style={{ marginBottom: 16 }}>
               <Descriptions.Item label="Agent ID" span={2}>
                 <code>{selectedAgent.id}</code>
               </Descriptions.Item>

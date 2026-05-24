@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { App as AntdApp } from 'antd'
 import ProLayout, { PageHeader, ProLayoutProps } from '@ant-design/pro-layout'
-import { Button, Dropdown, Avatar, Space, Input, Badge, Breadcrumb } from 'antd'
+import { Button, Dropdown, Avatar, Space, Input, Badge, Breadcrumb, ConfigProvider } from 'antd'
 import {
   DashboardOutlined,
   CloudServerOutlined,
@@ -272,23 +273,33 @@ const MainLayout = () => {
 
 const App = () => {
   return (
-    <QueryClientProvider client={queryClient}>
-      <UserProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route
-              path="/*"
-              element={
-                <ProtectedRoute>
-                  <MainLayout />
-                </ProtectedRoute>
-              }
-            />
-          </Routes>
-        </BrowserRouter>
-      </UserProvider>
-    </QueryClientProvider>
+    <ConfigProvider
+      theme={{
+        token: {
+          colorPrimary: '#165DFF', // 阿里云蓝
+        },
+      }}
+    >
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <UserProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route
+                  path="/*"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout />
+                    </ProtectedRoute>
+                  }
+                />
+              </Routes>
+            </BrowserRouter>
+          </UserProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>
   )
 }
 
