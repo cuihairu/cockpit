@@ -92,6 +92,7 @@ func (d *DB) migrate() error {
 	return d.db.AutoMigrate(
 		&User{},
 		&Agent{},
+		&Alert{},
 		&ComputeInstance{},
 		&Domain{},
 		&Certificate{},

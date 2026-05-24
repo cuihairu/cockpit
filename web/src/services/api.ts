@@ -147,6 +147,31 @@ class ApiService {
   }> {
     return this.client.get<any, any>('/status')
   }
+
+  // ========== 警告/通知 ==========
+  async getAlerts(): Promise<{ data: Alert[] }> {
+    return this.client.get<any, any>('/alerts')
+  }
+
+  async markAlertRead(id: string): Promise<void> {
+    return this.client.put(`/alerts/${id}/read`)
+  }
+
+  async markAllAlertsRead(): Promise<void> {
+    return this.client.put('/alerts/read-all')
+  }
+}
+
+// 警告类型
+export interface Alert {
+  id: string
+  type: 'info' | 'warning' | 'error' | 'success'
+  title: string
+  message: string
+  resource_id?: string
+  resource_type?: string
+  created_at: string
+  read: boolean
 }
 
 // 导出单例

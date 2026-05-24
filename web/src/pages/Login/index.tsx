@@ -2,20 +2,19 @@ import { useState } from 'react'
 import { Form, Input, Button, Card, message } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { api } from '@/services/api'
+import { useUser } from '@/contexts/UserContext'
 import logo from '@/assets/logo.svg'
 import './index.css'
 
 const Login = () => {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const { login } = useUser()
 
   const onFinish = async (values: { username: string; password: string }) => {
     setLoading(true)
     try {
-      const response = await api.login(values.username, values.password)
-      localStorage.setItem('token', response.token)
-      localStorage.setItem('username', response.username)
+      await login(values.username, values.password)
       message.success('登录成功')
       navigate('/')
     } catch (error) {
