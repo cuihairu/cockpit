@@ -326,7 +326,7 @@ func TestDockerProviderType(t *testing.T) {
 }
 
 func TestOpenWrtProviderType(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	if p.Type() != "openwrt" {
 		t.Errorf("expected type 'openwrt', got '%s'", p.Type())
@@ -560,7 +560,7 @@ func TestPVEProviderDeleteSnapshotMissingName(t *testing.T) {
 }
 
 func TestOpenWrtProviderUnknownAction(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.Call("unknown_action", nil)
 	if err == nil {
@@ -569,7 +569,7 @@ func TestOpenWrtProviderUnknownAction(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetSystemInfo(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetSystemInfo(nil)
 	if err == nil {
@@ -578,7 +578,7 @@ func TestOpenWrtProviderGetSystemInfo(t *testing.T) {
 }
 
 func TestOpenWrtProviderListInterfaces(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.ListInterfaces(nil)
 	if err == nil {
@@ -587,7 +587,7 @@ func TestOpenWrtProviderListInterfaces(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetInterface(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetInterface(map[string]interface{}{"name": "lan"})
 	if err == nil {
@@ -596,7 +596,7 @@ func TestOpenWrtProviderGetInterface(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetInterfaceMissingName(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetInterface(map[string]interface{}{})
 	if err == nil {
@@ -605,7 +605,7 @@ func TestOpenWrtProviderGetInterfaceMissingName(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetRoutes(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetRoutes(nil)
 	if err == nil {
@@ -614,7 +614,7 @@ func TestOpenWrtProviderGetRoutes(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetFirewallZones(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetFirewallZones(nil)
 	if err == nil {
@@ -623,7 +623,7 @@ func TestOpenWrtProviderGetFirewallZones(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetFirewallRules(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetFirewallRules(nil)
 	if err == nil {
@@ -632,7 +632,7 @@ func TestOpenWrtProviderGetFirewallRules(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetFirewallRedirects(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetFirewallRedirects(nil)
 	if err == nil {
@@ -641,7 +641,7 @@ func TestOpenWrtProviderGetFirewallRedirects(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetWirelessStatus(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetWirelessStatus(nil)
 	if err == nil {
@@ -650,7 +650,7 @@ func TestOpenWrtProviderGetWirelessStatus(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetDHCPLoads(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetDHCPLoads(nil)
 	if err == nil {
@@ -659,7 +659,7 @@ func TestOpenWrtProviderGetDHCPLoads(t *testing.T) {
 }
 
 func TestOpenWrtProviderReadFile(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.ReadFile(map[string]interface{}{"path": "/etc/config/system"})
 	if err == nil {
@@ -668,7 +668,7 @@ func TestOpenWrtProviderReadFile(t *testing.T) {
 }
 
 func TestOpenWrtProviderReadFileMissingPath(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.ReadFile(map[string]interface{}{})
 	if err == nil {
@@ -677,7 +677,7 @@ func TestOpenWrtProviderReadFileMissingPath(t *testing.T) {
 }
 
 func TestOpenWrtProviderWriteFile(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.WriteFile(map[string]interface{}{
 		"path": "/tmp/test",
@@ -689,7 +689,7 @@ func TestOpenWrtProviderWriteFile(t *testing.T) {
 }
 
 func TestOpenWrtProviderWriteFileMissingPath(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.WriteFile(map[string]interface{}{"data": "test"})
 	if err == nil {
@@ -698,7 +698,7 @@ func TestOpenWrtProviderWriteFileMissingPath(t *testing.T) {
 }
 
 func TestOpenWrtProviderWriteFileMissingData(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.WriteFile(map[string]interface{}{"path": "/tmp/test"})
 	if err == nil {
@@ -707,7 +707,7 @@ func TestOpenWrtProviderWriteFileMissingData(t *testing.T) {
 }
 
 func TestOpenWrtProviderReboot(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.Reboot(nil)
 	if err == nil {
@@ -716,7 +716,7 @@ func TestOpenWrtProviderReboot(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetLEDState(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetLEDState(map[string]interface{}{"name": "tp-link:blue:status"})
 	if err == nil {
@@ -725,7 +725,7 @@ func TestOpenWrtProviderGetLEDState(t *testing.T) {
 }
 
 func TestOpenWrtProviderGetLEDStateMissingName(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.GetLEDState(map[string]interface{}{})
 	if err == nil {
@@ -734,7 +734,7 @@ func TestOpenWrtProviderGetLEDStateMissingName(t *testing.T) {
 }
 
 func TestOpenWrtProviderSetLEDState(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.SetLEDState(map[string]interface{}{
 		"name":  "tp-link:blue:status",
@@ -746,7 +746,7 @@ func TestOpenWrtProviderSetLEDState(t *testing.T) {
 }
 
 func TestOpenWrtProviderSetLEDStateMissingName(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.SetLEDState(map[string]interface{}{"state": "on"})
 	if err == nil {
@@ -755,7 +755,7 @@ func TestOpenWrtProviderSetLEDStateMissingName(t *testing.T) {
 }
 
 func TestOpenWrtProviderSetLEDStateMissingState(t *testing.T) {
-	p := NewOpenWrtProvider("192.168.1.1", 443, "root", "password")
+	p := NewOpenWrtProvider("127.0.0.1", 443, "root", "password")
 
 	_, err := p.SetLEDState(map[string]interface{}{"name": "tp-link:blue:status"})
 	if err == nil {
