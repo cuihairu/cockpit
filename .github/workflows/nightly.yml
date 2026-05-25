@@ -2,9 +2,8 @@ name: Nightly Build
 
 on:
   schedule:
-    # 每天 UTC 0:00 执行
     - cron: '0 0 * * *'
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -42,8 +41,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -77,13 +74,16 @@ jobs:
         shell: bash
         run: |
           cd dist
-          tar czf "cockpit-${{ matrix.target }}-nightly.tar.gz" "cockpit${{ matrix.ext }}" "cockpit-agent${{ matrix.ext }}"
+          tar czf "cockpit-${{ matrix.target }}-nightly.tar.gz" "cockpit${{ matrix.ext }}"
+          tar czf "cockpit-agent-${{ matrix.target }}-nightly.tar.gz" "cockpit-agent${{ matrix.ext }}"
 
-      - name: Upload binary artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: cockpit-${{ matrix.target }}
-          path: dist/cockpit-${{ matrix.target }}-nightly.tar.gz
+          path: |
+            dist/cockpit-${{ matrix.target }}-nightly.tar.gz
+            dist/cockpit-agent-${{ matrix.target }}-nightly.tar.gz
           retention-days: 7
 
   build-web:
@@ -120,7 +120,7 @@ jobs:
           retention-days: 7
 
   release:
-    name: Nightly Release
+    name: Release
     runs-on: ubuntu-latest
     needs: [build, build-web]
     steps:
@@ -135,38 +135,41 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: List artifacts
-        run: ls -la dist/
-
-      - name: Delete old nightly release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          release_id=$(gh api repos/:owner/:repo/releases/tags/nightly --jq '.id' 2>/dev/null || echo "")
-          if [ -n "$release_id" ]; then
-            gh release delete "$release_id" -y || true
-          fi
-          git tag -d nightly 2>/dev/null || true
-          git push origin :refs/tags/nightly 2>/dev/null || true
-
-      - name: Create nightly release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update nightly tag
         run: |
           git tag -f nightly
           git push -f origin nightly
 
+      - name: Update nightly release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 如果 release 已存在则删除（保留 tag）
+          if gh release view nightly > /dev/null 2>&1; then
+            gh release delete nightly --yes --cleanup-tag=false
+          fi
+
+          DATE=$(date +%Y-%m-%d)
+
           gh release create nightly \
-            --title "Nightly Build ($(date +%Y-%m-%d))" \
-            --notes "Automated nightly build ($(date +%Y-%m-%d)). This release is overwritten daily.
+            --title "Nightly $DATE" \
+            --latest=false \
+            --notes "Automated nightly build ($DATE).
 
           ## Downloads
-          - \`cockpit-linux-amd64-nightly.tar.gz\` — Linux x86_64
-          - \`cockpit-windows-amd64-nightly.tar.gz\` — Windows x86_64
-          - \`cockpit-darwin-arm64-nightly.tar.gz\` — macOS Apple Silicon
-          - \`cockpit-web-nightly.tar.gz\` — Web UI (cross-platform)" \
-            --latest=false \
+          | File | Platform | Arch |
+          |------|----------|------|
+          | \`cockpit-linux-amd64-nightly.tar.gz\` | Linux | x86_64 |
+          | \`cockpit-agent-linux-amd64-nightly.tar.gz\` | Linux Agent | x86_64 |
+          | \`cockpit-windows-amd64-nightly.tar.gz\` | Windows | x86_64 |
+          | \`cockpit-agent-windows-amd64-nightly.tar.gz\` | Windows Agent | x86_64 |
+          | \`cockpit-darwin-arm64-nightly.tar.gz\` | macOS | Apple Silicon |
+          | \`cockpit-agent-darwin-arm64-nightly.tar.gz\` | macOS Agent | Apple Silicon |
+          | \`cockpit-web-nightly.tar.gz\` | Web UI | cross-platform |" \
             dist/cockpit-linux-amd64-nightly.tar.gz \
+            dist/cockpit-agent-linux-amd64-nightly.tar.gz \
             dist/cockpit-windows-amd64-nightly.tar.gz \
+            dist/cockpit-agent-windows-amd64-nightly.tar.gz \
             dist/cockpit-darwin-arm64-nightly.tar.gz \
+            dist/cockpit-agent-darwin-arm64-nightly.tar.gz \
             dist/cockpit-web-nightly.tar.gz
