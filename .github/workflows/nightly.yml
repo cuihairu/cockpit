@@ -20,7 +20,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          persist-credentials: false
+          persist-credentials: true
 
       - name: Set up Go
         uses: actions/setup-go@v6

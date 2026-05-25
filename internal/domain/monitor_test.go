@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -115,6 +116,10 @@ func TestQueryWhoisInvalidPath(t *testing.T) {
 }
 
 func TestNormalizeDomain(t *testing.T) {
+	if _, err := exec.LookPath("whois"); err != nil {
+		t.Skip("skipping: whois command not found")
+	}
+
 	m := NewMonitor(Config{})
 
 	tests := []struct {

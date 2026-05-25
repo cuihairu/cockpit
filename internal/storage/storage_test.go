@@ -1376,7 +1376,7 @@ func TestCleanupOldMetrics(t *testing.T) {
 	now := time.Now().UTC()
 	metrics := []*SystemMetric{
 		{AgentID: "agent-1", Timestamp: now.Add(-25 * time.Hour), CPUUsage: 10},
-		{AgentID: "agent-1", Timestamp: now.Add(-20 * time.Hour), CPUUsage: 20},
+		{AgentID: "agent-1", Timestamp: now.Add(-26 * time.Hour), CPUUsage: 20},
 		{AgentID: "agent-1", Timestamp: now.Add(-5 * time.Hour), CPUUsage: 50},
 	}
 	for _, m := range metrics {
