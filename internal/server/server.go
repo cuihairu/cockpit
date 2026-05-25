@@ -110,6 +110,9 @@ func (s *Server) Start() error {
 		// 注册远程连接 API
 		s.registerRemoteAPI(mux)
 
+	// 注册桌面连接 API
+	s.registerDesktopAPI(mux)
+
 	// 公开路由
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/health", s.handleHealth)
@@ -277,6 +280,10 @@ func (s *Server) handleMessage(agent *Agent, msg *protocol.Message) {
 		s.handleProxyClose(agent, msg)
 	case protocol.MessageTypeProxyError:
 		s.handleProxyError(agent, msg)
+	case protocol.MessageTypeDesktopData:
+		s.HandleDesktopData(msg)
+	case protocol.MessageTypeDesktopClose:
+		s.HandleDesktopClose(msg)
 	default:
 		log.Printf("Unknown message type: %s from agent %s", msg.Type, agent.ID)
 	}

@@ -28,6 +28,7 @@ import type { Agent } from '@/types'
 import { api } from '@/services/api'
 import RemoteServicesCard from '@/components/RemoteServices'
 import TerminalModal, { type RemoteProtocol } from '@/components/TerminalModal'
+import DesktopModal from '@/components/DesktopModal'
 
 // 虚拟化类型显示配置
 const virtTypeConfig: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
@@ -98,6 +99,15 @@ const Agents = () => {
     host: string
     port: number
     protocol: RemoteProtocol
+    title: string
+  } | null>(null)
+
+  // 桌面相关状态
+  const [desktopVisible, setDesktopVisible] = useState(false)
+  const [desktopConfig, setDesktopConfig] = useState<{
+    agentId: string
+    host: string
+    port: number
     title: string
   } | null>(null)
 
@@ -279,16 +289,26 @@ const Agents = () => {
     setDetailVisible(true)
   }
 
-  // 打开终端
+  // 打开远程连接（按协议分流）
   const openTerminal = (protocol: RemoteProtocol, host: string, port: number) => {
-    setTerminalConfig({
-      agentId: selectedAgent?.id || '',
-      host,
-      port,
-      protocol,
-      title: `${protocol.toUpperCase()} - ${host}:${port}`,
-    })
-    setTerminalVisible(true)
+    if (protocol === 'rdp') {
+      setDesktopConfig({
+        agentId: selectedAgent?.id || '',
+        host,
+        port,
+        title: `RDP - ${host}:${port}`,
+      })
+      setDesktopVisible(true)
+    } else {
+      setTerminalConfig({
+        agentId: selectedAgent?.id || '',
+        host,
+        port,
+        protocol,
+        title: `${protocol.toUpperCase()} - ${host}:${port}`,
+      })
+      setTerminalVisible(true)
+    }
   }
 
   return (
@@ -434,6 +454,18 @@ const Agents = () => {
         />
       )}
     </Card>
+
+      {/* 桌面模态框 */}
+      {desktopConfig && (
+        <DesktopModal
+          visible={desktopVisible}
+          onClose={() => setDesktopVisible(false)}
+          agentId={desktopConfig.agentId}
+          host={desktopConfig.host}
+          port={desktopConfig.port}
+          title={desktopConfig.title}
+        />
+      )}
   </div>
   )
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/agent/detector"
+	"github.com/cuihairu/cockpit/internal/agent/rdp"
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
 	"github.com/cuihairu/cockpit/internal/proxy"
 	"github.com/cuihairu/cockpit/internal/protocol"
@@ -24,6 +25,7 @@ type Agent struct {
 	rpc       *rpc.Handler
 	collector *Collector   // 系统信息采集器
 	proxyHandler *proxy.Handler // 代理处理器
+	desktopHandler *rdp.Handler // 桌面会话处理器
 
 	// 注册信息
 	agentID  string
@@ -59,6 +61,7 @@ func NewAgent(cfg Config) *Agent {
 		rpc:          rpc.NewHandler(),
 		collector:    NewCollector(),
 		proxyHandler: proxy.NewHandler(),
+		desktopHandler: rdp.NewHandler(),
 		capabilities: []protocol.Capability{},
 		ctx:          ctx,
 		cancel:       cancel,
@@ -104,6 +107,9 @@ func (a *Agent) Start() error {
 // Stop 停止 Agent
 func (a *Agent) Stop() {
 	a.cancel()
+	if a.desktopHandler != nil {
+		a.desktopHandler.Stop()
+	}
 	if a.proxyHandler != nil {
 		a.proxyHandler.Stop()
 	}
@@ -131,6 +137,11 @@ func (a *Agent) connect() error {
 
 	// 启动代理处理器
 	a.proxyHandler.Start(conn)
+
+	// 启动桌面处理器
+	a.desktopHandler.SetSendFunc(func(msg *protocol.Message) error {
+		return a.codec.WriteMessage(conn, msg)
+	})
 
 	log.Printf("Connected to server")
 	return nil
@@ -344,6 +355,12 @@ func (a *Agent) handleMessage(msg *protocol.Message) {
 		a.proxyHandler.HandleProxyData(msg)
 	case protocol.MessageTypeProxyClose:
 		a.proxyHandler.HandleProxyClose(msg)
+	case protocol.MessageTypeDesktopNew:
+		a.desktopHandler.HandleDesktopNew(msg)
+	case protocol.MessageTypeDesktopData:
+		a.desktopHandler.HandleDesktopData(msg)
+	case protocol.MessageTypeDesktopClose:
+		a.desktopHandler.HandleDesktopClose(msg)
 	default:
 		log.Printf("Unknown message type: %s", msg.Type)
 	}

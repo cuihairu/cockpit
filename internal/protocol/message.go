@@ -21,6 +21,11 @@ const (
 	// 双向
 	MessageTypeError    MessageType = "error"
 	MessageTypeProxyData MessageType = "proxy_data"      // 代理数据转发
+
+	// 桌面会话 (远程桌面)
+	MessageTypeDesktopNew   MessageType = "desktop_new"   // Server -> Agent: 开始桌面会话
+	MessageTypeDesktopData  MessageType = "desktop_data"  // 双向: 桌面数据传输
+	MessageTypeDesktopClose MessageType = "desktop_close" // 双向: 关闭桌面会话
 )
 
 // Message WebSocket 消息
