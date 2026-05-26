@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Card, Form, Input, InputNumber, Switch, Button, Space, Tabs, message, Select, Descriptions, Statistic } from 'antd'
-import { SaveOutlined, ReloadOutlined } from '@ant-design/icons'
+import { SaveOutlined } from '@ant-design/icons'
 
 const Settings = () => {
   const [form] = Form.useForm()
@@ -131,7 +131,7 @@ const Settings = () => {
       key: '1',
       label: '系统信息',
       children: (
-        <Descriptions variant="bordered" column={1}>
+        <Descriptions bordered column={1}>
           <Descriptions.Item label="版本">v0.1.0</Descriptions.Item>
           <Descriptions.Item label="构建时间">2024-05-24</Descriptions.Item>
           <Descriptions.Item label="Go 版本">1.23</Descriptions.Item>

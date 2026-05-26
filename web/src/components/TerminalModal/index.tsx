@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, Button, Space, message } from 'antd';
+import { Modal, Button, Space } from 'antd';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -11,7 +11,7 @@ interface TerminalModalProps {
   agentId: string;
   host: string;
   port: number;
-  protocol: 'ssh' | 'telnet' | 'vnc';
+  protocol: 'ssh' | 'telnet' | 'vnc' | 'rdp' | 'ftp';
   title?: string;
 }
 
@@ -151,7 +151,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       }
     };
 
-    ws.onerror = (error) => {
+    ws.onerror = (_error) => {
       terminal.writeln('\r\n\x1b[1;31m连接错误\x1b[0m\r\n');
       setConnected(false);
     };

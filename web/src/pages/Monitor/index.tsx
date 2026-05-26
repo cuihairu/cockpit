@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
-import { Row, Col, Select, Spin, Alert, Empty } from 'antd';
+import { Row, Col, Select, Spin, Alert } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import SystemInfoCard from '@/components/SystemInfoCard';
 import MetricsChart from '@/components/MetricsChart';
@@ -8,7 +8,6 @@ import {
   getSystemSnapshots,
   getSystemSnapshot,
   getMetricsHistory,
-  formatBytes,
   type SystemInfoSnapshot,
   type SystemMetric,
 } from '@/services/metrics';

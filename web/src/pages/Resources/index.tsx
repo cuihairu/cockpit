@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Card, Tabs, Table, Tag, Button, Space, Tooltip, Input, Select } from 'antd'
+import { Card, Tabs, Table, Tag, Button, Space, Tooltip } from 'antd'
 import {
   ReloadOutlined,
   PlusOutlined,

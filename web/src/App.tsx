@@ -2,20 +2,16 @@ import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntdApp } from 'antd'
-import ProLayout, { PageHeader, ProLayoutProps } from '@ant-design/pro-layout'
-import { Button, Dropdown, Avatar, Space, Input, Badge, Breadcrumb, ConfigProvider } from 'antd'
+import ProLayout, { ProLayoutProps } from '@ant-design/pro-layout'
+import { Button, Dropdown, Avatar, Space, Input, ConfigProvider } from 'antd'
 import {
   DashboardOutlined,
-  CloudServerOutlined,
   ApiOutlined,
   SettingOutlined,
   UserOutlined,
   LogoutOutlined,
   QuestionCircleOutlined,
   AppstoreOutlined,
-  SearchOutlined,
-  BellOutlined,
-  HomeOutlined,
 } from '@ant-design/icons'
 import Dashboard from './pages/Dashboard'
 import Resources from './pages/Resources'
@@ -111,7 +107,7 @@ const MainLayout = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [pathname, setPathname] = useState(location.pathname)
-  const [settings, setSetting] = useState<{
+  const [settings] = useState<{
     fixSiderbar: boolean
     layout: 'side' | 'top' | 'mix'
     theme: 'light' | 'dark'
@@ -203,7 +199,6 @@ const MainLayout = () => {
       title="Cockpit"
       logo={logo}
       navTheme="light"
-      headerTheme="light"
       contentWidth="Fluid"
       location={{ pathname }}
       route={routeConfig}
@@ -244,7 +239,7 @@ const MainLayout = () => {
         ]
       }}
       // 面包屑项渲染
-      itemRender={(route, params, routes, paths) => {
+      itemRender={(route, _params, routes, _paths) => {
         const first = routes.indexOf(route) === 0
         return first ? (
           <a href="/" onClick={(e) => { e.preventDefault(); navigate('/') }}>

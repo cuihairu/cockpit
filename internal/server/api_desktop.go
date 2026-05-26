@@ -34,7 +34,7 @@ var (
 
 // desktopUpgrader 桌面连接专用 upgrader（更大的缓冲区）
 var desktopUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: isOriginAllowed,
 	ReadBufferSize:  1 * 1024 * 1024, // 1MB
 	WriteBufferSize: 1 * 1024 * 1024,
 }

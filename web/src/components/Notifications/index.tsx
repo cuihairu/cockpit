@@ -6,11 +6,9 @@ import {
   WarningOutlined,
   CloseCircleOutlined,
   InfoCircleOutlined,
-  ClearOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { api } from '@/services/api'
-import type { Alert } from '@/services/api'
 
 export interface Alert {
   id: string

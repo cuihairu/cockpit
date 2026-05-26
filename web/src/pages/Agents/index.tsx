@@ -15,7 +15,6 @@ import {
   ReloadOutlined,
   SearchOutlined,
   EnvironmentOutlined,
-  ApiOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   ExclamationCircleOutlined,
@@ -27,7 +26,8 @@ import type { ColumnsType } from 'antd/es/table'
 import type { Agent } from '@/types'
 import { api } from '@/services/api'
 import RemoteServicesCard from '@/components/RemoteServices'
-import TerminalModal, { type RemoteProtocol } from '@/components/TerminalModal'
+import TerminalModal from '@/components/TerminalModal'
+import type { RemoteProtocol } from '@/services/remote'
 import DesktopModal from '@/components/DesktopModal'
 import VNCModal from '@/components/VNCModal'
 
@@ -404,7 +404,7 @@ const Agents = () => {
       >
         {selectedAgent && (
           <>
-            <Descriptions variant="bordered" column={2} style={{ marginBottom: 16 }}>
+            <Descriptions bordered column={2} style={{ marginBottom: 16 }}>
               <Descriptions.Item label="Agent ID" span={2}>
                 <code>{selectedAgent.id}</code>
               </Descriptions.Item>
@@ -431,14 +431,14 @@ const Agents = () => {
               </Descriptions.Item>
               <Descriptions.Item label="最后连接">
                 {selectedAgent.lastSeen
-                  ? new Date(selectedAgent.lastSeen * 1000).toLocaleString()
+                  ? new Date(Number(selectedAgent.lastSeen) * 1000).toLocaleString()
                   : '-'}
               </Descriptions.Item>
               <Descriptions.Item label="能力" span={2}>
                 <Space size="small" wrap>
                   {(selectedAgent.capabilities || []).map((cap) => (
-                    <Tag key={cap} color="blue">
-                      {cap}
+                    <Tag key={cap.type} color="blue">
+                      {cap.type}
                     </Tag>
                   ))}
                 </Space>

@@ -10,7 +10,6 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { RangePickerProps } from 'antd/es/date-picker'
 import dayjs from 'dayjs'
-import { api } from '@/services/api'
 import './index.less'
 
 const { RangePicker } = DatePicker

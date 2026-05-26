@@ -28,6 +28,23 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
+// isOriginAllowed 检查 WebSocket 升级请求的 Origin 是否在白名单内
+func isOriginAllowed(r *http.Request) bool {
+	allowed := os.Getenv("ALLOWED_ORIGINS")
+	if allowed == "" {
+		// 未配置白名单时允许所有来源（开发模式）
+		return true
+	}
+	origin := r.Header.Get("Origin")
+	for _, a := range strings.Split(allowed, ",") {
+		a = strings.TrimSpace(a)
+		if a == "*" || a == origin {
+			return true
+		}
+	}
+	return false
+}
+
 // Server WebSocket 服务器
 type Server struct {
 	addr      string
@@ -68,10 +85,7 @@ func NewServer(cfg Config) *Server {
 		audit:    audit.NewLogger(db),
 		proxyMgr: proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				// 生产环境应该验证 Origin
-				return true
-			},
+			CheckOrigin: isOriginAllowed,
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
@@ -88,6 +102,9 @@ func (s *Server) Start() error {
 	// 初始化管理员用户
 	adminUser := getEnv("ADMIN_USERNAME", "admin")
 	adminPass := getEnv("ADMIN_PASSWORD", "admin")
+	if adminPass == "admin" {
+		log.Println("WARNING: Using default admin password. Set ADMIN_PASSWORD environment variable in production!")
+	}
 	if err := auth.InitAdmin(s.db, adminUser, adminPass); err != nil {
 		log.Printf("Warning: Failed to init admin user: %v", err)
 	} else {

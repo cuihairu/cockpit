@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Card, List, Tag, Button, Space, Modal, Form, Input, Select, message, Tooltip } from 'antd';
+import React, { useState } from 'react';
+import { Card, List, Tag, Button, Space, Modal, Form, Input, Select, message } from 'antd';
 import {
   CodeOutlined,
   DesktopOutlined,
@@ -36,13 +36,13 @@ const PROTOCOL_CONFIG: Record<RemoteProtocol, { name: string; icon: React.ReactN
 };
 
 const RemoteServicesCard: React.FC<RemoteServicesCardProps> = ({
-  agentId,
+  agentId: _agentId,
   services = [],
-  loading = false,
+  loading: _loading = false,
   onConnect,
 }) => {
   const [connectModalVisible, setConnectModalVisible] = useState(false);
-  const [selectedService, setSelectedService] = useState<RemoteService | null>(null);
+  const [_selectedService, setSelectedService] = useState<RemoteService | null>(null);
   const [form] = Form.useForm();
 
   // 过滤出运行中的服务

@@ -54,7 +54,6 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
     disconnect,
     sendKeyboard,
     sendMouse,
-    sendClipboard,
     sendSetResolution,
   } = useDesktopWS({
     onConnected: (w, h) => {

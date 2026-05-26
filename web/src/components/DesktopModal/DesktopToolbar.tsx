@@ -1,9 +1,8 @@
 import React from 'react';
-import { Space, Button, Select, Tooltip, Badge, Dropdown } from 'antd';
+import { Space, Button, Tooltip, Badge, Dropdown } from 'antd';
 import {
   FullscreenOutlined,
   FullscreenExitOutlined,
-  LinkOutlined,
   DisconnectOutlined,
   CopyOutlined,
   SettingOutlined,

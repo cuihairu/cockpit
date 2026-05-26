@@ -46,6 +46,13 @@ export interface ComputeInstance {
   displayName: string
   location: Location
   type: 'bare-metal' | 'vm' | 'container' | 'vps'
+  region?: string
+  zone?: string
+  cpuCores?: number
+  memoryMb?: number
+  diskGb?: number
+  agentId?: string
+  ipv4?: string
   platform?: string
   platformUrl?: string
   hardware?: {
@@ -253,9 +260,11 @@ export interface PaginationParams {
   pageSize: number
 }
 
-// 分页响应
+// 分页响应（与后端 api.go 返回格式一致）
 export interface PaginatedResponse<T> {
-  list: T[]
+  data: T[]
   total: number
-  success: boolean
+  page: number
+  pageSize: number
+  totalPages: number
 }

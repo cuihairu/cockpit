@@ -4,8 +4,6 @@ import {
   SafetyOutlined,
   CheckCircleOutlined,
   WarningOutlined,
-  ArrowUpOutlined,
-  ArrowDownOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
@@ -14,13 +12,6 @@ import type { ColumnsType } from 'antd/es/table'
 import './index.less'
 
 const { Title, Text } = Typography
-
-interface DashboardData {
-  services: { running: number; down: number; unknown: number }
-  domains: { valid: number; expiring: number }
-  certificates: { valid: number; expiring: number }
-  infrastructure: { total: number; online: number }
-}
 
 const Dashboard = () => {
   const { data: status, refetch } = useQuery({

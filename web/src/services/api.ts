@@ -1,7 +1,6 @@
 import axios, { AxiosInstance } from 'axios'
 import type {
   Agent,
-  ApiResponse,
   ComputeInstance,
   Domain,
   Certificate,
@@ -52,11 +51,9 @@ class ApiService {
   }
 
   // ========== 认证 ==========
-  async login(username: string, password: string) {
-    return this.client.post<{ token: string; user_id: string; username: string }>('/auth/login', {
-      username,
-      password,
-    })
+  async login(username: string, password: string): Promise<{ token: string; user_id: string; username: string; role?: string }> {
+    const data = await this.client.post<any>('/auth/login', { username, password })
+    return data as any
   }
 
   async logout() {

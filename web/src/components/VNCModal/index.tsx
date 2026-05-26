@@ -4,7 +4,6 @@ import {
   FullscreenOutlined,
   FullscreenExitOutlined,
   DisconnectOutlined,
-  SettingOutlined,
 } from '@ant-design/icons';
 import RFB from '@novnc/novnc';
 

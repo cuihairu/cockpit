@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/cuihairu/cockpit/internal/auth"
@@ -12,7 +13,11 @@ import (
 // serveAPI 处理 API 请求
 func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	// 设置 CORS
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	allowed := os.Getenv("ALLOWED_ORIGINS")
+	if allowed == "" {
+		allowed = "*"
+	}
+	w.Header().Set("Access-Control-Allow-Origin", allowed)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
@@ -193,7 +198,12 @@ func (s *Server) handleComputeInstancesList(w http.ResponseWriter, r *http.Reque
 
 // handleComputeInstanceGet 获取单个计算实例
 func (s *Server) handleComputeInstanceGet(w http.ResponseWriter, r *http.Request, id string) {
-	s.handleError(w, r, http.StatusNotImplemented, "Not implemented yet")
+	instance, err := s.db.GetComputeInstance(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "Compute instance not found")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, instance)
 }
 
 // handleDomainsList 域名列表
@@ -215,7 +225,12 @@ func (s *Server) handleDomainsList(w http.ResponseWriter, r *http.Request) {
 
 // handleDomainGet 获取单个域名
 func (s *Server) handleDomainGet(w http.ResponseWriter, r *http.Request, id string) {
-	s.handleError(w, r, http.StatusNotImplemented, "Not implemented yet")
+	domain, err := s.db.GetDomain(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "Domain not found")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, domain)
 }
 
 // handleCertificatesList 证书列表
@@ -237,7 +252,12 @@ func (s *Server) handleCertificatesList(w http.ResponseWriter, r *http.Request) 
 
 // handleCertificateGet 获取单个证书
 func (s *Server) handleCertificateGet(w http.ResponseWriter, r *http.Request, id string) {
-	s.handleError(w, r, http.StatusNotImplemented, "Not implemented yet")
+	cert, err := s.db.GetCertificate(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "Certificate not found")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, cert)
 }
 
 // handleServicesList 服务列表
@@ -259,7 +279,12 @@ func (s *Server) handleServicesList(w http.ResponseWriter, r *http.Request) {
 
 // handleServiceGet 获取单个服务
 func (s *Server) handleServiceGet(w http.ResponseWriter, r *http.Request, id string) {
-	s.handleError(w, r, http.StatusNotImplemented, "Not implemented yet")
+	svc, err := s.db.GetService(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "Service not found")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, svc)
 }
 
 // handleGatewaysList 网关列表
@@ -281,7 +306,12 @@ func (s *Server) handleGatewaysList(w http.ResponseWriter, r *http.Request) {
 
 // handleGatewayGet 获取单个网关
 func (s *Server) handleGatewayGet(w http.ResponseWriter, r *http.Request, id string) {
-	s.handleError(w, r, http.StatusNotImplemented, "Not implemented yet")
+	gw, err := s.db.GetGateway(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "Gateway not found")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, gw)
 }
 
 // handleStoragesList 存储列表
@@ -303,7 +333,12 @@ func (s *Server) handleStoragesList(w http.ResponseWriter, r *http.Request) {
 
 // handleStorageGet 获取单个存储
 func (s *Server) handleStorageGet(w http.ResponseWriter, r *http.Request, id string) {
-	s.handleError(w, r, http.StatusNotImplemented, "Not implemented yet")
+	st, err := s.db.GetStorage(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "Storage not found")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, st)
 }
 
 // storageAgentToResponse 将存储 Agent 转换为 API 响应格式
