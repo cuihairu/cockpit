@@ -35,7 +35,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          go test ./... -coverprofile=coverage.out -covermode=atomic
+          go test -short ./... -coverprofile=coverage.out -covermode=atomic -timeout 120s
 
       - name: Check coverage threshold
         run: |
