@@ -1,0 +1,58 @@
+# Cockpit 配置文件
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 9000
+
+# 数据库配置
+database:
+  path: "./data/cockpit.db"
+
+# JWT 认证配置
+jwt:
+  secret: "your-secret-key-change-this"
+  expiration: 24h
+
+# 邮件配置（用于密码重置）
+email:
+  enabled: false  # 默认关闭，需要时启用
+  smtp:
+    host: "smtp.gmail.com"
+    port: 587
+    username: "${SMTP_USER}"      # 从环境变量读取
+    password: "${SMTP_PASS}"      # 从环境变量读取
+    from: "noreply@example.com"
+    from_name: "Cockpit"
+  base_url: "http://localhost:9000"
+
+# 通知配置（Herald 集成）
+notification:
+  enabled: false  # 默认关闭，需要 Herald 服务时启用
+  herald:
+    base_url: "http://localhost:8080"
+    timeout: 5s
+  # 事件类型映射
+  events:
+    certificate_expired:
+      type: "certificate.expired"
+      enabled: true
+    certificate_expiring:
+      type: "certificate.expiring"
+      enabled: true
+    certificate_warning:
+      type: "certificate.warning"
+      enabled: true
+    service_down:
+      type: "service.down"
+      enabled: true
+    agent_offline:
+      type: "agent.offline"
+      enabled: true
+    domain_expired:
+      type: "domain.expired"
+      enabled: true
+
+# Agent 配置
+agent:
+  api_key_header: "X-API-Key"
