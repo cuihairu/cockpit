@@ -75,6 +75,14 @@ class ApiService {
     return this.client.get<any, UserInfo>('/me')
   }
 
+  // 修改当前用户密码
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ message: string }> {
+    return this.client.put<any, { message: string }>('/me/password', {
+      currentPassword,
+      newPassword,
+    })
+  }
+
   // ========== TOTP 二次验证 ==========
 
   // 生成 TOTP 密钥和 QR 码

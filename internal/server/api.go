@@ -36,6 +36,8 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleStatus(w, r)
 	case path == "/me":
 		s.handleCurrentUser(w, r)
+	case path == "/me/password":
+		s.handleCurrentUserPassword(w, r)
 	case path == "/agents":
 		s.handleAgentsList(w, r)
 	case strings.HasPrefix(path, "/agents/"):
@@ -124,6 +126,78 @@ func (s *Server) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, userInfo)
+}
+
+// handleCurrentUserPassword 修改当前用户密码
+func (s *Server) handleCurrentUserPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// 从 JWT 中获取用户信息
+	userID := r.Context().Value("user_id").(string)
+	if userID == "" {
+		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	user, err := s.db.GetUserByID(userID)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "User not found")
+		return
+	}
+
+	// 支持两种字段命名（前端使用 currentPassword/newPassword）
+	type ChangePasswordRequestAlt struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+		OldPassword     string `json:"old_password,omitempty"`
+	}
+
+	var req ChangePasswordRequestAlt
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	oldPassword := req.OldPassword
+	if oldPassword == "" {
+		oldPassword = req.CurrentPassword
+	}
+
+	// 验证新密码
+	if req.NewPassword == "" {
+		s.handleError(w, r, http.StatusBadRequest, "New password is required")
+		return
+	}
+
+	if len(req.NewPassword) < 6 {
+		s.handleError(w, r, http.StatusBadRequest, "New password must be at least 6 characters")
+		return
+	}
+
+	// 验证旧密码
+	_, err = s.db.VerifyPassword(user.Username, oldPassword)
+	if err != nil {
+		s.handleError(w, r, http.StatusUnauthorized, "Invalid current password")
+		return
+	}
+
+	// 哈希新密码
+	hashedPassword, err := storage.HashPassword(req.NewPassword)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to hash password")
+		return
+	}
+
+	// 更新密码
+	if err := s.db.UpdatePassword(userID, hashedPassword); err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to update password")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Password updated successfully"})
 }
 
 // handleAgentsList 获取 Agent 列表

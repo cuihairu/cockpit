@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Card, Form, Input, Button, message, Descriptions, Avatar, Space, Divider } from 'antd'
 import { UserOutlined, MailOutlined, LockOutlined, SaveOutlined } from '@ant-design/icons'
 import { useUser } from '@/contexts/UserContext'
+import { api } from '@/services/api'
 
 const Profile = () => {
   const { user } = useUser()
@@ -22,10 +23,12 @@ const Profile = () => {
   const handlePasswordChange = async (values: any) => {
     setLoading(true)
     try {
-      // TODO: 调用 API 修改密码
-      console.log('Changing password:', values)
+      await api.changePassword(values.currentPassword, values.newPassword)
       message.success('密码已修改')
       passwordForm.resetFields()
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.error || '修改密码失败'
+      message.error(errorMsg)
     } finally {
       setLoading(false)
     }
