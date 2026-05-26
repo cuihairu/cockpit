@@ -126,8 +126,14 @@ func LoadOrDefault(path string) *Config {
                 Secret:     "change-me",
                 Expiration: 24 * time.Hour,
             },
+            Email: &EmailConfig{
+                Enabled: false,
+            },
             Notification: &NotificationConfig{
                 Enabled: false,
+            },
+            Agent: &AgentConfig{
+                APIKeyHeader: "X-API-Key",
             },
         }
     }
