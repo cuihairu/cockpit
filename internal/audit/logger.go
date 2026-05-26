@@ -9,17 +9,20 @@ import (
 
 // Action 操作类型
 const (
-	ActionLogin   = "login"
-	ActionLogout  = "logout"
-	ActionCreate  = "create"
-	ActionUpdate  = "update"
-	ActionDelete  = "delete"
-	ActionView    = "view"
-	ActionExport  = "export"
-	ActionImport  = "import"
-	ActionStart   = "start"
-	ActionStop    = "stop"
-	ActionRestart = "restart"
+	ActionLogin    = "login"
+	ActionLogout   = "logout"
+	ActionCreate   = "create"
+	ActionUpdate   = "update"
+	ActionDelete   = "delete"
+	ActionView     = "view"
+	ActionExport   = "export"
+	ActionImport   = "import"
+	ActionStart    = "start"
+	ActionStop     = "stop"
+	ActionRestart  = "restart"
+	ActionTOTPEnable = "totp_enable"
+	ActionTOTPDisable = "totp_disable"
+	ActionTOTPVerify = "totp_verify"
 )
 
 // Status 状态
@@ -145,5 +148,55 @@ func (l *Logger) LogResource(username, action, resource, resourceID string, deta
 		IP:         ip,
 		UserAgent:  userAgent,
 		Status:     StatusSuccess,
+	})
+}
+
+// LogTOTPEnabled 记录 TOTP 启用操作
+func (l *Logger) LogTOTPEnabled(userID, ip, userAgent string) error {
+	return l.Log(&LogEntry{
+		Username:  userID,
+		Action:    ActionTOTPEnable,
+		Resource:  "totp",
+		IP:        ip,
+		UserAgent: userAgent,
+		Status:    StatusSuccess,
+	})
+}
+
+// LogTOTPDisabled 记录 TOTP 禁用操作
+func (l *Logger) LogTOTPDisabled(userID, ip, userAgent string) error {
+	return l.Log(&LogEntry{
+		Username:  userID,
+		Action:    ActionTOTPDisable,
+		Resource:  "totp",
+		IP:        ip,
+		UserAgent: userAgent,
+		Status:    StatusSuccess,
+	})
+}
+
+// LogTOTPVerified 记录 TOTP 验证操作
+func (l *Logger) LogTOTPVerified(userID, ip, userAgent string, usedBackup bool) error {
+	details := map[string]interface{}{"used_backup": usedBackup}
+	return l.Log(&LogEntry{
+		Username:  userID,
+		Action:    ActionTOTPVerify,
+		Resource:  "totp",
+		Details:   details,
+		IP:        ip,
+		UserAgent: userAgent,
+		Status:    StatusSuccess,
+	})
+}
+
+// LogTOTPFailed 记录 TOTP 验证失败操作
+func (l *Logger) LogTOTPFailed(userID, ip, userAgent string) error {
+	return l.Log(&LogEntry{
+		Username:  userID,
+		Action:    ActionTOTPVerify,
+		Resource:  "totp",
+		IP:        ip,
+		UserAgent: userAgent,
+		Status:    StatusFailure,
 	})
 }

@@ -152,8 +152,8 @@ func generateTmpToken(userID string) string {
 	return token
 }
 
-// validateTmpToken 验证临时令牌
-func validateTmpToken(token string) (string, bool) {
+// ValidateTmpToken 验证临时令牌（导出供外部使用）
+func ValidateTmpToken(token string) (string, bool) {
 	tmpTokenStoreMutex.RLock()
 	defer tmpTokenStoreMutex.RUnlock()
 
@@ -170,8 +170,8 @@ func validateTmpToken(token string) (string, bool) {
 	return data.UserID, true
 }
 
-// consumeTmpToken 消耗临时令牌（验证后删除）
-func consumeTmpToken(token string) bool {
+// ConsumeTmpToken 消耗临时令牌（验证后删除，导出供外部使用）
+func ConsumeTmpToken(token string) bool {
 	tmpTokenStoreMutex.Lock()
 	defer tmpTokenStoreMutex.Unlock()
 
