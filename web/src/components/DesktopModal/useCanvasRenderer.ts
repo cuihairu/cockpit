@@ -76,10 +76,8 @@ export function useCanvasRenderer() {
         );
       }
 
-      // 用解码后的像素创建 ImageData 绘制
-      const clamped = new Uint8ClampedArray(pixels.length);
-      clamped.set(pixels);
-      const region = new ImageData(clamped, rect.width, rect.height);
+      // 直接用像素创建 ImageData，避免中间数组复制
+      const region = new ImageData(new Uint8ClampedArray(pixels), rect.width, rect.height);
       ctx.putImageData(region, rect.x, rect.y);
     }
   }, []);

@@ -12,36 +12,40 @@ import (
 
 const Version = "0.1.0"
 
+// 默认配置文件搜索路径
+var defaultConfigPaths = []string{
+	"./config/cockpit.yaml",
+	"./cockpit.yaml",
+	"/etc/cockpit/config.yaml",
+}
+
 func loadConfig(configPath string) *config.Config {
-	// 如果没有指定配置文件，尝试默认路径
-	if configPath == "" {
-		// 尝试 ./config/cockpit.yaml
-		if _, err := os.Stat("./config/cockpit.yaml"); err == nil {
-			configPath = "./config/cockpit.yaml"
-		} else if _, err := os.Stat("./cockpit.yaml"); err == nil {
-			// 尝试 ./cockpit.yaml
-			configPath = "./cockpit.yaml"
-		} else {
-			// 返回默认配置
-			log.Println("未找到配置文件，使用默认配置")
-			return &config.Config{
-				Server: &config.ServerConfig{
-					Host: "0.0.0.0",
-					Port: 9000,
-				},
-				Database: &config.DatabaseConfig{
-					Path: "./data/cockpit.db",
-				},
+	// 如果指定了配置文件路径，直接加载
+	if configPath != "" {
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			log.Fatalf("加载配置文件失败: %v", err)
+		}
+		log.Printf("已加载配置文件: %s", configPath)
+		return cfg
+	}
+
+	// 尝试默认路径
+	for _, path := range defaultConfigPaths {
+		if _, err := os.Stat(path); err == nil {
+			cfg, err := config.Load(path)
+			if err != nil {
+				log.Printf("警告: 配置文件 %s 存在但加载失败: %v", path, err)
+				continue
 			}
+			log.Printf("已加载配置文件: %s", path)
+			return cfg
 		}
 	}
 
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		log.Fatalf("加载配置文件失败: %v", err)
-	}
-	log.Printf("已加载配置文件: %s", configPath)
-	return cfg
+	// 未找到配置文件，使用默认配置
+	log.Println("未找到配置文件，使用默认配置")
+	return config.LoadOrDefault("")
 }
 
 func main() {

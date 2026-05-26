@@ -43,7 +43,7 @@ export function useInputCapture({ sendKeyboard, sendMouse, enabled }: InputCaptu
       e.preventDefault();
 
       const button = e.button;
-      lastButtonsRef.current = mouseEventToButtons(e);
+      lastButtonsRef.current = e.buttons;
       const { x, y } = getCanvasCoords(e);
 
       sendMouseRef.current(x, y, button, 0, 'down');
@@ -131,11 +131,7 @@ export function useInputCapture({ sendKeyboard, sendMouse, enabled }: InputCaptu
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [getCanvasCoords]); // 仅依赖稳定的 getCanvasCoords
+  }, []); // 空依赖数组，所有动态值通过 ref 获取
 
   return { setCanvas };
-}
-
-function mouseEventToButtons(e: MouseEvent): number {
-  return e.buttons;
 }

@@ -1,10 +1,12 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Modal, Form, Input, message } from 'antd';
-import DesktopToolbar from './DesktopToolbar';
+import RemoteToolbar, { type ConnectionState } from '../RemoteToolbar';
 import { useDesktopWS } from './useDesktopWS';
 import { useCanvasRenderer } from './useCanvasRenderer';
 import { useInputCapture } from './useInputCapture';
 import { getRecentDesktopConfig, saveDesktopConfig } from '@/services/desktop';
+
+const CONNECTION_TIMEOUT = 30000; // 30秒超时
 
 interface DesktopModalProps {
   visible: boolean;
@@ -48,6 +50,8 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
   const rendererRef = useRef(renderer);
   rendererRef.current = renderer;
 
+  const clearTimeoutRef = useRef<(() => void) | null>(null);
+
   const {
     state,
     connect,
@@ -57,14 +61,17 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
     sendSetResolution,
   } = useDesktopWS({
     onConnected: (w, h) => {
+      clearTimeoutRef.current?.();
       setResolution(`${w}x${h}`);
       setShowCredentials(false);
       rendererRef.current.initBuffer(w, h);
     },
     onDisconnected: (reason) => {
+      clearTimeoutRef.current?.();
       message.info(`连接断开: ${reason}`);
     },
     onError: (error) => {
+      clearTimeoutRef.current?.();
       message.error(`远程桌面错误: ${error}`);
     },
     onScreenUpdate: (update) => {
@@ -103,6 +110,16 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
         width: 1280,
         height: 800,
       });
+
+      // 启动超时定时器
+      const timer = setTimeout(() => {
+        if (state === 'connecting') {
+          disconnect();
+          message.error('连接超时，请检查网络或重试');
+          setShowCredentials(true);
+        }
+      }, CONNECTION_TIMEOUT);
+      clearTimeoutRef.current = () => clearTimeout(timer);
 
       connect({
         agentId,
@@ -206,8 +223,8 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
           background: '#000',
         }}
       >
-        <DesktopToolbar
-          state={state}
+        <RemoteToolbar
+          state={state as ConnectionState}
           resolution={resolution}
           isFullscreen={isFullscreen}
           onResolutionChange={handleResolutionChange}

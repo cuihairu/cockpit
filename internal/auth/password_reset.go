@@ -9,7 +9,10 @@ import (
 	"net/smtp"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/cuihairu/cockpit/internal/config"
 )
 
 var (
@@ -30,6 +33,17 @@ type ResetTokenData struct {
 // 重置令牌存储（生产环境应使用 Redis）
 var resetTokenStore = make(map[string]*ResetTokenData)
 var resetTokenStoreMutex = make(map[string]*time.Time)
+
+// emailConfig 全局邮件配置
+var emailConfig *config.EmailConfig
+var emailConfigMutex sync.RWMutex
+
+// SetEmailConfig 设置邮件配置
+func SetEmailConfig(cfg *config.EmailConfig) {
+	emailConfigMutex.Lock()
+	defer emailConfigMutex.Unlock()
+	emailConfig = cfg
+}
 
 // 生成6位数字验证码
 func generateVerificationCode() string {
@@ -125,25 +139,34 @@ func cleanupExpiredTokens() {
 	}
 }
 
-// EmailConfig 邮件配置
-type EmailConfig struct {
-	SMTPHost     string
-	SMTPPort     string
-	SMTPUser     string
-	SMTPPass     string
-	SMTPFrom     string
-	SMTPFromName string
-}
+// GetEmailConfig 获取邮件配置（优先使用配置文件，否则回退到环境变量）
+func GetEmailConfig() *config.EmailConfig {
+	emailConfigMutex.RLock()
+	defer emailConfigMutex.RUnlock()
 
-// GetEmailConfig 从环境变量获取邮件配置
-func GetEmailConfig() *EmailConfig {
-	return &EmailConfig{
-		SMTPHost:     getEnvOrDefault("SMTP_HOST", "smtp.gmail.com"),
-		SMTPPort:     getEnvOrDefault("SMTP_PORT", "587"),
-		SMTPUser:     os.Getenv("SMTP_USER"),
-		SMTPPass:     os.Getenv("SMTP_PASS"),
-		SMTPFrom:     getEnvOrDefault("SMTP_FROM", os.Getenv("SMTP_USER")),
-		SMTPFromName: getEnvOrDefault("SMTP_FROM_NAME", "Cockpit"),
+	// 如果已通过配置文件设置，直接返回
+	if emailConfig != nil && emailConfig.Enabled {
+		return emailConfig
+	}
+
+	// 回退到环境变量（保持向后兼容）
+	smtpUser := os.Getenv("SMTP_USER")
+	smtpPass := os.Getenv("SMTP_PASS")
+	if smtpUser == "" || smtpPass == "" {
+		return nil // 邮件未配置
+	}
+
+	return &config.EmailConfig{
+		Enabled: true,
+		SMTP: &config.SMTPConfig{
+			Host:     getEnvOrDefault("SMTP_HOST", "smtp.gmail.com"),
+			Port:     parseInt(getEnvOrDefault("SMTP_PORT", "587")),
+			Username: smtpUser,
+			Password: smtpPass,
+			From:     getEnvOrDefault("SMTP_FROM", smtpUser),
+			FromName: getEnvOrDefault("SMTP_FROM_NAME", "Cockpit"),
+		},
+		BaseURL: getEnvOrDefault("BASE_URL", "http://localhost:9000"),
 	}
 }
 
@@ -154,18 +177,28 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
+func parseInt(s string) int {
+	var i int
+	fmt.Sscanf(s, "%d", &i)
+	return i
+}
+
 // SendPasswordResetEmail 发送密码重置邮件
 func SendPasswordResetEmail(email, username, code, token string) error {
-	config := GetEmailConfig()
+	cfg := GetEmailConfig()
 
 	// 检查邮件配置
-	if config.SMTPUser == "" || config.SMTPPass == "" {
+	if cfg == nil || !cfg.Enabled || cfg.SMTP == nil || cfg.SMTP.Username == "" || cfg.SMTP.Password == "" {
 		return ErrEmailNotConfigured
 	}
 
 	// 构建邮件内容
 	subject := "重置您的 Cockpit 密码"
-	resetURL := fmt.Sprintf("%s/reset-password?token=%s", getBaseURL(), token)
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = getBaseURL()
+	}
+	resetURL := fmt.Sprintf("%s/reset-password?token=%s", baseURL, token)
 
 	body := fmt.Sprintf(`
 <!DOCTYPE html>
@@ -198,25 +231,26 @@ func SendPasswordResetEmail(email, username, code, token string) error {
 `, username, code, resetURL, resetURL)
 
 	// 发送邮件
-	return sendEmail(config, []string{email}, subject, body)
+	return sendEmail(cfg, []string{email}, subject, body)
 }
 
 // sendEmail 发送邮件
-func sendEmail(config *EmailConfig, to []string, subject, htmlBody string) error {
-	auth := smtp.PlainAuth("", config.SMTPUser, config.SMTPPass, config.SMTPHost)
+func sendEmail(cfg *config.EmailConfig, to []string, subject, htmlBody string) error {
+	smtpCfg := cfg.SMTP
+	auth := smtp.PlainAuth("", smtpCfg.Username, smtpCfg.Password, smtpCfg.Host)
 
-	addr := fmt.Sprintf("%s:%s", config.SMTPHost, config.SMTPPort)
+	addr := fmt.Sprintf("%s:%d", smtpCfg.Host, smtpCfg.Port)
 
 	// 构建邮件内容
 	var content bytes.Buffer
-	content.WriteString(fmt.Sprintf("From: %s <%s>\r\n", config.SMTPFromName, config.SMTPFrom))
+	content.WriteString(fmt.Sprintf("From: %s <%s>\r\n", smtpCfg.FromName, smtpCfg.From))
 	content.WriteString(fmt.Sprintf("To: %s\r\n", strings.Join(to, ", ")))
 	content.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
 	content.WriteString("MIME-Version: 1.0\r\n")
 	content.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
 	content.WriteString(htmlBody)
 
-	return smtp.SendMail(addr, auth, config.SMTPFrom, to, content.Bytes())
+	return smtp.SendMail(addr, auth, smtpCfg.From, to, content.Bytes())
 }
 
 // getBaseURL 获取基础 URL（用于生成重置链接）

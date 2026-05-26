@@ -107,6 +107,9 @@ func NewServer(cfg *config.Config) *Server {
 
 // Start 启动服务器
 func (s *Server) Start() error {
+	// 设置邮件配置
+	auth.SetEmailConfig(s.cfg.Email)
+
 	// 初始化认证（设置数据库）
 	auth.InitDB(s.db)
 

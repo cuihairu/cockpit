@@ -1,11 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Modal, Form, Input, message, Button, Space, Tooltip, Badge } from 'antd';
-import {
-  FullscreenOutlined,
-  FullscreenExitOutlined,
-  DisconnectOutlined,
-} from '@ant-design/icons';
+import { Modal, Form, Input, message } from 'antd';
+import RemoteToolbar, { type ConnectionState } from '../RemoteToolbar';
 import RFB from '@novnc/novnc';
+import { useConnectionTimeout } from '@/hooks/useConnectionTimeout';
+
+const CONNECTION_TIMEOUT = 30000; // 30秒超时
 
 interface VNCModalProps {
   visible: boolean;
@@ -40,11 +39,27 @@ const VNCModal: React.FC<VNCModalProps> = ({
       rfbRef.current.disconnect();
       rfbRef.current = null;
     }
-    // 清理 noVNC 创建的 canvas
+    // 安全清理 noVNC 创建的 canvas
     if (vncContainerRef.current) {
-      vncContainerRef.current.innerHTML = '';
+      while (vncContainerRef.current.firstChild) {
+        vncContainerRef.current.removeChild(vncContainerRef.current.firstChild);
+      }
     }
   }, []);
+
+  const handleTimeout = useCallback(() => {
+    if (vncState === 'connecting') {
+      cleanup();
+      setVncState('disconnected');
+      message.error('连接超时，请检查网络或重试');
+    }
+  }, [vncState, cleanup]);
+
+  const { start: startTimeout, clear: clearTimeout } = useConnectionTimeout({
+    timeout: CONNECTION_TIMEOUT,
+    onTimeout: handleTimeout,
+    enabled: vncState === 'connecting',
+  });
 
   const handleConnect = useCallback(() => {
     form.validateFields().then((values) => {
@@ -66,6 +81,7 @@ const VNCModal: React.FC<VNCModalProps> = ({
       const url = `${wsProtocol}//${window.location.host}/api/remote/vnc?${q}`;
 
       setVncState('connecting');
+      startTimeout();
 
       try {
         const rfb = new RFB(vncContainerRef.current, url, {
@@ -73,11 +89,13 @@ const VNCModal: React.FC<VNCModalProps> = ({
         });
 
         rfb.addEventListener('connect', () => {
+          clearTimeout();
           setVncState('connected');
           setShowCredentials(false);
         });
 
         rfb.addEventListener('disconnect', (e: Event) => {
+          clearTimeout();
           const detail = (e as CustomEvent).detail;
           setVncState('disconnected');
           if (!detail?.clean) {
@@ -103,11 +121,12 @@ const VNCModal: React.FC<VNCModalProps> = ({
 
         rfbRef.current = rfb;
       } catch (err) {
+        clearTimeout();
         message.error(`VNC 连接失败: ${err}`);
         setVncState('disconnected');
       }
     });
-  }, [agentId, host, port, form, cleanup]);
+  }, [agentId, host, port, form, cleanup, startTimeout, clearTimeout]);
 
   const handleDisconnect = useCallback(() => {
     cleanup();
@@ -199,61 +218,22 @@ const VNCModal: React.FC<VNCModalProps> = ({
           background: '#000',
         }}
       >
-        {/* 工具栏 */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '6px 12px',
-            background: '#1f1f1f',
-            borderBottom: '1px solid #333',
-            color: '#ccc',
-            fontSize: 13,
-            userSelect: 'none',
-          }}
+        <RemoteToolbar
+          state={vncState as ConnectionState}
+          isFullscreen={isFullscreen}
+          showResolution={false}
+          onToggleFullscreen={handleToggleFullscreen}
+          onDisconnect={handleDisconnect}
+          extraActions={[
+            {
+              key: 'cad',
+              label: 'CAD',
+              onClick: sendCtrlAltDel,
+            },
+          ]}
         >
-          <Space size="middle">
-            <Badge
-              color={vncState === 'connected' ? '#52c41a' : vncState === 'connecting' ? '#faad14' : '#ff4d4f'}
-              text={<span style={{ color: '#ccc' }}>
-                {vncState === 'connected' ? '已连接' : vncState === 'connecting' ? '连接中' : '已断开'}
-              </span>}
-            />
-            {desktopName && <span style={{ color: '#888' }}>{desktopName}</span>}
-          </Space>
-
-          <Space size="small">
-            {vncState === 'connected' && (
-              <>
-                <Tooltip title="发送 Ctrl+Alt+Del">
-                  <Button size="small" type="text" style={{ color: '#ccc' }} onClick={sendCtrlAltDel}>
-                    CAD
-                  </Button>
-                </Tooltip>
-                <Tooltip title={isFullscreen ? '退出全屏' : '全屏'}>
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-                    style={{ color: '#ccc' }}
-                    onClick={handleToggleFullscreen}
-                  />
-                </Tooltip>
-              </>
-            )}
-            <Tooltip title="断开">
-              <Button
-                size="small"
-                type="text"
-                danger={vncState === 'connected'}
-                icon={<DisconnectOutlined />}
-                onClick={handleDisconnect}
-                disabled={vncState === 'disconnected'}
-              />
-            </Tooltip>
-          </Space>
-        </div>
+          {desktopName && <span style={{ color: '#888' }}>{desktopName}</span>}
+        </RemoteToolbar>
 
         {/* VNC 渲染区域 */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
