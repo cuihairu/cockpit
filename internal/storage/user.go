@@ -14,8 +14,13 @@ type User struct {
 	Password  string    `gorm:"not null" json:"-"` // 永不返回密码
 	Email     string    `json:"email"`
 	Role      string    `gorm:"index;default:user" json:"role"` // admin, user
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// TOTP 字段
+	TOTPSecret   string     `gorm:"column:totp_secret" json:"-"`
+	TOTPEnabled  bool       `gorm:"column:totp_enabled;default:false" json:"totp_enabled"`
+	BackupCodes  string     `gorm:"column:backup_codes;type:text" json:"-"`
+	TOTPSetupAt  *time.Time `gorm:"column:totp_setup_at" json:"totp_setup_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // BeforeCreate GORM hook
