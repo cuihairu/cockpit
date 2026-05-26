@@ -109,18 +109,6 @@ func expandEnvInContent(content string) string {
     })
 }
 
-// expandEnv 扩展单个字符串中的环境变量
-func expandEnv(s string) string {
-    re := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
-    return re.ReplaceAllStringFunc(s, func(match string) string {
-        varName := match[2 : len(match)-1]
-        if val := os.Getenv(varName); val != "" {
-            return val
-        }
-        return ""
-    })
-}
-
 // LoadOrDefault 加载配置或返回默认配置
 func LoadOrDefault(path string) *Config {
     cfg, err := Load(path)

@@ -103,52 +103,45 @@ agent:
     }
 }
 
-func TestExpandEnv(t *testing.T) {
-    os.Setenv("TEST_VAR", "expanded")
-    defer os.Unsetenv("TEST_VAR")
-
-    tests := []struct {
-        name     string
-        input    string
-        expected string
-    }{
-        {"simple expansion", "${TEST_VAR}", "expanded"},
-        {"multiple vars", "${TEST_VAR}-${TEST_VAR}", "expanded-expanded"},
-        {"no vars", "plain-text", "plain-text"},
-        {"missing var", "${MISSING_VAR}", ""},
-        {"mixed", "prefix-${TEST_VAR}-suffix", "prefix-expanded-suffix"},
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            result := expandEnv(tt.input)
-            if result != tt.expected {
-                t.Errorf("expandEnv(%q) = %q, want %q", tt.input, result, tt.expected)
-            }
-        })
-    }
-}
-
 func TestLoadDefaults(t *testing.T) {
-    // 测试默认值
+    // 测试 LoadOrDefault 在文件不存在时返回默认配置
     tmpDir := t.TempDir()
-    configPath := filepath.Join(tmpDir, "minimal.yaml")
+    nonExistentPath := filepath.Join(tmpDir, "does-not-exist.yaml")
 
-    content := []byte(`
-server:
-  port: 9000
-`)
-    if err := os.WriteFile(configPath, content, 0644); err != nil {
-        t.Fatalf("Failed to write config: %v", err)
+    cfg := LoadOrDefault(nonExistentPath)
+
+    // 验证默认配置的具体值
+    if cfg.Server == nil {
+        t.Fatal("Expected Server config to be non-nil")
+    }
+    if cfg.Server.Host != "0.0.0.0" {
+        t.Errorf("Expected default host '0.0.0.0', got '%s'", cfg.Server.Host)
+    }
+    if cfg.Server.Port != 9000 {
+        t.Errorf("Expected default port 9000, got %d", cfg.Server.Port)
     }
 
-    cfg, err := Load(configPath)
-    if err != nil {
-        t.Fatalf("Failed to load config: %v", err)
+    if cfg.Database == nil {
+        t.Fatal("Expected Database config to be non-nil")
+    }
+    if cfg.Database.Path != "./data/cockpit.db" {
+        t.Errorf("Expected default database path './data/cockpit.db', got '%s'", cfg.Database.Path)
     }
 
-    // 检查默认值
-    if cfg.Server.Host != "" {
-        t.Errorf("Expected empty host as default, got '%s'", cfg.Server.Host)
+    if cfg.JWT == nil {
+        t.Fatal("Expected JWT config to be non-nil")
+    }
+    if cfg.JWT.Secret != "change-me" {
+        t.Errorf("Expected default JWT secret 'change-me', got '%s'", cfg.JWT.Secret)
+    }
+    if cfg.JWT.Expiration != 24*time.Hour {
+        t.Errorf("Expected default JWT expiration 24h, got %v", cfg.JWT.Expiration)
+    }
+
+    if cfg.Notification == nil {
+        t.Fatal("Expected Notification config to be non-nil")
+    }
+    if cfg.Notification.Enabled {
+        t.Error("Expected notification to be disabled by default")
     }
 }
