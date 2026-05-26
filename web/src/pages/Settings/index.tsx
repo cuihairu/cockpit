@@ -16,17 +16,25 @@ const Settings = () => {
 
   // 获取用户信息（包括 TOTP 状态）
   useEffect(() => {
-    // TODO: 从 API 获取用户信息
-    // 暂时从 localStorage 读取基本信息
-    const username = localStorage.getItem('username')
-    if (username) {
-      setUserInfo({
-        id: localStorage.getItem('userId') || '',
-        username,
-        role: localStorage.getItem('role') || 'user',
-        totp_enabled: false, // 默认值，实际应从 API 获取
-      })
+    const fetchUserInfo = async () => {
+      try {
+        const info = await api.getCurrentUser()
+        setUserInfo(info)
+      } catch (err) {
+        console.error('Failed to fetch user info:', err)
+        // 降级到 localStorage
+        const username = localStorage.getItem('username')
+        if (username) {
+          setUserInfo({
+            id: localStorage.getItem('userId') || '',
+            username,
+            role: localStorage.getItem('role') || 'user',
+            totp_enabled: false,
+          })
+        }
+      }
     }
+    fetchUserInfo()
   }, [])
 
   const handleSave = async (values: any) => {

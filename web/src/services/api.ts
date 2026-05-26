@@ -11,6 +11,7 @@ import type {
   TOTPGenerateResponse,
   TOTPVerifyResponse,
   LoginResponse,
+  UserInfo,
 } from '@/types'
 
 class ApiService {
@@ -67,6 +68,11 @@ class ApiService {
 
   async refreshToken() {
     return this.client.post<{ token: string }>('/auth/refresh')
+  }
+
+  // 获取当前用户信息
+  async getCurrentUser(): Promise<UserInfo> {
+    return this.client.get<any, UserInfo>('/me')
   }
 
   // ========== TOTP 二次验证 ==========

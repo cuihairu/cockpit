@@ -34,6 +34,8 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/status":
 		s.handleStatus(w, r)
+	case path == "/me":
+		s.handleCurrentUser(w, r)
 	case path == "/agents":
 		s.handleAgentsList(w, r)
 	case strings.HasPrefix(path, "/agents/"):
@@ -87,6 +89,41 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, status)
+}
+
+// handleCurrentUser 获取当前用户信息
+func (s *Server) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// 从 JWT 中获取用户信息
+	userID := r.Context().Value("user_id").(string)
+	if userID == "" {
+		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	user, err := s.db.GetUserByID(userID)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "User not found")
+		return
+	}
+
+	// 返回用户信息（不包含密码）
+	userInfo := map[string]interface{}{
+		"id":           user.ID,
+		"username":     user.Username,
+		"email":        user.Email,
+		"role":         user.Role,
+		"totp_enabled": user.TOTPEnabled,
+		"totp_setup_at": user.TOTPSetupAt,
+		"created_at":   user.CreatedAt,
+		"updated_at":   user.UpdatedAt,
+	}
+
+	s.writeJSON(w, http.StatusOK, userInfo)
 }
 
 // handleAgentsList 获取 Agent 列表
