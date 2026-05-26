@@ -459,7 +459,7 @@ func (p *PVEProvider) DeleteSnapshot(params map[string]interface{}) (interface{}
 // ============ Docker Provider ============
 
 type DockerProvider struct {
-	client *docker.Client
+	client docker.DockerAPI
 }
 
 // NewDockerProvider 创建 Docker Provider

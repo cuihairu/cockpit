@@ -14,10 +14,35 @@ import (
 	"github.com/docker/docker/client"
 )
 
+// DockerAPI abstracts Docker operations for testability
+type DockerAPI interface {
+	ListContainers(all bool) ([]ContainerInfo, error)
+	GetContainer(id string) (*ContainerInfo, error)
+	StartContainer(id string) error
+	StopContainer(id string, timeout *int) error
+	RestartContainer(id string, timeout *int) error
+	RemoveContainer(id string, force, removeVolumes bool) error
+	PauseContainer(id string) error
+	UnpauseContainer(id string) error
+	GetLogs(id string, tail, since string, follow, timestamps, stdout, stderr bool) (string, error)
+	GetContainerStats(id string) (map[string]interface{}, error)
+	ListImages(all bool) ([]ImageInfo, error)
+	RemoveImage(id string, force, pruneChildren bool) ([]string, error)
+	PullImage(ref string) (string, error)
+	ListVolumes() ([]VolumeInfo, error)
+	RemoveVolume(name string, force bool) error
+	ListNetworks() ([]NetworkInfo, error)
+	Info() (*SystemInfo, error)
+	Version() (types.Version, error)
+	Close() error
+}
+
 // Client Docker client wrapper
 type Client struct {
 	cli *client.Client
 }
+
+var _ DockerAPI = (*Client)(nil)
 
 // Config Docker configuration
 type Config struct {
