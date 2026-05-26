@@ -71,16 +71,15 @@ func AlertToEvent(alert *storage.Alert, cfg *config.NotificationConfig) *Event {
 	}
 
 	// 检查事件是否启用
-	for _, eventCfg := range cfg.Events {
-		if eventCfg.Type == eventType && eventCfg.Enabled {
-			return &Event{
-				Type:   eventType,
-				Labels: buildEventLabels(alert),
-			}
-		}
+	eventCfg, exists := cfg.Events[eventType]
+	if !exists || !eventCfg.Enabled {
+		return nil
 	}
 
-	return nil
+	return &Event{
+		Type:   eventType,
+		Labels: buildEventLabels(alert),
+	}
 }
 
 // buildEventLabels 从 Alert 构建事件标签

@@ -20,11 +20,11 @@ func TestAlertToEvent(t *testing.T) {
 	cfg := &config.NotificationConfig{
 		Enabled: true,
 		Events: map[string]*config.EventConfig{
-			"certificate_expired": {
+			"certificate.expired": {
 				Type:    "certificate.expired",
 				Enabled: true,
 			},
-			"service_down": {
+			"service.down": {
 				Type:    "service.down",
 				Enabled: true,
 			},
@@ -89,7 +89,7 @@ func TestAlertToEvent(t *testing.T) {
 				testCfg = &config.NotificationConfig{
 					Enabled: false,
 					Events: map[string]*config.EventConfig{
-						"certificate_expired": {
+						"certificate.expired": {
 							Type:    "certificate.expired",
 							Enabled: true,
 						},
@@ -307,11 +307,11 @@ func TestClientIsEventEnabled(t *testing.T) {
 	cfg := &config.NotificationConfig{
 		Enabled: true,
 		Events: map[string]*config.EventConfig{
-			"cert_expired": {
+			"certificate.expired": {
 				Type:    "certificate.expired",
 				Enabled: true,
 			},
-			"service_down": {
+			"service.down": {
 				Type:    "service.down",
 				Enabled: false,
 			},
@@ -437,7 +437,7 @@ func TestClientSendAlert(t *testing.T) {
 			Timeout: 5 * time.Second,
 		},
 		Events: map[string]*config.EventConfig{
-			"cert_expired": {
+			"certificate.expired": {
 				Type:    "certificate.expired",
 				Enabled: true,
 			},
@@ -483,7 +483,7 @@ func TestClientSendAlertNoMatch(t *testing.T) {
 			BaseURL: "http://localhost:8080",
 		},
 		Events: map[string]*config.EventConfig{
-			"cert_expired": {
+			"certificate.expired": {
 				Type:    "certificate.expired",
 				Enabled: true,
 			},
@@ -544,7 +544,7 @@ func TestSendAlertNonBlocking(t *testing.T) {
 						Timeout: 5 * time.Second,
 					},
 					Events: map[string]*config.EventConfig{
-						"cert_expired": {
+						"certificate.expired": {
 							Type:    "certificate.expired",
 							Enabled: true,
 						},
@@ -578,7 +578,7 @@ func TestSendAlertNonBlocking(t *testing.T) {
 						Timeout: 5 * time.Second,
 					},
 					Events: map[string]*config.EventConfig{
-						"cert_expired": {
+						"certificate.expired": {
 							Type:    "certificate.expired",
 							Enabled: true,
 						},
@@ -634,7 +634,7 @@ func TestSendAlertNonBlockingError(t *testing.T) {
 			Timeout: 1 * time.Second,
 		},
 		Events: map[string]*config.EventConfig{
-			"cert_expired": {
+			"certificate.expired": {
 				Type:    "certificate.expired",
 				Enabled: true,
 			},

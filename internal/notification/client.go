@@ -45,6 +45,10 @@ func (c *Client) SendEvent(ctx context.Context, event *Event) error {
 		return fmt.Errorf("client or herald config is nil")
 	}
 
+	if event == nil {
+		return nil
+	}
+
 	if c.config.Herald.BaseURL == "" {
 		return fmt.Errorf("herald base URL is empty")
 	}
