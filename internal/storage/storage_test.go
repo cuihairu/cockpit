@@ -8,13 +8,20 @@ import (
 	"time"
 )
 
-func TestOpenWithDefaultPath(t *testing.T) {
-	db, err := Open(Config{})
+// testDB creates an isolated test database for each test
+func testDB(t *testing.T) *DB {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := Open(Config{Path: path})
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
+	return db
+}
+
+func TestOpenWithDefaultPath(t *testing.T) {
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	if db == nil {
 		t.Error("Open() should not return nil")
@@ -56,11 +63,8 @@ func TestOpenCreatesDirectory(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer os.Remove("cockpit.db")
+	db := testDB(t)
+ var err error
 
 	err = db.Close()
 	if err != nil {
@@ -75,12 +79,8 @@ func TestClose(t *testing.T) {
 }
 
 func TestDBSession(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	session := db.Session()
 	if session == nil {
@@ -91,12 +91,9 @@ func TestDBSession(t *testing.T) {
 // ============ Agent Tests ============
 
 func TestUpsertAgent(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{
 		ID:       "agent-1",
@@ -129,12 +126,8 @@ func TestUpsertAgent(t *testing.T) {
 }
 
 func TestGetAgent(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{
 		ID:       "agent-1",
@@ -160,12 +153,8 @@ func TestGetAgent(t *testing.T) {
 }
 
 func TestListAgents(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	// Add agents
 	agents := []*Agent{
@@ -193,12 +182,8 @@ func TestListAgents(t *testing.T) {
 }
 
 func TestListAgentsByRegion(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agents := []*Agent{
 		{ID: "agent-1", Hostname: "host1", Region: "us-east", Zone: "zone-1"},
@@ -225,12 +210,9 @@ func TestListAgentsByRegion(t *testing.T) {
 }
 
 func TestDeleteAgent(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "test"}
 	db.UpsertAgent(agent)
@@ -247,12 +229,9 @@ func TestDeleteAgent(t *testing.T) {
 }
 
 func TestUpdateAgentStatus(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "test", Status: "online"}
 	db.UpsertAgent(agent)
@@ -274,12 +253,8 @@ func TestUpdateAgentStatus(t *testing.T) {
 }
 
 func TestCleanupOfflineAgents(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	// Use local time to match what CleanupOfflineAgents uses (time.Now())
 	oldTime := time.Now().Add(-2 * time.Hour)
@@ -316,12 +291,9 @@ func TestCleanupOfflineAgents(t *testing.T) {
 // ============ ComputeInstance Tests ============
 
 func TestUpsertComputeInstance(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -348,12 +320,8 @@ func TestUpsertComputeInstance(t *testing.T) {
 }
 
 func TestGetComputeInstance(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -381,12 +349,8 @@ func TestGetComputeInstance(t *testing.T) {
 }
 
 func TestListComputeInstances(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -442,12 +406,9 @@ func TestListComputeInstances(t *testing.T) {
 }
 
 func TestDeleteComputeInstance(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -469,12 +430,9 @@ func TestDeleteComputeInstance(t *testing.T) {
 // ============ Domain Tests ============
 
 func TestUpsertDomain(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	domain := &Domain{
 		ID:      "domain-1",
@@ -491,12 +449,8 @@ func TestUpsertDomain(t *testing.T) {
 }
 
 func TestGetDomain(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	domain := &Domain{
 		ID:     "domain-1",
@@ -516,12 +470,8 @@ func TestGetDomain(t *testing.T) {
 }
 
 func TestGetDomainByName(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	domain := &Domain{
 		ID:     "domain-1",
@@ -546,12 +496,8 @@ func TestGetDomainByName(t *testing.T) {
 }
 
 func TestListDomains(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	domains := []*Domain{
 		{ID: "d-1", Domain: "aaa.com", Status: "active"},
@@ -578,12 +524,9 @@ func TestListDomains(t *testing.T) {
 }
 
 func TestDeleteDomain(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	domain := &Domain{ID: "domain-1", Domain: "test.com"}
 	db.UpsertDomain(domain)
@@ -602,12 +545,9 @@ func TestDeleteDomain(t *testing.T) {
 // ============ Certificate Tests ============
 
 func TestUpsertCertificate(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	domain := &Domain{ID: "domain-1", Domain: "example.com"}
 	db.UpsertDomain(domain)
@@ -630,12 +570,8 @@ func TestUpsertCertificate(t *testing.T) {
 }
 
 func TestGetCertificate(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	domain := &Domain{ID: "domain-1", Domain: "example.com"}
 	db.UpsertDomain(domain)
@@ -665,12 +601,8 @@ func TestGetCertificate(t *testing.T) {
 }
 
 func TestListCertificates(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	certs := []*Certificate{
 		{ID: "cert-1", DomainName: "a.com", Status: "valid", ExpiresAt: time.Now().UTC().Add(100 * time.Hour)},
@@ -697,12 +629,8 @@ func TestListCertificates(t *testing.T) {
 }
 
 func TestListExpiringCertificates(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	now := time.Now().UTC()
 
@@ -726,12 +654,9 @@ func TestListExpiringCertificates(t *testing.T) {
 }
 
 func TestDeleteCertificate(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	cert := &Certificate{
 		ID:         "cert-1",
@@ -755,12 +680,9 @@ func TestDeleteCertificate(t *testing.T) {
 // ============ Service Tests ============
 
 func TestUpsertService(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -782,12 +704,8 @@ func TestUpsertService(t *testing.T) {
 }
 
 func TestGetService(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -817,12 +735,8 @@ func TestGetService(t *testing.T) {
 }
 
 func TestListServices(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	services := []*Service{
 		{ID: "svc-1", Name: "zzz", Type: "http", Status: "up"},
@@ -849,12 +763,9 @@ func TestListServices(t *testing.T) {
 }
 
 func TestDeleteService(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	service := &Service{ID: "svc-1", Name: "test", Type: "http"}
 	db.UpsertService(service)
@@ -873,12 +784,9 @@ func TestDeleteService(t *testing.T) {
 // ============ Gateway Tests ============
 
 func TestUpsertGateway(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -899,12 +807,8 @@ func TestUpsertGateway(t *testing.T) {
 }
 
 func TestGetGateway(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -933,12 +837,8 @@ func TestGetGateway(t *testing.T) {
 }
 
 func TestListGateways(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -966,12 +866,9 @@ func TestListGateways(t *testing.T) {
 }
 
 func TestDeleteGateway(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -993,12 +890,9 @@ func TestDeleteGateway(t *testing.T) {
 // ============ Storage Tests ============
 
 func TestUpsertStorage(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -1022,12 +916,8 @@ func TestUpsertStorage(t *testing.T) {
 }
 
 func TestGetStorage(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -1056,12 +946,8 @@ func TestGetStorage(t *testing.T) {
 }
 
 func TestListStorages(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -1085,12 +971,9 @@ func TestListStorages(t *testing.T) {
 }
 
 func TestDeleteStorage(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
 	db.UpsertAgent(agent)
@@ -1112,12 +995,8 @@ func TestDeleteStorage(t *testing.T) {
 // ============ Stats Tests ============
 
 func TestGetStats(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	// Add test data
 	agents := []*Agent{
@@ -1189,12 +1068,9 @@ func TestGetStats(t *testing.T) {
 // ============ SystemMetric Tests ============
 
 func TestSaveSystemMetric(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	metric := &SystemMetric{
 		AgentID:   "agent-1",
@@ -1210,12 +1086,9 @@ func TestSaveSystemMetric(t *testing.T) {
 }
 
 func TestUpdateSystemInfoSnapshot(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	snapshot := &SystemInfoSnapshot{
 		AgentID:    "agent-1",
@@ -1239,12 +1112,8 @@ func TestUpdateSystemInfoSnapshot(t *testing.T) {
 }
 
 func TestGetSystemInfoSnapshot(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	snapshot := &SystemInfoSnapshot{
 		AgentID:  "agent-1",
@@ -1269,12 +1138,8 @@ func TestGetSystemInfoSnapshot(t *testing.T) {
 }
 
 func TestListSystemInfoSnapshots(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	snapshots := []*SystemInfoSnapshot{
 		{AgentID: "agent-1", OSName: "Linux", Hostname: "host1"},
@@ -1295,12 +1160,8 @@ func TestListSystemInfoSnapshots(t *testing.T) {
 }
 
 func TestGetSystemMetrics(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	now := time.Now().UTC()
 	metrics := []*SystemMetric{
@@ -1331,12 +1192,8 @@ func TestGetSystemMetrics(t *testing.T) {
 }
 
 func TestGetSystemMetricsByTimeRange(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	now := time.Now().UTC()
 	metrics := []*SystemMetric{
@@ -1366,12 +1223,8 @@ func TestGetSystemMetricsByTimeRange(t *testing.T) {
 }
 
 func TestCleanupOldMetrics(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	now := time.Now().UTC()
 	metrics := []*SystemMetric{
@@ -1396,12 +1249,9 @@ func TestCleanupOldMetrics(t *testing.T) {
 // ============ Transaction Tests ============
 
 func TestTransaction(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	err = db.Transaction(func(tx *DB) error {
 		agent := &Agent{
@@ -1427,12 +1277,9 @@ func TestTransaction(t *testing.T) {
 }
 
 func TestTransactionRollback(t *testing.T) {
-	db, err := Open(Config{})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	db := testDB(t)
+ var err error
 	defer db.Close()
-	defer os.Remove("cockpit.db")
 
 	expectedErr := errors.New("rollback test")
 	err = db.Transaction(func(tx *DB) error {
