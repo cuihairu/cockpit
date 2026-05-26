@@ -15,6 +15,7 @@
     }
   },
   "dependencies": {
+    "@novnc/novnc": "^1.7.0",
     "@ant-design/icons": "^6.2.3",
     "@ant-design/pro-components": "^2.8.10",
     "@ant-design/pro-layout": "^7.22.7",

@@ -82,7 +82,8 @@ export function useDesktopWS(options: DesktopWSOptions) {
   }, []);
 
   const handleMessage = useCallback((msg: Record<string, unknown>) => {
-    const type = msg.type as string;
+    // Server 转发时将 desktopType 映射为 type 字段
+    const type = (msg.type as string) || (msg.desktopType as string) || '';
 
     switch (type) {
       case 'connecting':
@@ -91,18 +92,20 @@ export function useDesktopWS(options: DesktopWSOptions) {
       case 'connected':
         setState('connected');
         optionsRef.current.onConnected?.(
-          (msg.width as number) || 1280,
-          (msg.height as number) || 800
+          Number(msg.width) || 1280,
+          Number(msg.height) || 800
         );
         break;
 
-      case 'screen_update':
+      case 'screen_update': {
+        const rects = Array.isArray(msg.rects) ? msg.rects as BitmapRect[] : [];
         optionsRef.current.onScreenUpdate?.({
-          width: msg.width as number,
-          height: msg.height as number,
-          rects: msg.rects as BitmapRect[],
+          width: Number(msg.width) || 1280,
+          height: Number(msg.height) || 800,
+          rects,
         });
         break;
+      }
 
       case 'disconnected':
         setState('disconnected');

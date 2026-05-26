@@ -60,7 +60,7 @@ export function useCanvasRenderer() {
       const expectedSize = rect.width * rect.height * 4;
       if (pixels.length !== expectedSize) continue;
 
-      // 写入帧缓冲并直接用解码像素绘制
+      // 写入帧缓冲
       for (let y = 0; y < rect.height; y++) {
         const srcOffset = y * rect.width * 4;
         const dstY = rect.y + y;
@@ -70,19 +70,16 @@ export function useCanvasRenderer() {
         const copyWidth = Math.min(rect.width, buffer.width - rect.x) * 4;
         if (copyWidth <= 0) continue;
 
-        // 写帧缓冲
         buffer.data.set(
           pixels.subarray(srcOffset, srcOffset + copyWidth),
           dstOffset
         );
       }
 
-      // 直接用解码后的像素创建 ImageData 绘制（零拷贝）
-      const region = new ImageData(
-        new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.length),
-        rect.width,
-        rect.height
-      );
+      // 用解码后的像素创建 ImageData 绘制
+      const clamped = new Uint8ClampedArray(pixels.length);
+      clamped.set(pixels);
+      const region = new ImageData(clamped, rect.width, rect.height);
       ctx.putImageData(region, rect.x, rect.y);
     }
   }, []);

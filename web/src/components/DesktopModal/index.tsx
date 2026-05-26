@@ -4,6 +4,7 @@ import DesktopToolbar from './DesktopToolbar';
 import { useDesktopWS } from './useDesktopWS';
 import { useCanvasRenderer } from './useCanvasRenderer';
 import { useInputCapture } from './useInputCapture';
+import { getRecentDesktopConfig, saveDesktopConfig } from '@/services/desktop';
 
 interface DesktopModalProps {
   visible: boolean;
@@ -28,6 +29,25 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [form] = Form.useForm();
 
+  // 打开时自动填充上次使用的凭据
+  useEffect(() => {
+    if (visible) {
+      const saved = getRecentDesktopConfig(agentId, host, port);
+      if (saved) {
+        form.setFieldsValue({
+          username: saved.username,
+          domain: saved.domain,
+        });
+      }
+    }
+  }, [visible, agentId, host, port, form]);
+
+  const renderer = useCanvasRenderer();
+
+  // 用 ref 保存 renderer 的回调，避免 useDesktopWS 回调中引用不稳定的 renderer
+  const rendererRef = useRef(renderer);
+  rendererRef.current = renderer;
+
   const {
     state,
     connect,
@@ -40,7 +60,7 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
     onConnected: (w, h) => {
       setResolution(`${w}x${h}`);
       setShowCredentials(false);
-      renderer.initBuffer(w, h);
+      rendererRef.current.initBuffer(w, h);
     },
     onDisconnected: (reason) => {
       message.info(`连接断开: ${reason}`);
@@ -49,14 +69,12 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
       message.error(`远程桌面错误: ${error}`);
     },
     onScreenUpdate: (update) => {
-      renderer.handleScreenUpdate(update);
+      rendererRef.current.handleScreenUpdate(update);
     },
     onClipboard: (text) => {
       navigator.clipboard.writeText(text).catch(() => {});
     },
   });
-
-  const renderer = useCanvasRenderer();
 
   const { setCanvas } = useInputCapture({
     sendKeyboard,
@@ -64,7 +82,6 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
     enabled: state === 'connected' && !showCredentials,
   });
 
-  // 连接 canvas ref 到两个 hook
   const canvasRef = useCallback((node: HTMLCanvasElement | null) => {
     renderer.canvasRef.current = node;
     setCanvas(node);
@@ -72,13 +89,29 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
 
   const handleConnect = () => {
     form.validateFields().then((values) => {
+      const username = values.username || '';
+      const password = values.password || '';
+      const domain = values.domain || '';
+
+      // 保存连接配置（不含密码）
+      saveDesktopConfig({
+        name: `${host}:${port}`,
+        agentId,
+        host,
+        port,
+        username,
+        domain,
+        width: 1280,
+        height: 800,
+      });
+
       connect({
         agentId,
         host,
         port,
-        username: values.username || '',
-        password: values.password || '',
-        domain: values.domain || '',
+        username,
+        password,
+        domain,
         width: 1280,
         height: 800,
       });
@@ -116,7 +149,6 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
     setResolution(`${width}x${height}`);
   };
 
-  // 监听全屏变化
   useEffect(() => {
     const handler = () => {
       setIsFullscreen(!!document.fullscreenElement);

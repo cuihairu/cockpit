@@ -113,6 +113,9 @@ func (s *Server) Start() error {
 	// 注册桌面连接 API
 	s.registerDesktopAPI(mux)
 
+	// 注册 VNC 连接 API
+	s.registerVNCAPI(mux)
+
 	// 公开路由
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/health", s.handleHealth)
@@ -682,6 +685,28 @@ func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
 		return
 	}
 
+	// 检查是否是 VNC 连接
+	if len(proxyID) > 3 && proxyID[:3] == "vnc" {
+		var data []byte
+		switch v := msg.Payload["data"].(type) {
+		case string:
+			data = []byte(v)
+		case []byte:
+			data = v
+		case []interface{}:
+			data = make([]byte, len(v))
+			for i, b := range v {
+				if f, ok := b.(float64); ok {
+					data[i] = byte(f)
+				}
+			}
+		}
+		if err := s.HandleVNCData(connID, data); err != nil {
+			log.Printf("HandleVNCData error: %v", err)
+		}
+		return
+	}
+
 	// 解析数据
 	var data []byte
 	switch v := msg.Payload["data"].(type) {
@@ -717,6 +742,12 @@ func (s *Server) handleProxyClose(agent *Agent, msg *protocol.Message) {
 	terminalFlag, _ := msg.Payload["terminal"].(bool)
 	if terminalFlag || (len(proxyID) > 8 && proxyID[:8] == "terminal") {
 		s.HandleTerminalClose(connID, reason)
+		return
+	}
+
+	// 检查是否是 VNC 连接
+	if len(proxyID) > 3 && proxyID[:3] == "vnc" {
+		s.HandleVNCClose(connID, reason)
 		return
 	}
 

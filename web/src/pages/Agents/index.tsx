@@ -29,6 +29,7 @@ import { api } from '@/services/api'
 import RemoteServicesCard from '@/components/RemoteServices'
 import TerminalModal, { type RemoteProtocol } from '@/components/TerminalModal'
 import DesktopModal from '@/components/DesktopModal'
+import VNCModal from '@/components/VNCModal'
 
 // 虚拟化类型显示配置
 const virtTypeConfig: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
@@ -105,6 +106,15 @@ const Agents = () => {
   // 桌面相关状态
   const [desktopVisible, setDesktopVisible] = useState(false)
   const [desktopConfig, setDesktopConfig] = useState<{
+    agentId: string
+    host: string
+    port: number
+    title: string
+  } | null>(null)
+
+  // VNC 相关状态
+  const [vncVisible, setVncVisible] = useState(false)
+  const [vncConfig, setVncConfig] = useState<{
     agentId: string
     host: string
     port: number
@@ -299,6 +309,14 @@ const Agents = () => {
         title: `RDP - ${host}:${port}`,
       })
       setDesktopVisible(true)
+    } else if (protocol === 'vnc') {
+      setVncConfig({
+        agentId: selectedAgent?.id || '',
+        host,
+        port,
+        title: `VNC - ${host}:${port}`,
+      })
+      setVncVisible(true)
     } else {
       setTerminalConfig({
         agentId: selectedAgent?.id || '',
@@ -464,6 +482,18 @@ const Agents = () => {
           host={desktopConfig.host}
           port={desktopConfig.port}
           title={desktopConfig.title}
+        />
+      )}
+
+      {/* VNC 模态框 */}
+      {vncConfig && (
+        <VNCModal
+          visible={vncVisible}
+          onClose={() => setVncVisible(false)}
+          agentId={vncConfig.agentId}
+          host={vncConfig.host}
+          port={vncConfig.port}
+          title={vncConfig.title}
         />
       )}
   </div>

@@ -24,18 +24,18 @@ type DesktopSession struct {
 	Height     int
 	CreatedAt  time.Time
 	LastActive time.Time
+	done       chan struct{}
 }
 
 var (
-	desktopSessions   = make(map[string]*DesktopSession)
-	desktopSessionsMu = make(map[string]*websocket.Conn) // connID -> client ws
-	desktopMu         sync.Mutex
+	desktopSessions   = make(map[string]*DesktopSession) // sessionID -> session
+	desktopSessionsMu sync.Mutex
 )
 
 // desktopUpgrader 桌面连接专用 upgrader（更大的缓冲区）
 var desktopUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
-	ReadBufferSize:  1 * 1024 * 1024,  // 1MB
+	ReadBufferSize:  1 * 1024 * 1024, // 1MB
 	WriteBufferSize: 1 * 1024 * 1024,
 }
 
@@ -46,11 +46,14 @@ func (s *Server) handleDesktopWebSocket(w http.ResponseWriter, r *http.Request) 
 	host := query.Get("host")
 	portStr := query.Get("port")
 	token := query.Get("token")
-	username := query.Get("username")
+	username := query.Get("password")
 	password := query.Get("password")
 	domain := query.Get("domain")
 	widthStr := query.Get("width")
 	heightStr := query.Get("height")
+
+	// 修正：username 参数
+	username = query.Get("username")
 
 	if agentID == "" || host == "" || portStr == "" || token == "" {
 		http.Error(w, "Missing required parameters", http.StatusBadRequest)
@@ -108,12 +111,12 @@ func (s *Server) handleDesktopWebSocket(w http.ResponseWriter, r *http.Request) 
 		Height:     height,
 		CreatedAt:  time.Now(),
 		LastActive: time.Now(),
+		done:       make(chan struct{}),
 	}
 
-	desktopMu.Lock()
+	desktopSessionsMu.Lock()
 	desktopSessions[sessionID] = session
-	desktopSessionsMu[connID] = conn
-	desktopMu.Unlock()
+	desktopSessionsMu.Unlock()
 
 	log.Printf("Desktop session created: %s -> %s (%dx%d)", sessionID, target, width, height)
 
@@ -131,14 +134,13 @@ func (s *Server) handleDesktopWebSocket(w http.ResponseWriter, r *http.Request) 
 	if err := agent.SendMessage(msg); err != nil {
 		log.Printf("Failed to send desktop_new to agent: %v", err)
 		conn.WriteJSON(map[string]interface{}{
-			"type":    "error",
-			"message": "Failed to establish connection to agent",
+			"type":  "error",
+			"error": "Failed to establish connection to agent",
 		})
 		conn.Close()
-		desktopMu.Lock()
+		desktopSessionsMu.Lock()
 		delete(desktopSessions, sessionID)
-		delete(desktopSessionsMu, connID)
-		desktopMu.Unlock()
+		desktopSessionsMu.Unlock()
 		return
 	}
 
@@ -148,9 +150,10 @@ func (s *Server) handleDesktopWebSocket(w http.ResponseWriter, r *http.Request) 
 		"message": "Connecting to " + target,
 	})
 
-	// 启动消息处理循环
+	// 启动浏览器→Agent 读取循环
 	go s.desktopSendLoop(session)
-	s.desktopReceiveLoop(session)
+	// 超时/保活管理（阻塞直到 done）
+	s.desktopKeepaliveLoop(session)
 }
 
 // desktopSendLoop 浏览器 -> Agent 数据转发
@@ -159,6 +162,7 @@ func (s *Server) desktopSendLoop(session *DesktopSession) {
 		if r := recover(); r != nil {
 			log.Printf("desktopSendLoop panic: %v", r)
 		}
+		close(session.done) // 通知 keepaliveLoop 退出
 	}()
 
 	for {
@@ -168,7 +172,7 @@ func (s *Server) desktopSendLoop(session *DesktopSession) {
 				log.Printf("Desktop WebSocket read error: %v", err)
 			}
 			s.sendDesktopCloseToAgent(session)
-			break
+			return
 		}
 
 		session.LastActive = time.Now()
@@ -180,7 +184,6 @@ func (s *Server) desktopSendLoop(session *DesktopSession) {
 
 		msgType, _ := msg["type"].(string)
 
-		// 构建转发给 Agent 的 desktop_data 消息
 		payload := map[string]interface{}{
 			"sessionId": session.ID,
 		}
@@ -221,13 +224,17 @@ func (s *Server) desktopSendLoop(session *DesktopSession) {
 	}
 }
 
-// desktopReceiveLoop 超时管理
-func (s *Server) desktopReceiveLoop(session *DesktopSession) {
+// desktopKeepaliveLoop 超时管理与保活
+func (s *Server) desktopKeepaliveLoop(session *DesktopSession) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
+		case <-session.done:
+			// browser 断开，sendLoop 已退出
+			return
+
 		case <-ticker.C:
 			if err := session.ClientWS.WriteJSON(map[string]interface{}{
 				"type": "ping",
@@ -260,10 +267,9 @@ func (s *Server) sendDesktopCloseToAgent(session *DesktopSession) {
 // closeDesktopSession 关闭桌面会话
 func (s *Server) closeDesktopSession(session *DesktopSession) {
 	session.ClientWS.Close()
-	desktopMu.Lock()
+	desktopSessionsMu.Lock()
 	delete(desktopSessions, session.ID)
-	delete(desktopSessionsMu, session.ConnID)
-	desktopMu.Unlock()
+	desktopSessionsMu.Unlock()
 	log.Printf("Desktop session closed: %s", session.ID)
 }
 
@@ -274,22 +280,20 @@ func (s *Server) HandleDesktopData(msg *protocol.Message) {
 		return
 	}
 
-	desktopMu.Lock()
+	desktopSessionsMu.Lock()
 	session, exists := desktopSessions[sessionID]
-	desktopMu.Unlock()
+	desktopSessionsMu.Unlock()
 
 	if !exists {
 		return
 	}
 
-	// 直接将 desktop_data 负载转发给浏览器
+	// 将 desktop_data 负载转发给浏览器，desktopType 映射为前端 type
 	desktopType, _ := msg.Payload["desktopType"].(string)
 	agentMsg := map[string]interface{}{
-		"type":        desktopType,
-		"sessionId":   sessionID,
+		"type": desktopType,
 	}
 
-	// 复制所有 payload 字段
 	for k, v := range msg.Payload {
 		agentMsg[k] = v
 	}
@@ -308,21 +312,20 @@ func (s *Server) HandleDesktopClose(msg *protocol.Message) {
 		reason = "agent closed"
 	}
 
-	desktopMu.Lock()
+	desktopSessionsMu.Lock()
 	session, exists := desktopSessions[sessionID]
 	if exists {
 		delete(desktopSessions, sessionID)
-		delete(desktopSessionsMu, session.ConnID)
 	}
-	desktopMu.Unlock()
+	desktopSessionsMu.Unlock()
 
 	if !exists {
 		return
 	}
 
 	session.ClientWS.WriteJSON(map[string]interface{}{
-		"type":    "disconnected",
-		"reason":  reason,
+		"type":   "disconnected",
+		"reason": reason,
 	})
 	session.ClientWS.Close()
 	log.Printf("Desktop session closed by agent: %s, reason: %s", sessionID, reason)

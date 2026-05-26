@@ -11,11 +11,18 @@ export function useInputCapture({ sendKeyboard, sendMouse, enabled }: InputCaptu
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastButtonsRef = useRef(0);
 
+  // 用 ref 保存最新回调，避免依赖变化导致事件监听器反复重注册
+  const sendKeyboardRef = useRef(sendKeyboard);
+  sendKeyboardRef.current = sendKeyboard;
+  const sendMouseRef = useRef(sendMouse);
+  sendMouseRef.current = sendMouse;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+
   const setCanvas = useCallback((canvas: HTMLCanvasElement | null) => {
     canvasRef.current = canvas;
   }, []);
 
-  // 获取鼠标在 Canvas 上的相对坐标
   const getCanvasCoords = useCallback((e: MouseEvent): { x: number; y: number } => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -30,92 +37,87 @@ export function useInputCapture({ sendKeyboard, sendMouse, enabled }: InputCaptu
     };
   }, []);
 
-  // 鼠标事件处理
-  const handleMouseDown = useCallback((e: MouseEvent) => {
-    if (!enabled) return;
-    e.preventDefault();
-
-    const buttons = mouseEventToButtons(e);
-    lastButtonsRef.current = buttons;
-    const { x, y } = getCanvasCoords(e);
-
-    // 发送单个按钮的 down 事件
-    const button = mouseEventToGrdpButton(e);
-    sendMouse(x, y, button, 0, 'down');
-  }, [enabled, getCanvasCoords, sendMouse]);
-
-  const handleMouseUp = useCallback((e: MouseEvent) => {
-    if (!enabled) return;
-    e.preventDefault();
-
-    const button = mouseEventToGrdpButton(e);
-    const { x, y } = getCanvasCoords(e);
-
-    sendMouse(x, y, button, 0, 'up');
-    lastButtonsRef.current = 0;
-  }, [enabled, getCanvasCoords, sendMouse]);
-
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!enabled) return;
-
-    const { x, y } = getCanvasCoords(e);
-    sendMouse(x, y, 0, 0, 'move');
-  }, [enabled, getCanvasCoords, sendMouse]);
-
-  const handleWheel = useCallback((e: WheelEvent) => {
-    if (!enabled) return;
-    e.preventDefault();
-
-    const { x, y } = getCanvasCoords(e);
-    // RDP 使用 WHEEL_DELTA=120 每格，browser deltaY 通常 ±100
-    const delta = e.deltaY > 0 ? -1 : e.deltaY < 0 ? 1 : 0;
-    if (delta !== 0) {
-      sendMouse(x, y, 0, delta, 'move');
-    }
-  }, [enabled, getCanvasCoords, sendMouse]);
-
-  // 键盘事件处理
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (!enabled) return;
-    if (shouldPreventDefault(e.code)) {
-      e.preventDefault();
-    }
-    e.stopPropagation();
-
-    const scanCode = codeToScanCode(e.code);
-    if (scanCode === 0) return;
-
-    const extended = isExtendedKey(scanCode);
-    const baseCode = getBaseScanCode(scanCode);
-
-    sendKeyboard(baseCode, true, extended);
-  }, [enabled, sendKeyboard]);
-
-  const handleKeyUp = useCallback((e: KeyboardEvent) => {
-    if (!enabled) return;
-    e.stopPropagation();
-
-    const scanCode = codeToScanCode(e.code);
-    if (scanCode === 0) return;
-
-    const extended = isExtendedKey(scanCode);
-    const baseCode = getBaseScanCode(scanCode);
-
-    sendKeyboard(baseCode, false, extended);
-  }, [enabled, sendKeyboard]);
-
-  // 注册/注销事件监听
   useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      if (!enabledRef.current) return;
+      e.preventDefault();
+
+      const button = e.button;
+      lastButtonsRef.current = mouseEventToButtons(e);
+      const { x, y } = getCanvasCoords(e);
+
+      sendMouseRef.current(x, y, button, 0, 'down');
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (!enabledRef.current) return;
+      e.preventDefault();
+
+      const button = e.button;
+      const { x, y } = getCanvasCoords(e);
+
+      sendMouseRef.current(x, y, button, 0, 'up');
+      lastButtonsRef.current = 0;
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!enabledRef.current) return;
+
+      const { x, y } = getCanvasCoords(e);
+      sendMouseRef.current(x, y, 0, 0, 'move');
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      if (!enabledRef.current) return;
+      e.preventDefault();
+
+      const { x, y } = getCanvasCoords(e);
+      const delta = e.deltaY > 0 ? -1 : e.deltaY < 0 ? 1 : 0;
+      if (delta !== 0) {
+        sendMouseRef.current(x, y, 0, delta, 'move');
+      }
+    };
+
+    const handleContextMenu = (e: Event) => e.preventDefault();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!enabledRef.current) return;
+      if (shouldPreventDefault(e.code)) {
+        e.preventDefault();
+      }
+      e.stopPropagation();
+
+      const scanCode = codeToScanCode(e.code);
+      if (scanCode === 0) return;
+
+      const extended = isExtendedKey(scanCode);
+      const baseCode = getBaseScanCode(scanCode);
+
+      sendKeyboardRef.current(baseCode, true, extended);
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (!enabledRef.current) return;
+      e.stopPropagation();
+
+      const scanCode = codeToScanCode(e.code);
+      if (scanCode === 0) return;
+
+      const extended = isExtendedKey(scanCode);
+      const baseCode = getBaseScanCode(scanCode);
+
+      sendKeyboardRef.current(baseCode, false, extended);
+    };
+
     const canvas = canvasRef.current;
-    if (!canvas || !enabled) return;
+    if (!canvas) return;
 
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('wheel', handleWheel, { passive: false });
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('contextmenu', handleContextMenu);
 
-    // 键盘事件在 window 上捕获（canvas 不可聚焦）
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
@@ -124,22 +126,16 @@ export function useInputCapture({ sendKeyboard, sendMouse, enabled }: InputCaptu
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('wheel', handleWheel);
+      canvas.removeEventListener('contextmenu', handleContextMenu);
+
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [enabled, handleKeyDown, handleKeyUp, handleMouseDown, handleMouseUp, handleMouseMove, handleWheel]);
+  }, [getCanvasCoords]); // 仅依赖稳定的 getCanvasCoords
 
   return { setCanvas };
 }
 
-// MouseEvent.button -> grdp button 参数
-// 0=left, 1=middle, 2=right
-function mouseEventToGrdpButton(e: MouseEvent): number {
-  return e.button;
-}
-
-// MouseEvent -> buttons 位标志
-// 1=left, 2=right, 4=middle
 function mouseEventToButtons(e: MouseEvent): number {
   return e.buttons;
 }
