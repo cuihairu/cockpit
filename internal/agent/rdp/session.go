@@ -36,8 +36,14 @@ func NewSession(sessionID, target, domain, username, password string, width, hei
 	}
 
 	client := grdp.NewRdpClient(target, width, height)
+	s.client = client
 
-	// 注册 OnBitmap 回调
+	// 登录（grdp v0.6.7 的 On* 方法内部访问 g.pdu，Login 前为 nil）
+	if err := client.Login(domain, username, password); err != nil {
+		return nil, err
+	}
+
+	// Login 成功后再注册回调
 	client.OnBitmap(func(bitmaps []grdp.Bitmap) {
 		s.handleBitmap(bitmaps)
 	})
@@ -79,7 +85,6 @@ func NewSession(sessionID, target, domain, username, password string, width, hei
 		})
 	})
 
-	// 剪贴板双向同步
 	client.OnClipboard(
 		func(text string) {
 			s.enqueue(&protocol.Message{
@@ -96,13 +101,6 @@ func NewSession(sessionID, target, domain, username, password string, width, hei
 		},
 	)
 
-	s.client = client
-
-	// 登录
-	if err := client.Login(domain, username, password); err != nil {
-		return nil, err
-	}
-
 	return s, nil
 }
 
@@ -118,23 +116,25 @@ func (s *Session) handleBitmap(bitmaps []grdp.Bitmap) {
 	rects := make([]protocol.DesktopBitmapRect, 0, len(bitmaps))
 
 	for _, bm := range bitmaps {
-		// 转换为 RGBA（grdp v0.6.7 使用 RGBA() 方法）
 		rgba := bm.RGBA()
 
 		// 合成到帧缓冲
 		for y := 0; y < bm.Height; y++ {
-			for x := 0; x < bm.Width; x++ {
-				dstX := bm.DestLeft + x
-				dstY := bm.DestTop + y
-				if dstX < s.width && dstY < s.height {
-					srcOff := (y*bm.Width + x) * 4
-					dstOff := (dstY*s.width + dstX) * 4
-					copy(s.screen.Pix[dstOff:dstOff+4], rgba.Pix[srcOff:srcOff+4])
-				}
+			dstY := bm.DestTop + y
+			if dstY >= s.height {
+				continue
+			}
+			srcOff := y * bm.Width * 4
+			dstOff := (dstY*s.width + bm.DestLeft) * 4
+			copyWidth := bm.Width * 4
+			if bm.DestLeft+bm.Width > s.width {
+				copyWidth = (s.width - bm.DestLeft) * 4
+			}
+			if copyWidth > 0 && srcOff+copyWidth <= len(rgba.Pix) && dstOff+copyWidth <= len(s.screen.Pix) {
+				copy(s.screen.Pix[dstOff:dstOff+copyWidth], rgba.Pix[srcOff:srcOff+copyWidth])
 			}
 		}
 
-		// base64 编码 RGBA 像素数据
 		rect := protocol.DesktopBitmapRect{
 			X:      bm.DestLeft,
 			Y:      bm.DestTop,
@@ -217,10 +217,11 @@ func (s *Session) HandleMouse(x, y, button, wheelDelta int, action string) {
 	}
 }
 
-// HandleClipboard 处理本地剪贴板数据
+// 剪贴板文本
 var clipboardText string
 var clipboardMu sync.Mutex
 
+// HandleClipboard 处理本地剪贴板数据
 func (s *Session) HandleClipboard(text string) {
 	clipboardMu.Lock()
 	clipboardText = text
@@ -254,7 +255,9 @@ func (s *Session) Close() {
 	if !s.closed.CompareAndSwap(false, true) {
 		return
 	}
-	s.client.Close()
+	if s.client != nil {
+		s.client.Close()
+	}
 	close(s.sendQueue)
 	slog.Info("RDP session closed", "sessionID", s.ID)
 }

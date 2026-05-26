@@ -8,7 +8,6 @@ export function useCanvasRenderer() {
   const pendingRectsRef = useRef<BitmapRect[]>([]);
   const desktopSizeRef = useRef({ width: 0, height: 0 });
 
-  // 初始化帧缓冲
   const initBuffer = useCallback((width: number, height: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -18,7 +17,6 @@ export function useCanvasRenderer() {
     bufferRef.current = new ImageData(width, height);
     desktopSizeRef.current = { width, height };
 
-    // 清空画布
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.fillStyle = '#000';
@@ -26,27 +24,22 @@ export function useCanvasRenderer() {
     }
   }, []);
 
-  // 处理屏幕更新
   const handleScreenUpdate = useCallback((update: ScreenUpdate) => {
     const { width, height, rects } = update;
 
-    // 分辨率变更时重建缓冲
     if (!bufferRef.current ||
         bufferRef.current.width !== width ||
         bufferRef.current.height !== height) {
       initBuffer(width, height);
     }
 
-    // 追加脏矩形
     pendingRectsRef.current.push(...rects);
 
-    // 去重 RAF
     if (!rafRef.current) {
       rafRef.current = requestAnimationFrame(flushFrame);
     }
   }, [initBuffer]);
 
-  // 刷新帧：解码 + 绘制
   const flushFrame = useCallback(() => {
     rafRef.current = 0;
 
@@ -61,36 +54,32 @@ export function useCanvasRenderer() {
     pendingRectsRef.current = [];
 
     for (const rect of rects) {
-      // base64 解码 RGBA 像素
       const pixels = decodeBase64(rect.data);
       if (!pixels) continue;
 
       const expectedSize = rect.width * rect.height * 4;
       if (pixels.length !== expectedSize) continue;
 
-      // 写入帧缓冲
+      // 写入帧缓冲并直接用解码像素绘制
       for (let y = 0; y < rect.height; y++) {
-        for (let x = 0; x < rect.width; x++) {
-          const srcIdx = (y * rect.width + x) * 4;
-          const dstX = rect.x + x;
-          const dstY = rect.y + y;
+        const srcOffset = y * rect.width * 4;
+        const dstY = rect.y + y;
+        if (dstY >= buffer.height) break;
 
-          if (dstX < buffer.width && dstY < buffer.height) {
-            const dstIdx = (dstY * buffer.width + dstX) * 4;
-            buffer.data[dstIdx] = pixels[srcIdx];
-            buffer.data[dstIdx + 1] = pixels[srcIdx + 1];
-            buffer.data[dstIdx + 2] = pixels[srcIdx + 2];
-            buffer.data[dstIdx + 3] = pixels[srcIdx + 3];
-          }
-        }
+        const dstOffset = (dstY * buffer.width + rect.x) * 4;
+        const copyWidth = Math.min(rect.width, buffer.width - rect.x) * 4;
+        if (copyWidth <= 0) continue;
+
+        // 写帧缓冲
+        buffer.data.set(
+          pixels.subarray(srcOffset, srcOffset + copyWidth),
+          dstOffset
+        );
       }
 
-      // 使用 putImageData 绘制脏矩形区域
+      // 直接用解码后的像素创建 ImageData 绘制（零拷贝）
       const region = new ImageData(
-        buffer.data.slice(
-          rect.y * buffer.width * 4 + rect.x * 4,
-          (rect.y + rect.height) * buffer.width * 4 + (rect.x + rect.width) * 4
-        ),
+        new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.length),
         rect.width,
         rect.height
       );
@@ -98,7 +87,6 @@ export function useCanvasRenderer() {
     }
   }, []);
 
-  // base64 解码（使用 atob + Uint8Array）
   function decodeBase64(data: string): Uint8Array | null {
     try {
       const binary = atob(data);
@@ -112,7 +100,6 @@ export function useCanvasRenderer() {
     }
   }
 
-  // 清理
   useEffect(() => {
     return () => {
       if (rafRef.current) {
