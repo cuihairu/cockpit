@@ -6,10 +6,43 @@ import (
 	"log"
 	"os"
 
+	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/server"
 )
 
 const Version = "0.1.0"
+
+func loadConfig(configPath string) *config.Config {
+	// 如果没有指定配置文件，尝试默认路径
+	if configPath == "" {
+		// 尝试 ./config/cockpit.yaml
+		if _, err := os.Stat("./config/cockpit.yaml"); err == nil {
+			configPath = "./config/cockpit.yaml"
+		} else if _, err := os.Stat("./cockpit.yaml"); err == nil {
+			// 尝试 ./cockpit.yaml
+			configPath = "./cockpit.yaml"
+		} else {
+			// 返回默认配置
+			log.Println("未找到配置文件，使用默认配置")
+			return &config.Config{
+				Server: &config.ServerConfig{
+					Host: "0.0.0.0",
+					Port: 9000,
+				},
+				Database: &config.DatabaseConfig{
+					Path: "./data/cockpit.db",
+				},
+			}
+		}
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Fatalf("加载配置文件失败: %v", err)
+	}
+	log.Printf("已加载配置文件: %s", configPath)
+	return cfg
+}
 
 func main() {
 	// 默认以 server 模式启动
@@ -41,8 +74,7 @@ func main() {
 
 // handleServerDefault 处理默认 server 启动
 func handleServerDefault() {
-	addr := flag.String("addr", "0.0.0.0:9000", "监听地址")
-	dataDir := flag.String("data", "./data", "数据目录")
+	configPath := flag.String("config", "", "配置文件路径")
 	showVersion := flag.Bool("version", false, "显示版本信息")
 	flag.Parse()
 
@@ -51,10 +83,8 @@ func handleServerDefault() {
 		os.Exit(0)
 	}
 
-	s := server.NewServer(server.Config{
-		Addr:    *addr,
-		DataDir: *dataDir,
-	})
+	cfg := loadConfig(*configPath)
+	s := server.NewServer(cfg)
 
 	if err := s.Start(); err != nil {
 		log.Fatalf("Server error: %v", err)
@@ -72,8 +102,7 @@ func printUsage() {
 	fmt.Println("  cockpit version      # 显示版本信息")
 	fmt.Println()
 	fmt.Println("Server 选项:")
-	fmt.Println("  -addr string         # 监听地址 (默认 \"0.0.0.0:9000\")")
-	fmt.Println("  -data string         # 数据目录 (默认 \"./data\")")
+	fmt.Println("  -config string       # 配置文件路径 (默认 \"./config/cockpit.yaml\")")
 	fmt.Println("  -version             # 显示版本信息")
 }
 
@@ -83,8 +112,7 @@ func printVersion() {
 
 func handleServer() {
 	cmd := flag.NewFlagSet("server", flag.ExitOnError)
-	addr := cmd.String("addr", "0.0.0.0:9000", "监听地址")
-	dataDir := cmd.String("data", "./data", "数据目录")
+	configPath := cmd.String("config", "", "配置文件路径")
 	help := cmd.Bool("h", false, "显示帮助")
 
 	cmd.Parse(os.Args[2:])
@@ -96,10 +124,8 @@ func handleServer() {
 		os.Exit(0)
 	}
 
-	s := server.NewServer(server.Config{
-		Addr:    *addr,
-		DataDir: *dataDir,
-	})
+	cfg := loadConfig(*configPath)
+	s := server.NewServer(cfg)
 
 	if err := s.Start(); err != nil {
 		log.Fatalf("Server error: %v", err)

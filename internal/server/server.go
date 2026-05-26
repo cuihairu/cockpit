@@ -7,13 +7,14 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/alert"
 	"github.com/cuihairu/cockpit/internal/auth"
+	"github.com/cuihairu/cockpit/internal/config"
+	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/proxy"
 	"github.com/cuihairu/cockpit/internal/storage"
@@ -47,43 +48,53 @@ func isOriginAllowed(r *http.Request) bool {
 
 // Server WebSocket 服务器
 type Server struct {
-	addr      string
-	registry  *Registry
-	codec     *protocol.Codec
-	db        *storage.DB
-	audit     *audit.Logger
-	proxyMgr  *proxy.Manager
-	upgrader  websocket.Upgrader
+	addr         string
+	registry     *Registry
+	codec        *protocol.Codec
+	db           *storage.DB
+	audit        *audit.Logger
+	proxyMgr     *proxy.Manager
+	notification *notification.Client
+	cfg          *config.Config
+	upgrader     websocket.Upgrader
 
 	mu     sync.RWMutex
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-// Config 服务器配置
-type Config struct {
-	Addr    string // 监听地址，如 "0.0.0.0:8080"
-	DataDir string // 数据目录
-}
-
 // NewServer 创建新服务器
-func NewServer(cfg Config) *Server {
+func NewServer(cfg *config.Config) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// 打开数据库
-	dbPath := filepath.Join(cfg.DataDir, "cockpit.db")
+	dbPath := cfg.Database.Path
+	if dbPath == "" {
+		dbPath = "./data/cockpit.db"
+	}
 	db, err := storage.Open(storage.Config{Path: dbPath})
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 
+	// 初始化通知客户端
+	var notificationClient *notification.Client
+	if cfg.Notification != nil && cfg.Notification.Enabled {
+		notificationClient = notification.NewClient(cfg.Notification)
+	}
+
+	// 构造服务器地址
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+
 	return &Server{
-		addr:     cfg.Addr,
-		registry: NewRegistry(),
-		codec:    protocol.NewCodec(),
-		db:       db,
-		audit:    audit.NewLogger(db),
-		proxyMgr: proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
+		addr:         addr,
+		registry:     NewRegistry(),
+		codec:        protocol.NewCodec(),
+		db:           db,
+		audit:        audit.NewLogger(db),
+		proxyMgr:     proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
+		notification: notificationClient,
+		cfg:          cfg,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: isOriginAllowed,
 			ReadBufferSize:  1024,
@@ -139,6 +150,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/auth/login", s.handleLoginWithAudit)
 	mux.HandleFunc("/api/auth/refresh", auth.HandleRefresh)
 	mux.HandleFunc("/api/auth/totp/verify", s.handleTOTPVerify) // TOTP 验证不需要 JWT（使用临时令牌）
+	mux.HandleFunc("/api/auth/forgot-password", s.handleForgotPassword)
+	mux.HandleFunc("/api/auth/reset-password", s.handleResetPassword)
+	mux.HandleFunc("/api/auth/verify-reset-code", s.handleVerifyResetCode)
 
 	// 需要认证的 API 路由
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -623,14 +637,14 @@ func (s *Server) alertCheckLoop() {
 
 // runAlertChecks 执行警告检查
 func (s *Server) runAlertChecks() {
-	generator := alert.NewGenerator(s.db)
+	generator := alert.NewGenerator(s.db, s.notification, s.cfg.Notification)
 	generator.CheckAllChecks()
 	log.Println("Alert checks completed")
 }
 
 // cleanupOldAlerts 清理旧警告
 func (s *Server) cleanupOldAlerts() {
-	generator := alert.NewGenerator(s.db)
+	generator := alert.NewGenerator(s.db, s.notification, s.cfg.Notification)
 	generator.CleanupOldAlerts(30 * 24 * time.Hour) // 保留30天
 	log.Println("Old alerts cleaned up")
 }

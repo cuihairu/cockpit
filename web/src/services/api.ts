@@ -85,6 +85,25 @@ class ApiService {
 
   // ========== TOTP 二次验证 ==========
 
+  // 忘记密码 - 发送重置邮件
+  async forgotPassword(username: string): Promise<{ email: string; masked_email: string; message: string }> {
+    return this.client.post<any, any>('/auth/forgot-password', { username })
+  }
+
+  // 重置密码
+  async resetPassword(token: string, code: string, newPassword: string): Promise<{ message: string }> {
+    return this.client.post<any, { message: string }>('/auth/reset-password', {
+      token,
+      code,
+      newPassword,
+    })
+  }
+
+  // 验证重置验证码
+  async verifyResetCode(token: string, code: string): Promise<{ valid: boolean; message?: string }> {
+    return this.client.post<any, any>('/auth/verify-reset-code', { token, code })
+  }
+
   // 生成 TOTP 密钥和 QR 码
   async generateTOTP(): Promise<TOTPGenerateResponse> {
     return this.client.post<any, TOTPGenerateResponse>('/auth/totp/generate')

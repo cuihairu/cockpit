@@ -1,0 +1,78 @@
+.reset-password-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e8eef5 100%);
+  padding: 24px;
+
+  .reset-password-card {
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+    border-radius: 8px;
+    border: none;
+
+    .reset-password-header {
+      text-align: center;
+      margin-bottom: 24px;
+
+      .back-link {
+        display: inline-flex;
+        align-items: center;
+        color: #666;
+        text-decoration: none;
+        margin-bottom: 16px;
+        font-size: 14px;
+        transition: color 0.3s;
+
+        &:hover {
+          color: #165DFF;
+        }
+      }
+
+      h3 {
+        margin: 0;
+        color: #1D2129;
+      }
+    }
+
+    .reset-password-body {
+      .step-content {
+        width: 100%;
+      }
+
+      .password-strength {
+        margin-top: -12px;
+        margin-bottom: 16px;
+
+        .ant-progress {
+          margin-top: 8px;
+        }
+      }
+
+      .reset-password-tips {
+        text-align: center;
+        padding: 12px;
+        background: #f7f8fa;
+        border-radius: 4px;
+      }
+
+      .success-icon {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background: #f0f9ff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 16px 0;
+
+        .anticon {
+          font-size: 48px;
+          color: #52c41a;
+        }
+      }
+    }
+  }
+}

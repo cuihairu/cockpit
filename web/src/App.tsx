@@ -22,6 +22,8 @@ import AuditLogs from './pages/AuditLogs'
 import Monitor from './pages/Monitor'
 import Login from './pages/Login'
 import TOTPVerify from './pages/TOTPVerify'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword from './pages/ResetPassword'
 import SetupTOTP from './pages/SetupTOTP'
 import NotificationDropdown from './components/Notifications'
 import { UserProvider, useUser } from './contexts/UserContext'
@@ -284,6 +286,8 @@ const App = () => {
             <BrowserRouter>
               <Routes>
                 <Route path="/login" element={<Login />} />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/totp-verify" element={<TOTPVerify />} />
                 <Route
                   path="/*"

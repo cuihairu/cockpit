@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Form, Input, Button, App, Checkbox } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useUser, TOTPRequiredError } from '@/contexts/UserContext'
 import logo from '@/assets/logo.svg'
 import './index.less'
@@ -79,9 +79,14 @@ const LoginContent = () => {
             />
           </Form.Item>
           <Form.Item>
-            <Form.Item name="remember" valuePropName="checked" noStyle>
-              <Checkbox>记住账号</Checkbox>
-            </Form.Item>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Form.Item name="remember" valuePropName="checked" noStyle>
+                <Checkbox>记住账号</Checkbox>
+              </Form.Item>
+              <Link to="/forgot-password" style={{ fontSize: 14 }}>
+                忘记密码？
+              </Link>
+            </div>
           </Form.Item>
           <Form.Item>
             <Button type="primary" htmlType="submit" block loading={loading} className="login-button">
