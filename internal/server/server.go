@@ -138,6 +138,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/api/auth/login", s.handleLoginWithAudit)
 	mux.HandleFunc("/api/auth/refresh", auth.HandleRefresh)
+	mux.HandleFunc("/api/auth/totp/verify", s.handleTOTPVerify) // TOTP 验证不需要 JWT（使用临时令牌）
 
 	// 需要认证的 API 路由
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +148,22 @@ func (s *Server) Start() error {
 				s.handleLoginWithAudit(w, r)
 			} else if r.URL.Path == "/api/auth/refresh" {
 				auth.HandleRefresh(w, r)
+			} else if r.URL.Path == "/api/auth/totp/verify" {
+				s.handleTOTPVerify(w, r)
 			}
+			return
+		}
+		// TOTP 设置路由需要认证
+		if r.URL.Path == "/api/auth/totp/generate" {
+			auth.Middleware(s.handleTOTPGenerate)(w, r)
+			return
+		}
+		if r.URL.Path == "/api/auth/totp/enable" {
+			auth.Middleware(s.handleTOTPEnable)(w, r)
+			return
+		}
+		if r.URL.Path == "/api/auth/totp/disable" {
+			auth.Middleware(s.handleTOTPDisable)(w, r)
 			return
 		}
 		// 其他 API 需要认证
