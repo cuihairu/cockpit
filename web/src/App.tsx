@@ -21,6 +21,8 @@ import Profile from './pages/Profile'
 import AuditLogs from './pages/AuditLogs'
 import Monitor from './pages/Monitor'
 import Login from './pages/Login'
+import TOTPVerify from './pages/TOTPVerify'
+import SetupTOTP from './pages/SetupTOTP'
 import NotificationDropdown from './components/Notifications'
 import { UserProvider, useUser } from './contexts/UserContext'
 import logo from '@/assets/logo.svg'
@@ -259,6 +261,7 @@ const MainLayout = () => {
         <Route path="/agents" element={<Agents />} />
         <Route path="/monitor" element={<Monitor />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/settings/setup-totp" element={<SetupTOTP />} />
         <Route path="/settings/audit-logs" element={<AuditLogs />} />
         <Route path="/profile" element={<Profile />} />
       </Routes>
@@ -281,6 +284,7 @@ const App = () => {
             <BrowserRouter>
               <Routes>
                 <Route path="/login" element={<Login />} />
+                <Route path="/totp-verify" element={<TOTPVerify />} />
                 <Route
                   path="/*"
                   element={

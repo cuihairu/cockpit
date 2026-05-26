@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Form, Input, Button, App, Checkbox } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { useUser } from '@/contexts/UserContext'
+import { useUser, TOTPRequiredError } from '@/contexts/UserContext'
 import logo from '@/assets/logo.svg'
 import './index.less'
 
@@ -20,7 +20,13 @@ const LoginContent = () => {
       message.success('登录成功')
       navigate('/')
     } catch (error) {
-      message.error('用户名或密码错误')
+      if (error instanceof TOTPRequiredError) {
+        // 需要二次验证，跳转到 TOTP 验证页面
+        const { tmp_token, username } = error.response
+        navigate(`/totp-verify?tmp_token=${tmp_token}&username=${username}`)
+      } else {
+        message.error('用户名或密码错误')
+      }
     } finally {
       setLoading(false)
     }

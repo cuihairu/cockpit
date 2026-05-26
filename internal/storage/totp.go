@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/pquerna/otp"
+	"github.com/pquerna/otp/totp"
 )
 
 var (
@@ -110,4 +113,50 @@ func (d *DB) RegenerateBackupCodes(userID string, hashedBackupCodes []string) er
 	return d.db.Model(&User{}).
 		Where("id = ?", userID).
 		Update("backup_codes", string(backupJSON)).Error
+}
+
+// ValidateTOTPCode 验证 TOTP 代码或备份码
+// 返回 (isValid, isBackup, error)
+func (d *DB) ValidateTOTPCode(userID, code string) (bool, bool, error) {
+	user, err := d.GetUserByID(userID)
+	if err != nil {
+		return false, false, err
+	}
+
+	if !user.TOTPEnabled {
+		return false, false, nil
+	}
+
+	// 尝试验证 TOTP 代码
+	// 需要解密 secret
+	secret, err := Decrypt(user.TOTPSecret)
+	if err == nil && secret != "" {
+		// 直接使用 totp 包验证
+		valid, _ := totp.ValidateCustom(
+			code,
+			secret,
+			time.Now(),
+			totp.ValidateOpts{
+				Period:    30,
+				Skew:      1,
+				Digits:    otp.DigitsSix,
+				Algorithm: otp.AlgorithmSHA1,
+			},
+		)
+		if valid {
+			return true, false, nil
+		}
+	}
+
+	// 尝试验证备份码
+	codeHash := HashSingleBackupCode(code)
+	valid, err := d.ConsumeBackupCode(userID, codeHash)
+	if err != nil {
+		return false, false, err
+	}
+	if valid {
+		return true, true, nil
+	}
+
+	return false, false, nil
 }

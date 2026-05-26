@@ -57,6 +57,25 @@ cd cockpit
 ./cockpit server start
 ```
 
+### 环境变量
+
+| 变量名 | 说明 | 默认值 | 是否必需 |
+|--------|------|--------|----------|
+| `TOTP_ENCRYPTION_KEY` | TOTP 密钥加密密钥（AES-256） | 内置开发密钥 | 生产环境必需 |
+
+**⚠️ 安全警告：** 生产环境必须设置 `TOTP_ENCRYPTION_KEY` 环境变量！
+
+```bash
+# 生成随机密钥（推荐）
+export TOTP_ENCRYPTION_KEY=$(openssl rand -base64 32)
+
+# 或使用
+export TOTP_ENCRYPTION_KEY="your-secure-random-key-min-32-chars"
+
+# 然后启动服务
+./cockpit server start
+```
+
 ### 部署 Agent
 
 ```bash

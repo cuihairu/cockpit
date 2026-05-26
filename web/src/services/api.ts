@@ -8,6 +8,9 @@ import type {
   Gateway,
   Storage,
   PaginatedResponse,
+  TOTPGenerateResponse,
+  TOTPVerifyResponse,
+  LoginResponse,
 } from '@/types'
 
 class ApiService {
@@ -51,9 +54,9 @@ class ApiService {
   }
 
   // ========== 认证 ==========
-  async login(username: string, password: string): Promise<{ token: string; user_id: string; username: string; role?: string }> {
-    const data = await this.client.post<any>('/auth/login', { username, password })
-    return data as any
+  async login(username: string, password: string): Promise<LoginResponse> {
+    const data = await this.client.post<any, LoginResponse>('/auth/login', { username, password })
+    return data
   }
 
   async logout() {
@@ -64,6 +67,28 @@ class ApiService {
 
   async refreshToken() {
     return this.client.post<{ token: string }>('/auth/refresh')
+  }
+
+  // ========== TOTP 二次验证 ==========
+
+  // 生成 TOTP 密钥和 QR 码
+  async generateTOTP(): Promise<TOTPGenerateResponse> {
+    return this.client.post<any, TOTPGenerateResponse>('/auth/totp/generate')
+  }
+
+  // 启用 TOTP
+  async enableTOTP(code: string): Promise<{ status: string; message: string }> {
+    return this.client.post<any, { status: string; message: string }>('/auth/totp/enable', { code })
+  }
+
+  // 禁用 TOTP
+  async disableTOTP(code: string): Promise<{ status: string; message: string }> {
+    return this.client.post<any, { status: string; message: string }>('/auth/totp/disable', { code })
+  }
+
+  // 验证 TOTP 代码（登录时的二次验证）
+  async verifyTOTP(code: string, tmpToken: string): Promise<TOTPVerifyResponse> {
+    return this.client.post<any, TOTPVerifyResponse>('/auth/totp/verify', { code, tmp_token: tmpToken })
   }
 
   // ========== Agent ==========

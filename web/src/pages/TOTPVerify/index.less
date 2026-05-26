@@ -1,0 +1,68 @@
+.totp-verify-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f2 100%);
+  padding: 24px;
+}
+
+.totp-verify-card {
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+}
+
+.totp-verify-header {
+  text-align: center;
+  margin-bottom: 32px;
+
+  .totp-icon-wrapper {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    .anticon {
+      font-size: 32px;
+      color: #fff;
+    }
+  }
+
+  .totp-title {
+    margin-bottom: 8px;
+    color: #333;
+  }
+}
+
+.totp-verify-body {
+  margin-bottom: 24px;
+
+  .totp-description {
+    display: block;
+    font-size: 14px;
+    color: #666;
+  }
+
+  .ant-input-affix-wrapper {
+    font-size: 20px;
+    letter-spacing: 4px;
+    text-align: center;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  }
+
+  .ant-btn-link {
+    padding: 0;
+  }
+}
+
+.totp-verify-footer {
+  text-align: center;
+  padding-top: 16px;
+  border-top: 1px solid #e8e8e8;
+}

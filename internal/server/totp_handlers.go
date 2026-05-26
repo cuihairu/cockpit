@@ -3,23 +3,23 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/cuihairu/cockpit/internal/auth"
+	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
 // TOTPGenerateResponse TOTP 生成响应
 type TOTPGenerateResponse struct {
-	Secret    string   `json:"secret"`
-	QRCode    string   `json:"qr_code"`
+	Secret      string   `json:"secret"`
+	QRCode      string   `json:"qr_code"`
 	BackupCodes []string `json:"backup_codes"`
 }
 
 // TOTPVerifyRequest TOTP 验证请求
 type TOTPVerifyRequest struct {
-	Code      string `json:"code"`
-	TmpToken  string `json:"tmp_token,omitempty"`
+	Code     string `json:"code"`
+	TmpToken string `json:"tmp_token,omitempty"`
 }
 
 // TOTPVerifyResponse TOTP 验证响应
@@ -40,6 +40,15 @@ type TOTPEnableRequest struct {
 type TOTPDisableRequest struct {
 	Code string `json:"code"`
 }
+
+// totpTmpData TOTP 临时存储数据
+type totpTmpData struct {
+	Secret      string
+	BackupCodes []string
+}
+
+// TOTP 临时存储 (生产环境应使用 Redis)
+var totpTmpStore = make(map[string]*totpTmpData)
 
 // handleTOTPGenerate 处理 TOTP 生成请求
 func (s *Server) handleTOTPGenerate(w http.ResponseWriter, r *http.Request) {
@@ -62,35 +71,51 @@ func (s *Server) handleTOTPGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 生成 TOTP 密钥和备份码
-	secret, backupCodes, err := storage.GenerateTOTP()
+	// 生成 TOTP 密钥
+	secret, err := auth.GenerateTOTPSecret(user.Username, "Cockpit")
 	if err != nil {
 		http.Error(w, `{"error":"Failed to generate TOTP"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// 加密存储密钥（临时保存，启用时才正式写入）
-	encryptedSecret, err := storage.EncryptSecret(secret)
+	// 生成备份码
+	backupCodes, err := storage.GenerateBackupCodes()
+	if err != nil {
+		http.Error(w, `{"error":"Failed to generate backup codes"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// 加密密钥
+	encryptedSecret, err := storage.Encrypt(secret)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to encrypt secret"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// 临时保存到上下文（这里使用简化方案，生产环境应使用 Redis）
-	// 实际应用中可以将这个临时密钥存到带过期时间的存储中
-	tmpStorageKey := "totp_tmp_" + userID
-	s.totpTmpStore[tmpStorageKey] = &totpTmpData{
-		Secret:       encryptedSecret,
-		BackupCodes:  backupCodes,
-		ExpiresAt:    time.Now().Add(10 * time.Minute),
+	// 哈希备份码
+	hashedBackupCodes, err := storage.HashBackupCodes(backupCodes)
+	if err != nil {
+		http.Error(w, `{"error":"Failed to hash backup codes"}`, http.StatusInternalServerError)
+		return
 	}
 
-	// 生成 QR 码 URL（使用 Google Authenticator 格式）
-	qrCodeURL := storage.GenerateQRCodeURL(user.Username, secret)
+	// 临时保存（启用时才正式写入）
+	tmpStorageKey := "totp_tmp_" + userID
+	totpTmpStore[tmpStorageKey] = &totpTmpData{
+		Secret:      encryptedSecret,
+		BackupCodes: hashedBackupCodes,
+	}
+
+	// 生成 QR 码 URL
+	qrCodeURL, err := auth.GenerateTOTPURL(secret, user.Username, "Cockpit")
+	if err != nil {
+		http.Error(w, `{"error":"Failed to generate QR code"}`, http.StatusInternalServerError)
+		return
+	}
 
 	response := TOTPGenerateResponse{
-		Secret:     secret,
-		QRCode:     qrCodeURL,
+		Secret:      secret,
+		QRCode:      qrCodeURL,
 		BackupCodes: backupCodes,
 	}
 
@@ -120,39 +145,39 @@ func (s *Server) handleTOTPEnable(w http.ResponseWriter, r *http.Request) {
 
 	// 获取临时存储的 TOTP 数据
 	tmpStorageKey := "totp_tmp_" + userID
-	tmpData, exists := s.totpTmpStore[tmpStorageKey]
+	tmpData, exists := totpTmpStore[tmpStorageKey]
 	if !exists {
 		http.Error(w, `{"error":"TOTP setup not initiated. Please generate TOTP first."}`, http.StatusBadRequest)
 		return
 	}
 
-	// 检查是否过期
-	if time.Now().After(tmpData.ExpiresAt) {
-		delete(s.totpTmpStore, tmpStorageKey)
-		http.Error(w, `{"error":"TOTP setup expired. Please generate TOTP again."}`, http.StatusBadRequest)
+	// 解密密钥用于验证
+	secret, err := storage.Decrypt(tmpData.Secret)
+	if err != nil {
+		delete(totpTmpStore, tmpStorageKey)
+		http.Error(w, `{"error":"Invalid TOTP data"}`, http.StatusInternalServerError)
 		return
 	}
 
 	// 验证 TOTP 码
-	valid, err := storage.ValidateTOTP(tmpData.Secret, req.Code)
-	if err != nil || !valid {
+	if !auth.ValidateTOTP(secret, req.Code) {
 		http.Error(w, `{"error":"Invalid TOTP code"}`, http.StatusBadRequest)
 		return
 	}
 
 	// 启用 TOTP
-	now := time.Now()
-	err = s.db.EnableTOTP(userID, tmpData.Secret, tmpData.BackupCodes, &now)
+	err = s.db.EnableTOTP(userID, tmpData.Secret, tmpData.BackupCodes)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to enable TOTP"}`, http.StatusInternalServerError)
 		return
 	}
 
 	// 清除临时数据
-	delete(s.totpTmpStore, tmpStorageKey)
+	delete(totpTmpStore, tmpStorageKey)
 
 	// 记录审计日志
-	s.audit.LogTOTPEnabled(userID, s.getClientIP(r), r.UserAgent())
+	user, _ := s.db.GetUserByID(userID)
+	s.audit.LogSuccess(user.Username, audit.ActionTOTPEnable, "totp", userID, nil, s.getClientIP(r), r.UserAgent())
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "TOTP enabled successfully"})
@@ -195,18 +220,13 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	isValid, isBackup, err := s.db.ValidateTOTPCode(userID, req.Code)
 	if err != nil || !isValid {
 		// 记录失败的审计日志
-		s.audit.LogTOTPFailed(userID, s.getClientIP(r), r.UserAgent())
+		s.audit.LogFailure(user.Username, audit.ActionTOTPVerify, "totp", userID, nil, s.getClientIP(r), r.UserAgent())
 		http.Error(w, `{"error":"Invalid TOTP code"}`, http.StatusUnauthorized)
 		return
 	}
 
 	// 消耗临时令牌
 	auth.ConsumeTmpToken(req.TmpToken)
-
-	// 如果是备份码，标记为已使用
-	if isBackup {
-		s.db.MarkBackupCodeUsed(userID, req.Code)
-	}
 
 	// 生成认证令牌
 	token, err := auth.GenerateToken(user.ID, user.Username, user.Role)
@@ -216,7 +236,7 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 记录成功的审计日志
-	s.audit.LogTOTPVerified(userID, s.getClientIP(r), r.UserAgent(), isBackup)
+	s.audit.LogSuccess(user.Username, audit.ActionTOTPVerify, "totp", userID, map[string]bool{"used_backup": isBackup}, s.getClientIP(r), r.UserAgent())
 
 	response := TOTPVerifyResponse{
 		Token:     token,
@@ -278,21 +298,8 @@ func (s *Server) handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 记录审计日志
-	s.audit.LogTOTPDisabled(userID, s.getClientIP(r), r.UserAgent())
+	s.audit.LogSuccess(user.Username, audit.ActionTOTPDisable, "totp", userID, nil, s.getClientIP(r), r.UserAgent())
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "TOTP disabled successfully"})
 }
-
-// validateTmpToken 验证临时令牌（从 auth 包导出的函数）
-// 这个函数已在 auth/handler.go 中实现，这里只需要调用它
-
-// totpTmpData TOTP 临时存储数据
-type totpTmpData struct {
-	Secret      string
-	BackupCodes string
-	ExpiresAt   time.Time
-}
-
-// totpTmpStore TOTP 临时存储
-var totpTmpStore = make(map[string]*totpTmpData)

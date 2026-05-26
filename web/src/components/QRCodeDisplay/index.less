@@ -1,0 +1,41 @@
+.qrcode-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+
+  .qrcode-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+  }
+
+  .qrcode-canvas-wrapper {
+    position: relative;
+    border: 1px solid #e8e8e8;
+    border-radius: 8px;
+    padding: 16px;
+    background: #fff;
+  }
+
+  .qrcode-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .qrcode-error {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #ff4d4f;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  canvas {
+    display: block;
+  }
+}

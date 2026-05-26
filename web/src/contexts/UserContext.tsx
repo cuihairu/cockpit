@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { api } from '@/services/api'
+import type { LoginResponse } from '@/types'
 
 interface User {
   id: string
@@ -11,9 +12,20 @@ interface User {
 interface UserContextType {
   user: User | null
   token: string | null
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<LoginResponse>
   logout: () => void
   updateUser: (user: User) => void
+}
+
+// TOTP 要求错误类
+export class TOTPRequiredError extends Error {
+  public response: LoginResponse
+
+  constructor(response: LoginResponse) {
+    super('TOTP verification required')
+    this.name = 'TOTPRequiredError'
+    this.response = response
+  }
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined)
@@ -40,9 +52,19 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [])
 
-  const login = async (username: string, password: string) => {
+  const login = async (username: string, password: string): Promise<LoginResponse> => {
     const res = await api.login(username, password)
+
+    // 如果需要 TOTP 验证，抛出特殊错误
+    if (res.requires_totp) {
+      throw new TOTPRequiredError(res)
+    }
+
     const { token, user_id, username: userName } = res
+
+    if (!token) {
+      throw new Error('No token returned from login')
+    }
 
     localStorage.setItem('token', token)
     localStorage.setItem('userId', user_id)
@@ -55,6 +77,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       username: userName,
       role: res.role || 'user',
     })
+
+    return res
   }
 
   const logout = () => {
