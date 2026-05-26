@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -116,4 +117,20 @@ func (c *Client) IsEventEnabled(eventType string) bool {
 	}
 
 	return false
+}
+
+// SendAlertNonBlocking 非阻塞发送警告（用于异步场景）
+func SendAlertNonBlocking(client *Client, alert *storage.Alert, cfg *config.NotificationConfig) {
+	if client == nil || !client.IsEnabled() {
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := client.SendAlert(ctx, alert); err != nil {
+			log.Printf("[notification] failed to send alert: %v", err)
+		}
+	}()
 }

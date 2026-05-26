@@ -503,3 +503,153 @@ func TestClientSendAlertNoMatch(t *testing.T) {
 		t.Fatalf("SendAlert() should not return error for non-matching alert, got %v", err)
 	}
 }
+
+func TestSendAlertNonBlocking(t *testing.T) {
+	tests := []struct {
+		name           string
+		client         *Client
+		alert          *storage.Alert
+		cfg            *config.NotificationConfig
+		expectPanic    bool
+		expectedStatus int
+	}{
+		{
+			name:        "nil client does not panic",
+			client:      nil,
+			alert:       &storage.Alert{Type: "error", Title: "test"},
+			cfg:         &config.NotificationConfig{},
+			expectPanic: false,
+		},
+		{
+			name: "disabled client does not send",
+			client: NewClient(&config.NotificationConfig{
+				Enabled: false,
+			}),
+			alert: &storage.Alert{Type: "error", Title: "test"},
+			cfg:   &config.NotificationConfig{},
+			expectPanic: false,
+		},
+		{
+			name: "successful non-blocking send",
+			client: func() *Client {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusCreated)
+				}))
+				t.Cleanup(server.Close)
+
+				return NewClient(&config.NotificationConfig{
+					Enabled: true,
+					Herald: &config.HeraldConfig{
+						BaseURL: server.URL,
+						Timeout: 5 * time.Second,
+					},
+					Events: map[string]*config.EventConfig{
+						"cert_expired": {
+							Type:    "certificate.expired",
+							Enabled: true,
+						},
+					},
+				})
+			}(),
+			alert: &storage.Alert{
+				Type:         "error",
+				Title:        "证书已过期",
+				Message:      "域名 example.com 的证书已过期",
+				ResourceType: strPtr("certificate"),
+			},
+			cfg:            &config.NotificationConfig{},
+			expectPanic:    false,
+			expectedStatus: http.StatusCreated,
+		},
+		{
+			name: "non-blocking returns immediately",
+			client: func() *Client {
+				// 创建一个会延迟响应的服务器
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					time.Sleep(100 * time.Millisecond)
+					w.WriteHeader(http.StatusCreated)
+				}))
+				t.Cleanup(server.Close)
+
+				return NewClient(&config.NotificationConfig{
+					Enabled: true,
+					Herald: &config.HeraldConfig{
+						BaseURL: server.URL,
+						Timeout: 5 * time.Second,
+					},
+					Events: map[string]*config.EventConfig{
+						"cert_expired": {
+							Type:    "certificate.expired",
+							Enabled: true,
+						},
+					},
+				})
+			}(),
+			alert: &storage.Alert{
+				Type:         "error",
+				Title:        "证书已过期",
+				ResourceType: strPtr("certificate"),
+			},
+			cfg:         &config.NotificationConfig{},
+			expectPanic: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 测试不会 panic
+			defer func() {
+				if r := recover(); r != nil && !tt.expectPanic {
+					t.Errorf("SendAlertNonBlocking() panicked unexpectedly: %v", r)
+				}
+			}()
+
+			start := time.Now()
+			SendAlertNonBlocking(tt.client, tt.alert, tt.cfg)
+			elapsed := time.Since(start)
+
+			// 非阻塞调用应该几乎立即返回（< 10ms）
+			if elapsed > 50*time.Millisecond {
+				t.Errorf("SendAlertNonBlocking() took too long: %v, expected < 50ms", elapsed)
+			}
+
+			// 等待异步操作完成（仅用于验证，实际使用中不需要）
+			time.Sleep(200 * time.Millisecond)
+		})
+	}
+}
+
+func TestSendAlertNonBlockingError(t *testing.T) {
+	// 创建一个会返回错误的服务器
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal server error"))
+	}))
+	defer server.Close()
+
+	client := NewClient(&config.NotificationConfig{
+		Enabled: true,
+		Herald: &config.HeraldConfig{
+			BaseURL: server.URL,
+			Timeout: 1 * time.Second,
+		},
+		Events: map[string]*config.EventConfig{
+			"cert_expired": {
+				Type:    "certificate.expired",
+				Enabled: true,
+			},
+		},
+	})
+
+	alert := &storage.Alert{
+		Type:         "error",
+		Title:        "证书已过期",
+		ResourceType: strPtr("certificate"),
+	}
+
+	// 函数不应该 panic，错误应该被记录到日志
+	SendAlertNonBlocking(client, alert, &config.NotificationConfig{})
+
+	// 等待异步操作完成
+	time.Sleep(100 * time.Millisecond)
+}
