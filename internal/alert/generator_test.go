@@ -19,7 +19,7 @@ func testDB(t *testing.T) *storage.DB {
 }
 
 func TestNewGenerator(t *testing.T) {
-	g := NewGenerator(nil)
+	g := NewGenerator(nil, nil, nil)
 	if g == nil {
 		t.Fatal("NewGenerator() should not return nil")
 	}
@@ -27,7 +27,7 @@ func TestNewGenerator(t *testing.T) {
 
 func TestNewGeneratorWithDB(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 	if g == nil {
 		t.Fatal("NewGenerator() should not return nil")
 	}
@@ -38,13 +38,13 @@ func TestNewGeneratorWithDB(t *testing.T) {
 
 func TestCheckAllChecksEmptyDB(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 	g.CheckAllChecks()
 }
 
 func TestCheckExpiringCertificates7Days(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	cert := &storage.Certificate{
 		DomainName: "example.com",
@@ -71,7 +71,7 @@ func TestCheckExpiringCertificates7Days(t *testing.T) {
 
 func TestCheckExpiringCertificates30Days(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	cert := &storage.Certificate{
 		DomainName: "example20.com",
@@ -98,7 +98,7 @@ func TestCheckExpiringCertificates30Days(t *testing.T) {
 
 func TestCheckExpiringCertificatesExpired(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	cert := &storage.Certificate{
 		DomainName: "expired.com",
@@ -122,7 +122,7 @@ func TestCheckExpiringCertificatesExpired(t *testing.T) {
 
 func TestCheckExpiringCertificatesNotExpiring(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	cert := &storage.Certificate{
 		DomainName: "safe.com",
@@ -146,7 +146,7 @@ func TestCheckExpiringCertificatesNotExpiring(t *testing.T) {
 
 func TestCheckExpiringCertificatesNonValid(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	cert := &storage.Certificate{
 		DomainName: "revoked.com",
@@ -170,7 +170,7 @@ func TestCheckExpiringCertificatesNonValid(t *testing.T) {
 
 func TestCheckDownServices(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	svc := &storage.Service{
 		Name:   "nginx",
@@ -197,7 +197,7 @@ func TestCheckDownServices(t *testing.T) {
 
 func TestCheckDownServicesRunning(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	svc := &storage.Service{
 		Name:   "nginx",
@@ -221,7 +221,7 @@ func TestCheckDownServicesRunning(t *testing.T) {
 
 func TestCheckOfflineAgents(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	agent := &storage.Agent{
 		Hostname: "test-host",
@@ -248,7 +248,7 @@ func TestCheckOfflineAgents(t *testing.T) {
 
 func TestCheckOfflineAgentsOnline(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	agent := &storage.Agent{
 		Hostname: "online-host",
@@ -272,7 +272,7 @@ func TestCheckOfflineAgentsOnline(t *testing.T) {
 
 func TestCheckExpiredDomains(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	domain := &storage.Domain{
 		Domain: "expired-domain.com",
@@ -298,7 +298,7 @@ func TestCheckExpiredDomains(t *testing.T) {
 
 func TestCheckExpiredDomainsActive(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	domain := &storage.Domain{
 		Domain: "active-domain.com",
@@ -320,14 +320,14 @@ func TestCheckExpiredDomainsActive(t *testing.T) {
 }
 
 func TestCheckDiskSpaceNoPanic(t *testing.T) {
-	g := NewGenerator(nil)
+	g := NewGenerator(nil, nil, nil)
 	g.CheckDiskSpace(80)
 	g.CheckDiskSpace(0)
 	g.CheckDiskSpace(100)
 }
 
 func TestCheckMemoryUsageNoPanic(t *testing.T) {
-	g := NewGenerator(nil)
+	g := NewGenerator(nil, nil, nil)
 	g.CheckMemoryUsage(80)
 	g.CheckMemoryUsage(0)
 	g.CheckMemoryUsage(100)
@@ -335,7 +335,7 @@ func TestCheckMemoryUsageNoPanic(t *testing.T) {
 
 func TestCleanupOldAlerts(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	oldAlert := &storage.Alert{
 		Type:    "info",
@@ -353,7 +353,7 @@ func TestCleanupOldAlerts(t *testing.T) {
 
 func TestMultipleChecksIdempotent(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	svc := &storage.Service{Name: "api-server", Type: "api", Status: "down"}
 	db.UpsertService(svc)
@@ -372,7 +372,7 @@ func TestMultipleChecksIdempotent(t *testing.T) {
 
 func TestCheckAllChecksMixed(t *testing.T) {
 	db := testDB(t)
-	g := NewGenerator(db)
+	g := NewGenerator(db, nil, nil)
 
 	svc := &storage.Service{Name: "web", Type: "http", Status: "down"}
 	db.UpsertService(svc)

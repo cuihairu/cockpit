@@ -5,17 +5,25 @@ import (
 	"log"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/config"
+	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
 // Generator 警告生成器
 type Generator struct {
-	db *storage.DB
+	db              *storage.DB
+	notification    *notification.Client
+	notificationCfg *config.NotificationConfig
 }
 
 // NewGenerator 创建警告生成器
-func NewGenerator(db *storage.DB) *Generator {
-	return &Generator{db: db}
+func NewGenerator(db *storage.DB, notif *notification.Client, notifCfg *config.NotificationConfig) *Generator {
+	return &Generator{
+		db:              db,
+		notification:    notif,
+		notificationCfg: notifCfg,
+	}
 }
 
 // CheckAllChecks 检查所有警告条件
@@ -147,6 +155,9 @@ func (g *Generator) createAlertIfNotExists(alertType, title, message, resourceID
 	if err := g.db.CreateAlert(alert); err != nil {
 		log.Printf("Failed to create alert: %v", err)
 	}
+
+	// 发送外部通知（非阻塞）
+	notification.SendAlertNonBlocking(g.notification, alert, g.notificationCfg)
 }
 
 // CleanupOldAlerts 清理旧警告
