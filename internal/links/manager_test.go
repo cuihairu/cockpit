@@ -661,3 +661,84 @@ func TestLinkCopyBehavior(t *testing.T) {
 		t.Error("Modifying returned link should not affect stored link")
 	}
 }
+
+func TestManagerLoadAndSave(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "links.json")
+
+	m1, err := NewManager(Config{StoragePath: filePath})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	m1.Add(&Link{Title: "Link1", URL: "https://example1.com", Category: "tools"})
+	m1.Add(&Link{Title: "Link2", URL: "https://example2.com", Category: "services", Tags: []string{"tag1"}})
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("file should exist after save: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("file should not be empty")
+	}
+
+	m2, err := NewManager(Config{StoragePath: filePath})
+	if err != nil {
+		t.Fatalf("NewManager() load error = %v", err)
+	}
+
+	links := m2.List()
+	if len(links) != 2 {
+		t.Errorf("loaded links count = %d, want 2", len(links))
+	}
+
+	cats := m2.ListCategories()
+	if len(cats) == 0 {
+		t.Error("categories should be loaded from file")
+	}
+}
+
+func TestManagerLoadInvalidJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "links.json")
+	os.WriteFile(filePath, []byte("not json"), 0644)
+
+	_, err := NewManager(Config{StoragePath: filePath})
+	if err == nil {
+		t.Error("expected error for invalid JSON file")
+	}
+}
+
+func TestManagerSaveNoFilePath(t *testing.T) {
+	m := &Manager{
+		links:      make(map[string]*Link),
+		categories: make(map[string]*Category),
+	}
+	err := m.save()
+	if err != nil {
+		t.Errorf("save() with no file path should return nil: %v", err)
+	}
+}
+
+func TestManagerLoadNoFilePath(t *testing.T) {
+	m := &Manager{
+		links:      make(map[string]*Link),
+		categories: make(map[string]*Category),
+	}
+	err := m.load()
+	if err != nil {
+		t.Errorf("load() with no file path should return nil: %v", err)
+	}
+}
+
+func TestManagerSaveCreatesDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "subdir", "links.json")
+
+	m, _ := NewManager(Config{StoragePath: filePath})
+	m.Add(&Link{Title: "Test", URL: "https://example.com"})
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		t.Error("save() should create parent directories")
+	}
+}

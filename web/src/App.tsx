@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, Spin } from 'antd'
 import ProLayout, { ProLayoutProps } from '@ant-design/pro-layout'
 import { Button, Dropdown, Avatar, Space, Input, ConfigProvider } from 'antd'
 import {
@@ -13,22 +13,20 @@ import {
   QuestionCircleOutlined,
   AppstoreOutlined,
 } from '@ant-design/icons'
-import Dashboard from './pages/Dashboard'
-import Resources from './pages/Resources'
-import Agents from './pages/Agents'
-import Settings from './pages/Settings'
-import Profile from './pages/Profile'
-import AuditLogs from './pages/AuditLogs'
-import Monitor from './pages/Monitor'
 import Login from './pages/Login'
-import TOTPVerify from './pages/TOTPVerify'
-import ForgotPassword from './pages/ForgotPassword'
-import ResetPassword from './pages/ResetPassword'
-import SetupTOTP from './pages/SetupTOTP'
 import NotificationDropdown from './components/Notifications'
 import { UserProvider, useUser } from './contexts/UserContext'
 import logo from '@/assets/logo.svg'
 import './App.less'
+
+// Route-level code splitting
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Resources = lazy(() => import('./pages/Resources'))
+const Agents = lazy(() => import('./pages/Agents'))
+const Settings = lazy(() => import('./pages/Settings'))
+const Profile = lazy(() => import('./pages/Profile'))
+const AuditLogs = lazy(() => import('./pages/AuditLogs'))
+const Monitor = lazy(() => import('./pages/Monitor'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +36,13 @@ const queryClient = new QueryClient({
     },
   },
 })
+
+// Page loading fallback
+const PageLoading = () => (
+  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+    <Spin size="large" />
+  </div>
+)
 
 // 路由配置
 const routeConfig: ProLayoutProps['route'] = {
@@ -118,13 +123,12 @@ const MainLayout = () => {
     colorWeak: boolean
   }>({
     fixSiderbar: true,
-    layout: 'mix', // 阿里云风格：mix 布局
+    layout: 'mix',
     theme: 'light',
     colorWeak: false,
   })
   const { user, logout } = useUser()
 
-  // 监听路由变化
   useEffect(() => {
     setPathname(location.pathname)
   }, [location.pathname])
@@ -134,7 +138,6 @@ const MainLayout = () => {
     window.location.href = '/login'
   }
 
-  // 用户菜单
   const userMenuItems = [
     {
       key: 'profile',
@@ -163,7 +166,6 @@ const MainLayout = () => {
     },
   ]
 
-  // 右侧内容区域
   const RightContent = () => (
     <Space size="middle">
       <Button
@@ -185,7 +187,6 @@ const MainLayout = () => {
     </Space>
   )
 
-  // 头部内容渲染（搜索框）
   const HeaderContent = () => (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
       <Input.Search
@@ -206,19 +207,16 @@ const MainLayout = () => {
       contentWidth="Fluid"
       location={{ pathname }}
       route={routeConfig}
-      // 阿里云风格配置
       fixedHeader
       siderWidth={208}
       headerContentRender={HeaderContent}
       rightContentRender={RightContent}
-      // 顶部主菜单配置
       headerTitleRender={(logo, title) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {logo}
           {title}
         </div>
       )}
-      // 菜单点击处理
       menuItemRender={(menuItemProps, defaultDom) => {
         return (
           <a
@@ -232,7 +230,6 @@ const MainLayout = () => {
           </a>
         )
       }}
-      // 面包屑渲染
       breadcrumbRender={(routers = []) => {
         return [
           {
@@ -242,7 +239,6 @@ const MainLayout = () => {
           ...routers,
         ]
       }}
-      // 面包屑项渲染
       itemRender={(route, _params, routes, _paths) => {
         const first = routes.indexOf(route) === 0
         return first ? (
@@ -253,20 +249,20 @@ const MainLayout = () => {
           <span>{route.breadcrumbName}</span>
         )
       }}
-      // 隐藏菜单头部的 logo 区域（因为顶部已经有了）
       menuHeaderRender={false}
     >
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/resources" element={<Resources />} />
-        <Route path="/resources/*" element={<Resources />} />
-        <Route path="/agents" element={<Agents />} />
-        <Route path="/monitor" element={<Monitor />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/settings/setup-totp" element={<SetupTOTP />} />
-        <Route path="/settings/audit-logs" element={<AuditLogs />} />
-        <Route path="/profile" element={<Profile />} />
-      </Routes>
+      <Suspense fallback={<PageLoading />}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/resources" element={<Resources />} />
+          <Route path="/resources/*" element={<Resources />} />
+          <Route path="/agents" element={<Agents />} />
+          <Route path="/monitor" element={<Monitor />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/settings/audit-logs" element={<AuditLogs />} />
+          <Route path="/profile" element={<Profile />} />
+        </Routes>
+      </Suspense>
     </ProLayout>
   )
 }
@@ -276,7 +272,7 @@ const App = () => {
     <ConfigProvider
       theme={{
         token: {
-          colorPrimary: '#165DFF', // 阿里云蓝
+          colorPrimary: '#165DFF',
         },
       }}
     >
@@ -286,9 +282,6 @@ const App = () => {
             <BrowserRouter>
               <Routes>
                 <Route path="/login" element={<Login />} />
-                <Route path="/forgot-password" element={<ForgotPassword />} />
-                <Route path="/reset-password" element={<ResetPassword />} />
-                <Route path="/totp-verify" element={<TOTPVerify />} />
                 <Route
                   path="/*"
                   element={

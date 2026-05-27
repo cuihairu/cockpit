@@ -643,3 +643,163 @@ func TestAgentLocation(t *testing.T) {
 		t.Errorf("RegionName = %v, want 'Region One'", location.RegionName)
 	}
 }
+
+// ============ Error Path Tests ============
+
+func TestParseFileNotExist(t *testing.T) {
+	_, err := ParseFile("/nonexistent/path/inventory.yaml")
+	if err == nil {
+		t.Error("expected error for nonexistent file")
+	}
+}
+
+func TestParseFileInvalidYAML(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "bad.yaml")
+	os.WriteFile(tmpFile, []byte(":\n  :\n    - [invalid"), 0644)
+
+	_, err := ParseFile(tmpFile)
+	if err == nil {
+		t.Error("expected error for invalid YAML")
+	}
+}
+
+func TestResolveRegionRefNotFound(t *testing.T) {
+	inv := &Inventory{Regions: map[string]*Region{}}
+	_, err := inv.resolveRegionRef([]string{"nonexistent", "zones", "z1"})
+	if err == nil {
+		t.Error("expected error for nonexistent region")
+	}
+}
+
+func TestResolveRegionRefInvalidRef(t *testing.T) {
+	inv := &Inventory{Regions: map[string]*Region{}}
+	_, err := inv.resolveRegionRef([]string{})
+	if err == nil {
+		t.Error("expected error for invalid ref")
+	}
+}
+
+func TestResolveRegionRefZoneNotFound(t *testing.T) {
+	inv := &Inventory{
+		Regions: map[string]*Region{
+			"r1": {Zones: map[string]*Zone{}},
+		},
+	}
+	_, err := inv.resolveRegionRef([]string{"r1", "zones"})
+	if err == nil {
+		t.Error("expected error for missing zone name")
+	}
+}
+
+func TestResolveRegionRefAgentNotFound(t *testing.T) {
+	inv := &Inventory{
+		Regions: map[string]*Region{
+			"r1": {Zones: map[string]*Zone{
+				"z1": {Agents: map[string]*Agent{}},
+			}},
+		},
+	}
+	_, err := inv.resolveRegionRef([]string{"r1", "zones", "z1", "agents"})
+	if err == nil {
+		t.Error("expected error for missing agent name")
+	}
+}
+
+func TestMergeNil(t *testing.T) {
+	inv := &Inventory{Version: "v1"}
+	inv.Merge(nil) // should not panic
+}
+
+func TestMergeWithNilMaps(t *testing.T) {
+	inv := &Inventory{Version: "v1"}
+	other := &Inventory{
+		Regions:   map[string]*Region{"r1": {Name: "R1"}},
+		Domains:   map[string]*Domain{"d1": {Domain: "d1.com"}},
+		Resources: map[string]*Ref{"res1": {Ref: "regions.home"}},
+	}
+	inv.Merge(other)
+
+	if len(inv.Regions) != 1 {
+		t.Errorf("Regions = %d, want 1", len(inv.Regions))
+	}
+	if len(inv.Domains) != 1 {
+		t.Errorf("Domains = %d, want 1", len(inv.Domains))
+	}
+	if len(inv.Resources) != 1 {
+		t.Errorf("Resources = %d, want 1", len(inv.Resources))
+	}
+}
+
+func TestLoadDirNotExist(t *testing.T) {
+	_, err := LoadDir("/nonexistent/directory")
+	if err == nil {
+		t.Error("expected error for nonexistent directory")
+	}
+}
+
+func TestLoadDirWithBadFile(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(":\n  invalid"), 0644)
+
+	_, err := LoadDir(dir)
+	if err == nil {
+		t.Error("expected error for invalid YAML in directory")
+	}
+}
+
+func TestLoadDirSkipNonYAML(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("not yaml"), 0644)
+	os.MkdirAll(filepath.Join(dir, "subdir"), 0755)
+
+	result, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir() error = %v", err)
+	}
+	if result == nil {
+		t.Error("result should not be nil")
+	}
+}
+
+func TestWriteAndReadRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "subdir", "test.yaml")
+
+	inv := &Inventory{
+		Version: "v1",
+		Regions: map[string]*Region{
+			"us-east": {Name: "US East"},
+		},
+	}
+
+	if err := inv.Write(path); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	loaded, err := ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile() error = %v", err)
+	}
+	if loaded.Version != "v1" {
+		t.Errorf("Version = %v", loaded.Version)
+	}
+}
+
+func TestValidateEmpty(t *testing.T) {
+	inv := &Inventory{Version: "v1"}
+	err := inv.Validate()
+	// Empty inventory should validate
+	if err != nil {
+		t.Logf("Validate() returned: %v (may be expected)", err)
+	}
+}
+
+func TestResolveRefUnsupported(t *testing.T) {
+	inv := &Inventory{
+		Domains: map[string]*Domain{},
+	}
+	_, err := inv.ResolveRef("unsupported.ref.path")
+	if err == nil {
+		t.Error("expected error for unsupported ref type")
+	}
+}

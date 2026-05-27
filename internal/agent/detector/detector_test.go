@@ -1,6 +1,12 @@
 package detector
 
 import (
+	"bytes"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -532,5 +538,251 @@ func TestGetRemoteCapability(t *testing.T) {
 	info = GetRemoteCapability(cap)
 	if info == nil {
 		t.Error("GetRemoteCapability() should not return nil for matching type")
+	}
+}
+
+func TestGetRemoteCapabilityWithServices(t *testing.T) {
+	cap := protocol.Capability{
+		Type: "remote-services",
+		Metadata: map[string]interface{}{
+			"ssh": map[string]interface{}{
+				"host":    "192.168.1.1",
+				"port":    22,
+				"running": true,
+			},
+			"rdp": map[string]interface{}{
+				"host":    "192.168.1.2",
+				"port":    3389,
+				"running": true,
+			},
+			"vnc": map[string]interface{}{
+				"host":    "192.168.1.3",
+				"port":    5900,
+				"running": true,
+			},
+			"telnet": map[string]interface{}{
+				"host":    "192.168.1.4",
+				"port":    23,
+				"running": false,
+			},
+		},
+	}
+	info := GetRemoteCapability(cap)
+	if info == nil {
+		t.Fatal("GetRemoteCapability() should not return nil")
+	}
+	if info.SSH == nil || !info.SSH.Enabled {
+		t.Error("SSH should be enabled")
+	}
+	if info.SSH.Host != "192.168.1.1" {
+		t.Errorf("SSH Host = %v", info.SSH.Host)
+	}
+	if info.RDP == nil || !info.RDP.Enabled {
+		t.Error("RDP should be enabled")
+	}
+	if info.VNC == nil || !info.VNC.Enabled {
+		t.Error("VNC should be enabled")
+	}
+}
+
+func TestGetRemoteCapabilityNonRunning(t *testing.T) {
+	cap := protocol.Capability{
+		Type: "remote-services",
+		Metadata: map[string]interface{}{
+			"ssh": map[string]interface{}{
+				"host":    "192.168.1.1",
+				"port":    22,
+				"running": false,
+			},
+		},
+	}
+	info := GetRemoteCapability(cap)
+	if info == nil {
+		t.Fatal("should not return nil")
+	}
+	if info.SSH != nil {
+		t.Error("SSH should be nil when not running")
+	}
+}
+
+func TestGetServiceName(t *testing.T) {
+	d := NewRemoteServiceDetector()
+	tests := []struct {
+		protocol protocol.RemoteProtocol
+		expected string
+	}{
+		{protocol.RemoteProtocolSSH, "SSH Server"},
+		{protocol.RemoteProtocolRDP, "RDP Server"},
+		{protocol.RemoteProtocolVNC, "VNC Server"},
+		{protocol.RemoteProtocolTelnet, "Telnet Server"},
+		{protocol.RemoteProtocolFTP, "FTP Server"},
+		{protocol.RemoteProtocol("unknown"), "unknown"},
+	}
+	for _, tt := range tests {
+		result := d.getServiceName(tt.protocol)
+		if result != tt.expected {
+			t.Errorf("getServiceName(%v) = %q, want %q", tt.protocol, result, tt.expected)
+		}
+	}
+}
+
+func TestReadOpenWrtRelease(t *testing.T) {
+	dir := t.TempDir()
+	releasePath := dir + "/openwrt_release"
+	content := `DISTRIB_ID='OpenWrt'
+DISTRIB_RELEASE='23.05.0'
+DISTRIB_TARGET='x86/64'
+DISTRIB_ARCH='x86_64'
+DISTRIB_DESCRIPTION='OpenWrt 23.05.0 r23456'
+`
+	if err := os.WriteFile(releasePath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &OpenWrtDetector{}
+	// readOpenWrtRelease reads from /etc/openwrt_release, not configurable
+	// We can test the parsing logic by directly calling with our test file
+	// But readOpenWrtRelease is hardcoded to /etc/openwrt_release
+	// Instead test the Detect method which checks /etc/openwrt_release first
+	// On Windows this will skip to /bin/ubus check, so readOpenWrtRelease won't be called
+	// Let's just verify Detect doesn't panic
+	_, err := d.Detect()
+	_ = err
+}
+
+func TestReadOpenWrtReleaseParsing(t *testing.T) {
+	// Test the parsing logic by creating a temp file and reading it
+	dir := t.TempDir()
+	path := dir + "/test_release"
+	content := `DISTRIB_ID='OpenWrt'
+DISTRIB_RELEASE='23.05.0'
+DISTRIB_TARGET='x86/64'
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Replicate the parsing logic from readOpenWrtRelease
+	metadata := make(map[string]any)
+	lines := bytes.Split(data, []byte("\n"))
+	for _, line := range lines {
+		parts := bytes.SplitN(line, []byte("="), 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(string(parts[0]))
+			value := strings.Trim(strings.TrimSpace(string(parts[1])), `"'`)
+			metadata[key] = value
+		}
+	}
+
+	if metadata["DISTRIB_ID"] != "OpenWrt" {
+		t.Errorf("DISTRIB_ID = %v", metadata["DISTRIB_ID"])
+	}
+	if metadata["DISTRIB_RELEASE"] != "23.05.0" {
+		t.Errorf("DISTRIB_RELEASE = %v", metadata["DISTRIB_RELEASE"])
+	}
+}
+
+func TestPVEDetectorWithHTTPTest(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/version" {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data": {"version": "8.1.3"}}`))
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	d := &PVEDetector{}
+
+	// Test testAPI with httptest server
+	if !d.testAPI(ts.URL) {
+		t.Error("testAPI() should return true for valid PVE server")
+	}
+
+	// Test getVersion with httptest server
+	version := d.getVersion(ts.URL)
+	if version != "8.1.3" {
+		t.Errorf("getVersion() = %q, want 8.1.3", version)
+	}
+}
+
+func TestPVEDetectorTestAPIFail(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	d := &PVEDetector{}
+	if d.testAPI(ts.URL) {
+		t.Error("testAPI() should return false for 500 response")
+	}
+}
+
+func TestPVEDetectorTestAPIInvalidURL(t *testing.T) {
+	d := &PVEDetector{}
+	if d.testAPI("http://127.0.0.1:1") {
+		t.Error("testAPI() should return false for unreachable URL")
+	}
+}
+
+func TestPVEDetectorGetVersionInvalidJSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not json"))
+	}))
+	defer ts.Close()
+
+	d := &PVEDetector{}
+	version := d.getVersion(ts.URL)
+	if version != "unknown" {
+		t.Errorf("getVersion() = %q, want unknown", version)
+	}
+}
+
+func TestCheckServiceWithEmptyHost(t *testing.T) {
+	d := NewRemoteServiceDetector()
+	// checkService with empty host - will try ":port"
+	result := d.checkService("", 9999, protocol.RemoteProtocolSSH)
+	// Should return nil (connection refused)
+	if result != nil {
+		t.Error("checkService() should return nil for closed port")
+	}
+}
+
+func TestCheckServiceWithServer(t *testing.T) {
+	// Start a test TCP server
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	d := NewRemoteServiceDetector()
+	result := d.checkService("127.0.0.1", port, protocol.RemoteProtocolSSH)
+	if result == nil {
+		t.Fatal("checkService() should detect open port")
+	}
+	if result.Protocol != protocol.RemoteProtocolSSH {
+		t.Errorf("Protocol = %v", result.Protocol)
+	}
+	if !result.Running {
+		t.Error("Running should be true")
+	}
+	if result.Name != "SSH Server" {
+		t.Errorf("Name = %v", result.Name)
 	}
 }

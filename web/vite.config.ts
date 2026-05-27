@@ -26,7 +26,32 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    // 构建后由 Go Server 托管
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react-dom') || id.includes('react-router') || id.endsWith('react.js')) {
+              return 'vendor-react'
+            }
+            if (id.includes('@ant-design') || id.includes('antd') || id.includes('@rc-component')) {
+              return 'vendor-antd'
+            }
+            if (id.includes('@ant-design/charts') || id.includes('@antv')) {
+              return 'vendor-chart'
+            }
+            if (id.includes('@xterm')) {
+              return 'vendor-xterm'
+            }
+            if (id.includes('@novnc')) {
+              return 'vendor-novnc'
+            }
+            if (id.includes('echarts') || id.includes('zrender')) {
+              return 'vendor-echarts'
+            }
+          }
+        },
+      },
+    },
   },
 })

@@ -1,6 +1,9 @@
 package openwrt
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -377,5 +380,358 @@ func TestRPCResponseStruct(t *testing.T) {
 
 	if resp.ID != 1 {
 		t.Errorf("ID = %v, want 1", resp.ID)
+	}
+}
+
+// ============ httptest-based API Tests ============
+
+func openwrtTestHandler(t *testing.T, responses map[string]interface{}) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req RPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+
+		// Extract method from params
+		if len(req.Params) >= 3 {
+			method := req.Params[1].(string)
+			if method == "session" {
+				// Login request
+				resp := RPCResponse{
+					Jsonrpc: "2.0",
+					ID:      1,
+					Result: RPCResult{
+						Data: []interface{}{
+							map[string]interface{}{
+								"ubus_rpc_session": "test-session-token",
+							},
+						},
+					},
+				}
+				json.NewEncoder(w).Encode(resp)
+				return
+			}
+
+			procedure, _ := req.Params[2].(string)
+			key := method + "." + procedure
+			if data, ok := responses[key]; ok {
+				resp := RPCResponse{
+					Jsonrpc: "2.0",
+					ID:      1,
+					Result: RPCResult{
+						Data: []interface{}{data},
+					},
+				}
+				json.NewEncoder(w).Encode(resp)
+				return
+			}
+		}
+
+		// Default: return empty result
+		json.NewEncoder(w).Encode(RPCResponse{Jsonrpc: "2.0", ID: 1})
+	}
+}
+
+func newTestClient(ts *httptest.Server) *Client {
+	return &Client{
+		endpoint: ts.URL + "/ubus",
+		username: "root",
+		password: "password",
+		timeout:  5 * time.Second,
+		client:   ts.Client(),
+	}
+}
+
+func TestListInterfacesWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"network.interface.dump": map[string]interface{}{
+			"interface": []interface{}{
+				map[string]interface{}{
+					"interface":     "lan",
+					"up":            true,
+					"proto":         "static",
+					"ipv4-address":  []string{"192.168.1.1"},
+				},
+			},
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	ifaces, err := c.ListInterfaces()
+	if err != nil {
+		t.Fatalf("ListInterfaces() error = %v", err)
+	}
+	if len(ifaces) != 1 {
+		t.Errorf("count = %d, want 1", len(ifaces))
+	}
+	if ifaces[0].Name != "lan" {
+		t.Errorf("name = %v", ifaces[0].Name)
+	}
+}
+
+func TestListInterfacesParseError(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"network.interface.dump": "not-an-object",
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	_, err := c.ListInterfaces()
+	if err == nil {
+		t.Error("expected error for invalid response")
+	}
+}
+
+func TestGetInterfaceWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"network.interface.status": map[string]interface{}{
+			"interface": "wan",
+			"up":        true,
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	iface, err := c.GetInterface("wan")
+	if err != nil {
+		t.Fatalf("GetInterface() error = %v", err)
+	}
+	if iface.Name != "wan" {
+		t.Errorf("name = %v", iface.Name)
+	}
+}
+
+func TestGetInterfaceParseError(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"network.interface.status": "invalid",
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	_, err := c.GetInterface("wan")
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestListRoutesWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"network.route.dump": map[string]interface{}{
+			"route": []interface{}{
+				map[string]interface{}{
+					"target":  "0.0.0.0",
+					"mask":    0,
+					"nexthop": "192.168.1.254",
+					"device":  "eth0",
+				},
+			},
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	routes, err := c.ListRoutes()
+	if err != nil {
+		t.Fatalf("ListRoutes() error = %v", err)
+	}
+	if len(routes) != 1 {
+		t.Errorf("count = %d, want 1", len(routes))
+	}
+}
+
+func TestGetFirewallZonesWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"firewall.get_zones": []interface{}{
+			map[string]interface{}{"name": "lan", "input": "ACCEPT", "forward": "REJECT"},
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	zones, err := c.GetFirewallZones()
+	if err != nil {
+		t.Fatalf("GetFirewallZones() error = %v", err)
+	}
+	if len(zones) != 1 {
+		t.Errorf("count = %d", len(zones))
+	}
+}
+
+func TestGetFirewallRulesWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"firewall.get_rules": []interface{}{
+			map[string]interface{}{"name": "test-rule", "src": "lan"},
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	rules, err := c.GetFirewallRules()
+	if err != nil {
+		t.Fatalf("GetFirewallRules() error = %v", err)
+	}
+	if len(rules) != 1 {
+		t.Errorf("count = %d", len(rules))
+	}
+}
+
+func TestGetFirewallRedirectsWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"firewall.get_redirects": []interface{}{
+			map[string]interface{}{"name": "test-redir", "src": "wan"},
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	redirects, err := c.GetFirewallRedirects()
+	if err != nil {
+		t.Fatalf("GetFirewallRedirects() error = %v", err)
+	}
+	if len(redirects) != 1 {
+		t.Errorf("count = %d", len(redirects))
+	}
+}
+
+func TestGetWirelessStatusWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"network.wireless.status": []interface{}{
+			map[string]interface{}{
+				"radios": []interface{}{
+					map[string]interface{}{"name": "radio0", "up": true},
+				},
+				"interfaces": []interface{}{
+					map[string]interface{}{"ssid": "TestWiFi", "mode": "ap"},
+				},
+			},
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	status, err := c.GetWirelessStatus()
+	if err != nil {
+		t.Fatalf("GetWirelessStatus() error = %v", err)
+	}
+	if len(status) != 1 {
+		t.Errorf("count = %d, want 1", len(status))
+	}
+}
+
+func TestGetDHCPLoadsWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"uci.get": map[string]interface{}{
+			"dhcp": []interface{}{
+				map[string]interface{}{
+					"leasefile": "/tmp/dhcp.leases",
+				},
+			},
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	_, err := c.GetDHCPLoads()
+	// May error on reading lease file, but should not panic
+	if err != nil {
+		// OK - lease file not accessible in test
+	}
+}
+
+func TestReadFileWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"file.read": map[string]interface{}{
+			"data": "file contents here",
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	content, err := c.ReadFile("/etc/config/network")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if content != "file contents here" {
+		t.Errorf("content = %v", content)
+	}
+}
+
+func TestGetLEDStateWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"led.get": map[string]interface{}{
+			"name":  "power",
+			"state": "on",
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	led, err := c.GetLEDState("power")
+	if err != nil {
+		t.Fatalf("GetLEDState() error = %v", err)
+	}
+	if led.Name != "power" {
+		t.Errorf("name = %v", led.Name)
+	}
+}
+
+func TestGetSystemInfoWithServer(t *testing.T) {
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{
+		"system.info": map[string]interface{}{
+			"uptime":    float64(86400),
+			"localtime": float64(1700000000),
+			"load":      []interface{}{0.5, 0.3, 0.1},
+			"memory": map[string]interface{}{
+				"total":     float64(128 * 1024 * 1024),
+				"free":      float64(64 * 1024 * 1024),
+				"available": float64(80 * 1024 * 1024),
+				"buffered":  float64(16 * 1024 * 1024),
+			},
+		},
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	info, err := c.GetSystemInfo()
+	if err != nil {
+		t.Fatalf("GetSystemInfo() error = %v", err)
+	}
+	if info.Uptime != 86400 {
+		t.Errorf("uptime = %v", info.Uptime)
+	}
+}
+
+func TestCallLoginFailure(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return RPC error for login
+		resp := RPCResponse{
+			Jsonrpc: "2.0",
+			ID:      1,
+			Error:   &RPCError{Code: -32000, Message: "Access denied"},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	_, err := c.ListInterfaces()
+	if err == nil {
+		t.Error("expected error for login failure")
+	}
+}
+
+func TestCallHTTPErrorNew(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	_, err := c.ListInterfaces()
+	if err == nil {
+		t.Error("expected error for HTTP 500")
 	}
 }

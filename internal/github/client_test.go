@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -843,5 +844,118 @@ func TestTriggerWorkflowOptionsStruct(t *testing.T) {
 	opts := TriggerWorkflowOptions{Ref: "main"}
 	if opts.Ref != "main" {
 		t.Errorf("Ref = %s, want main", opts.Ref)
+	}
+}
+
+func TestDownloadArtifact(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		expectedPath := "/repos/owner/repo/actions/artifacts/test-artifact/zip"
+		if r.URL.Path != expectedPath {
+			t.Errorf("path = %s, want %s", r.URL.Path, expectedPath)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("zip-content"))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{Token: "test-token", BaseURL: server.URL})
+	data, err := client.DownloadArtifact(context.Background(), "owner", "repo", "test-artifact", 123)
+	if err != nil {
+		t.Fatalf("DownloadArtifact() error = %v", err)
+	}
+	if string(data) != "zip-content" {
+		t.Errorf("data = %s, want zip-content", string(data))
+	}
+}
+
+func TestDownloadArtifactError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"message": "not found"})
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{Token: "test-token", BaseURL: server.URL})
+	_, err := client.DownloadArtifact(context.Background(), "owner", "repo", "missing", 123)
+	if err == nil {
+		t.Error("expected error for 404")
+	}
+}
+
+func TestListJobsForWorkflowRunWithPagination(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/actions/runs/123/jobs") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"total_count": 1,
+			"jobs": []interface{}{
+				map[string]interface{}{
+					"id":          456,
+					"name":        "test-job",
+					"status":      "completed",
+					"conclusion":  "success",
+					"started_at":  "2024-01-01T00:00:00Z",
+					"completed_at": "2024-01-01T00:01:00Z",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{Token: "test-token", BaseURL: server.URL})
+
+	// Test with pagination options
+	jobs, err := client.ListJobsForWorkflowRun(context.Background(), "owner", "repo", 123, ListOptions{Page: 2, PerPage: 10})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Errorf("jobs count = %d, want 1", len(jobs))
+	}
+
+	// Test with only Page (no PerPage)
+	jobs, err = client.ListJobsForWorkflowRun(context.Background(), "owner", "repo", 123, ListOptions{Page: 3})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	_ = jobs
+}
+
+func TestListArtifactsWithPagination(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/actions/artifacts") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"total_count": 1,
+			"artifacts": []interface{}{
+				map[string]interface{}{
+					"id":                 789,
+					"name":               "test-artifact",
+					"size_in_bytes":      1024,
+					"created_at":         "2024-01-01T00:00:00Z",
+					"expired":            false,
+					"workflow_run_id":    123,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{Token: "test-token", BaseURL: server.URL})
+
+	artifacts, err := client.ListArtifacts(context.Background(), "owner", "repo", ListOptions{Page: 1, PerPage: 5})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if len(artifacts) != 1 {
+		t.Errorf("artifacts count = %d, want 1", len(artifacts))
+	}
+	if artifacts[0].Name != "test-artifact" {
+		t.Errorf("Name = %s", artifacts[0].Name)
 	}
 }

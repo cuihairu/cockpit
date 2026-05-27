@@ -105,7 +105,9 @@ func (a *Agent) IsOnline(timeout time.Duration) bool {
 // Close 关闭连接
 func (a *Agent) Close() {
 	close(a.Send)
-	a.Conn.Close()
+	if a.Conn != nil {
+		a.Conn.Close()
+	}
 }
 
 // AgentID 实现 proxy.AgentConn 接口

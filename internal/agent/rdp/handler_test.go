@@ -2,10 +2,12 @@ package rdp
 
 import (
 	"encoding/base64"
+	"fmt"
 	"image"
 	"sync"
 	"testing"
 
+	grdp "github.com/nakagami/grdp"
 	"github.com/cuihairu/cockpit/internal/protocol"
 )
 
@@ -697,4 +699,448 @@ func TestHandlerConcurrentStop(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// ============ Bitmap Processing Tests (with real data) ============
+
+func TestHandleBitmapWithData(t *testing.T) {
+	s := &Session{
+		ID:        "bitmap-test",
+		sendQueue: make(chan *protocol.Message, 10),
+		width:     64,
+		height:    64,
+		screen:    image.NewRGBA(image.Rect(0, 0, 64, 64)),
+	}
+
+	bmWidth, bmHeight := 4, 4
+	data := make([]byte, bmWidth*bmHeight*4)
+	for i := 0; i < len(data); i += 4 {
+		data[i] = 0xFF
+		data[i+1] = 0x00
+		data[i+2] = 0x00
+		data[i+3] = 0xFF
+	}
+
+	bitmaps := []grdp.Bitmap{{
+		DestLeft:     10,
+		DestTop:      10,
+		DestRight:    14,
+		DestBottom:   14,
+		Width:        bmWidth,
+		Height:       bmHeight,
+		BitsPerPixel: 32,
+		Data:         data,
+	}}
+
+	s.handleBitmap(bitmaps)
+
+	if len(s.sendQueue) != 1 {
+		t.Fatalf("Expected 1 message in queue, got %d", len(s.sendQueue))
+	}
+
+	msg := <-s.sendQueue
+	if msg.Type != protocol.MessageTypeDesktopData {
+		t.Errorf("Type = %v, want %v", msg.Type, protocol.MessageTypeDesktopData)
+	}
+	if msg.Payload["desktopType"] != string(protocol.DesktopMsgScreenUpdate) {
+		t.Errorf("desktopType = %v", msg.Payload["desktopType"])
+	}
+
+	rects, ok := msg.Payload["rects"].([]protocol.DesktopBitmapRect)
+	if !ok {
+		t.Fatal("rects should be []DesktopBitmapRect")
+	}
+	if len(rects) != 1 {
+		t.Fatalf("Expected 1 rect, got %d", len(rects))
+	}
+	if rects[0].X != 10 || rects[0].Y != 10 {
+		t.Errorf("Rect position = (%d,%d), want (10,10)", rects[0].X, rects[0].Y)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(rects[0].Data)
+	if err != nil {
+		t.Fatalf("Failed to decode base64: %v", err)
+	}
+	if len(decoded) == 0 {
+		t.Error("Decoded data should not be empty")
+	}
+}
+
+func TestHandleBitmapMultipleRects(t *testing.T) {
+	s := &Session{
+		ID:        "multi-bitmap",
+		sendQueue: make(chan *protocol.Message, 10),
+		width:     100,
+		height:    100,
+		screen:    image.NewRGBA(image.Rect(0, 0, 100, 100)),
+	}
+
+	makeBitmap := func(x, y, w, h int) grdp.Bitmap {
+		data := make([]byte, w*h*4)
+		for i := range data {
+			data[i] = byte(i % 256)
+		}
+		return grdp.Bitmap{
+			DestLeft: x, DestTop: y,
+			DestRight: x + w, DestBottom: y + h,
+			Width: w, Height: h,
+			BitsPerPixel: 32, Data: data,
+		}
+	}
+
+	bitmaps := []grdp.Bitmap{
+		makeBitmap(0, 0, 10, 10),
+		makeBitmap(20, 20, 5, 5),
+	}
+
+	s.handleBitmap(bitmaps)
+
+	if len(s.sendQueue) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(s.sendQueue))
+	}
+
+	msg := <-s.sendQueue
+	rects := msg.Payload["rects"].([]protocol.DesktopBitmapRect)
+	if len(rects) != 2 {
+		t.Errorf("Expected 2 rects, got %d", len(rects))
+	}
+}
+
+func TestHandleBitmapClipAtBoundary(t *testing.T) {
+	s := &Session{
+		ID:        "clip-bitmap",
+		sendQueue: make(chan *protocol.Message, 10),
+		width:     20,
+		height:    20,
+		screen:    image.NewRGBA(image.Rect(0, 0, 20, 20)),
+	}
+
+	data := make([]byte, 30*30*4)
+	bm := grdp.Bitmap{
+		DestLeft: 10, DestTop: 10,
+		DestRight: 40, DestBottom: 40,
+		Width: 30, Height: 30,
+		BitsPerPixel: 32, Data: data,
+	}
+
+	s.handleBitmap([]grdp.Bitmap{bm})
+
+	if len(s.sendQueue) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(s.sendQueue))
+	}
+}
+
+func TestHandleBitmap16bpp(t *testing.T) {
+	s := &Session{
+		ID:        "16bpp-bitmap",
+		sendQueue: make(chan *protocol.Message, 10),
+		width:     32,
+		height:    32,
+		screen:    image.NewRGBA(image.Rect(0, 0, 32, 32)),
+	}
+
+	bmWidth, bmHeight := 2, 2
+	data := make([]byte, bmWidth*bmHeight*2)
+
+	bitmaps := []grdp.Bitmap{{
+		DestLeft: 0, DestTop: 0,
+		DestRight: bmWidth, DestBottom: bmHeight,
+		Width: bmWidth, Height: bmHeight,
+		BitsPerPixel: 2,
+		Data:         data,
+	}}
+
+	s.handleBitmap(bitmaps)
+
+	if len(s.sendQueue) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(s.sendQueue))
+	}
+}
+
+// ============ getClipboardText Tests ============
+
+func TestGetClipboardText(t *testing.T) {
+	s := &Session{ID: "clip-test"}
+
+	clipboardMu.Lock()
+	clipboardText = "test clipboard content"
+	clipboardMu.Unlock()
+
+	got := s.getClipboardText()
+	if got != "test clipboard content" {
+		t.Errorf("getClipboardText() = %q, want %q", got, "test clipboard content")
+	}
+
+	clipboardMu.Lock()
+	clipboardText = ""
+	clipboardMu.Unlock()
+}
+
+func TestGetClipboardTextEmpty(t *testing.T) {
+	s := &Session{ID: "clip-empty"}
+	clipboardMu.Lock()
+	clipboardText = ""
+	clipboardMu.Unlock()
+
+	got := s.getClipboardText()
+	if got != "" {
+		t.Errorf("Expected empty string, got %q", got)
+	}
+}
+
+// ============ Session Close with nil client ============
+
+func TestSessionCloseNilClient(t *testing.T) {
+	s := &Session{
+		ID:        "nil-client",
+		sendQueue: make(chan *protocol.Message, 1),
+	}
+
+	if s.IsClosed() {
+		t.Error("Should not be closed initially")
+	}
+
+	s.Close()
+
+	if !s.IsClosed() {
+		t.Error("Should be closed after Close()")
+	}
+}
+
+// ============ sessionSendLoop Tests ============
+
+func TestSessionSendLoopWithSendFunc(t *testing.T) {
+	h := NewHandler()
+	var received []*protocol.Message
+	var mu sync.Mutex
+	h.SetSendFunc(func(msg *protocol.Message) error {
+		mu.Lock()
+		received = append(received, msg)
+		mu.Unlock()
+		return nil
+	})
+
+	s := &Session{
+		ID:        "sendloop-test",
+		sendQueue: make(chan *protocol.Message, 10),
+		width:     100,
+		height:    100,
+		screen:    image.NewRGBA(image.Rect(0, 0, 100, 100)),
+	}
+
+	h.mu.Lock()
+	h.sessions["sendloop-test"] = s
+	h.mu.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		h.sessionSendLoop(s)
+	}()
+
+	for i := 0; i < 3; i++ {
+		s.enqueue(&protocol.Message{
+			Type: protocol.MessageTypeDesktopData,
+			Payload: map[string]interface{}{
+				"sessionId": "sendloop-test",
+				"index":     i,
+			},
+		})
+	}
+
+	close(s.sendQueue)
+	wg.Wait()
+
+	mu.Lock()
+	count := len(received)
+	mu.Unlock()
+
+	if count != 3 {
+		t.Errorf("Expected 3 messages sent, got %d", count)
+	}
+}
+
+func TestSessionSendLoopSendError(t *testing.T) {
+	h := NewHandler()
+	callCount := 0
+	h.SetSendFunc(func(msg *protocol.Message) error {
+		callCount++
+		return fmt.Errorf("send error")
+	})
+
+	s := &Session{
+		ID:        "sendloop-err",
+		sendQueue: make(chan *protocol.Message, 10),
+		width:     100,
+		height:    100,
+		screen:    image.NewRGBA(image.Rect(0, 0, 100, 100)),
+	}
+
+	h.mu.Lock()
+	h.sessions["sendloop-err"] = s
+	h.mu.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		h.sessionSendLoop(s)
+	}()
+
+	s.sendQueue <- &protocol.Message{
+		Type: protocol.MessageTypeDesktopData,
+		Payload: map[string]interface{}{
+			"sessionId": "sendloop-err",
+		},
+	}
+
+	wg.Wait()
+
+	if callCount != 1 {
+		t.Errorf("Expected 1 sendFunc call, got %d", callCount)
+	}
+
+	h.mu.RLock()
+	_, exists := h.sessions["sendloop-err"]
+	h.mu.RUnlock()
+	if exists {
+		t.Error("Session should be cleaned up after send error")
+	}
+}
+
+func TestSessionSendLoopNilSendFunc(t *testing.T) {
+	h := NewHandler()
+
+	s := &Session{
+		ID:        "sendloop-nil",
+		sendQueue: make(chan *protocol.Message, 10),
+		width:     100,
+		height:    100,
+		screen:    image.NewRGBA(image.Rect(0, 0, 100, 100)),
+	}
+
+	h.mu.Lock()
+	h.sessions["sendloop-nil"] = s
+	h.mu.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		h.sessionSendLoop(s)
+	}()
+
+	s.sendQueue <- &protocol.Message{Type: protocol.MessageTypeDesktopData}
+
+	close(s.sendQueue)
+	wg.Wait()
+
+	h.mu.RLock()
+	_, exists := h.sessions["sendloop-nil"]
+	h.mu.RUnlock()
+	if exists {
+		t.Error("Session should be cleaned up after loop exits")
+	}
+}
+
+// ============ HandleDesktopNew Default Resolution ============
+
+func TestHandleDesktopNewDefaultResolution(t *testing.T) {
+	h := NewHandler()
+	var capturedMsg *protocol.Message
+	h.SetSendFunc(func(msg *protocol.Message) error {
+		capturedMsg = msg
+		return nil
+	})
+
+	msg := &protocol.Message{
+		Type: protocol.MessageTypeDesktopNew,
+		Payload: map[string]interface{}{
+			"sessionId": "default-res",
+			"target":    "192.168.255.255:33389",
+			"username":  "test",
+			"password":  "test",
+		},
+	}
+	h.HandleDesktopNew(msg)
+
+	if capturedMsg == nil {
+		t.Fatal("Should have sent error message")
+	}
+	if capturedMsg.Payload["desktopType"] != string(protocol.DesktopMsgError) {
+		t.Error("Should send error for connection failure")
+	}
+}
+
+func TestHandleDesktopNewZeroResolution(t *testing.T) {
+	h := NewHandler()
+	var capturedMsg *protocol.Message
+	h.SetSendFunc(func(msg *protocol.Message) error {
+		capturedMsg = msg
+		return nil
+	})
+
+	msg := &protocol.Message{
+		Type: protocol.MessageTypeDesktopNew,
+		Payload: map[string]interface{}{
+			"sessionId": "zero-res",
+			"target":    "192.168.255.255:33389",
+			"username":  "test",
+			"password":  "test",
+			"width":     float64(0),
+			"height":    float64(0),
+		},
+	}
+	h.HandleDesktopNew(msg)
+
+	if capturedMsg == nil {
+		t.Fatal("Should have sent error message")
+	}
+}
+
+// ============ HandleDesktopData Mouse Button Mapping ============
+
+func TestHandleDesktopDataMouseButtonMapping(t *testing.T) {
+	tests := []struct {
+		name    string
+		buttons float64
+	}{
+		{"left", 1},
+		{"middle", 4},
+		{"right", 2},
+		{"none", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewHandler()
+			s := &Session{
+				ID:        "mouse-" + tt.name,
+				sendQueue: make(chan *protocol.Message, 1),
+				width:     100,
+				height:    100,
+				screen:    image.NewRGBA(image.Rect(0, 0, 100, 100)),
+			}
+			s.closed.Store(true)
+
+			h.mu.Lock()
+			h.sessions["mouse-"+tt.name] = s
+			h.mu.Unlock()
+
+			msg := &protocol.Message{
+				Type: protocol.MessageTypeDesktopData,
+				Payload: map[string]interface{}{
+					"sessionId":   "mouse-" + tt.name,
+					"desktopType": string(protocol.DesktopMsgMouse),
+					"x":           float64(50),
+					"y":           float64(50),
+					"buttons":     tt.buttons,
+					"wheelDelta":  float64(3),
+					"action":      "down",
+				},
+			}
+			h.HandleDesktopData(msg)
+		})
+	}
 }
