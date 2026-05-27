@@ -20,8 +20,9 @@ type Config struct {
 
 // ServerConfig 服务器配置
 type ServerConfig struct {
-    Host string `yaml:"host"`
-    Port int    `yaml:"port"`
+    Host      string `yaml:"host"`
+    Port      int    `yaml:"port"`
+    StaticDir string `yaml:"static_dir"`
 }
 
 // DatabaseConfig 数据库配置

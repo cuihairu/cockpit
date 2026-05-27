@@ -85,5 +85,5 @@ cockpit-agent
 *.db
 *.db-journal
 
-# Embedded web assets (generated)
-embed/web/dist/
+# Web build output (served via STATIC_DIR at runtime)
+web/dist/

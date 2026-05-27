@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -109,7 +110,11 @@ func HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenString := authHeader[7:] // Remove "Bearer " prefix
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		http.Error(w, `{"error":"Invalid authorization format"}`, http.StatusUnauthorized)
+		return
+	}
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
 	newToken, err := RefreshToken(tokenString)
 	if err != nil {

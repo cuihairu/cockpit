@@ -34,6 +34,7 @@ func isOriginAllowed(r *http.Request) bool {
 	allowed := os.Getenv("ALLOWED_ORIGINS")
 	if allowed == "" {
 		// 未配置白名单时允许所有来源（开发模式）
+		log.Println("WARNING: ALLOWED_ORIGINS not set, accepting all WebSocket origins. Configure this in production!")
 		return true
 	}
 	origin := r.Header.Get("Origin")
@@ -117,7 +118,10 @@ func (s *Server) Start() error {
 	adminUser := getEnv("ADMIN_USERNAME", "admin")
 	adminPass := getEnv("ADMIN_PASSWORD", "admin")
 	if adminPass == "admin" {
-		log.Println("WARNING: Using default admin password. Set ADMIN_PASSWORD environment variable in production!")
+		log.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+		log.Println("!! WARNING: Using DEFAULT admin password 'admin'!      !!")
+		log.Println("!! Set ADMIN_PASSWORD environment variable immediately! !!")
+		log.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 	}
 	if err := auth.InitAdmin(s.db, adminUser, adminPass); err != nil {
 		log.Printf("Warning: Failed to init admin user: %v", err)

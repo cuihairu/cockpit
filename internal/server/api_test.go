@@ -508,9 +508,10 @@ func TestServeAPICORS(t *testing.T) {
 
 	s.serveAPI(rec, req)
 
+	// 未配置 ALLOWED_ORIGINS 时不设置 CORS header（安全默认值）
 	origin := rec.Header().Get("Access-Control-Allow-Origin")
-	if origin != "*" {
-		t.Errorf("CORS origin = %q, want %q", origin, "*")
+	if origin != "" {
+		t.Errorf("CORS origin = %q, want empty (not set)", origin)
 	}
 	methods := rec.Header().Get("Access-Control-Allow-Methods")
 	if methods == "" {
