@@ -49,8 +49,9 @@ func newTestServerWithDB(t *testing.T) *Server {
 	auth.InitDB(db)
 
 	return &Server{
-		registry: NewRegistry(),
-		db:       db,
+		registry:       NewRegistry(),
+		db:             db,
+		remoteSessions: NewRemoteSessionManager(),
 	}
 }
 

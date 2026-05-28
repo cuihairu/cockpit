@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -305,4 +306,76 @@ func (s *Server) HandleTerminalClose(connID string, reason string) {
 // registerRemoteAPI 注册远程连接 API
 func (s *Server) registerRemoteAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/remote/terminal", s.handleTerminalWebSocket)
+	mux.HandleFunc("/api/remote/sessions", auth.Middleware(s.handleRemoteSessions))
+	mux.HandleFunc("/api/remote/sessions/", auth.Middleware(s.handleRemoteSession))
+}
+
+func (s *Server) handleRemoteSessions(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"data": s.remoteSessions.List(),
+		})
+	case http.MethodPost:
+		s.handleRemoteSessionCreate(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleRemoteSession(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/remote/sessions/")
+	id = strings.TrimSpace(id)
+	if id == "" {
+		http.Error(w, "Missing session id", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		session, ok := s.remoteSessions.Get(id)
+		if !ok {
+			http.Error(w, "Remote session not found", http.StatusNotFound)
+			return
+		}
+		s.writeJSON(w, http.StatusOK, session)
+	case http.MethodDelete:
+		if ok := s.remoteSessions.Delete(id); !ok {
+			http.Error(w, "Remote session not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleRemoteSessionCreate(w http.ResponseWriter, r *http.Request) {
+	var req RemoteSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.AgentID == "" || req.Host == "" || req.Port <= 0 {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+
+	if req.Protocol != protocol.RemoteProtocolSSH &&
+		req.Protocol != protocol.RemoteProtocolTelnet &&
+		req.Protocol != protocol.RemoteProtocolRDP &&
+		req.Protocol != protocol.RemoteProtocolVNC {
+		http.Error(w, "Unsupported protocol", http.StatusBadRequest)
+		return
+	}
+
+	if _, exists := s.registry.Get(req.AgentID); !exists {
+		http.Error(w, "Agent not found or offline", http.StatusNotFound)
+		return
+	}
+
+	userInfo, _ := auth.GetUserFromContext(r)
+	session := s.remoteSessions.Create(userInfo.UserID, userInfo.Username, req)
+	s.writeJSON(w, http.StatusCreated, session)
 }

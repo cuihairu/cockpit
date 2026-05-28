@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/alert"
+	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/notification"
@@ -19,7 +20,6 @@ import (
 	"github.com/cuihairu/cockpit/internal/proxy"
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/gorilla/websocket"
-	"github.com/cuihairu/cockpit/internal/audit"
 )
 
 func getEnv(key, defaultValue string) string {
@@ -49,15 +49,16 @@ func isOriginAllowed(r *http.Request) bool {
 
 // Server WebSocket 服务器
 type Server struct {
-	addr         string
-	registry     *Registry
-	codec        *protocol.Codec
-	db           *storage.DB
-	audit        *audit.Logger
-	proxyMgr     *proxy.Manager
-	notification *notification.Client
-	cfg          *config.Config
-	upgrader     websocket.Upgrader
+	addr           string
+	registry       *Registry
+	codec          *protocol.Codec
+	db             *storage.DB
+	audit          *audit.Logger
+	proxyMgr       *proxy.Manager
+	notification   *notification.Client
+	remoteSessions *RemoteSessionManager
+	cfg            *config.Config
+	upgrader       websocket.Upgrader
 
 	mu     sync.RWMutex
 	ctx    context.Context
@@ -88,16 +89,17 @@ func NewServer(cfg *config.Config) *Server {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
 	return &Server{
-		addr:         addr,
-		registry:     NewRegistry(),
-		codec:        protocol.NewCodec(),
-		db:           db,
-		audit:        audit.NewLogger(db),
-		proxyMgr:     proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
-		notification: notificationClient,
-		cfg:          cfg,
+		addr:           addr,
+		registry:       NewRegistry(),
+		codec:          protocol.NewCodec(),
+		db:             db,
+		audit:          audit.NewLogger(db),
+		proxyMgr:       proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
+		notification:   notificationClient,
+		remoteSessions: NewRemoteSessionManager(),
+		cfg:            cfg,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: isOriginAllowed,
+			CheckOrigin:     isOriginAllowed,
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
@@ -139,11 +141,11 @@ func (s *Server) Start() error {
 
 	// 注册代理 API
 	s.registerProxyAPI(mux)
-		// 注册系统指标 API
-		s.registerMetricsAPI(mux)
+	// 注册系统指标 API
+	s.registerMetricsAPI(mux)
 
-		// 注册远程连接 API
-		s.registerRemoteAPI(mux)
+	// 注册远程连接 API
+	s.registerRemoteAPI(mux)
 
 	// 注册桌面连接 API
 	s.registerDesktopAPI(mux)
@@ -212,8 +214,8 @@ func (s *Server) Start() error {
 
 	// 启动警告检查协程
 	go s.alertCheckLoop()
-		// 启动系统指标清理协程
-		go s.metricsCleanupLoop()
+	// 启动系统指标清理协程
+	go s.metricsCleanupLoop()
 
 	return server.ListenAndServe()
 }
@@ -465,28 +467,28 @@ func (s *Server) handleSystemInfo(agentID string, systemInfo map[string]interfac
 
 	// 更新快照
 	snapshot := &storage.SystemInfoSnapshot{
-		AgentID:         agentID,
-		CPUUsage:        metric.CPUUsage,
-		CPUCores:        metric.CPUCores,
-		CPUFreqMHz:      metric.CPUFreqMHz,
-		MemTotal:        metric.MemTotal,
-		MemUsed:         metric.MemUsed,
-		MemAvailable:    metric.MemAvailable,
-		MemUsagePercent: metric.MemUsagePercent,
-		DiskTotal:       metric.DiskTotal,
-		DiskUsed:        metric.DiskUsed,
-		DiskFree:        metric.DiskFree,
+		AgentID:          agentID,
+		CPUUsage:         metric.CPUUsage,
+		CPUCores:         metric.CPUCores,
+		CPUFreqMHz:       metric.CPUFreqMHz,
+		MemTotal:         metric.MemTotal,
+		MemUsed:          metric.MemUsed,
+		MemAvailable:     metric.MemAvailable,
+		MemUsagePercent:  metric.MemUsagePercent,
+		DiskTotal:        metric.DiskTotal,
+		DiskUsed:         metric.DiskUsed,
+		DiskFree:         metric.DiskFree,
 		DiskUsagePercent: metric.DiskUsagePercent,
-		NetBytesSent:    metric.NetBytesSent,
-		NetBytesRecv:    metric.NetBytesRecv,
-		OSName:          metric.OSName,
-		OSVersion:       metric.OSVersion,
-		Arch:            metric.Arch,
-		Uptime:          metric.Uptime,
-		Load1:           metric.Load1,
-		Load5:           metric.Load5,
-		Load15:          metric.Load15,
-		UpdatedAt:       now,
+		NetBytesSent:     metric.NetBytesSent,
+		NetBytesRecv:     metric.NetBytesRecv,
+		OSName:           metric.OSName,
+		OSVersion:        metric.OSVersion,
+		Arch:             metric.Arch,
+		Uptime:           metric.Uptime,
+		Load1:            metric.Load1,
+		Load5:            metric.Load5,
+		Load15:           metric.Load15,
+		UpdatedAt:        now,
 	}
 
 	if v, ok := systemInfo["hostname"].(string); ok {

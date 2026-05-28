@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntdApp, Spin } from 'antd'
@@ -22,7 +22,7 @@ import './App.less'
 // Route-level code splitting
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Resources = lazy(() => import('./pages/Resources'))
-const Agents = lazy(() => import('./pages/Agents'))
+const Workbench = lazy(() => import('./pages/Workbench'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Profile = lazy(() => import('./pages/Profile'))
 const AuditLogs = lazy(() => import('./pages/AuditLogs'))
@@ -85,8 +85,8 @@ const routeConfig: ProLayoutProps['route'] = {
       ],
     },
     {
-      path: '/agents',
-      name: 'Agent 管理',
+      path: '/workbench',
+      name: '工作台',
       icon: <ApiOutlined />,
     },
     {
@@ -115,7 +115,6 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 const MainLayout = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const [pathname, setPathname] = useState(location.pathname)
   const [settings] = useState<{
     fixSiderbar: boolean
     layout: 'side' | 'top' | 'mix'
@@ -128,10 +127,6 @@ const MainLayout = () => {
     colorWeak: false,
   })
   const { user, logout } = useUser()
-
-  useEffect(() => {
-    setPathname(location.pathname)
-  }, [location.pathname])
 
   const handleLogout = () => {
     logout()
@@ -205,7 +200,7 @@ const MainLayout = () => {
       logo={logo}
       navTheme="light"
       contentWidth="Fluid"
-      location={{ pathname }}
+      location={{ pathname: location.pathname }}
       route={routeConfig}
       fixedHeader
       siderWidth={208}
@@ -256,7 +251,8 @@ const MainLayout = () => {
           <Route path="/" element={<Dashboard />} />
           <Route path="/resources" element={<Resources />} />
           <Route path="/resources/*" element={<Resources />} />
-          <Route path="/agents" element={<Agents />} />
+          <Route path="/workbench" element={<Workbench />} />
+          <Route path="/agents" element={<Navigate to="/workbench" replace />} />
           <Route path="/monitor" element={<Monitor />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/settings/audit-logs" element={<AuditLogs />} />
