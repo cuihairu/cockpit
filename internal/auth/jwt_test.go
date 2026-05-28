@@ -296,3 +296,28 @@ func TestEmptySecretInit(t *testing.T) {
 		t.Error("ValidateToken() should return claims")
 	}
 }
+
+func TestSecretFingerprint(t *testing.T) {
+	SetSecret("test-secret-key")
+	fp := SecretFingerprint()
+	if fp == "" {
+		t.Error("SecretFingerprint() should not be empty")
+	}
+	if len(fp) != 8 {
+		t.Errorf("fingerprint length = %d, want 8 (4 bytes hex)", len(fp))
+	}
+}
+
+func TestRefreshTokenReturnsSameWhenNotNearExpiry(t *testing.T) {
+	SetSecret("test-secret")
+
+	token, _ := GenerateToken("user-1", "admin", "admin")
+	newToken, err := RefreshToken(token)
+	if err != nil {
+		t.Fatalf("RefreshToken() error = %v", err)
+	}
+	// Token not near expiry, should return same token
+	if newToken != token {
+		t.Error("RefreshToken() should return same token when not near expiry")
+	}
+}

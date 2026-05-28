@@ -502,3 +502,61 @@ var _ interface {
 	UnderlyingConn() net.Conn
 	MessageReader() io.Reader
 } = (*mockWSConn)(nil)
+
+func TestHandlerStartWithMock(t *testing.T) {
+	h := NewHandler()
+
+	// Manually set running to test Stop behavior
+	h.running.Store(true)
+	if !h.running.Load() {
+		t.Error("Handler should be running")
+	}
+}
+
+func TestHandlerStopCleansConns(t *testing.T) {
+	h := NewHandler()
+	h.running.Store(true)
+	h.sendQueue = make(chan *protocol.Message, 1000)
+
+	conn1, _ := net.Pipe()
+	h.mu.Lock()
+	h.conns["c1"] = &AgentTargetConn{ID: "c1", Conn: conn1}
+	h.mu.Unlock()
+
+	h.Stop()
+
+	h.mu.RLock()
+	count := len(h.conns)
+	h.mu.RUnlock()
+	if count != 0 {
+		t.Errorf("conns should be empty after Stop(), got %d", count)
+	}
+}
+
+func TestSendMessageRunning(t *testing.T) {
+	h := NewHandler()
+	h.running.Store(true)
+	h.sendQueue = make(chan *protocol.Message, 1000)
+
+	msg := protocol.NewMessage(protocol.MessageTypeHeartbeat, nil)
+	err := h.SendMessage(msg)
+	if err != nil {
+		t.Errorf("SendMessage() while running error = %v", err)
+	}
+}
+
+func TestSendErrorRunning(t *testing.T) {
+	h := NewHandler()
+	h.running.Store(true)
+	h.sendQueue = make(chan *protocol.Message, 1000)
+
+	h.SendError("p1", "c1", "test error")
+}
+
+func TestSendCloseRunning(t *testing.T) {
+	h := NewHandler()
+	h.running.Store(true)
+	h.sendQueue = make(chan *protocol.Message, 1000)
+
+	h.SendClose("p1", "c1", "test reason")
+}

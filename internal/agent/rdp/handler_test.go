@@ -1047,6 +1047,9 @@ func TestSessionSendLoopNilSendFunc(t *testing.T) {
 // ============ HandleDesktopNew Default Resolution ============
 
 func TestHandleDesktopNewDefaultResolution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that requires network dial")
+	}
 	h := NewHandler()
 	var capturedMsg *protocol.Message
 	h.SetSendFunc(func(msg *protocol.Message) error {
@@ -1074,6 +1077,9 @@ func TestHandleDesktopNewDefaultResolution(t *testing.T) {
 }
 
 func TestHandleDesktopNewZeroResolution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that requires network dial")
+	}
 	h := NewHandler()
 	var capturedMsg *protocol.Message
 	h.SetSendFunc(func(msg *protocol.Message) error {
