@@ -66,16 +66,10 @@ jobs:
           go build -ldflags="-s -w" -o dist/cockpit ./cmd/cockpit
           go build -ldflags="-s -w" -o dist/cockpit-agent ./cmd/cockpit-agent
 
-      - name: Upload server artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: cockpit-linux-amd64
-          path: dist/cockpit
+          path: dist/*
           retention-days: 7
-
-      - name: Upload agent artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: cockpit-agent-linux-amd64
-          path: dist/cockpit-agent
-          retention-days: 7
+          compression-level: 0
