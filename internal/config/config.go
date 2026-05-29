@@ -117,7 +117,7 @@ func LoadOrDefault(path string) *Config {
         // 返回默认配置
         return &Config{
             Server: &ServerConfig{
-                Host: "0.0.0.0",
+                Host: "127.0.0.1",  // 默认仅监听本地，更安全
                 Port: 9000,
             },
             Database: &DatabaseConfig{

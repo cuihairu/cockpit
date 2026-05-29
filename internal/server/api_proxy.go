@@ -3,9 +3,11 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/auth"
+	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/google/uuid"
 )
@@ -64,10 +66,17 @@ func (s *Server) handleProxies(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"data": result})
 }
 
-// handleProxyCreate 创建代理
+// handleProxyCreate 创建代理（仅管理员）
 func (s *Server) handleProxyCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 验证管理员权限
+	userInfo, ok := auth.GetUserFromContext(r)
+	if !ok || userInfo.Role != "admin" {
+		http.Error(w, "Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -78,6 +87,7 @@ func (s *Server) handleProxyCreate(w http.ResponseWriter, r *http.Request) {
 		RemotePort  int    `json:"remotePort"`
 		Target      string `json:"target"`
 		Description string `json:"description"`
+		PublicBind  bool   `json:"publicBind"` // 显式允许公网绑定
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -107,6 +117,38 @@ func (s *Server) handleProxyCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 警告：端口小于 1024 需要 root 权限
+	if req.RemotePort < 1024 {
+		http.Error(w, "Ports below 1024 require root privileges", http.StatusBadRequest)
+		return
+	}
+
+	// 如果没有显式允许公网绑定，检查是否绑定到 0.0.0.0
+	if !req.PublicBind {
+		// 默认行为：拒绝潜在的公网暴露
+		// 管理员可以通过设置 publicBind=true 来明确允许
+		// 这里我们只记录警告，实际绑定在 proxy manager 中处理
+		http.Error(w, "For security, proxies bind to 127.0.0.1 by default. Set publicBind=true to allow 0.0.0.0 binding.", http.StatusBadRequest)
+		return
+	}
+
+	// 记录审计日志
+	userIDUint, _ := strconv.ParseUint(userInfo.UserID, 10, 32)
+	s.audit.Log(&audit.LogEntry{
+		UserID:     uint(userIDUint),
+		Username:   userInfo.Username,
+		Action:     "create",
+		Resource:   "proxy",
+		Details: map[string]interface{}{
+			"name":       req.Name,
+			"target":     req.Target,
+			"remotePort": req.RemotePort,
+			"publicBind": req.PublicBind,
+		},
+		IP:    s.getClientIP(r),
+		Status: audit.StatusSuccess,
+	})
+
 	// 创建代理配置
 	proxy := &storage.Proxy{
 		ID:          uuid.New().String(),
@@ -117,13 +159,10 @@ func (s *Server) handleProxyCreate(w http.ResponseWriter, r *http.Request) {
 		Target:      req.Target,
 		Description: req.Description,
 		Enabled:     true,
+		CreatedBy:   userInfo.Username,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-
-	// 获取当前用户
-	userInfo, _ := auth.GetUserFromContext(r)
-	proxy.CreatedBy = userInfo.Username
 
 	if err := s.db.CreateProxy(proxy); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -144,10 +183,17 @@ func (s *Server) handleProxyCreate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(proxy)
 }
 
-// handleProxyUpdate 更新代理
+// handleProxyUpdate 更新代理（仅管理员）
 func (s *Server) handleProxyUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 验证管理员权限
+	userInfo, ok := auth.GetUserFromContext(r)
+	if !ok || userInfo.Role != "admin" {
+		http.Error(w, "Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -226,10 +272,17 @@ func (s *Server) handleProxyUpdate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(proxy)
 }
 
-// handleProxyDelete 删除代理
+// handleProxyDelete 删除代理（仅管理员）
 func (s *Server) handleProxyDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 验证管理员权限
+	userInfo, ok := auth.GetUserFromContext(r)
+	if !ok || userInfo.Role != "admin" {
+		http.Error(w, "Admin access required", http.StatusForbidden)
 		return
 	}
 

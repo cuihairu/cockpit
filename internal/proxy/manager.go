@@ -137,7 +137,7 @@ func (m *Manager) StartProxy(config *storage.Proxy) error {
 	proxy.cancel = cancel
 
 	// 启动监听
-	addr := fmt.Sprintf(":%d", config.RemotePort)
+	addr := fmt.Sprintf("127.0.0.1:%d", config.RemotePort)  // 默认绑定本地，防止公网暴露
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		cancel()

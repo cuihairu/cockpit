@@ -28,6 +28,9 @@ type Agent struct {
 	// 标签（支持复杂类型）
 	Labels       map[string]interface{} `gorm:"serializer:json" json:"labels"`
 
+	// 认证：SecretHash 存储 Agent 认证密钥的哈希值
+	SecretHash   string `gorm:"column" json:"-"`
+
 	// 关联资源
 	ComputeInstances []ComputeInstance `gorm:"foreignKey:AgentID" json:"-"`
 	Domains          []Domain          `gorm:"foreignKey:AgentID" json:"-"`

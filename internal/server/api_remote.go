@@ -35,22 +35,29 @@ var (
 
 // handleTerminalWebSocket 处理终端 WebSocket 连接
 func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	agentID := query.Get("agent_id")
-	host := query.Get("host")
-	portStr := query.Get("port")
-	protocolStr := query.Get("protocol")
-	token := query.Get("token")
+	// 从 Sec-WebSocket-Protocol 头获取票据
+	protocols := r.Header["Sec-WebSocket-Protocol"]
+	if len(protocols) == 0 {
+		http.Error(w, "Missing ticket in Sec-WebSocket-Protocol header", http.StatusBadRequest)
+		return
+	}
+	ticketID := protocols[0]
 
-	if agentID == "" || host == "" || portStr == "" || protocolStr == "" {
-		http.Error(w, "Missing required parameters", http.StatusBadRequest)
+	// 验证票据
+	ticket, valid := s.ticketMgr.ValidateTicket(ticketID)
+	if !valid {
+		http.Error(w, "Invalid or expired ticket", http.StatusUnauthorized)
 		return
 	}
 
-	username, err := auth.ValidateToken(token)
-	if err != nil {
-		log.Printf("Token validation failed: %v", err)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	// 从票据参数获取连接信息
+	agentID := ticket.Params["agent_id"]
+	host := ticket.Params["host"]
+	portStr := ticket.Params["port"]
+	protocolStr := ticket.Params["protocol"]
+
+	if agentID == "" || host == "" || portStr == "" || protocolStr == "" {
+		http.Error(w, "Invalid ticket parameters", http.StatusBadRequest)
 		return
 	}
 
@@ -74,7 +81,12 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	conn, err := s.upgrader.Upgrade(w, r, nil)
+	// 升级 WebSocket，接受票据协议
+	upgrader := websocket.Upgrader{
+		CheckOrigin: isOriginAllowed,
+		Subprotocols: []string{ticketID},
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)
 		return
@@ -100,7 +112,7 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 	terminalByConn[connID] = session
 	terminalSessionsMu.Unlock()
 
-	log.Printf("Terminal session created: %s for user %s", sessionID, username)
+	log.Printf("Terminal session created: %s for user %s", sessionID, ticket.Username)
 
 	target := host + ":" + portStr
 	msg := protocol.NewMessage(protocol.MessageTypeProxyNew, map[string]interface{}{
@@ -305,9 +317,89 @@ func (s *Server) HandleTerminalClose(connID string, reason string) {
 
 // registerRemoteAPI 注册远程连接 API
 func (s *Server) registerRemoteAPI(mux *http.ServeMux) {
+	mux.HandleFunc("/api/remote/tickets", auth.Middleware(s.handleTicketCreate))
 	mux.HandleFunc("/api/remote/terminal", s.handleTerminalWebSocket)
 	mux.HandleFunc("/api/remote/sessions", auth.Middleware(s.handleRemoteSessions))
 	mux.HandleFunc("/api/remote/sessions/", auth.Middleware(s.handleRemoteSession))
+}
+
+// handleTicketCreate 创建短期 WebSocket 连接票据
+func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		AgentID   string `json:"agent_id"`
+		Host      string `json:"host"`
+		Port      int    `json:"port"`
+		Protocol  string `json:"protocol"` // ssh, telnet, vnc, rdp
+		Username  string `json:"username,omitempty"`
+		Password  string `json:"password,omitempty"` // VNC密码等
+		Domain    string `json:"domain,omitempty"`
+		Width     int    `json:"width,omitempty"`
+		Height    int    `json:"height,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.AgentID == "" || req.Host == "" || req.Port <= 0 || req.Protocol == "" {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+
+	// 检查 Agent 是否在线
+	if _, exists := s.registry.Get(req.AgentID); !exists {
+		http.Error(w, "Agent not found or offline", http.StatusNotFound)
+		return
+	}
+
+	// 获取当前用户
+	userInfo, ok := auth.GetUserFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// 构建票据参数
+	params := map[string]string{
+		"agent_id": req.AgentID,
+		"host":     req.Host,
+		"port":     string(rune(req.Port)),
+		"protocol": req.Protocol,
+	}
+	if req.Username != "" {
+		params["username"] = req.Username
+	}
+	if req.Password != "" {
+		params["password"] = req.Password
+	}
+	if req.Domain != "" {
+		params["domain"] = req.Domain
+	}
+	if req.Width > 0 {
+		params["width"] = string(rune(req.Width))
+	}
+	if req.Height > 0 {
+		params["height"] = string(rune(req.Height))
+	}
+
+	// 生成票据
+	ticket, err := s.ticketMgr.GenerateTicket(userInfo.UserID, userInfo.Username, params)
+	if err != nil {
+		http.Error(w, "Failed to generate ticket", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"ticket":     ticket.ID,
+		"expires_at": ticket.ExpiresAt.Format(time.RFC3339),
+	})
 }
 
 func (s *Server) handleRemoteSessions(w http.ResponseWriter, r *http.Request) {

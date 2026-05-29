@@ -46,6 +46,7 @@ type Agent struct {
 type Config struct {
 	ServerURL   string                 `json:"server_url"`
 	AgentID     string                 `json:"agent_id,omitempty"`
+	Secret      string                 `json:"secret,omitempty"` // Agent 认证密钥
 	Region      string                 `json:"region,omitempty"`
 	Zone        string                 `json:"zone,omitempty"`
 	Labels      map[string]interface{} `json:"labels,omitempty"`
@@ -202,6 +203,7 @@ func (a *Agent) register() error {
 
 	payload := map[string]any{
 		"agentId":        a.agentID,
+		"secret":         a.config.Secret,
 		"location":       a.location,
 		"capabilities":   a.capabilities,
 		"hostname":       hostname,

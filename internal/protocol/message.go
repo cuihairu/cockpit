@@ -63,6 +63,7 @@ type Capability struct {
 // RegisterPayload 注册消息负载
 type RegisterPayload struct {
 	AgentID      string                 `json:"agentId"`
+	Secret       string                 `json:"secret,omitempty"` // Agent 认证密钥
 	Location     Location               `json:"location"`
 	Capabilities []Capability           `json:"capabilities"`
 	Hostname     string                 `json:"hostname,omitempty"`

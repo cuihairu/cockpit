@@ -236,6 +236,55 @@ func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request, id strin
 	s.writeJSON(w, http.StatusOK, storageAgentToResponse(agent))
 }
 
+// handleAgentSecret 管理 Agent 密钥（仅限管理员）
+func (s *Server) handleAgentSecret(w http.ResponseWriter, r *http.Request, id string) {
+	userInfo, ok := auth.GetUserFromContext(r)
+	if !ok || userInfo.Role != "admin" {
+		s.handleError(w, r, http.StatusForbidden, "Admin access required")
+		return
+	}
+
+	agent, err := s.db.GetAgent(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "Agent not found")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPost:
+		// 重新生成密钥
+		newSecret, err := s.db.RegenerateAgentSecret(id)
+		if err != nil {
+			s.handleError(w, r, http.StatusInternalServerError, "Failed to regenerate secret")
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"agentId": id,
+			"secret":  newSecret,
+			"message": "Agent secret regenerated. Save this secret, it won't be shown again.",
+		})
+	case http.MethodGet:
+		// 检查密钥状态
+		hasSecret := agent.SecretHash != ""
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"agentId":      id,
+			"hasSecret":    hasSecret,
+			"configured":   hasSecret,
+		})
+	case http.MethodDelete:
+		// 删除密钥（将允许无认证连接，不推荐）
+		if err := s.db.UpdateAgentSecret(id, ""); err != nil {
+			s.handleError(w, r, http.StatusInternalServerError, "Failed to remove secret")
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"message": "Agent secret removed (authentication disabled)",
+		})
+	default:
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
 // handleResources 处理资源请求
 func (s *Server) handleResources(w http.ResponseWriter, r *http.Request, resourcePath string) {
 	if r.Method != http.MethodGet {

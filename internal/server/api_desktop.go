@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -41,29 +40,33 @@ var desktopUpgrader = websocket.Upgrader{
 
 // handleDesktopWebSocket 处理桌面 WebSocket 连接
 func (s *Server) handleDesktopWebSocket(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	agentID := query.Get("agent_id")
-	host := query.Get("host")
-	portStr := query.Get("port")
-	token := query.Get("token")
-	username := query.Get("password")
-	password := query.Get("password")
-	domain := query.Get("domain")
-	widthStr := query.Get("width")
-	heightStr := query.Get("height")
+	// 从 Sec-WebSocket-Protocol 头获取票据
+	protocols := r.Header["Sec-WebSocket-Protocol"]
+	if len(protocols) == 0 {
+		http.Error(w, "Missing ticket in Sec-WebSocket-Protocol header", http.StatusBadRequest)
+		return
+	}
+	ticketID := protocols[0]
 
-	// 修正：username 参数
-	username = query.Get("username")
-
-	if agentID == "" || host == "" || portStr == "" || token == "" {
-		http.Error(w, "Missing required parameters", http.StatusBadRequest)
+	// 验证票据
+	ticket, valid := s.ticketMgr.ValidateTicket(ticketID)
+	if !valid {
+		http.Error(w, "Invalid or expired ticket", http.StatusUnauthorized)
 		return
 	}
 
-	// 验证 token
-	_, err := auth.ValidateToken(token)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	// 从票据参数获取连接信息
+	agentID := ticket.Params["agent_id"]
+	host := ticket.Params["host"]
+	portStr := ticket.Params["port"]
+	username := ticket.Params["username"]
+	password := ticket.Params["password"]
+	domain := ticket.Params["domain"]
+	widthStr := ticket.Params["width"]
+	heightStr := ticket.Params["height"]
+
+	if agentID == "" || host == "" || portStr == "" {
+		http.Error(w, "Invalid ticket parameters", http.StatusBadRequest)
 		return
 	}
 
@@ -89,8 +92,14 @@ func (s *Server) handleDesktopWebSocket(w http.ResponseWriter, r *http.Request) 
 		height = 800
 	}
 
-	// 升级 WebSocket
-	conn, err := desktopUpgrader.Upgrade(w, r, nil)
+	// 升级 WebSocket，接受票据协议
+	upgrader := websocket.Upgrader{
+		CheckOrigin:   isOriginAllowed,
+		Subprotocols:  []string{ticketID},
+		ReadBufferSize:  1 * 1024 * 1024,
+		WriteBufferSize: 1 * 1024 * 1024,
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Desktop WebSocket upgrade failed: %v", err)
 		return

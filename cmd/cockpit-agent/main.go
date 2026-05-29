@@ -52,6 +52,7 @@ func handleStart() {
 	cmd := flag.NewFlagSet("start", flag.ExitOnError)
 	server := cmd.String("server", "", "Server WebSocket 地址 (必需)")
 	agentID := cmd.String("id", "", "Agent ID (可选，默认自动生成)")
+	secret := cmd.String("secret", "", "Agent 认证密钥 (可选，但推荐使用)")
 	region := cmd.String("region", "", "地域 (可选)")
 	zone := cmd.String("zone", "", "可用区 (可选)")
 	labelsStr := cmd.String("labels", "", "标签 (可选)，格式: key1=value1,key2=value2,key3=[a,b,c]")
@@ -68,6 +69,7 @@ func handleStart() {
 		fmt.Println("  cockpit-agent start -server ws://localhost:8080")
 		fmt.Println("  cockpit-agent start -server wss://example.com:8080 -region jiangsu-huaian -zone datacenter-a")
 		fmt.Println("  cockpit-agent start -server ws://localhost:8080 -labels env=prod,services=[docker,k8s],gpu=true")
+		fmt.Println("  cockpit-agent start -server ws://localhost:8080 -secret YOUR_SECRET_HERE")
 		os.Exit(0)
 	}
 
@@ -83,6 +85,7 @@ func handleStart() {
 	cfg := agent.Config{
 		ServerURL: *server,
 		AgentID:   *agentID,
+		Secret:    *secret,
 		Region:    *region,
 		Zone:      *zone,
 		Labels:    labels,

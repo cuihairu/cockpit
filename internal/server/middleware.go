@@ -1,6 +1,8 @@
 package server
 
 import (
+	"strconv"
+
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"net/http"
@@ -35,16 +37,20 @@ func (s *Server) AuditMiddleware(next http.Handler) http.Handler {
 		// 保存原始响应写入器
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
-		// 获取用户信息
+		// 处理请求（在处理过程中，auth 中间件会设置用户上下文）
+		next.ServeHTTP(wrapped, r)
+
+		// 处理完成后，尝试获取用户信息
+		// 此时 auth 中间件已经执行，context 应该包含用户信息
 		username := "anonymous"
 		userID := uint(0)
 		if userInfo, ok := auth.GetUserFromContext(r); ok {
 			username = userInfo.Username
-			// UserID 是 string 类型
+			// 将 string UserID 转换为 uint
+			if parsedID, err := strconv.ParseUint(userInfo.UserID, 10, 32); err == nil {
+				userID = uint(parsedID)
+			}
 		}
-
-		// 处理请求
-		next.ServeHTTP(wrapped, r)
 
 		// 记录审计日志（只记录需要审计的路径）
 		if s.shouldAudit(r.Method, r.URL.Path) {

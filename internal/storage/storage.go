@@ -183,6 +183,29 @@ func (d *DB) CleanupOfflineAgents(timeout time.Duration) ([]string, error) {
 	return removed, nil
 }
 
+// UpdateAgentSecret 更新 Agent 密钥哈希
+func (d *DB) UpdateAgentSecret(agentID, secretHash string) error {
+	return d.db.Model(&Agent{}).
+		Where("id = ?", agentID).
+		Update("secret_hash", secretHash).Error
+}
+
+// RegenerateAgentSecret 重新生成 Agent 密钥（返回新明文密钥和哈希）
+func (d *DB) RegenerateAgentSecret(agentID string) (string, error) {
+	secret, err := GenerateAgentSecret()
+	if err != nil {
+		return "", err
+	}
+	hash, err := HashAgentSecret(secret)
+	if err != nil {
+		return "", err
+	}
+	if err := d.UpdateAgentSecret(agentID, hash); err != nil {
+		return "", err
+	}
+	return secret, nil
+}
+
 // ============ ComputeInstance 操作 ============
 
 // UpsertComputeInstance 插入或更新计算实例

@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -57,6 +59,7 @@ type Server struct {
 	proxyMgr       *proxy.Manager
 	notification   *notification.Client
 	remoteSessions *RemoteSessionManager
+	ticketMgr      *TicketManager
 	cfg            *config.Config
 	upgrader       websocket.Upgrader
 
@@ -97,6 +100,7 @@ func NewServer(cfg *config.Config) *Server {
 		proxyMgr:       proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
 		notification:   notificationClient,
 		remoteSessions: NewRemoteSessionManager(),
+			ticketMgr:      NewTicketManager(),
 		cfg:            cfg,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:     isOriginAllowed,
@@ -118,13 +122,26 @@ func (s *Server) Start() error {
 
 	// 初始化管理员用户
 	adminUser := getEnv("ADMIN_USERNAME", "admin")
-	adminPass := getEnv("ADMIN_PASSWORD", "admin")
-	if adminPass == "admin" {
-		log.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-		log.Println("!! WARNING: Using DEFAULT admin password 'admin'!      !!")
-		log.Println("!! Set ADMIN_PASSWORD environment variable immediately! !!")
-		log.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+	adminPass := os.Getenv("ADMIN_PASSWORD")
+
+	// 强制要求设置密码
+	if adminPass == "" {
+		log.Fatal("SECURITY ERROR: ADMIN_PASSWORD environment variable is required for production use. Please set a strong password and restart.")
 	}
+
+	// 验证密码强度
+	if len(adminPass) < 8 {
+		log.Fatal("SECURITY ERROR: ADMIN_PASSWORD must be at least 8 characters long")
+	}
+
+	// 检查是否是常见的弱密码
+	weakPasswords := []string{"password", "12345678", "admin123", "qwerty123", "abcdef12"}
+	for _, weak := range weakPasswords {
+		if adminPass == weak {
+			log.Fatalf("SECURITY ERROR: ADMIN_PASSWORD is too weak (cannot use common password '%s')", weak)
+		}
+	}
+
 	if err := auth.InitAdmin(s.db, adminUser, adminPass); err != nil {
 		log.Printf("Warning: Failed to init admin user: %v", err)
 	} else {
@@ -267,6 +284,37 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		agentID = protocol.GenerateIDWithPrefix("agent")
 	}
 
+	// 认证检查
+	existingAgent, err := s.db.GetAgent(agentID)
+	if err == nil && existingAgent.SecretHash != "" {
+		// Agent 已存在且有密钥配置，验证密钥
+		if reg.Secret == "" {
+			log.Printf("Agent %s registration failed: missing secret", agentID)
+			s.sendRegisterError(conn, "authentication_required", "Agent secret is required")
+			conn.Close()
+			return
+		}
+		if !storage.VerifyAgentSecret(existingAgent.SecretHash, reg.Secret) {
+			log.Printf("Agent %s registration failed: invalid secret", agentID)
+			s.sendRegisterError(conn, "authentication_failed", "Invalid agent secret")
+			conn.Close()
+			return
+		}
+	} else if existingAgent != nil && existingAgent.SecretHash == "" {
+		// Agent 存在但未配置密钥（旧版本迁移），需要配置
+		log.Printf("Agent %s exists but has no secret configured", agentID)
+	}
+
+	// 检查 Registry 中是否已有活跃连接
+	if activeAgent, exists := s.registry.Get(agentID); exists {
+		if activeAgent.IsOnline(0) {
+			log.Printf("Agent %s already has active connection, rejecting duplicate", agentID)
+			s.sendRegisterError(conn, "duplicate_connection", "Agent already connected")
+			conn.Close()
+			return
+		}
+	}
+
 	// 创建 Agent
 	agent := NewAgent(agentID, conn)
 	agent.Update(&reg)
@@ -274,13 +322,18 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 注册到 Registry
 	if err := s.registry.Register(agent); err != nil {
 		log.Printf("Register agent failed: %v", err)
-		// 如果已存在，先注销旧的
-		s.registry.Unregister(agentID)
-		s.registry.Register(agent)
+		s.sendRegisterError(conn, "registration_failed", err.Error())
+		conn.Close()
+		return
 	}
 
 	// 持久化到数据库
-	if err := s.db.UpsertAgent(toStorageAgent(agent)); err != nil {
+	storageAgent := toStorageAgent(agent)
+	if existingAgent != nil && existingAgent.SecretHash != "" {
+		// 保留现有的 SecretHash
+		storageAgent.SecretHash = existingAgent.SecretHash
+	}
+	if err := s.db.UpsertAgent(storageAgent); err != nil {
 		log.Printf("Failed to persist agent to database: %v", err)
 	}
 
@@ -297,6 +350,15 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 启动读写循环
 	go s.readLoop(agent)
 	go s.writeLoop(agent)
+}
+
+// sendRegisterError 发送注册错误响应
+func (s *Server) sendRegisterError(conn *websocket.Conn, code, message string) {
+	resp := protocol.NewMessage(protocol.MessageTypeError, map[string]interface{}{
+		"code":    code,
+		"message": message,
+	})
+	s.codec.WriteMessage(conn, resp)
 }
 
 // readLoop 读取循环
@@ -660,6 +722,22 @@ func (s *Server) cleanupOldAlerts() {
 
 // handleLoginWithAudit 处理登录并记录审计日志
 func (s *Server) handleLoginWithAudit(w http.ResponseWriter, r *http.Request) {
+	// 在消费 body 之前先读取用户名用于审计
+	var username string
+
+	// 读取 body 用于解析
+	body, err := io.ReadAll(r.Body)
+	if err == nil {
+		// 创建一个新的 reader 供后续使用
+		r.Body = io.NopCloser(bytes.NewBuffer(body))
+
+		// 尝试解析用户名
+		var loginReq auth.LoginRequest
+		if json.Unmarshal(body, &loginReq) == nil {
+			username = loginReq.Username
+		}
+	}
+
 	// 创建一个 ResponseRecorder 来捕获响应状态码
 	recorder := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
@@ -667,13 +745,6 @@ func (s *Server) handleLoginWithAudit(w http.ResponseWriter, r *http.Request) {
 	auth.HandleLogin(recorder, r)
 
 	// 根据响应状态码记录审计日志
-	username := r.FormValue("username")
-	if username == "" {
-		// 尝试从 JSON body 读取
-		if err := r.ParseForm(); err == nil {
-			username = r.FormValue("username")
-		}
-	}
 	if username == "" {
 		username = "unknown"
 	}
