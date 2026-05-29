@@ -52,6 +52,7 @@ func newTestServerWithDB(t *testing.T) *Server {
 		registry:       NewRegistry(),
 		db:             db,
 		remoteSessions: NewRemoteSessionManager(),
+		audit:          audit.NewLogger(db),
 	}
 }
 
@@ -1652,6 +1653,7 @@ func TestHandleProxyCreateSuccess(t *testing.T) {
 		"proxyType":  "tcp",
 		"remotePort": 8080,
 		"target":     "localhost:3000",
+		"publicBind": true,
 	})
 
 	_, req := doAuthenticatedRequest(s, http.MethodPost, "/api/proxies", body)
@@ -1674,6 +1676,7 @@ func TestHandleProxyCreateUDP(t *testing.T) {
 		"proxyType":  "udp",
 		"remotePort": 9090,
 		"target":     "localhost:5000",
+		"publicBind": true,
 	})
 
 	_, req := doAuthenticatedRequest(s, http.MethodPost, "/api/proxies", body)
@@ -1771,6 +1774,7 @@ func TestHandleProxyDeleteSuccess(t *testing.T) {
 
 func TestHandleProxyDeleteByQueryParam(t *testing.T) {
 	s := newTestServerWithDB(t)
+	setupAdmin(s)
 
 	s.db.CreateProxy(&storage.Proxy{
 		ID: "qp-proxy", Name: "QP", AgentID: "a1", ProxyType: "tcp",
@@ -1779,12 +1783,11 @@ func TestHandleProxyDeleteByQueryParam(t *testing.T) {
 	})
 
 	// Invalid JSON body, should fall back to query param
-	req := httptest.NewRequest(http.MethodDelete, "/api/proxies?id=qp-proxy", bytes.NewReader([]byte("invalid")))
-	rec := httptest.NewRecorder()
-	s.handleProxyDelete(rec, req)
+	_, req := doAuthenticatedRequest(s, http.MethodDelete, "/api/proxies?id=qp-proxy", []byte("invalid"))
+	rr := callWithAuth(s, s.handleProxyDelete, req)
 
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("Status = %d, want %d", rec.Code, http.StatusNoContent)
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("Status = %d, want %d", rr.Code, http.StatusNoContent)
 	}
 }
 

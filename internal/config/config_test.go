@@ -114,8 +114,8 @@ func TestLoadDefaults(t *testing.T) {
     if cfg.Server == nil {
         t.Fatal("Expected Server config to be non-nil")
     }
-    if cfg.Server.Host != "0.0.0.0" {
-        t.Errorf("Expected default host '0.0.0.0', got '%s'", cfg.Server.Host)
+    if cfg.Server.Host != "127.0.0.1" {
+        t.Errorf("Expected default host '127.0.0.1', got '%s'", cfg.Server.Host)
     }
     if cfg.Server.Port != 9000 {
         t.Errorf("Expected default port 9000, got %d", cfg.Server.Port)
