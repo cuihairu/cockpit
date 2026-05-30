@@ -7,7 +7,7 @@ import (
 // AuditLog 审计日志
 type AuditLog struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	UserID    uint      `gorm:"index" json:"user_id"`
+	UserID    string    `gorm:"index;size:50" json:"user_id"`
 	Username  string    `gorm:"size:100;index" json:"username"`
 	Action    string    `gorm:"size:50;index" json:"action"`         // login, logout, create, update, delete, view
 	Resource  string    `gorm:"size:100;index" json:"resource"`      // user, agent, domain, certificate, service, etc.

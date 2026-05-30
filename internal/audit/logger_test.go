@@ -37,7 +37,7 @@ func TestConstants(t *testing.T) {
 
 func TestLogEntry(t *testing.T) {
 	entry := &LogEntry{
-		UserID:     1,
+		UserID:     "1",
 		Username:   "testuser",
 		Action:     ActionLogin,
 		Resource:   "user",
@@ -183,11 +183,11 @@ func TestLogEntryDetailsTypes(t *testing.T) {
 func TestLogEntryWithUserID(t *testing.T) {
 	tests := []struct {
 		name   string
-		userID uint
+		userID string
 	}{
-		{"zero user ID", 0},
-		{"non-zero user ID", 123},
-		{"max user ID", ^uint(0)},
+		{"empty user ID", ""},
+		{"numeric user ID", "123"},
+		{"UUID user ID", "550e8400-e29b-41d4-a716-446655440000"},
 	}
 
 	for _, tt := range tests {
@@ -294,7 +294,7 @@ func TestLogEntryWithUserAgent(t *testing.T) {
 func TestLogEntryComplete(t *testing.T) {
 	// Test a complete log entry with all fields set
 	entry := &LogEntry{
-		UserID:     42,
+		UserID:     "42",
 		Username:   "admin",
 		Action:     ActionUpdate,
 		Resource:   "agent",
@@ -309,7 +309,7 @@ func TestLogEntryComplete(t *testing.T) {
 		Status:    StatusSuccess,
 	}
 
-	if entry.UserID != 42 {
+	if entry.UserID != "42" {
 		t.Errorf("UserID = %v, want 42", entry.UserID)
 	}
 

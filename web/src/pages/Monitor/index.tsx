@@ -11,6 +11,7 @@ import {
   type SystemInfoSnapshot,
   type SystemMetric,
 } from '@/services/metrics';
+import { logger } from '@/utils/logger';
 
 const Monitor: React.FC = () => {
   const [snapshots, setSnapshots] = useState<SystemInfoSnapshot[]>([]);
@@ -29,7 +30,7 @@ const Monitor: React.FC = () => {
         setSelectedAgentId(data[0].agentId);
       }
     } catch (error) {
-      console.error('Failed to fetch snapshots:', error);
+      logger.error('Failed to fetch snapshots:', error);
     }
   }, [selectedAgentId]);
 
@@ -39,7 +40,7 @@ const Monitor: React.FC = () => {
       const data = await getSystemSnapshot(agentId);
       setCurrentSnapshot(data);
     } catch (error) {
-      console.error('Failed to fetch snapshot:', error);
+      logger.error('Failed to fetch snapshot:', error);
     }
   }, []);
 
@@ -51,7 +52,7 @@ const Monitor: React.FC = () => {
       const response = await getMetricsHistory(agentId, { start, end, limit: 1000 });
       setMetricsHistory(response.data || []);
     } catch (error) {
-      console.error('Failed to fetch metrics history:', error);
+      logger.error('Failed to fetch metrics history:', error);
     }
   }, []);
 

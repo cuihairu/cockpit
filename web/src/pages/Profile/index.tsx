@@ -3,6 +3,7 @@ import { Card, Form, Input, Button, message, Descriptions, Avatar, Space, Divide
 import { UserOutlined, MailOutlined, LockOutlined, SaveOutlined } from '@ant-design/icons'
 import { useUser } from '@/contexts/UserContext'
 import { api } from '@/services/api'
+import { logger } from '@/utils/logger'
 
 const Profile = () => {
   const { user } = useUser()
@@ -12,9 +13,15 @@ const Profile = () => {
   const handleProfileSave = async (values: any) => {
     setLoading(true)
     try {
-      // TODO: 调用 API 保存用户信息
-      console.log('Saving profile:', values)
+      await api.updateProfile({
+        email: values.email,
+        phone: values.phone,
+        department: values.department,
+      })
       message.success('个人信息已更新')
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.error || '更新个人信息失败'
+      message.error(errorMsg)
     } finally {
       setLoading(false)
     }

@@ -188,13 +188,13 @@ func TestLogEntryConcurrentCreation(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func(id int) {
 			entry := &LogEntry{
-				UserID:   uint(id),
+				UserID:   string(rune(id)), // Convert to string for test
 				Username: "user",
 				Action:   ActionCreate,
 				Resource: "test",
 				Status:   StatusSuccess,
 			}
-			if entry.UserID != uint(id) {
+			if entry.UserID != string(rune(id)) {
 				t.Errorf("UserID = %v, want %v", entry.UserID, id)
 			}
 			done <- true
@@ -441,7 +441,7 @@ func TestLoggerLogWithUserID(t *testing.T) {
 	logger := NewLogger(db)
 
 	entry := &LogEntry{
-		UserID:   123,
+		UserID:   "123", // Convert to string
 		Username: "testuser",
 		Action:   ActionCreate,
 		Resource: "agent",

@@ -1,8 +1,6 @@
 package server
 
 import (
-	"strconv"
-
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"net/http"
@@ -43,13 +41,10 @@ func (s *Server) AuditMiddleware(next http.Handler) http.Handler {
 		// 处理完成后，尝试获取用户信息
 		// 此时 auth 中间件已经执行，context 应该包含用户信息
 		username := "anonymous"
-		userID := uint(0)
+		userID := ""
 		if userInfo, ok := auth.GetUserFromContext(r); ok {
 			username = userInfo.Username
-			// 将 string UserID 转换为 uint
-			if parsedID, err := strconv.ParseUint(userInfo.UserID, 10, 32); err == nil {
-				userID = uint(parsedID)
-			}
+			userID = userInfo.UserID
 		}
 
 		// 记录审计日志（只记录需要审计的路径）

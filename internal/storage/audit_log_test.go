@@ -10,7 +10,7 @@ func TestCreateAuditLog(t *testing.T) {
 	defer db.Close()
 
 	log := &AuditLog{
-		UserID:   1,
+		UserID:   "1",
 		Username: "admin",
 		Action:   "login",
 		Resource: "session",

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { logger } from '@/utils/logger';
 
 // 系统信息快照
 export interface SystemInfoSnapshot {
@@ -94,7 +95,7 @@ metricsClient.interceptors.response.use(
       localStorage.removeItem('username');
       window.location.href = '/login';
     }
-    console.error('Metrics API Error:', error);
+    logger.error('Metrics API Error:', error);
     return Promise.reject(error);
   }
 );

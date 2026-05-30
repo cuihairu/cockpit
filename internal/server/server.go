@@ -88,6 +88,18 @@ func NewServer(cfg *config.Config) *Server {
 		notificationClient = notification.NewClient(cfg.Notification)
 	}
 
+	// 检查 TOTP 加密密钥
+	if storage.IsUsingDefaultKey() {
+		log.Println("WARNING: Using default TOTP encryption key. This is insecure for production!")
+		log.Println("Please set TOTP_ENCRYPTION_KEY environment variable with a strong random key.")
+	}
+	// 在生产模式下强制验证密钥（可以通过环境变量 PRODUCTION=true 启用）
+	if os.Getenv("PRODUCTION") == "true" {
+		if err := storage.ValidateKey(); err != nil {
+			log.Fatalf("SECURITY ERROR: %v", err)
+		}
+	}
+
 	// 构造服务器地址
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 

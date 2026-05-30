@@ -4,6 +4,7 @@ import { SaveOutlined, SafetyOutlined, CheckCircleOutlined, WarningOutlined } fr
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/services/api'
 import type { UserInfo } from '@/types'
+import { logger } from '@/utils/logger'
 
 const Settings = () => {
   const [form] = Form.useForm()
@@ -21,7 +22,7 @@ const Settings = () => {
         const info = await api.getCurrentUser()
         setUserInfo(info)
       } catch (err) {
-        console.error('Failed to fetch user info:', err)
+        logger.error('Failed to fetch user info:', err)
         // 降级到 localStorage
         const username = localStorage.getItem('username')
         if (username) {
@@ -40,9 +41,18 @@ const Settings = () => {
   const handleSave = async (values: any) => {
     setLoading(true)
     try {
-      // TODO: 调用 API 保存设置
-      console.log('Saving settings:', values)
+      await api.saveSettings({
+        siteName: values.siteName,
+        refreshInterval: values.refreshInterval,
+        enableNotifications: values.enableNotifications,
+        theme: values.theme,
+        compactMode: values.compactMode,
+        showResourceCount: values.showResourceCount,
+      })
       message.success('设置已保存')
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.error || '保存设置失败'
+      message.error(errorMsg)
     } finally {
       setLoading(false)
     }

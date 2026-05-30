@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/auth"
@@ -133,9 +132,9 @@ func (s *Server) handleProxyCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 记录审计日志
-	userIDUint, _ := strconv.ParseUint(userInfo.UserID, 10, 32)
+	// UserID is now string, no conversion needed
 	s.audit.Log(&audit.LogEntry{
-		UserID:     uint(userIDUint),
+		UserID:     userInfo.UserID,
 		Username:   userInfo.Username,
 		Action:     "create",
 		Resource:   "proxy",

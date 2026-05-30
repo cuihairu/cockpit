@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { Spin } from 'antd'
+import { logger } from '@/utils/logger'
 import './index.less'
 
 interface QRCodeDisplayProps {
@@ -24,7 +25,7 @@ const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({ value, size = 200, title 
       setLoading(false)
       if (err) {
         setError('生成 QR 码失败')
-        console.error('QR Code generation error:', err)
+        logger.error('QR Code generation error:', err)
       }
     })
   }, [value, size])

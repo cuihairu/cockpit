@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { logger } from '@/utils/logger';
 
 // 远程连接类型
 export type RemoteProtocol = 'ssh' | 'rdp' | 'vnc' | 'telnet' | 'ftp';
@@ -56,7 +57,7 @@ remoteClient.interceptors.response.use(
       localStorage.removeItem('username');
       window.location.href = '/login';
     }
-    console.error('Remote API Error:', error);
+    logger.error('Remote API Error:', error);
     return Promise.reject(error);
   }
 );

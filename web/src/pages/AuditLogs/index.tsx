@@ -10,6 +10,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { RangePickerProps } from 'antd/es/date-picker'
 import dayjs from 'dayjs'
+import { logger } from '@/utils/logger'
 import './index.less'
 
 const { RangePicker } = DatePicker
@@ -103,7 +104,7 @@ const AuditLogs = () => {
       const data = await response.json()
       setStats(data)
     } catch (error) {
-      console.error('Failed to fetch stats:', error)
+      logger.error('Failed to fetch stats:', error)
     }
   }
 

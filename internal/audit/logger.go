@@ -33,7 +33,7 @@ const (
 
 // LogEntry 日志条目
 type LogEntry struct {
-	UserID     uint
+	UserID     string
 	Username   string
 	Action     string
 	Resource   string

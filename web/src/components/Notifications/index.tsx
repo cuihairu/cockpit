@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { api } from '@/services/api'
+import { logger } from '@/utils/logger'
 
 export interface Alert {
   id: string
@@ -32,7 +33,7 @@ const NotificationDropdown = () => {
       const res = await api.getAlerts()
       setAlerts(res.data || [])
     } catch (error) {
-      console.error('Failed to fetch alerts:', error)
+      logger.error('Failed to fetch alerts:', error)
     } finally {
       setLoading(false)
     }
@@ -51,7 +52,7 @@ const NotificationDropdown = () => {
       await api.markAlertRead(alertId)
       setAlerts(alerts.map((a) => (a.id === alertId ? { ...a, read: true } : a)))
     } catch (error) {
-      console.error('Failed to mark alert as read:', error)
+      logger.error('Failed to mark alert as read:', error)
     }
   }
 
@@ -60,7 +61,7 @@ const NotificationDropdown = () => {
       await api.markAllAlertsRead()
       setAlerts(alerts.map((a) => ({ ...a, read: true })))
     } catch (error) {
-      console.error('Failed to mark all alerts as read:', error)
+      logger.error('Failed to mark all alerts as read:', error)
     }
   }
 

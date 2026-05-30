@@ -13,6 +13,9 @@ import (
 )
 
 var encryptionKey []byte
+var usingDefaultKey = false
+
+const defaultKeyPrefix = "change-this-totp-encryption-key"
 
 func init() {
 	key := os.Getenv("TOTP_ENCRYPTION_KEY")
@@ -21,9 +24,38 @@ func init() {
 		// ⚠️ 警告：生产环境必须设置 TOTP_ENCRYPTION_KEY 环境变量！
 		// 使用默认密钥会导致所有实例使用相同密钥，严重破坏安全性。
 		key = "change-this-totp-encryption-key-in-prod!"
+		usingDefaultKey = true
+	} else {
+		// 检查是否使用默认密钥或弱密钥
+		if len(key) < 32 {
+			usingDefaultKey = true
+		}
+		if strings.HasPrefix(key, defaultKeyPrefix) {
+			usingDefaultKey = true
+		}
 	}
 	hash := sha256.Sum256([]byte(key))
 	encryptionKey = hash[:]
+}
+
+// IsUsingDefaultKey 检查是否正在使用默认密钥
+func IsUsingDefaultKey() bool {
+	return usingDefaultKey
+}
+
+// ValidateKey 验证密钥强度
+func ValidateKey() error {
+	key := os.Getenv("TOTP_ENCRYPTION_KEY")
+	if key == "" {
+		return fmt.Errorf("TOTP_ENCRYPTION_KEY environment variable is not set")
+	}
+	if len(key) < 32 {
+		return fmt.Errorf("TOTP_ENCRYPTION_KEY must be at least 32 characters long")
+	}
+	if strings.HasPrefix(key, defaultKeyPrefix) {
+		return fmt.Errorf("TOTP_ENCRYPTION_KEY cannot use default/weak key")
+	}
+	return nil
 }
 
 // Encrypt 使用 AES-256-GCM 加密明文

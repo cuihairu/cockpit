@@ -13,6 +13,7 @@ import type {
   LoginResponse,
   UserInfo,
 } from '@/types'
+import { logger } from '@/utils/logger'
 
 class ApiService {
   private client: AxiosInstance
@@ -48,7 +49,7 @@ class ApiService {
           localStorage.removeItem('username')
           window.location.href = '/login'
         }
-        console.error('API Error:', error)
+        logger.error('API Error:', error)
         return Promise.reject(error)
       }
     )
@@ -73,6 +74,23 @@ class ApiService {
   // 获取当前用户信息
   async getCurrentUser(): Promise<UserInfo> {
     return this.client.get<any, UserInfo>('/me')
+  }
+
+  // 更新当前用户信息
+  async updateProfile(data: { email?: string; phone?: string; department?: string }): Promise<{ message: string }> {
+    return this.client.put<any, { message: string }>('/me/profile', data)
+  }
+
+  // 保存用户设置
+  async saveSettings(data: {
+    siteName?: string
+    refreshInterval?: number
+    enableNotifications?: boolean
+    theme?: string
+    compactMode?: boolean
+    showResourceCount?: boolean
+  }): Promise<{ message: string }> {
+    return this.client.put<any, { message: string }>('/settings', data)
   }
 
   // 修改当前用户密码

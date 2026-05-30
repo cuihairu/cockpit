@@ -137,6 +137,46 @@ func handleServer() {
 }
 
 func handleAgent() {
-	fmt.Println("Agent command coming soon...")
+	cmd := flag.NewFlagSet("agent", flag.ExitOnError)
+	serverAddr := cmd.String("server", "", "Server address (e.g., wss://server.com:8080)")
+	agentID := cmd.String("id", "", "Agent ID (auto-generated if empty)")
+	_ = cmd.String("secret", "", "Agent secret (if configured)")
+	help := cmd.Bool("h", false, "显示帮助")
+
+	cmd.Parse(os.Args[2:])
+
+	if *help {
+		fmt.Println("启动 Cockpit Agent")
+		fmt.Println()
+		cmd.PrintDefaults()
+		fmt.Println()
+		fmt.Println("示例:")
+		fmt.Println("  cockpit agent -server wss://localhost:8080")
+		fmt.Println("  cockpit agent -server wss://localhost:8080 -id agent-001")
+		os.Exit(0)
+	}
+
+	if *serverAddr == "" {
+		fmt.Println("错误: 请指定服务器地址 (-server)")
+		fmt.Println()
+		cmd.PrintDefaults()
+		os.Exit(1)
+	}
+
+	fmt.Printf("启动 Cockpit Agent\n")
+	fmt.Printf("服务器: %s\n", *serverAddr)
+	if *agentID != "" {
+		fmt.Printf("Agent ID: %s\n", *agentID)
+	}
+	fmt.Println()
+	fmt.Println("Agent 功能正在开发中，敬请期待...")
+	fmt.Println()
+	fmt.Println("计划功能:")
+	fmt.Println("  - 系统信息采集")
+	fmt.Println("  - Docker 容器监控")
+	fmt.Println("  - 远程命令执行")
+	fmt.Println("  - 文件传输")
+	fmt.Println("  - 日志收集")
+
 	os.Exit(1)
 }
