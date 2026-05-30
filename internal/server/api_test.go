@@ -2028,6 +2028,131 @@ func (s *Server) makeUserHandler(id string) http.HandlerFunc {
 	}
 }
 
+// makeAgentSecretHandler creates a handler that extracts agent ID and calls handleAgentSecret
+func (s *Server) makeAgentSecretHandler(id string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.handleAgentSecret(w, r, id)
+	}
+}
+
+// ============ handleAgentSecret Tests ============
+
+func TestHandleAgentSecretGet(t *testing.T) {
+	s := newTestServerWithDB(t)
+	setupAdmin(s)
+
+	// Create test agent
+	s.db.UpsertAgent(&storage.Agent{ID: "test-agent", Hostname: "test-agent", Status: "online"})
+
+	_, req := doAuthenticatedRequest(s, http.MethodGet, "/api/agents/test-agent/secret", nil)
+	rr := callWithAuth(s, s.makeAgentSecretHandler("test-agent"), req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(rr.Body).Decode(&result)
+	if result["agentId"] != "test-agent" {
+		t.Errorf("agentId = %v, want test-agent", result["agentId"])
+	}
+	if result["hasSecret"] != false {
+		t.Errorf("hasSecret = %v, want false", result["hasSecret"])
+	}
+}
+
+func TestHandleAgentSecretGetNonexistent(t *testing.T) {
+	s := newTestServerWithDB(t)
+	setupAdmin(s)
+
+	_, req := doAuthenticatedRequest(s, http.MethodGet, "/api/agents/nonexistent/secret", nil)
+	rr := callWithAuth(s, s.makeAgentSecretHandler("nonexistent"), req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("Status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleAgentSecretGetNoAuth(t *testing.T) {
+	s := newTestServerWithDB(t)
+
+	s.db.UpsertAgent(&storage.Agent{ID: "test-agent", Hostname: "test-agent", Status: "online"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/secret", nil)
+	rec := httptest.NewRecorder()
+	s.makeAgentSecretHandler("test-agent")(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("Status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestHandleAgentSecretPost(t *testing.T) {
+	s := newTestServerWithDB(t)
+	setupAdmin(s)
+
+	s.db.UpsertAgent(&storage.Agent{ID: "test-agent", Hostname: "test-agent", Status: "online"})
+
+	_, req := doAuthenticatedRequest(s, http.MethodPost, "/api/agents/test-agent/secret", nil)
+	rr := callWithAuth(s, s.makeAgentSecretHandler("test-agent"), req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(rr.Body).Decode(&result)
+	if result["agentId"] != "test-agent" {
+		t.Errorf("agentId = %v, want test-agent", result["agentId"])
+	}
+	if result["secret"] == nil {
+		t.Error("secret should be returned")
+	}
+
+	// Verify secret was actually set
+	agent, _ := s.db.GetAgent("test-agent")
+	if agent.SecretHash == "" {
+		t.Error("SecretHash should be set")
+	}
+}
+
+func TestHandleAgentSecretDelete(t *testing.T) {
+	s := newTestServerWithDB(t)
+	setupAdmin(s)
+
+	// Create agent with secret
+	secret, _ := storage.GenerateAgentSecret()
+	hash, _ := storage.HashAgentSecret(secret)
+	s.db.UpsertAgent(&storage.Agent{ID: "test-agent", Hostname: "test-agent", Status: "online", SecretHash: hash})
+
+	_, req := doAuthenticatedRequest(s, http.MethodDelete, "/api/agents/test-agent/secret", nil)
+	rr := callWithAuth(s, s.makeAgentSecretHandler("test-agent"), req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	// Verify secret was removed
+	agent, _ := s.db.GetAgent("test-agent")
+	if agent.SecretHash != "" {
+		t.Error("SecretHash should be empty")
+	}
+}
+
+func TestHandleAgentSecretWrongMethod(t *testing.T) {
+	s := newTestServerWithDB(t)
+	setupAdmin(s)
+
+	s.db.UpsertAgent(&storage.Agent{ID: "test-agent", Hostname: "test-agent", Status: "online"})
+
+	_, req := doAuthenticatedRequest(s, http.MethodPut, "/api/agents/test-agent/secret", nil)
+	rr := callWithAuth(s, s.makeAgentSecretHandler("test-agent"), req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
+	}
+}
+
 func (s *Server) makePasswordHandler(id string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.handleUserChangePassword(w, r, id)

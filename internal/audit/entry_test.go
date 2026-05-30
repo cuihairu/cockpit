@@ -453,3 +453,90 @@ func TestLoggerLogWithUserID(t *testing.T) {
 		t.Errorf("Log() error = %v", err)
 	}
 }
+
+func TestLoggerLogTOTPEnabled(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	err = logger.LogTOTPEnabled("testuser", "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Errorf("LogTOTPEnabled() error = %v", err)
+	}
+}
+
+func TestLoggerLogTOTPDisabled(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	err = logger.LogTOTPDisabled("testuser", "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Errorf("LogTOTPDisabled() error = %v", err)
+	}
+}
+
+func TestLoggerLogTOTPVerified(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	// Test with backup code
+	err = logger.LogTOTPVerified("testuser", "127.0.0.1", "test-agent", true)
+	if err != nil {
+		t.Errorf("LogTOTPVerified() with backup error = %v", err)
+	}
+
+	// Test without backup code
+	err = logger.LogTOTPVerified("testuser", "127.0.0.1", "test-agent", false)
+	if err != nil {
+		t.Errorf("LogTOTPVerified() without backup error = %v", err)
+	}
+}
+
+func TestLoggerLogTOTPFailed(t *testing.T) {
+	db, err := storage.Open(storage.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Close()
+		os.Remove("cockpit.db")
+		os.Remove("cockpit.db-shm")
+		os.Remove("cockpit.db-wal")
+	}()
+
+	logger := NewLogger(db)
+
+	err = logger.LogTOTPFailed("testuser", "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Errorf("LogTOTPFailed() error = %v", err)
+	}
+}
