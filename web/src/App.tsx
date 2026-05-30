@@ -15,6 +15,7 @@ import {
 } from '@ant-design/icons'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
+import ErrorBoundary from './components/ErrorBoundary'
 import { UserProvider, useUser } from './contexts/UserContext'
 import { logger } from '@/utils/logger'
 import logo from '@/assets/logo.svg'
@@ -266,33 +267,35 @@ const MainLayout = () => {
 
 const App = () => {
   return (
-    <ConfigProvider
-      theme={{
-        token: {
-          colorPrimary: '#165DFF',
-        },
-      }}
-    >
-      <AntdApp>
-        <QueryClientProvider client={queryClient}>
-          <UserProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route
-                  path="/*"
-                  element={
-                    <ProtectedRoute>
-                      <MainLayout />
-                    </ProtectedRoute>
-                  }
-                />
-              </Routes>
-            </BrowserRouter>
-          </UserProvider>
-        </QueryClientProvider>
-      </AntdApp>
-    </ConfigProvider>
+    <ErrorBoundary>
+      <ConfigProvider
+        theme={{
+          token: {
+            colorPrimary: '#165DFF',
+          },
+        }}
+      >
+        <AntdApp>
+          <QueryClientProvider client={queryClient}>
+            <UserProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/login" element={<Login />} />
+                  <Route
+                    path="/*"
+                    element={
+                      <ProtectedRoute>
+                        <MainLayout />
+                      </ProtectedRoute>
+                    }
+                  />
+                </Routes>
+              </BrowserRouter>
+            </UserProvider>
+          </QueryClientProvider>
+        </AntdApp>
+      </ConfigProvider>
+    </ErrorBoundary>
   )
 }
 

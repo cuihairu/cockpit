@@ -1,19 +1,26 @@
-import { Card, Row, Col, Statistic, Progress, Table, Tag, Space, Typography, Button } from 'antd'
+import { Card, Row, Col, Statistic, Progress, Table, Tag, Space, Typography, Button, Input } from 'antd'
 import {
   CloudServerOutlined,
   SafetyOutlined,
   CheckCircleOutlined,
   WarningOutlined,
   ReloadOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@/services/api'
+import { logger } from '@/utils/logger'
 import type { ColumnsType } from 'antd/es/table'
+import type { Agent } from '@/types'
 import './index.less'
 
 const { Title, Text } = Typography
 
 const Dashboard = () => {
+  const navigate = useNavigate()
+  const [searchQuery, setSearchQuery] = useState('')
   const { data: status, refetch } = useQuery({
     queryKey: ['status'],
     queryFn: () => api.getStatus(),
@@ -35,6 +42,24 @@ const Dashboard = () => {
   const onlineRate = stats.infrastructure.total > 0
     ? Math.round((stats.infrastructure.online / stats.infrastructure.total) * 100)
     : 0
+
+  // 搜索过滤
+  const filteredAgents = (agents || []).filter((agent: Agent) => {
+    if (!searchQuery) return true
+    const query = searchQuery.toLowerCase()
+    return (
+      agent.hostname?.toLowerCase().includes(query) ||
+      agent.ip?.toLowerCase().includes(query) ||
+      agent.id?.toLowerCase().includes(query) ||
+      agent.location?.region?.toLowerCase().includes(query) ||
+      agent.location?.zone?.toLowerCase().includes(query)
+    )
+  })
+
+  const handleSearch = (value: string) => {
+    setSearchQuery(value)
+    logger.debug('Dashboard search:', value)
+  }
 
   const resourceCards = [
     {
@@ -175,7 +200,7 @@ const Dashboard = () => {
 
       <Card title="Agent 列表" variant="borderless" extra={<a href="/agents">查看全部</a>}>
         <Table
-          dataSource={agents || []}
+          dataSource={filteredAgents}
           columns={agentColumns}
           rowKey="id"
           pagination={{ pageSize: 5 }}

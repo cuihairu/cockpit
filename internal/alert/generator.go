@@ -32,6 +32,8 @@ func (g *Generator) CheckAllChecks() {
 	g.CheckDownServices()
 	g.CheckOfflineAgents()
 	g.CheckExpiredDomains()
+	g.CheckDiskSpace(80)  // 80% 磁盘使用率阈值
+	g.CheckMemoryUsage(85) // 85% 内存使用率阈值
 }
 
 // CheckExpiringCertificates 检查即将过期的证书
@@ -129,14 +131,42 @@ func (g *Generator) CheckExpiredDomains() {
 
 // CheckDiskSpace 检查磁盘空间
 func (g *Generator) CheckDiskSpace(thresholdPercent int) {
-	// TODO: 实现磁盘空间检查
-	// 需要从 Agent 获取磁盘使用情况
+	// 获取最新的系统信息快照
+	snapshots, err := g.db.ListSystemInfoSnapshots()
+	if err != nil {
+		log.Printf("Failed to get system snapshots: %v", err)
+		return
+	}
+
+	for _, snapshot := range snapshots {
+		// 检查磁盘使用率
+		if snapshot.DiskUsagePercent >= float64(thresholdPercent) {
+			title := "磁盘空间不足"
+			message := fmt.Sprintf("Agent %s (%s) 磁盘使用率已达 %.1f%%，超过阈值 %d%%",
+				snapshot.Hostname, snapshot.AgentID, snapshot.DiskUsagePercent, thresholdPercent)
+			g.createAlertIfNotExists("warning", title, message, snapshot.AgentID, "agent")
+		}
+	}
 }
 
 // CheckMemoryUsage 检查内存使用
 func (g *Generator) CheckMemoryUsage(thresholdPercent int) {
-	// TODO: 实现内存使用检查
-	// 需要从 Agent 获取内存使用情况
+	// 获取最新的系统信息快照
+	snapshots, err := g.db.ListSystemInfoSnapshots()
+	if err != nil {
+		log.Printf("Failed to get system snapshots: %v", err)
+		return
+	}
+
+	for _, snapshot := range snapshots {
+		// 检查内存使用率
+		if snapshot.MemUsagePercent >= float64(thresholdPercent) {
+			title := "内存使用率过高"
+			message := fmt.Sprintf("Agent %s (%s) 内存使用率已达 %.1f%%，超过阈值 %d%%",
+				snapshot.Hostname, snapshot.AgentID, snapshot.MemUsagePercent, thresholdPercent)
+			g.createAlertIfNotExists("warning", title, message, snapshot.AgentID, "agent")
+		}
+	}
 }
 
 // createAlertIfNotExists 如果不存在则创建警告
