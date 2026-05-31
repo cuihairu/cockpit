@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -127,8 +128,12 @@ func (h *Handler) HandleProxyData(msg *protocol.Message) error {
 	var data []byte
 	switch v := dataBytes.(type) {
 	case string:
-		// JSON 字符串，需要解码
-		data = []byte(v)
+		decoded, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			data = []byte(v)
+		} else {
+			data = decoded
+		}
 	case []byte:
 		data = v
 	case []interface{}:

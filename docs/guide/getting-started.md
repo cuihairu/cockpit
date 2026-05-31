@@ -3,11 +3,11 @@
 ## 环境要求
 
 ### Server
-- Go 1.23+
+- Go 1.26+
 - 8080 端口（可配置）
 
 ### Agent
-- Go 1.23+（或直接下载预编译二进制）
+- Go 1.26+（或直接下载预编译二进制）
 - 能访问 Server 的网络连接
 
 ## 安装 Server
@@ -42,10 +42,10 @@ go build -o cockpit ./cmd/cockpit
 ### 3. 启动
 
 ```bash
-./cockpit server start
+./cockpit server
 ```
 
-默认监听 `http://localhost:8080`
+默认监听由配置决定，示例配置为 `http://127.0.0.1:9000`
 
 ## 部署 Agent
 
@@ -62,7 +62,7 @@ go build -o cockpit-agent ./cmd/cockpit-agent
 ### 2. 启动
 
 ```bash
-./cockpit-agent start --server ws://your-server-ip:8080
+./cockpit-agent start --server ws://your-server-ip:9000
 ```
 
 Agent 会：
@@ -75,7 +75,7 @@ Agent 会：
 在 Server 上：
 
 ```bash
-./cockpit agent list
+通过 Web UI 或 API 查看 agent 列表
 ```
 
 应该看到：

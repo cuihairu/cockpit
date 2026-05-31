@@ -25,7 +25,7 @@ cd web
 pnpm build
 cd ..
 go build ./cmd/cockpit
-./cockpit server start
+./cockpit server
 # 访问 http://localhost:8080
 ```
 

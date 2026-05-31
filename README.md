@@ -1,6 +1,6 @@
 # Cockpit
 
-> 个人混合基础设施控制台 —— Git-first 的 Homelab CMDB 与监控平台
+> 个人混合基础设施控制台 —— Git-first 的 Homelab CMDB、控制平面与监控能力
 
 [![Go](https://github.com/cuihairu/cockpit/actions/workflows/go.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/go.yml)
 [![Docs](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml)
@@ -54,7 +54,7 @@ cd cockpit
 ./cockpit init
 
 # 启动 Server
-./cockpit server start
+./cockpit server
 ```
 
 ### 环境变量
@@ -73,7 +73,7 @@ export TOTP_ENCRYPTION_KEY=$(openssl rand -base64 32)
 export TOTP_ENCRYPTION_KEY="your-secure-random-key-min-32-chars"
 
 # 然后启动服务
-./cockpit server start
+./cockpit server
 ```
 
 ### 部署 Agent

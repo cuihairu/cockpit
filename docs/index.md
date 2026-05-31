@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Cockpit
   text: 个人混合基础设施控制台
-  tagline: Git-first 的 Homelab CMDB 与监控平台
+  tagline: Git-first 的 Homelab CMDB、控制平面与监控能力
   actions:
     - theme: brand
       text: 快速开始

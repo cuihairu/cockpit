@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
@@ -21,6 +22,7 @@ type Agent struct {
 	Labels         map[string]interface{}
 	Send           chan *protocol.Message
 	mu             sync.RWMutex
+	closed         atomic.Bool
 	LastSeen       time.Time
 }
 
@@ -104,7 +106,10 @@ func (a *Agent) IsOnline(timeout time.Duration) bool {
 
 // Close 关闭连接
 func (a *Agent) Close() {
-	close(a.Send)
+	if a.closed.CompareAndSwap(false, true) {
+		close(a.Send)
+	}
+
 	if a.Conn != nil {
 		a.Conn.Close()
 	}
@@ -117,6 +122,16 @@ func (a *Agent) AgentID() string {
 
 //SendMessage 发送消息给 Agent
 func (a *Agent) SendMessage(msg *protocol.Message) error {
+	if a.closed.Load() {
+		return fmt.Errorf("agent %s is closed", a.ID)
+	}
+
+	defer func() {
+		if recover() != nil {
+			// channel closed concurrently
+		}
+	}()
+
 	select {
 	case a.Send <- msg:
 		return nil

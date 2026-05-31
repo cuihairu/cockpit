@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -804,9 +805,14 @@ func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
 	if terminalFlag || (len(proxyID) > 8 && proxyID[:8] == "terminal") {
 		// 解析数据
 		var data []byte
-		switch v := msg.Payload["data"].(type) {
-		case string:
+	switch v := msg.Payload["data"].(type) {
+	case string:
+		decoded, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
 			data = []byte(v)
+		} else {
+			data = decoded
+		}
 		case []byte:
 			data = v
 		case []interface{}:
@@ -827,9 +833,14 @@ func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
 	// 检查是否是 VNC 连接
 	if len(proxyID) > 3 && proxyID[:3] == "vnc" {
 		var data []byte
-		switch v := msg.Payload["data"].(type) {
-		case string:
+	switch v := msg.Payload["data"].(type) {
+	case string:
+		decoded, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
 			data = []byte(v)
+		} else {
+			data = decoded
+		}
 		case []byte:
 			data = v
 		case []interface{}:
@@ -850,7 +861,12 @@ func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
 	var data []byte
 	switch v := msg.Payload["data"].(type) {
 	case string:
-		data = []byte(v)
+		decoded, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			data = []byte(v)
+		} else {
+			data = decoded
+		}
 	case []byte:
 		data = v
 	case []interface{}:

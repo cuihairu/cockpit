@@ -131,6 +131,9 @@ func (g *Generator) CheckExpiredDomains() {
 
 // CheckDiskSpace 检查磁盘空间
 func (g *Generator) CheckDiskSpace(thresholdPercent int) {
+	if g == nil || g.db == nil {
+		return
+	}
 	// 获取最新的系统信息快照
 	snapshots, err := g.db.ListSystemInfoSnapshots()
 	if err != nil {
@@ -151,6 +154,9 @@ func (g *Generator) CheckDiskSpace(thresholdPercent int) {
 
 // CheckMemoryUsage 检查内存使用
 func (g *Generator) CheckMemoryUsage(thresholdPercent int) {
+	if g == nil || g.db == nil {
+		return
+	}
 	// 获取最新的系统信息快照
 	snapshots, err := g.db.ListSystemInfoSnapshots()
 	if err != nil {
