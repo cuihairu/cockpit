@@ -29,13 +29,13 @@
     "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.6",
     "qrcode": "^1.5.4",
-    "react": "^19.2.6",
+    "react": "^19.2.7",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.16.0"
   },
   "devDependencies": {
     "@types/qrcode": "^1.5.6",
-    "@types/react": "^19.2.15",
+    "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.59.4",
     "@typescript-eslint/parser": "^8.60.1",
