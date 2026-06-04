@@ -11,12 +11,16 @@ import (
 
 // Inventory 基础设施清单
 type Inventory struct {
-	Version   string              `yaml:"version"`
-	Metadata  Metadata            `yaml:"metadata,omitempty"`
-	Regions   map[string]*Region  `yaml:"regions,omitempty"`
-	Domains   map[string]*Domain  `yaml:"domains,omitempty"`
-	Resources map[string]*Ref     `yaml:"resources,omitempty"`
-	Templates map[string]*Template `yaml:"templates,omitempty"`
+	Version          string                      `yaml:"version"`
+	Metadata         Metadata                    `yaml:"metadata,omitempty"`
+	Regions          map[string]*Region          `yaml:"regions,omitempty"`
+	Domains          map[string]*Domain          `yaml:"domains,omitempty"`
+	Resources        map[string]*Ref             `yaml:"resources,omitempty"`
+	Templates        map[string]*Template        `yaml:"templates,omitempty"`
+	ComputeInstances map[string]*ComputeInstance `yaml:"computeInstances,omitempty"`
+	Services         map[string]*Service         `yaml:"services,omitempty"`
+	Gateways         map[string]*Gateway         `yaml:"gateways,omitempty"`
+	Storages         map[string]*Storage         `yaml:"storages,omitempty"`
 }
 
 // Metadata 元数据
@@ -42,36 +46,36 @@ type Zone struct {
 	Description string            `yaml:"description,omitempty"`
 	Labels      map[string]string `yaml:"labels,omitempty"`
 	Endpoints   []string          `yaml:"endpoints,omitempty"` // API 端点
-	Agents      map[string]*Agent  `yaml:"agents,omitempty"`
+	Agents      map[string]*Agent `yaml:"agents,omitempty"`
 }
 
 // Agent Agent 定义
 type Agent struct {
-	ID          string            `yaml:"id"`
-	Name        string            `yaml:"name,omitempty"`
-	Hostname    string            `yaml:"hostname,omitempty"`
-	IP          string            `yaml:"ip,omitempty"`
-	Port        int               `yaml:"port,omitempty"`
-	Labels      map[string]string `yaml:"labels,omitempty"`
-	Capabilities []string         `yaml:"capabilities,omitempty"` // pve, docker, openwrt, etc
-	Config      map[string]any    `yaml:"config,omitempty"`      // Agent 特定配置
+	ID           string            `yaml:"id"`
+	Name         string            `yaml:"name,omitempty"`
+	Hostname     string            `yaml:"hostname,omitempty"`
+	IP           string            `yaml:"ip,omitempty"`
+	Port         int               `yaml:"port,omitempty"`
+	Labels       map[string]string `yaml:"labels,omitempty"`
+	Capabilities []string          `yaml:"capabilities,omitempty"` // pve, docker, openwrt, etc
+	Config       map[string]any    `yaml:"config,omitempty"`       // Agent 特定配置
 }
 
 // Domain 域名定义
 type Domain struct {
-	ID          string            `yaml:"id"`
-	Domain      string            `yaml:"domain"`
-	Provider    string            `yaml:"provider,omitempty"` // cloudflare, godaddy, etc
-	Agent       string            `yaml:"agent,omitempty"`    // 关联 Agent ID
-	AutoRenew   bool              `yaml:"autoRenew,omitempty"`
-	Labels      map[string]string `yaml:"labels,omitempty"`
-	Certificates []*Certificate   `yaml:"certificates,omitempty"`
+	ID           string            `yaml:"id"`
+	Domain       string            `yaml:"domain"`
+	Provider     string            `yaml:"provider,omitempty"` // cloudflare, godaddy, etc
+	Agent        string            `yaml:"agent,omitempty"`    // 关联 Agent ID
+	AutoRenew    bool              `yaml:"autoRenew,omitempty"`
+	Labels       map[string]string `yaml:"labels,omitempty"`
+	Certificates []*Certificate    `yaml:"certificates,omitempty"`
 }
 
 // Certificate 证书定义
 type Certificate struct {
 	ID              string            `yaml:"id"`
-	Domain          string            `yaml:"domain"` // 或引用 domains 中的 key
+	Domain          string            `yaml:"domain"`             // 或引用 domains 中的 key
 	Provider        string            `yaml:"provider,omitempty"` // letsencrypt, zerossl, etc
 	Agent           string            `yaml:"agent,omitempty"`
 	AutoRenew       bool              `yaml:"autoRenew,omitempty"`
@@ -94,30 +98,34 @@ type Template struct {
 
 // ComputeInstance 计算资源 (在 Zone 下定义)
 type ComputeInstance struct {
-	ID          string            `yaml:"id"`
-	Name        string            `yaml:"name"`
-	Type        string            `yaml:"type"` // vm, container, baremetal
-	Agent       string            `yaml:"agent"`
-	Template    string            `yaml:"template,omitempty"`
-	CPU         int               `yaml:"cpu,omitempty"`
-	Memory      int               `yaml:"memory,omitempty"` // MB
-	Disk        int               `yaml:"disk,omitempty"`   // GB
-	IPv4        string            `yaml:"ipv4,omitempty"`
-	IPv6        string            `yaml:"ipv6,omitempty"`
-	Labels      map[string]string `yaml:"labels,omitempty"`
-	Tags        []string          `yaml:"tags,omitempty"`
+	ID       string            `yaml:"id"`
+	Name     string            `yaml:"name"`
+	Type     string            `yaml:"type"` // vm, container, baremetal
+	Agent    string            `yaml:"agent"`
+	Region   string            `yaml:"region,omitempty"`
+	Zone     string            `yaml:"zone,omitempty"`
+	Template string            `yaml:"template,omitempty"`
+	CPU      int               `yaml:"cpu,omitempty"`
+	Memory   int               `yaml:"memory,omitempty"` // MB
+	Disk     int               `yaml:"disk,omitempty"`   // GB
+	IPv4     string            `yaml:"ipv4,omitempty"`
+	IPv6     string            `yaml:"ipv6,omitempty"`
+	Labels   map[string]string `yaml:"labels,omitempty"`
+	Tags     []string          `yaml:"tags,omitempty"`
 }
 
 // Service 服务定义
 type Service struct {
-	ID         string            `yaml:"id"`
-	Name       string            `yaml:"name"`
-	Type       string            `yaml:"type"` // http, tcp, database
-	Agent      string            `yaml:"agent,omitempty"`
-	URL        string            `yaml:"url,omitempty"`
-	Endpoint   *Endpoint         `yaml:"endpoint,omitempty"`
-	Interval   int               `yaml:"interval,omitempty"` // 检查间隔（秒）
-	Labels     map[string]string `yaml:"labels,omitempty"`
+	ID       string            `yaml:"id"`
+	Name     string            `yaml:"name"`
+	Type     string            `yaml:"type"` // http, tcp, database
+	Agent    string            `yaml:"agent,omitempty"`
+	Region   string            `yaml:"region,omitempty"`
+	Zone     string            `yaml:"zone,omitempty"`
+	URL      string            `yaml:"url,omitempty"`
+	Endpoint *Endpoint         `yaml:"endpoint,omitempty"`
+	Interval int               `yaml:"interval,omitempty"` // 检查间隔（秒）
+	Labels   map[string]string `yaml:"labels,omitempty"`
 }
 
 // Endpoint 端点定义
@@ -133,6 +141,8 @@ type Gateway struct {
 	Name     string            `yaml:"name"`
 	Type     string            `yaml:"type"` // openwrt, pfsense, etc
 	Agent    string            `yaml:"agent"`
+	Region   string            `yaml:"region,omitempty"`
+	Zone     string            `yaml:"zone,omitempty"`
 	IPv4     string            `yaml:"ipv4,omitempty"`
 	IPv6     string            `yaml:"ipv6,omitempty"`
 	Upstream string            `yaml:"upstream,omitempty"`
@@ -145,6 +155,8 @@ type Storage struct {
 	Name   string            `yaml:"name"`
 	Type   string            `yaml:"type"` // nfs, iscsi, local, ceph
 	Agent  string            `yaml:"agent,omitempty"`
+	Region string            `yaml:"region,omitempty"`
+	Zone   string            `yaml:"zone,omitempty"`
 	Path   string            `yaml:"path,omitempty"`
 	Labels map[string]string `yaml:"labels,omitempty"`
 }
@@ -340,6 +352,50 @@ func (i *Inventory) GetCertificates() []*Certificate {
 		}
 	}
 	return certs
+}
+
+// GetComputeInstances 获取所有计算实例
+func (i *Inventory) GetComputeInstances() []*ComputeInstance {
+	instances := make([]*ComputeInstance, 0, len(i.ComputeInstances))
+	for _, inst := range i.ComputeInstances {
+		if inst != nil {
+			instances = append(instances, inst)
+		}
+	}
+	return instances
+}
+
+// GetServices 获取所有服务
+func (i *Inventory) GetServices() []*Service {
+	services := make([]*Service, 0, len(i.Services))
+	for _, svc := range i.Services {
+		if svc != nil {
+			services = append(services, svc)
+		}
+	}
+	return services
+}
+
+// GetGateways 获取所有网关
+func (i *Inventory) GetGateways() []*Gateway {
+	gateways := make([]*Gateway, 0, len(i.Gateways))
+	for _, gw := range i.Gateways {
+		if gw != nil {
+			gateways = append(gateways, gw)
+		}
+	}
+	return gateways
+}
+
+// GetStorages 获取所有存储
+func (i *Inventory) GetStorages() []*Storage {
+	storages := make([]*Storage, 0, len(i.Storages))
+	for _, st := range i.Storages {
+		if st != nil {
+			storages = append(storages, st)
+		}
+	}
+	return storages
 }
 
 // Write 写入 inventory 到文件

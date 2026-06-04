@@ -9,6 +9,11 @@ server:
 database:
   path: "./data/cockpit.db"
 
+# Inventory 配置
+inventory:
+  path: "./examples/inventory.yaml"
+  watch: false
+
 # JWT 认证配置
 jwt:
   secret: "your-secret-key-change-this"

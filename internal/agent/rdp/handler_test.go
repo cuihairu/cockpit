@@ -1,3 +1,5 @@
+//go:build rdp && !darwin
+
 package rdp
 
 import (
@@ -7,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	grdp "github.com/nakagami/grdp"
 	"github.com/cuihairu/cockpit/internal/protocol"
+	grdp "github.com/nakagami/grdp"
 )
 
 // ============ Handler Tests ============

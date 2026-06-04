@@ -71,8 +71,8 @@ func testInventory() *Inventory {
 				},
 			},
 			"domain-2": {
-				ID:      "domain-2",
-				Domain:  "test.org",
+				ID:       "domain-2",
+				Domain:   "test.org",
 				Provider: "route53",
 			},
 		},

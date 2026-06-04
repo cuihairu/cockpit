@@ -22,6 +22,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/proxy"
 	"github.com/cuihairu/cockpit/internal/storage"
+	inventorysync "github.com/cuihairu/cockpit/internal/sync"
 	"github.com/gorilla/websocket"
 )
 
@@ -61,6 +62,7 @@ type Server struct {
 	notification   *notification.Client
 	remoteSessions *RemoteSessionManager
 	ticketMgr      *TicketManager
+	inventorySync  *inventorysync.Manager
 	cfg            *config.Config
 	upgrader       websocket.Upgrader
 
@@ -81,6 +83,16 @@ func NewServer(cfg *config.Config) *Server {
 	db, err := storage.Open(storage.Config{Path: dbPath})
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
+	}
+
+	// 配置 JWT
+	if cfg.JWT != nil {
+		if cfg.JWT.Secret != "" {
+			auth.SetSecret(cfg.JWT.Secret)
+		}
+		if cfg.JWT.Expiration > 0 {
+			auth.SetExpiration(cfg.JWT.Expiration)
+		}
 	}
 
 	// 初始化通知客户端
@@ -113,7 +125,7 @@ func NewServer(cfg *config.Config) *Server {
 		proxyMgr:       proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
 		notification:   notificationClient,
 		remoteSessions: NewRemoteSessionManager(),
-			ticketMgr:      NewTicketManager(),
+		ticketMgr:      NewTicketManager(),
 		cfg:            cfg,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:     isOriginAllowed,
@@ -166,11 +178,48 @@ func (s *Server) Start() error {
 	// 设置代理管理器的 ServerInterface
 	s.proxyMgr = proxy.NewManager(s, s.db)
 
+	// 启动代理管理器（启动已启用的代理）
+	if err := s.proxyMgr.Start(); err != nil {
+		log.Printf("Failed to start proxy manager: %v", err)
+	}
+
+	if err := s.startInventorySync(); err != nil {
+		log.Printf("Failed to start inventory sync: %v", err)
+	}
+
+	// 注册所有路由
+	s.registerRoutes(mux)
+
+	// 应用审计中间件
+	handler := s.AuditMiddleware(mux)
+
+	server := &http.Server{
+		Addr:    s.addr,
+		Handler: handler,
+	}
+
+	log.Printf("Server starting on %s", s.addr)
+	log.Printf("Web UI: http://%s", s.addr)
+
+	// 启动清理协程
+	go s.cleanupLoop()
+
+	// 启动警告检查协程
+	go s.alertCheckLoop()
+	// 启动系统指标清理协程
+	go s.metricsCleanupLoop()
+
+	return server.ListenAndServe()
+}
+
+// registerRoutes 注册所有 HTTP 路由
+func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 注册审计日志 API
 	s.registerAuditAPI(mux)
 
 	// 注册代理 API
 	s.registerProxyAPI(mux)
+
 	// 注册系统指标 API
 	s.registerMetricsAPI(mux)
 
@@ -227,38 +276,39 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		s.spaHandler().ServeHTTP(w, r)
 	})
-
-	// 应用审计中间件
-	handler := s.AuditMiddleware(mux)
-
-	server := &http.Server{
-		Addr:    s.addr,
-		Handler: handler,
-	}
-
-	log.Printf("Server starting on %s", s.addr)
-	log.Printf("Web UI: http://%s", s.addr)
-
-	// 启动清理协程
-	go s.cleanupLoop()
-
-	// 启动警告检查协程
-	go s.alertCheckLoop()
-	// 启动系统指标清理协程
-	go s.metricsCleanupLoop()
-
-	return server.ListenAndServe()
 }
 
 // Shutdown 关闭服务器
 func (s *Server) Shutdown() {
 	s.cancel()
+	if s.inventorySync != nil {
+		s.inventorySync.Stop()
+	}
 	if s.proxyMgr != nil {
 		s.proxyMgr.Stop()
 	}
 	if s.db != nil {
 		s.db.Close()
 	}
+}
+
+func (s *Server) startInventorySync() error {
+	if s.cfg == nil || s.cfg.Inventory == nil || !s.cfg.Inventory.Watch {
+		return nil
+	}
+	if s.cfg.Inventory.Path == "" {
+		return fmt.Errorf("inventory.watch enabled but inventory.path is empty")
+	}
+
+	manager, err := inventorysync.NewManager(s.cfg.Inventory.Path, s.db)
+	if err != nil {
+		return err
+	}
+	if err := manager.Start(); err != nil {
+		return err
+	}
+	s.inventorySync = manager
+	return nil
 }
 
 // handleWebSocket 处理 WebSocket 连接
@@ -318,16 +368,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Agent %s exists but has no secret configured", agentID)
 	}
 
-	// 检查 Registry 中是否已有活跃连接
-	if activeAgent, exists := s.registry.Get(agentID); exists {
-		if activeAgent.IsOnline(0) {
-			log.Printf("Agent %s already has active connection, rejecting duplicate", agentID)
-			s.sendRegisterError(conn, "duplicate_connection", "Agent already connected")
-			conn.Close()
-			return
-		}
+	// 检查 Registry 中是否已有活跃连接（Registry 中的 Agent 均为活跃状态）
+	if _, exists := s.registry.Get(agentID); exists {
+		log.Printf("Agent %s already has active connection, rejecting duplicate", agentID)
+		s.sendRegisterError(conn, "duplicate_connection", "Agent already connected")
+		conn.Close()
+		return
 	}
-
 	// 创建 Agent
 	agent := NewAgent(agentID, conn)
 	agent.Update(&reg)
@@ -805,14 +852,14 @@ func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
 	if terminalFlag || (len(proxyID) > 8 && proxyID[:8] == "terminal") {
 		// 解析数据
 		var data []byte
-	switch v := msg.Payload["data"].(type) {
-	case string:
-		decoded, err := base64.StdEncoding.DecodeString(v)
-		if err != nil {
-			data = []byte(v)
-		} else {
-			data = decoded
-		}
+		switch v := msg.Payload["data"].(type) {
+		case string:
+			decoded, err := base64.StdEncoding.DecodeString(v)
+			if err != nil {
+				data = []byte(v)
+			} else {
+				data = decoded
+			}
 		case []byte:
 			data = v
 		case []interface{}:
@@ -833,14 +880,14 @@ func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
 	// 检查是否是 VNC 连接
 	if len(proxyID) > 3 && proxyID[:3] == "vnc" {
 		var data []byte
-	switch v := msg.Payload["data"].(type) {
-	case string:
-		decoded, err := base64.StdEncoding.DecodeString(v)
-		if err != nil {
-			data = []byte(v)
-		} else {
-			data = decoded
-		}
+		switch v := msg.Payload["data"].(type) {
+		case string:
+			decoded, err := base64.StdEncoding.DecodeString(v)
+			if err != nil {
+				data = []byte(v)
+			} else {
+				data = decoded
+			}
 		case []byte:
 			data = v
 		case []interface{}:

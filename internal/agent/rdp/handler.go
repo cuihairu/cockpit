@@ -1,3 +1,5 @@
+//go:build rdp && !darwin
+
 package rdp
 
 import (

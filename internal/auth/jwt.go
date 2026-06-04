@@ -6,16 +6,14 @@ import (
 	"errors"
 	"log"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
 var (
-	jwtSecret []byte
-	secretOnce sync.Once
-	secretWarned bool
+	jwtSecret     []byte
+	jwtExpiration time.Duration = 24 * time.Hour // 默认 24 小时
 )
 
 func init() {
@@ -35,6 +33,13 @@ func init() {
 func SetSecret(secret string) {
 	if secret != "" {
 		jwtSecret = []byte(secret)
+	}
+}
+
+// SetExpiration 设置 JWT token 过期时间
+func SetExpiration(expiration time.Duration) {
+	if expiration > 0 {
+		jwtExpiration = expiration
 	}
 }
 
@@ -58,7 +63,7 @@ func GenerateToken(userID, username, role string) (string, error) {
 		Username: username,
 		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(jwtExpiration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
 		},

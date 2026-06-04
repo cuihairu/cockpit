@@ -177,9 +177,9 @@ func TestResolveRefInvalidPath(t *testing.T) {
 
 func TestResolveRefDomainNotFound(t *testing.T) {
 	inv := &Inventory{
-		Version:  "v1",
-		Domains:  map[string]*Domain{},
-		Regions:  map[string]*Region{},
+		Version: "v1",
+		Domains: map[string]*Domain{},
+		Regions: map[string]*Region{},
 	}
 
 	_, err := inv.ResolveRef("domains.nonexistent")
@@ -358,8 +358,8 @@ func TestGetAgents(t *testing.T) {
 
 func TestGetAgentsEmpty(t *testing.T) {
 	inv := &Inventory{
-		Version:  "v1",
-		Regions:  map[string]*Region{},
+		Version: "v1",
+		Regions: map[string]*Region{},
 	}
 
 	agents := inv.GetAgents()

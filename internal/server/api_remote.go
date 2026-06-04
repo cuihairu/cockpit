@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,15 +17,17 @@ import (
 
 // TerminalSession 终端会话
 type TerminalSession struct {
-	ID        string
-	AgentID   string
-	Protocol  protocol.RemoteProtocol
-	Host      string
-	Port      int
-	ClientWS  *websocket.Conn
-	ConnID    string
-	CreatedAt time.Time
-	done      chan struct{}
+	ID         string
+	AgentID    string
+	Protocol   protocol.RemoteProtocol
+	Host       string
+	Port       int
+	ClientWS   *websocket.Conn
+	ConnID     string
+	CreatedAt  time.Time
+	LastActive time.Time
+	mu         sync.Mutex
+	done       chan struct{}
 }
 
 var (
@@ -83,7 +86,7 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 
 	// 升级 WebSocket，接受票据协议
 	upgrader := websocket.Upgrader{
-		CheckOrigin: isOriginAllowed,
+		CheckOrigin:  isOriginAllowed,
 		Subprotocols: []string{ticketID},
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -96,15 +99,16 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 	sessionID := uuid.New().String()
 
 	session := &TerminalSession{
-		ID:        sessionID,
-		AgentID:   agentID,
-		Protocol:  remoteProtocol,
-		Host:      host,
-		Port:      port,
-		ClientWS:  conn,
-		ConnID:    connID,
-		CreatedAt: time.Now(),
-		done:      make(chan struct{}),
+		ID:         sessionID,
+		AgentID:    agentID,
+		Protocol:   remoteProtocol,
+		Host:       host,
+		Port:       port,
+		ClientWS:   conn,
+		ConnID:     connID,
+		CreatedAt:  time.Now(),
+		LastActive: time.Now(),
+		done:       make(chan struct{}),
 	}
 
 	terminalSessionsMu.Lock()
@@ -169,6 +173,11 @@ func (s *Server) terminalSendLoop(session *TerminalSession) {
 			return
 		}
 
+		// 更新最后活跃时间
+		session.mu.Lock()
+		session.LastActive = time.Now()
+		session.mu.Unlock()
+
 		var msg map[string]interface{}
 		if err := json.Unmarshal(data, &msg); err == nil {
 			msgType, _ := msg["type"].(string)
@@ -223,8 +232,6 @@ func (s *Server) terminalKeepaliveLoop(session *TerminalSession) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	lastActive := session.CreatedAt
-
 	for {
 		select {
 		case <-session.done:
@@ -238,11 +245,10 @@ func (s *Server) terminalKeepaliveLoop(session *TerminalSession) {
 				return
 			}
 
-			terminalSessionsMu.Lock()
-			if s, ok := terminalSessions[session.ID]; ok {
-				lastActive = s.CreatedAt // 用创建时间作为 fallback
-			}
-			terminalSessionsMu.Unlock()
+			// 获取实际的活动时间
+			session.mu.Lock()
+			lastActive := session.LastActive
+			session.mu.Unlock()
 
 			if time.Since(lastActive) > 30*time.Minute {
 				log.Printf("Terminal session timeout: %s", session.ID)
@@ -331,15 +337,15 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		AgentID   string `json:"agent_id"`
-		Host      string `json:"host"`
-		Port      int    `json:"port"`
-		Protocol  string `json:"protocol"` // ssh, telnet, vnc, rdp
-		Username  string `json:"username,omitempty"`
-		Password  string `json:"password,omitempty"` // VNC密码等
-		Domain    string `json:"domain,omitempty"`
-		Width     int    `json:"width,omitempty"`
-		Height    int    `json:"height,omitempty"`
+		AgentID  string `json:"agent_id"`
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		Protocol string `json:"protocol"` // ssh, telnet, vnc, rdp
+		Username string `json:"username,omitempty"`
+		Password string `json:"password,omitempty"` // VNC密码等
+		Domain   string `json:"domain,omitempty"`
+		Width    int    `json:"width,omitempty"`
+		Height   int    `json:"height,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -369,7 +375,7 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 	params := map[string]string{
 		"agent_id": req.AgentID,
 		"host":     req.Host,
-		"port":     string(rune(req.Port)),
+		"port":     strconv.Itoa(req.Port),
 		"protocol": req.Protocol,
 	}
 	if req.Username != "" {
@@ -382,10 +388,10 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 		params["domain"] = req.Domain
 	}
 	if req.Width > 0 {
-		params["width"] = string(rune(req.Width))
+		params["width"] = strconv.Itoa(req.Width)
 	}
 	if req.Height > 0 {
-		params["height"] = string(rune(req.Height))
+		params["height"] = strconv.Itoa(req.Height)
 	}
 
 	// 生成票据

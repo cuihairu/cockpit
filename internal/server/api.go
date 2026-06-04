@@ -40,7 +40,13 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	case path == "/agents":
 		s.handleAgentsList(w, r)
 	case strings.HasPrefix(path, "/agents/"):
-		s.handleAgentGet(w, r, strings.TrimPrefix(path, "/agents/"))
+		agentID := strings.TrimPrefix(path, "/agents/")
+		// Handle /agents/{id}/secret sub-path
+		if strings.HasSuffix(agentID, "/secret") {
+			s.handleAgentSecret(w, r, strings.TrimSuffix(agentID, "/secret"))
+			return
+		}
+		s.handleAgentGet(w, r, agentID)
 	case strings.HasPrefix(path, "/resources/"):
 		s.handleResources(w, r, strings.TrimPrefix(path, "/resources/"))
 	case path == "/users":
@@ -114,14 +120,14 @@ func (s *Server) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 
 	// 返回用户信息（不包含密码）
 	userInfo := map[string]interface{}{
-		"id":           user.ID,
-		"username":     user.Username,
-		"email":        user.Email,
-		"role":         user.Role,
-		"totp_enabled": user.TOTPEnabled,
+		"id":            user.ID,
+		"username":      user.Username,
+		"email":         user.Email,
+		"role":          user.Role,
+		"totp_enabled":  user.TOTPEnabled,
 		"totp_setup_at": user.TOTPSetupAt,
-		"created_at":   user.CreatedAt,
-		"updated_at":   user.UpdatedAt,
+		"created_at":    user.CreatedAt,
+		"updated_at":    user.UpdatedAt,
 	}
 
 	s.writeJSON(w, http.StatusOK, userInfo)
@@ -267,9 +273,9 @@ func (s *Server) handleAgentSecret(w http.ResponseWriter, r *http.Request, id st
 		// 检查密钥状态
 		hasSecret := agent.SecretHash != ""
 		s.writeJSON(w, http.StatusOK, map[string]interface{}{
-			"agentId":      id,
-			"hasSecret":    hasSecret,
-			"configured":   hasSecret,
+			"agentId":    id,
+			"hasSecret":  hasSecret,
+			"configured": hasSecret,
 		})
 	case http.MethodDelete:
 		// 删除密钥（将允许无认证连接，不推荐）
@@ -508,9 +514,9 @@ func storageAgentToResponse(agent *storage.Agent) map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"id":           agent.ID,
-		"hostname":     agent.Hostname,
-		"ip":           agent.IP,
+		"id":       agent.ID,
+		"hostname": agent.Hostname,
+		"ip":       agent.IP,
 		"location": map[string]string{
 			"region": agent.Region,
 			"zone":   agent.Zone,

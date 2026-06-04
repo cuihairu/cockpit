@@ -1,3 +1,5 @@
+//go:build rdp && !darwin
+
 package rdp
 
 import (
@@ -7,8 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	grdp "github.com/nakagami/grdp"
 	"github.com/cuihairu/cockpit/internal/protocol"
+	grdp "github.com/nakagami/grdp"
 )
 
 // Session RDP 桌面会话，封装 grdp 客户端
