@@ -247,6 +247,28 @@ func TestGetEmailConfigFromSet(t *testing.T) {
 	}
 }
 
+func TestGetEmailConfigFromSetNormalizesBaseURL(t *testing.T) {
+	SetEmailConfig(&config.EmailConfig{
+		Enabled: true,
+		SMTP: &config.SMTPConfig{
+			Host:     "smtp.test.com",
+			Port:     587,
+			Username: "test@test.com",
+			Password: "pass",
+		},
+		BaseURL: "http://example.com/",
+	})
+	defer SetEmailConfig(nil)
+
+	cfg := GetEmailConfig()
+	if cfg == nil {
+		t.Fatal("GetEmailConfig() should return config")
+	}
+	if cfg.BaseURL != "http://example.com" {
+		t.Errorf("BaseURL = %v, want http://example.com", cfg.BaseURL)
+	}
+}
+
 func TestGetEmailConfigFromEnv(t *testing.T) {
 	emailConfig = nil
 	t.Setenv("SMTP_USER", "env@test.com")
@@ -319,5 +341,14 @@ func TestGetBaseURL(t *testing.T) {
 func TestGetBaseURLDefault(t *testing.T) {
 	if v := getBaseURL(); !strings.Contains(v, "localhost") {
 		t.Errorf("getBaseURL() default should contain localhost, got %q", v)
+	}
+}
+
+func TestNormalizeBaseURL(t *testing.T) {
+	if v := normalizeBaseURL("http://example.com/"); v != "http://example.com" {
+		t.Errorf("normalizeBaseURL() = %q, want http://example.com", v)
+	}
+	if v := normalizeBaseURL("http://example.com"); v != "http://example.com" {
+		t.Errorf("normalizeBaseURL() = %q, want http://example.com", v)
 	}
 }

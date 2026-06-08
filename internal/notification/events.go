@@ -70,9 +70,15 @@ func AlertToEvent(alert *storage.Alert, cfg *config.NotificationConfig) *Event {
 		return nil
 	}
 
-	// 检查事件是否启用
-	eventCfg, exists := cfg.Events[eventType]
-	if !exists || !eventCfg.Enabled {
+	// 检查事件是否启用。配置中的 map key 是业务名称，真正的事件类型在 eventCfg.Type。
+	enabled := false
+	for _, eventCfg := range cfg.Events {
+		if eventCfg != nil && eventCfg.Type == eventType && eventCfg.Enabled {
+			enabled = true
+			break
+		}
+	}
+	if !enabled {
 		return nil
 	}
 

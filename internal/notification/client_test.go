@@ -114,6 +114,32 @@ func TestAlertToEvent(t *testing.T) {
 	}
 }
 
+func TestAlertToEventMatchesConfiguredTypeInsteadOfMapKey(t *testing.T) {
+	cfg := &config.NotificationConfig{
+		Enabled: true,
+		Events: map[string]*config.EventConfig{
+			"certificate_expired": {
+				Type:    "certificate.expired",
+				Enabled: true,
+			},
+		},
+	}
+
+	event := AlertToEvent(&storage.Alert{
+		Type:         "error",
+		Title:        "证书已过期",
+		Message:      "域名 example.com 的证书已过期",
+		ResourceType: strPtr("certificate"),
+	}, cfg)
+
+	if event == nil {
+		t.Fatal("Expected event, got nil")
+	}
+	if event.Type != "certificate.expired" {
+		t.Fatalf("Event.Type = %q, want %q", event.Type, "certificate.expired")
+	}
+}
+
 func TestGetAlertEventType(t *testing.T) {
 	tests := []struct {
 		name     string

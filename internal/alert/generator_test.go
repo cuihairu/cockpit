@@ -1,9 +1,14 @@
 package alert
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/config"
+	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
@@ -117,6 +122,79 @@ func TestCheckExpiringCertificatesExpired(t *testing.T) {
 	}
 	if len(alerts) == 0 {
 		t.Error("Expected alert for expired certificate")
+	}
+}
+
+func TestCheckExpiringCertificatesSendsNotification(t *testing.T) {
+	db := testDB(t)
+
+	received := make(chan map[string]interface{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST request, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/events" {
+			t.Errorf("expected path /api/v1/events, got %s", r.URL.Path)
+		}
+
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+
+		select {
+		case received <- payload:
+		default:
+		}
+
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	notifCfg := &config.NotificationConfig{
+		Enabled: true,
+		Herald: &config.HeraldConfig{
+			BaseURL: server.URL,
+			Timeout: time.Second,
+		},
+		Events: map[string]*config.EventConfig{
+			"certificate_expired": {
+				Type:    notification.CertificateExpired,
+				Enabled: true,
+			},
+		},
+	}
+	g := NewGenerator(db, notification.NewClient(notifCfg), notifCfg)
+
+	cert := &storage.Certificate{
+		DomainName: "expired.example.com",
+		Status:     "valid",
+		ExpiresAt:  time.Now().Add(-time.Hour),
+	}
+	if err := db.UpsertCertificate(cert); err != nil {
+		t.Fatalf("UpsertCertificate: %v", err)
+	}
+
+	g.CheckExpiringCertificates()
+
+	select {
+	case payload := <-received:
+		if payload["type"] != notification.CertificateExpired {
+			t.Fatalf("event type = %v, want %s", payload["type"], notification.CertificateExpired)
+		}
+
+		labels, ok := payload["labels"].(map[string]interface{})
+		if !ok {
+			t.Fatal("labels should be an object")
+		}
+		if labels["resource_type"] != "certificate" {
+			t.Fatalf("resource_type = %v, want certificate", labels["resource_type"])
+		}
+		if labels["title"] != "证书已过期" {
+			t.Fatalf("title = %v, want 证书已过期", labels["title"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for notification event")
 	}
 }
 

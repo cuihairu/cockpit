@@ -146,7 +146,9 @@ func GetEmailConfig() *config.EmailConfig {
 
 	// 如果已通过配置文件设置，直接返回
 	if emailConfig != nil && emailConfig.Enabled {
-		return emailConfig
+		cfg := *emailConfig
+		cfg.BaseURL = normalizeBaseURL(cfg.BaseURL)
+		return &cfg
 	}
 
 	// 回退到环境变量（保持向后兼容）
@@ -166,7 +168,7 @@ func GetEmailConfig() *config.EmailConfig {
 			From:     getEnvOrDefault("SMTP_FROM", smtpUser),
 			FromName: getEnvOrDefault("SMTP_FROM_NAME", "Cockpit"),
 		},
-		BaseURL: getEnvOrDefault("BASE_URL", "http://localhost:9000"),
+		BaseURL: normalizeBaseURL(getEnvOrDefault("BASE_URL", "http://localhost:9000")),
 	}
 }
 
@@ -194,7 +196,7 @@ func SendPasswordResetEmail(email, username, code, token string) error {
 
 	// 构建邮件内容
 	subject := "重置您的 Cockpit 密码"
-	baseURL := cfg.BaseURL
+	baseURL := normalizeBaseURL(cfg.BaseURL)
 	if baseURL == "" {
 		baseURL = getBaseURL()
 	}
@@ -256,9 +258,13 @@ func sendEmail(cfg *config.EmailConfig, to []string, subject, htmlBody string) e
 // getBaseURL 获取基础 URL（用于生成重置链接）
 func getBaseURL() string {
 	if baseURL := os.Getenv("BASE_URL"); baseURL != "" {
-		return strings.TrimSuffix(baseURL, "/")
+		return normalizeBaseURL(baseURL)
 	}
 	return "http://localhost:9000" // 默认本地地址
+}
+
+func normalizeBaseURL(baseURL string) string {
+	return strings.TrimSuffix(baseURL, "/")
 }
 
 // MaskEmail 脱敏邮箱地址

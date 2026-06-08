@@ -171,6 +171,63 @@ func TestNewServerWithConfig(t *testing.T) {
 	s.Shutdown()
 }
 
+func TestNewServerInitializesRuntimeConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Server:   &config.ServerConfig{Host: "127.0.0.1", Port: 9000},
+		Database: &config.DatabaseConfig{Path: dir + "/test.db"},
+		JWT:      &config.JWTConfig{Secret: "test", Expiration: 24 * time.Hour},
+		Email: &config.EmailConfig{
+			Enabled: true,
+			SMTP: &config.SMTPConfig{
+				Host:     "smtp.test.com",
+				Port:     587,
+				Username: "user@test.com",
+				Password: "secret",
+			},
+			BaseURL: "http://example.com/",
+		},
+		Notification: &config.NotificationConfig{
+			Enabled: true,
+			Herald: &config.HeraldConfig{
+				BaseURL: "http://localhost:8080",
+				Timeout: 3 * time.Second,
+			},
+		},
+		Agent: &config.AgentConfig{APIKeyHeader: "X-API-Key"},
+	}
+
+	s := NewServer(cfg)
+	if s == nil {
+		t.Fatal("NewServer() returned nil")
+	}
+	defer s.Shutdown()
+
+	if s.cfg != cfg {
+		t.Fatal("Server should keep the provided config")
+	}
+	if s.notification == nil {
+		t.Fatal("Server.notification should be initialized when notification is enabled")
+	}
+	if !s.notification.IsEnabled() {
+		t.Fatal("Server.notification should be enabled")
+	}
+
+	auth.SetEmailConfig(s.cfg.Email)
+	defer auth.SetEmailConfig(nil)
+
+	emailCfg := auth.GetEmailConfig()
+	if emailCfg == nil {
+		t.Fatal("Email config should be available at runtime")
+	}
+	if emailCfg.SMTP == nil || emailCfg.SMTP.Host != "smtp.test.com" {
+		t.Fatalf("SMTP host = %v, want smtp.test.com", emailCfg.SMTP)
+	}
+	if emailCfg.BaseURL != "http://example.com" {
+		t.Fatalf("BaseURL = %q, want %q", emailCfg.BaseURL, "http://example.com")
+	}
+}
+
 func TestShutdownNilProxyMgrAndDB(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
