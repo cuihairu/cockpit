@@ -17,7 +17,8 @@ ExecStart=/usr/local/bin/cockpit-agent start \
     -server "${SERVER_URL}" \
     -region "${REGION}" \
     -zone "${ZONE}" \
-    -id "${AGENT_ID}"
+    -id "${AGENT_ID}" \
+    -secret "${SECRET}"
 
 Restart=always
 RestartSec=5

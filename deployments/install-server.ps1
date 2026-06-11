@@ -6,7 +6,9 @@
 param(
     [string]$InstallDir = "C:\Program Files\Cockpit",
     [string]$ReleaseVersion = "latest",
-    [string]$BinaryUrl = ""
+    [string]$BinaryUrl = "",
+    [string]$AdminUsername = "admin",
+    [string]$AdminPassword = ""
 )
 
 Write-Host "Cockpit Server 安装脚本" -ForegroundColor Cyan
@@ -45,16 +47,48 @@ if (!(Test-Path $dataDir)) {
     New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 }
 
+# 设置必需环境变量
+if ([string]::IsNullOrEmpty($AdminPassword)) {
+    $AdminPassword = Read-Host "请输入管理员初始密码（至少 8 位）"
+}
+if ($AdminPassword.Length -lt 8) {
+    Write-Host "管理员密码至少需要 8 位" -ForegroundColor Red
+    exit 1
+}
+[Environment]::SetEnvironmentVariable("ADMIN_USERNAME", $AdminUsername, "Machine")
+[Environment]::SetEnvironmentVariable("ADMIN_PASSWORD", $AdminPassword, "Machine")
+$env:ADMIN_USERNAME = $AdminUsername
+$env:ADMIN_PASSWORD = $AdminPassword
+
 # 创建配置文件
 $configPath = "$dataDir\config.yaml"
 if (!(Test-Path $configPath)) {
     @"
 # Cockpit Server Configuration
 server:
-  addr: "0.0.0.0:8080"
+  host: 0.0.0.0
+  port: 9000
+  static_dir: "C:/ProgramData/Cockpit/web"
 
-web:
-  enabled: true
+database:
+  path: "C:/ProgramData/Cockpit/cockpit.db"
+
+inventory:
+  path: "C:/ProgramData/Cockpit/inventory.yaml"
+  watch: false
+
+jwt:
+  secret: change-me-in-production
+  expiration: 24h
+
+email:
+  enabled: false
+
+notification:
+  enabled: false
+
+agent:
+  api_key_header: X-API-Key
 "@ | Out-File -FilePath $configPath -Encoding UTF8
     Write-Host "配置文件: $configPath" -ForegroundColor Green
 }
@@ -73,7 +107,7 @@ if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
 
 # 创建新服务
 $executablePath = $binaryPath
-$arguments = "server start --config `"$configPath`""
+$arguments = "server -config `"$configPath`""
 
 try {
     New-Service -Name $serviceName `
@@ -113,7 +147,7 @@ Write-Host "配置防火墙..." -ForegroundColor Yellow
 try {
     New-NetFirewallRule -DisplayName "Cockpit Server" `
         -Direction Inbound `
-        -LocalPort 8080 `
+        -LocalPort 9000 `
         -Protocol TCP `
         -Action Allow `
         -Profile Any `
@@ -134,4 +168,4 @@ Write-Host "  重启服务: Restart-Service -Name $serviceName" -ForegroundColor
 Write-Host "  查看日志: Get-EventLog -LogName Application -Source $serviceName -Newest 50" -ForegroundColor White
 Write-Host "  卸载服务: & sc.exe delete $serviceName" -ForegroundColor White
 Write-Host ""
-Write-Host "Web UI: http://localhost:8080" -ForegroundColor Cyan
+Write-Host "Web UI: http://localhost:9000" -ForegroundColor Cyan

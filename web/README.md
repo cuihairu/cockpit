@@ -1,56 +1,71 @@
-# Cockpit Dashboard
+# Cockpit Web UI
 
-基于 React + Ant Design + ProComponents 的 Web UI。
+基于 React、TypeScript、Vite、Ant Design 和 ProComponents 的前端应用。
 
 ## 开发
 
 ```bash
-# 安装依赖
 pnpm install
-
-# 启动开发服务器 (http://localhost:3000)
 pnpm dev
-
-# 构建生产版本
-pnpm build
 ```
 
-## 构建集成
+开发服务器默认监听 `http://localhost:3000`。Vite 会把以下路径代理到本地 Server：
 
-构建后的文件会被 Go Server 嵌入并提供服务：
+- `/api` -> `http://localhost:9000`
+- `/ws` -> `ws://localhost:9000`
+
+因此本地开发时需要先启动后端：
 
 ```bash
-# 在项目根目录
-cd web
-pnpm build
-cd ..
-go build ./cmd/cockpit
-./cockpit server
-# 访问 http://localhost:8080
+export ADMIN_PASSWORD='change-this-password'
+./cockpit server -config config/cockpit.yaml
 ```
+
+Windows PowerShell：
+
+```powershell
+$env:ADMIN_PASSWORD = 'change-this-password'
+.\cockpit.exe server -config config\cockpit.yaml
+```
+
+## 构建
+
+```bash
+pnpm build
+```
+
+构建产物输出到 `web/dist`。Server 可通过以下任一方式提供静态文件：
+
+- 配置 `server.static_dir: ./web/dist`
+- 设置环境变量 `STATIC_DIR=./web/dist`
 
 ## 技术栈
 
-- **React 18** + **TypeScript**
-- **Vite** - 构建工具
-- **Ant Design 5** - UI 组件库
-- **ProComponents** - 高级组件（ProTable、ProForm 等）
-- **React Router** - 路由
-- **TanStack Query** - 数据获取
-- **Axios** - HTTP 客户端
+- React 19
+- TypeScript
+- Vite
+- Ant Design 5
+- ProComponents / ProLayout
+- React Router
+- TanStack Query
+- Axios
+- xterm.js / noVNC / ECharts
 
 ## 目录结构
 
-```
+```text
 src/
-├── components/     # 共享组件
-├── pages/          # 页面组件
-│   └── Dashboard/
-├── services/       # API 服务
-│   └── api.ts
-├── types/          # TypeScript 类型定义
-│   └── index.ts
-├── App.tsx         # 根组件
-├── main.tsx        # 入口
-└── index.css       # 全局样式
+  assets/
+  components/
+  contexts/
+  hooks/
+  pages/
+  services/
+  types/
+  utils/
+  workbench/
+  App.tsx
+  main.tsx
 ```
+
+前端只通过 Server API 通信，不直接访问 Agent 或内网目标。

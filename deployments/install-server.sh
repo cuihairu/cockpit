@@ -64,6 +64,53 @@ echo "创建状态目录..."
 mkdir -p /var/lib/cockpit
 chown cockpit:cockpit /var/lib/cockpit
 
+# 创建配置目录和默认配置
+echo "创建配置文件..."
+mkdir -p /etc/cockpit
+if [ ! -f /etc/cockpit/config.yaml ]; then
+    cat > /etc/cockpit/config.yaml << 'EOF'
+# Cockpit Server Configuration
+server:
+  host: 0.0.0.0
+  port: 9000
+  static_dir: /var/lib/cockpit/web
+
+database:
+  path: /var/lib/cockpit/cockpit.db
+
+inventory:
+  path: /var/lib/cockpit/inventory.yaml
+  watch: false
+
+jwt:
+  secret: change-me-in-production
+  expiration: 24h
+
+email:
+  enabled: false
+
+notification:
+  enabled: false
+
+agent:
+  api_key_header: X-API-Key
+EOF
+    chown root:cockpit /etc/cockpit/config.yaml
+    chmod 640 /etc/cockpit/config.yaml
+fi
+
+if [ ! -f /etc/default/cockpit-server ]; then
+    cat > /etc/default/cockpit-server << 'EOF'
+# Cockpit Server environment
+ADMIN_PASSWORD=change-this-password
+ADMIN_USERNAME=admin
+# PRODUCTION=true
+# TOTP_ENCRYPTION_KEY=replace-with-a-strong-random-key
+# ALLOWED_ORIGINS=https://cockpit.example.com
+EOF
+    chmod 600 /etc/default/cockpit-server
+fi
+
 # 安装 systemd 服务
 echo "安装 systemd 服务..."
 cat > /etc/systemd/system/cockpit.service << 'EOF'
@@ -77,7 +124,8 @@ Wants=network-online.target
 Type=simple
 User=cockpit
 Group=cockpit
-ExecStart=/usr/local/bin/cockpit server start
+EnvironmentFile=-/etc/default/cockpit-server
+ExecStart=/usr/local/bin/cockpit server -config /etc/cockpit/config.yaml
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -102,8 +150,10 @@ echo ""
 echo "安装完成！"
 echo ""
 echo "下一步:"
+echo "  编辑环境: sudo vi /etc/default/cockpit-server"
+echo "  编辑配置: sudo vi /etc/cockpit/config.yaml"
 echo "  启动服务: sudo systemctl enable --now cockpit"
 echo "  查看状态: sudo systemctl status cockpit"
 echo "  查看日志: sudo journalctl -u cockpit -f"
 echo ""
-echo "  Web UI: http://$(hostname -I | awk '{print $1}'):8080"
+echo "  Web UI: http://$(hostname -I | awk '{print $1}'):9000"

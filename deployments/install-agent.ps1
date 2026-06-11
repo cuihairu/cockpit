@@ -1,5 +1,5 @@
 # Cockpit Agent Windows 安装脚本
-# 管理员权限运行: .\install-agent.ps1 -ServerUrl "ws://server:8080"
+# 管理员权限运行: .\install-agent.ps1 -ServerUrl "ws://server:9000/ws"
 
 #requires -RunAsAdministrator
 
@@ -9,6 +9,9 @@ param(
 
     [Parameter(Mandatory=$false)]
     [string]$AgentId = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$Secret = "",
 
     [Parameter(Mandatory=$false)]
     [string]$Region = "",
@@ -66,7 +69,7 @@ $configPath = "$configDir\config.env"
 
 # 如果没有通过参数提供 ServerUrl，则提示输入
 if ([string]::IsNullOrEmpty($ServerUrl)) {
-    $ServerUrl = Read-Host "请输入 Server WebSocket 地址 (例如: ws://192.168.1.10:8080)"
+    $ServerUrl = Read-Host "请输入 Server WebSocket 地址 (例如: ws://192.168.1.10:9000/ws)"
 }
 
 # 创建配置文件
@@ -76,6 +79,7 @@ SERVER_URL=$ServerUrl
 REGION=$Region
 ZONE=$Zone
 AGENT_ID=$AgentId
+SECRET=$Secret
 "@ | Out-File -FilePath $configPath -Encoding ASCII
 
 Write-Host "配置文件: $configPath" -ForegroundColor Green
@@ -99,6 +103,9 @@ $startArgs += "-server", "`"$ServerUrl`""
 
 if (![string]::IsNullOrEmpty($AgentId)) {
     $startArgs += "-id", "`"$AgentId`""
+}
+if (![string]::IsNullOrEmpty($Secret)) {
+    $startArgs += "-secret", "`"$Secret`""
 }
 if (![string]::IsNullOrEmpty($Region)) {
     $startArgs += "-region", "`"$Region`""
@@ -155,4 +162,4 @@ Write-Host "  查看日志: Get-EventLog -LogName Application -Source $serviceNa
 Write-Host "  卸载服务: & sc.exe delete $serviceName" -ForegroundColor White
 Write-Host ""
 Write-Host "修改配置后需要重新安装服务:" -ForegroundColor Yellow
-Write-Host "  .\install-agent.ps1 -ServerUrl `"ws://your-server:8080`" -Region `"jiangsu-huaian`" -Zone `"datacenter-a`"" -ForegroundColor White
+Write-Host "  .\install-agent.ps1 -ServerUrl `"ws://your-server:9000/ws`" -Region `"jiangsu-huaian`" -Zone `"datacenter-a`"" -ForegroundColor White

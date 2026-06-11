@@ -1,91 +1,110 @@
 # Cockpit
 
-> 个人混合基础设施控制台 —— Git-first 的 Homelab CMDB、控制平面与监控能力
+个人混合基础设施控制台，用于把分散在本地机房、云 VPS、NAT 后节点上的资源收敛到一个轻量 Server + Agent 控制面。
 
 [![Go](https://github.com/cuihairu/cockpit/actions/workflows/go.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/go.yml)
 [![Docs](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml)
 [![codecov](https://codecov.io/gh/cuihairu/cockpit/branch/main/graph/badge.svg)](https://codecov.io/gh/cuihairu/cockpit)
 
-[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
-[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](https://github.com/cuihairu/cockpit/releases)
-[![macOS](https://img.shields.io/badge/macOS-000000?logo=apple)](https://github.com/cuihairu/cockpit/releases)
-[![Windows](https://img.shields.io/badge/Windows-00A4EF?logo=windows)](https://github.com/cuihairu/cockpit/releases)
-[![OpenWrt](https://img.shields.io/badge/OpenWrt-00B5E2?logo=openwrt)](https://github.com/cuihairu/cockpit/releases)
+## 当前能力
 
-## 介绍
-
-Cockpit 是一个针对个人混合基础设施的管理平台，提供：
-
-- **统一资产视图**：物理机、PVE VM/LXC、Docker、域名、证书、CI/CD 等
-- **跨地域监控**：支持异地机房、NAT 后设备的主动上报心跳
-- **Git-first 配置**：所有配置存储在 Git，支持 diff/rollback
-- **第三方集成**：同步到 Nezha、Homepage 等已有工具
+- Server 提供 Web UI、HTTP API、Agent WebSocket、认证、审计、告警和 SQLite 持久化。
+- Agent 主动连接 Server，上报心跳、系统指标和能力信息。
+- Inventory YAML 可通过 `cockpit sync` 同步为运行时资源视图。
+- Web UI 支持资源、工作台、监控、设置、审计和远程连接入口。
+- 远程终端、VNC、桌面连接使用短期 ticket，经 Server 和 Agent 转发到目标服务。
 
 ## 架构
 
+```text
+Browser Web UI
+    |
+    | HTTP API / WebSocket
+    v
+Cockpit Server (cmd/cockpit)
+    |  \
+    |   \ SQLite
+    |
+    | WebSocket /ws
+    v
+Cockpit Agent (cmd/cockpit-agent)
+    |
+    | local socket / TCP / platform API
+    v
+Managed targets
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Cockpit Server                           │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  WebSocket Server (Agent 连接)                      │    │
-│  │  Agent Registry (连接池管理)                        │    │
-│  │  RPC Router (转发 API 调用)                         │    │
-│  │  SQLite (配置 + 运行时状态)                         │    │
-│  │  Web UI / API                                       │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-         ↑ WebSocket (Agent 主动连接)
-         │
-┌─────────────────────────────────────────────────────────────┐
-│  各地 Agent（物理机/VM/容器，跨地域/NAT 均可）                │
-└─────────────────────────────────────────────────────────────┘
-```
+
+Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连出，所以 NAT 后节点不需要暴露入站端口。
 
 ## 快速开始
 
-### 安装 Server
+构建二进制：
 
 ```bash
-# 克隆仓库
-git clone https://github.com/cuihairu/cockpit.git
-cd cockpit
-
-# 初始化配置
-./cockpit init
-
-# 启动 Server
-./cockpit server
+go build -o cockpit ./cmd/cockpit
+go build -o cockpit-agent ./cmd/cockpit-agent
 ```
 
-### 环境变量
-
-| 变量名 | 说明 | 默认值 | 是否必需 |
-|--------|------|--------|----------|
-| `TOTP_ENCRYPTION_KEY` | TOTP 密钥加密密钥（AES-256） | 内置开发密钥 | 生产环境必需 |
-
-**⚠️ 安全警告：** 生产环境必须设置 `TOTP_ENCRYPTION_KEY` 环境变量！
+构建 Web UI：
 
 ```bash
-# 生成随机密钥（推荐）
-export TOTP_ENCRYPTION_KEY=$(openssl rand -base64 32)
-
-# 或使用
-export TOTP_ENCRYPTION_KEY="your-secure-random-key-min-32-chars"
-
-# 然后启动服务
-./cockpit server
+cd web
+pnpm install
+pnpm build
+cd ..
 ```
 
-### 部署 Agent
+初始化并同步示例清单：
 
 ```bash
-# 在目标机器上
-./cockpit-agent start --server wss://your-server.com:8080
+./cockpit init -example
+./cockpit sync -config config/cockpit.yaml
 ```
+
+启动 Server：
+
+```bash
+export ADMIN_PASSWORD='change-this-password'
+./cockpit server -config config/cockpit.yaml
+```
+
+默认访问地址：
+
+- Web UI: `http://127.0.0.1:9000`
+- Health: `http://127.0.0.1:9000/health`
+
+启动 Agent：
+
+```bash
+./cockpit-agent start -server ws://127.0.0.1:9000/ws -region home -zone datacenter
+```
+
+## 关键配置
+
+默认配置路径优先级：
+
+1. `-config` 指定路径
+2. `./config/cockpit.yaml`
+3. `./cockpit.yaml`
+4. `/etc/cockpit/config.yaml`
+
+生产环境至少设置：
+
+```bash
+export ADMIN_PASSWORD='use-a-strong-password'
+export TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+export ALLOWED_ORIGINS="https://cockpit.example.com"
+export PRODUCTION=true
+```
+
+对外部署时将 `server.host` 改为 `0.0.0.0`，并建议通过反向代理提供 HTTPS/WSS。
 
 ## 文档
 
-完整文档请访问：[cuihairu.github.io/cockpit](https://cuihairu.github.io/cockpit/)
+- [介绍](https://cuihairu.github.io/cockpit/guide/introduction)
+- [快速开始](https://cuihairu.github.io/cockpit/guide/getting-started)
+- [架构与边界](https://cuihairu.github.io/cockpit/guide/architecture)
+- [协议与 API 边界](https://cuihairu.github.io/cockpit/guide/protocol)
 
 ## 许可证
 

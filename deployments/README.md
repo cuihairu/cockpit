@@ -1,265 +1,181 @@
 # Cockpit 部署文件
 
-此目录包含 Cockpit Server 和 Agent 的部署脚本和配置文件，支持 Linux (systemd) 和 Windows 服务。
+此目录提供 Linux systemd 和 Windows Service 的安装脚本、服务单元和环境变量模板。
 
-## 目录
+## 当前约定
 
-- [Linux 部署](#linux-部署)
-  - [Server 部署](#server-部署)
-  - [Agent 部署](#agent-部署)
-- [Windows 部署](#windows-部署)
-  - [Server 部署](#server-部署-1)
-  - [Agent 部署](#agent-部署-1)
-- [配置说明](#配置说明)
+| 项目 | 默认值 |
+| --- | --- |
+| Server CLI | `cockpit server -config <config.yaml>` |
+| Agent CLI | `cockpit-agent start -server <ws-url>` |
+| Server 端口 | `9000` |
+| Agent WebSocket | `ws://server:9000/ws` 或 `wss://server/ws` |
+| Server 配置 | `/etc/cockpit/config.yaml` 或 `C:\ProgramData\Cockpit\config.yaml` |
+| Server 环境 | `/etc/default/cockpit-server` 或机器级环境变量 |
+| Agent 环境 | `/etc/default/cockpit-agent` 或安装脚本参数 |
 
----
+## Linux Server
 
-## Linux 部署
-
-### Server 部署
-
-Server 是中央管理服务器，提供 Web UI 和 API 接口。
-
-**快速安装：**
+快速安装：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/deployments/install-server.sh | sudo bash
 ```
 
-**手动安装：**
+安装脚本会创建：
+
+- `/usr/local/bin/cockpit`
+- `/etc/systemd/system/cockpit.service`
+- `/etc/cockpit/config.yaml`
+- `/etc/default/cockpit-server`
+- `/var/lib/cockpit`
+
+启动前至少编辑管理员密码：
 
 ```bash
-# 1. 下载二进制文件到 /usr/local/bin/cockpit
-
-# 2. 复制服务文件
-sudo cp cockpit-server.service /etc/systemd/system/cockpit.service
-
-# 3. 创建用户
-sudo useradd --system --user-group --home-dir /var/lib/cockpit --shell /usr/sbin/nologin cockpit
-
-# 4. 启动服务
+sudo vi /etc/default/cockpit-server
+sudo vi /etc/cockpit/config.yaml
 sudo systemctl daemon-reload
 sudo systemctl enable --now cockpit
 ```
 
-**访问：** `http://<server-ip>:8080`
+常用命令：
 
-### Agent 部署
+```bash
+sudo systemctl status cockpit
+sudo systemctl restart cockpit
+sudo journalctl -u cockpit -f
+```
 
-Agent 运行在被管理节点上，通过 WebSocket 连接到 Server。
+访问：
 
-**快速安装：**
+```text
+http://<server-ip>:9000
+```
+
+## Linux Agent
+
+快速安装：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/deployments/install-agent.sh | sudo bash
 ```
 
-**手动安装：**
+编辑 Agent 连接信息：
 
 ```bash
-# 1. 下载二进制文件到 /usr/local/bin/cockpit-agent
-
-# 2. 复制服务文件
-sudo cp cockpit-agent.service /etc/systemd/system/cockpit-agent.service
-sudo cp cockpit-agent.env /etc/default/cockpit-agent
-
-# 3. 编辑配置
 sudo vi /etc/default/cockpit-agent
-
-# 4. 启动服务
 sudo systemctl daemon-reload
 sudo systemctl enable --now cockpit-agent
 ```
 
----
+示例：
 
-## Windows 部署
-
-### Server 部署
-
-**前置要求：** PowerShell 管理员权限
-
-**快速安装：**
-
-```powershell
-# 以管理员身份运行 PowerShell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-.\install-server.ps1
+```dotenv
+SERVER_URL=wss://cockpit.example.com/ws
+REGION=home
+ZONE=datacenter
+AGENT_ID=server01
+SECRET=optional-agent-secret
 ```
 
-**手动安装：**
-
-```powershell
-# 1. 创建安装目录
-New-Item -ItemType Directory -Path "C:\Program Files\Cockpit" -Force
-
-# 2. 下载 cockpit.exe 到安装目录
-
-# 3. 创建数据目录
-New-Item -ItemType Directory -Path "C:\ProgramData\Cockpit" -Force
-
-# 4. 注册为 Windows 服务
-New-Service -Name "CockpitServer" `
-    -BinaryPathName "C:\Program Files\Cockpit\cockpit.exe server start" `
-    -DisplayName "Cockpit Infrastructure Management Server" `
-    -StartupType Automatic
-
-# 5. 启动服务
-Start-Service -Name "CockpitServer"
-```
-
-**访问：** `http://localhost:8080`
-
-### Agent 部署
-
-**前置要求：** PowerShell 管理员权限
-
-**快速安装：**
-
-```powershell
-# 以管理员身份运行 PowerShell
-.\install-agent.ps1 -ServerUrl "ws://your-server:8080" -Region "jiangsu-huaian" -Zone "datacenter-a"
-```
-
-**手动安装：**
-
-```powershell
-# 1. 创建安装目录
-New-Item -ItemType Directory -Path "C:\Program Files\CockpitAgent" -Force
-
-# 2. 下载 cockpit-agent.exe 到安装目录
-
-# 3. 注册为 Windows 服务
-New-Service -Name "CockpitAgent" `
-    -BinaryPathName '"C:\Program Files\CockpitAgent\cockpit-agent.exe" start -server "ws://your-server:8080"' `
-    -DisplayName "Cockpit Infrastructure Monitoring Agent" `
-    -StartupType Automatic
-
-# 4. 启动服务
-Start-Service -Name "CockpitAgent"
-```
-
-**卸载：**
-
-```powershell
-.\uninstall-windows.ps1 -Component "All"  # Server + Agent
-# 或
-.\uninstall-windows.ps1 -Component "Server"  # 仅 Server
-# 或
-.\uninstall-windows.ps1 -Component "Agent"   # 仅 Agent
-```
-
----
-
-## 配置说明
-
-### Agent 配置参数
-
-| 参数 | Linux 环境变量 | Windows 参数 | 必需 | 说明 | 示例 |
-|------|---------------|-------------|------|------|------|
-| Server 地址 | `SERVER_URL` | `-ServerUrl` | 是 | Server WebSocket 地址 | `ws://192.168.1.10:8080` |
-| 地域 | `REGION` | `-Region` | 否 | 地域标识 | `jiangsu-huaian` |
-| 可用区 | `ZONE` | `-Zone` | 否 | 可用区标识 | `datacenter-a` |
-| Agent ID | `AGENT_ID` | `-AgentId` | 否 | 自定义 Agent ID | 默认自动生成 |
-
-### 连接安全
-
-对于公网部署，建议使用加密连接：
-
-```bash
-# Linux
-SERVER_URL=wss://cockpit.example.com:8080
-
-# Windows
-.\install-agent.ps1 -ServerUrl "wss://cockpit.example.com:8080"
-```
-
----
-
-## 管理命令
-
-### Linux
-
-**Server 管理：**
-
-```bash
-sudo systemctl status cockpit
-sudo systemctl restart cockpit
-sudo systemctl stop cockpit
-sudo journalctl -u cockpit -f
-```
-
-**Agent 管理：**
+常用命令：
 
 ```bash
 sudo systemctl status cockpit-agent
 sudo systemctl restart cockpit-agent
-sudo systemctl stop cockpit
 sudo journalctl -u cockpit-agent -f
 ```
 
-### Windows
+## Windows Server
 
-**Server 管理：**
+以管理员身份运行 PowerShell：
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+.\install-server.ps1 -AdminUsername "admin" -AdminPassword "change-this-password"
+```
+
+安装脚本会：
+
+- 安装 `cockpit.exe`
+- 创建 `C:\ProgramData\Cockpit\config.yaml`
+- 设置机器级 `ADMIN_USERNAME` / `ADMIN_PASSWORD`
+- 注册 `CockpitServer` 服务
+- 添加 9000 端口防火墙规则
+
+管理命令：
 
 ```powershell
 Get-Service -Name CockpitServer
 Restart-Service -Name CockpitServer
 Stop-Service -Name CockpitServer
-Get-EventLog -LogName Application -Source CockpitServer -Newest 50
 ```
 
-**Agent 管理：**
+## Windows Agent
+
+以管理员身份运行 PowerShell：
+
+```powershell
+.\install-agent.ps1 `
+  -ServerUrl "wss://cockpit.example.com/ws" `
+  -AgentId "server01" `
+  -Region "home" `
+  -Zone "datacenter" `
+  -Secret "optional-agent-secret"
+```
+
+管理命令：
 
 ```powershell
 Get-Service -Name CockpitAgent
 Restart-Service -Name CockpitAgent
 Stop-Service -Name CockpitAgent
-Get-EventLog -LogName Application -Source CockpitAgent -Newest 50
 ```
 
----
+卸载：
 
-## 防火墙配置
+```powershell
+.\uninstall-windows.ps1 -Component "All"
+```
 
-### Linux
+## 生产环境注意
+
+- 必须设置强密码 `ADMIN_PASSWORD`。
+- 建议设置 `PRODUCTION=true` 和强随机 `TOTP_ENCRYPTION_KEY`。
+- 建议设置 `ALLOWED_ORIGINS=https://cockpit.example.com`。
+- 对外访问建议由 Nginx、Caddy、Traefik 等反向代理提供 HTTPS/WSS。
+- Agent 主动连接 Server，不需要在 Agent 节点开放入站端口。
+
+## 防火墙
+
+Server 需要开放 9000/TCP，或只开放反向代理端口：
 
 ```bash
-# firewall-cmd
-sudo firewall-cmd --permanent --add-port=8080/tcp
-sudo firewall-cmd --reload
-
-# ufw
-sudo ufw allow 8080/tcp
+sudo ufw allow 9000/tcp
 ```
 
-### Windows
+Windows：
 
 ```powershell
 New-NetFirewallRule -DisplayName "Cockpit Server" `
-    -Direction Inbound `
-    -LocalPort 8080 `
-    -Protocol TCP `
-    -Action Allow
+  -Direction Inbound `
+  -LocalPort 9000 `
+  -Protocol TCP `
+  -Action Allow
 ```
-
-**注意：** Agent 主动连接 Server，无需开放入站端口。
-
----
 
 ## 故障排查
 
-### Agent 无法连接
+Agent 无法连接：
 
-1. 检查 Server URL 是否正确
-2. 检查网络连通性：`curl -v ws://server:8080` (Linux)
-3. 检查 Server 防火墙
-4. 查看日志：
-   - Linux: `sudo journalctl -u cockpit-agent -n 50`
-   - Windows: `Get-EventLog -LogName Application -Newest 50`
+- 确认 `SERVER_URL` 以 `/ws` 结尾。
+- 确认 Server 可访问且 WebSocket 路径未被反向代理拦截。
+- 确认 Agent secret 与 Server 中记录一致。
+- 查看 `journalctl -u cockpit-agent -f` 或 Windows 服务日志。
 
-### Server 无法访问
+Server 无法启动：
 
-1. 检查服务状态
-2. 检查端口监听：`sudo netstat -tlnp | grep 8080`
-3. 检查防火墙规则
+- 确认设置了 `ADMIN_PASSWORD` 且至少 8 位。
+- 确认配置文件字段是 `server.host` 和 `server.port`，不是旧的 `server.addr`。
+- 确认数据库目录可由服务用户写入。

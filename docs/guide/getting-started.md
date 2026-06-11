@@ -2,145 +2,153 @@
 
 ## 环境要求
 
-### Server
-- Go 1.26+
-- 8080 端口（可配置）
+- Go 1.26.3 或兼容版本
+- Node.js 与 pnpm，用于构建 Web UI
+- Server 默认监听 `127.0.0.1:9000`
 
-### Agent
-- Go 1.26+（或直接下载预编译二进制）
-- 能访问 Server 的网络连接
+## 构建
 
-## 安装 Server
-
-### 1. 下载
+在仓库根目录：
 
 ```bash
-git clone https://github.com/cuihairu/cockpit.git
-cd cockpit
 go build -o cockpit ./cmd/cockpit
-```
-
-或直接下载预编译版本（TODO）
-
-### 2. 初始化
-
-```bash
-./cockpit init
-```
-
-这将创建：
-```
-~/.cockpit/
-├── config.yaml       # 主配置
-└── inventory/        # 资产配置目录
-    ├── cockpit.yaml
-    ├── regions/
-    ├── zones/
-    └── resources/
-```
-
-### 3. 启动
-
-```bash
-./cockpit server
-```
-
-默认监听由配置决定，示例配置为 `http://127.0.0.1:9000`
-
-## 部署 Agent
-
-### 1. 下载
-
-在目标机器上：
-
-```bash
-git clone https://github.com/cuihairu/cockpit.git
-cd cockpit
 go build -o cockpit-agent ./cmd/cockpit-agent
 ```
 
-### 2. 启动
+如需 Web UI：
 
 ```bash
-./cockpit-agent start --server ws://your-server-ip:9000
+cd web
+pnpm install
+pnpm build
+cd ..
 ```
 
-Agent 会：
-1. 连接到 Server
-2. 自动注册（报告位置和能力）
-3. 开始心跳（每 30 秒）
+`cockpit init` 生成的配置默认使用 `server.static_dir: ./web/dist`。如果静态目录不存在，Server 根路径会返回 API 运行提示，而不是 Web UI。
 
-### 3. 验证
-
-在 Server 上：
+## 初始化
 
 ```bash
-通过 Web UI 或 API 查看 agent 列表
+./cockpit init -example
 ```
 
-应该看到：
-```
-AGENT_ID              LOCATION           STATUS
-agent-huainan-dc-a    jiangsu-huaian/dc-a online
+这会在当前目录创建：
+
+```text
+config/
+  cockpit.yaml
+data/
+  cockpit.db
+inventory/
+  example.yaml
 ```
 
-## 添加第一个资产
+默认配置重点：
 
-### 1. 创建地域
+```yaml
+server:
+  host: 127.0.0.1
+  port: 9000
+  static_dir: ./web/dist
+
+database:
+  path: ./data/cockpit.db
+
+inventory:
+  path: ./inventory/example.yaml
+  watch: false
+```
+
+## 同步 Inventory
 
 ```bash
-# 或者直接编辑 YAML
-cat > ~/.cockpit/inventory/regions/local.yaml <<EOF
-apiVersion: cockpit.dev/v1alpha1
-kind: Region
-metadata:
-  name: local
-  displayName: 本地
-spec:
-  description: 家庭/本地机房
-  location: 江苏淮安
-  timezone: Asia/Shanghai
-EOF
+./cockpit sync -config config/cockpit.yaml
 ```
 
-### 2. 创建计算实例
+也可以显式指定 inventory 和数据库：
 
 ```bash
-cat > ~/.cockpit/inventory/resources/compute-instances/pve-host-01.yaml <<EOF
-apiVersion: cockpit.dev/v1alpha1
-kind: ComputeInstance
-metadata:
-  id: compute-pve-host-01
-  name: pve-host-01
-  displayName: PVE 主机 01
-spec:
-  region: local
-  zone: home-lab
-  type: bare-metal
-  platform: proxmox
-  platformUrl: https://192.168.1.10:8006
-  access:
-    web:
-      url: https://192.168.1.10:8006
-  monitoring:
-    enabled: true
-EOF
+./cockpit sync -inventory inventory/example.yaml -db data/cockpit.db
 ```
 
-### 3. 同步到数据库
+同步完成后查看数据库状态：
 
 ```bash
-./cockpit sync
+./cockpit status -db data/cockpit.db
 ```
 
-### 4. 查看状态
+## 启动 Server
+
+Server 启动时必须提供管理员密码：
 
 ```bash
-./cockpit status
+export ADMIN_PASSWORD='change-this-password'
+./cockpit server -config config/cockpit.yaml
 ```
+
+Windows PowerShell：
+
+```powershell
+$env:ADMIN_PASSWORD = 'change-this-password'
+.\cockpit.exe server -config config\cockpit.yaml
+```
+
+启动后访问：
+
+- Web UI: `http://127.0.0.1:9000`
+- Health: `http://127.0.0.1:9000/health`
+
+默认管理员用户名是 `admin`，可通过 `ADMIN_USERNAME` 修改。
+
+## 启动 Agent
+
+在被管理节点上运行：
+
+```bash
+./cockpit-agent start -server ws://127.0.0.1:9000/ws -region home -zone datacenter
+```
+
+常用参数：
+
+```bash
+./cockpit-agent start \
+  -server wss://cockpit.example.com/ws \
+  -id server01 \
+  -secret YOUR_AGENT_SECRET \
+  -region home \
+  -zone datacenter \
+  -labels env=home,role=hypervisor
+```
+
+要点：
+
+- `-server` 必须指向 Server 的 Agent WebSocket 入口，通常以 `/ws` 结尾。
+- `-secret` 可选但推荐；当 Server 中该 Agent 已配置 secret 后，后续注册必须提供。
+- 未指定 `-region` / `-zone` 时，Agent 会尝试读取 `COCKPIT_REGION` / `COCKPIT_ZONE`，否则使用 `unknown`。
+
+## 生产环境最小配置
+
+生产环境至少应设置：
+
+```bash
+export ADMIN_PASSWORD='use-a-strong-password'
+export TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+export ALLOWED_ORIGINS="https://cockpit.example.com"
+export PRODUCTION=true
+```
+
+并将 Server 配置改为对外监听：
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 9000
+```
+
+建议通过反向代理终止 TLS，并让 Agent 使用 `wss://.../ws` 连接。
 
 ## 下一步
 
-- [部署指南](/guide/deploy-server) —— 公网部署、内网部署
-- [资产定义](/guide/inventory) —— 添加更多资产类型
-- [监控配置](/guide/monitoring) —— 配置告警和健康检查
+- [核心概念](/guide/concepts)
+- [架构与边界](/guide/architecture)
+- [协议与 API 边界](/guide/protocol)

@@ -82,7 +82,8 @@ ExecStart=/usr/local/bin/cockpit-agent start \
     -server "${SERVER_URL}" \
     -region "${REGION}" \
     -zone "${ZONE}" \
-    -id "${AGENT_ID}"
+    -id "${AGENT_ID}" \
+    -secret "${SECRET}"
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -104,8 +105,8 @@ echo "创建环境配置文件..."
 if [ ! -f /etc/default/cockpit-agent ]; then
     cat > /etc/default/cockpit-agent << 'EOF'
 # Cockpit Agent 配置
-# Server WebSocket 地址 (必需)
-SERVER_URL=ws://localhost:8080
+# Server WebSocket 地址 (必需)，路径必须指向 /ws
+SERVER_URL=ws://localhost:9000/ws
 
 # 地域 (可选)
 REGION=
@@ -115,6 +116,9 @@ ZONE=
 
 # Agent ID (可选)
 # AGENT_ID=
+
+# Agent secret (可选但推荐)
+# SECRET=
 EOF
     echo "配置文件已创建: /etc/default/cockpit-agent"
     echo "请编辑此文件设置 SERVER_URL"

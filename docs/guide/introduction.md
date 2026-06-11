@@ -1,131 +1,81 @@
 # 介绍
 
-## 什么是 Cockpit？
+Cockpit 是一个面向个人混合基础设施的控制台。当前实现重点解决三件事：
 
-Cockpit 是一个针对**个人混合基础设施**的控制平面。如果你有以下场景，Cockpit 适合你：
+- 用 Inventory YAML 和 SQLite 建立统一资源视图。
+- 通过 Agent 主动连接 Server，管理 NAT 后或跨地域节点。
+- 在 Web UI 中查看资源、监控、告警、审计，并发起远程终端、VNC、RDP 等连接。
 
-- 多个地域的机房/服务器（本地机房 + 云 VPS）
-- 多种虚拟化技术（PVE、LXC、Docker、KVM）
-- 分散各地的 OpenWrt 路由器做内网穿透
-- 多个域名和 SSL 证书需要管理
-- GitHub Actions 等服务的运行状态需要监控
+## 当前能力
 
-## 为什么需要 Cockpit？
+| 能力 | 当前状态 |
+| --- | --- |
+| Server 控制面 | 已实现 HTTP API、Web UI 静态资源、Agent WebSocket、SQLite 持久化 |
+| Agent 执行面 | 已实现主动注册、心跳、系统指标采集、能力检测、代理和桌面消息处理 |
+| Inventory 同步 | `cockpit sync` 支持单文件 `version: v1` YAML 同步到 SQLite |
+| 资源视图 | 支持 Agent、计算实例、域名、证书、服务、网关、存储 |
+| 认证 | 支持管理员初始化、JWT、TOTP、密码重置 |
+| 远程连接 | 支持基于短期 ticket 的终端、VNC、桌面连接入口 |
+| 审计与告警 | 支持登录/代理等审计记录，证书/域名/服务/Agent 告警检查 |
 
-### 痛点
+## 适用场景
 
-| 痛点 | 说明 |
-|------|------|
-| **资产分散** | PVE 控制台、Portainer、各云厂商控制台、Nezha、Homepage... 访问入口分散 |
-| **状态不可见** | 哪个服务挂了？哪个证书快过期？哪台 VPS 快到期？没有统一视图 |
-| **配置散落** | Homepage/Nezha/Homelable 各存一份 SQLite，无版本控制 |
-| **异地难管** | OpenWrt 分散各地、NAT 后，常规扫描探不到 |
-| **关系不清晰** | 这个网站跑在哪个 Docker？哪个 VM？哪台 VPS？ |
+Cockpit 适合个人或小规模环境：
 
-### Cockpit 的解决方案
+- 家庭机房、本地机房和云 VPS 混合管理。
+- 多个节点处在 NAT 后，只能主动连出。
+- 希望用一份清单描述主机、服务、域名、证书和存储。
+- 希望在一个 Web UI 中查看资源状态、系统指标和远程连接入口。
 
-```
-Git (配置真相源)
-    ↓
-Cockpit Server (统一视图 + 状态存储)
-    ↓
-各地 Agent (主动上报 + API 转发)
-    ↓
-第三方集成 (Nezha/Homepage)
-```
-
-## 与其他项目的关系
-
-Cockpit **不是要替代**这些项目，而是**整合**它们：
-
-| 项目 | Cockpit 如何使用 |
-|------|------------------|
-| **Homepage** | 从 Cockpit 配置生成 services.yaml |
-| **Nezha** | Cockpit Agent 可作为 Nezha Agent，或对接 Nezha Dashboard |
-| **Homelabel** | Cockpit 提供 JSON 导出，供 Homelabel 导入 |
-| **PVE/Portainer** | Cockpit 只读展示，控制操作跳转到原平台 |
-
-## 核心特性
-
-### 1. Git-first 配置
-
-```bash
-inventory/
-├── regions/          # 地域定义
-├── zones/            # 可用区/机房
-└── resources/        # 资产实例
-    ├── compute-instances/
-    ├── domains/
-    ├── certificates/
-    └── services/
-```
-
-所有配置存储在 Git，支持：
-- `git diff` 查看变更
-- `git rollback` 回滚历史
-- `git pull/push` 多机同步
-
-### 2. 跨地域监控
-
-```
-机房A (NAT后)          机房B (NAT后)          云VPS
-    │                      │                    │
-    └──────────────────────┼────────────────────┘
-                           ↓
-                    Cockpit Server (公网)
-```
-
-Agent 主动连接 Server，无需：
-- 暴露内网端口
-- 配置端口转发
-- 担心防火墙规则
-
-### 3. 资产关系建模
-
-```yaml
-# 服务 ← 部署于 → 计算实例
-services/my-blog.yaml:
-  computeRef: compute-vm-nginx
-
-# 计算实例 ← 属于 → 宿主
-compute-vm-nginx.yaml:
-  hostRef: compute-pve-host-01
-
-# 服务 ← 关联 → 域名
-services/my-blog.yaml:
-  domainRef: domain-example-com
-  certificateRef: cert-example-com
-```
-
-一目了然的资产归属链。
+Cockpit 目前不是面向大规模多租户的 CMDB，也不是 Kubernetes 控制平面。它更像个人基础设施的轻量控制台。
 
 ## 架构概览
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Cockpit Server                           │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  WebSocket Server              │    │
-│  │  Agent Registry (连接池管理)                        │    │
-│  │  RPC Router (转发 API 调用)                         │    │
-│  │  SQLite (配置 + 运行时状态)                         │    │
-│  │  Web UI / API                                       │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-         ↑ WebSocket (Agent 主动连接)
-         │
-┌─────────────────────────────────────────────────────────────┐
-│  各地 Agent（物理机/VM/容器，跨地域/NAT 均可）                │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
-│  │ 机房A Agent │  │ 机房B Agent │  │ OpenWrt Agent│         │
-│  │ - PVE API   │  │ - PVE API   │  │ - 隧道拓扑   │         │
-│  │ - Docker    │  │ - 硬件监控  │  │ - 路由信息   │         │
-│  └─────────────┘  └─────────────┘  └─────────────┘          │
-└─────────────────────────────────────────────────────────────┘
+```text
+Browser
+  |
+  | /api, /api/remote/*
+  v
+Cockpit Server
+  |-- SQLite
+  |-- Web UI static files
+  |-- Agent Registry
+  |
+  | /ws
+  v
+Cockpit Agent
+  |-- local metrics
+  |-- Docker / PVE / OpenWrt detection
+  |-- TCP proxy / terminal / VNC / desktop target access
 ```
 
-## 下一步
+核心原则：
 
-- [快速开始](/guide/getting-started) —— 5 分钟上手
-- [核心概念](/guide/concepts) —— 了解资产模型
-- [部署指南](/guide/deploy-server) —— 生产环境部署
+- Web UI 只访问 Server。
+- Agent 主动连接 Server。
+- Server 维护全局运行时视图。
+- Agent 负责节点侧探测和执行。
+- Inventory 是声明式输入，SQLite 是运行时查询面。
+
+完整边界见 [架构与边界](/guide/architecture)。
+
+## 与其他工具的关系
+
+Cockpit 不要求替代已有控制台。当前代码中已经有 PVE、Docker、OpenWrt 客户端和 Agent 能力检测，长期可以把这些能力编排到统一工作台中。
+
+当前应按以下方式理解：
+
+| 工具/平台 | Cockpit 当前关系 |
+| --- | --- |
+| PVE | 有 API 客户端和 Agent capability 检测；控制面集成仍需按具体功能确认 |
+| Docker | 有 API 客户端、能力检测和资源视图基础 |
+| OpenWrt | 有客户端和能力检测基础 |
+| 远程终端/VNC/RDP | 通过 Agent 代理访问内网目标 |
+| Git | Inventory YAML 可以由 Git 管理，但当前应用仍以 `cockpit sync` 写入 SQLite 为准 |
+
+## 文档阅读路径
+
+1. [快速开始](/guide/getting-started)
+2. [核心概念](/guide/concepts)
+3. [架构与边界](/guide/architecture)
+4. [协议与 API 边界](/guide/protocol)

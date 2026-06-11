@@ -8,7 +8,8 @@ Wants=network-online.target
 Type=simple
 User=cockpit
 Group=cockpit
-ExecStart=/usr/local/bin/cockpit server start
+EnvironmentFile=-/etc/default/cockpit-server
+ExecStart=/usr/local/bin/cockpit server -config /etc/cockpit/config.yaml
 
 Restart=always
 RestartSec=5

@@ -8,15 +8,12 @@ export default defineConfig({
   // GitHub Pages 使用子路径部署
   base: '/cockpit/',
 
-  // 忽略死链检查（部分文档尚未完成）
-  ignoreDeadLinks: true,
-
   themeConfig: {
     logo: '/logo.svg',
 
     nav: [
       { text: '指南', link: '/guide/introduction' },
-      { text: '参考', link: '/reference/schema' },
+      { text: '架构', link: '/guide/architecture' },
       { text: 'GitHub', link: 'https://github.com/cuihairu/cockpit' }
     ],
 
@@ -31,38 +28,11 @@ export default defineConfig({
           ]
         },
         {
-          text: '部署',
+          text: '架构',
           items: [
-            { text: 'Server 部署', link: '/guide/deploy-server' },
-            { text: 'Agent 部署', link: '/guide/deploy-agent' },
-            { text: '网络配置', link: '/guide/networking' }
-          ]
-        },
-        {
-          text: '配置',
-          items: [
-            { text: '资产定义', link: '/guide/inventory' },
-            { text: '监控配置', link: '/guide/monitoring' },
-            { text: '第三方集成', link: '/guide/integrations' }
-          ]
-        },
-        {
-          text: '开发',
-          items: [
-            { text: '架构设计', link: '/guide/architecture' },
+            { text: '架构与边界', link: '/guide/architecture' },
             { text: '协议定义', link: '/guide/protocol' },
-            { text: '贡献指南', link: '/guide/contributing' }
-          ]
-        }
-      ],
-      '/reference/': [
-        {
-          text: '参考',
-          items: [
-            { text: 'Schema 定义', link: '/reference/schema' },
-            { text: '配置选项', link: '/reference/config' },
-            { text: 'CLI 命令', link: '/reference/cli' },
-            { text: 'API 文档', link: '/reference/api' }
+            { text: 'WebSocket 认证', link: '/websocket-token-auth' }
           ]
         }
       ]
