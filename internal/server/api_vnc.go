@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -14,6 +15,8 @@ import (
 // VNCSession VNC 桌面会话（二进制透传）
 type VNCSession struct {
 	ID         string
+	UserID     string
+	Username   string
 	AgentID    string
 	Target     string
 	ClientWS   *websocket.Conn
@@ -87,6 +90,8 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	session := &VNCSession{
 		ID:         sessionID,
+		UserID:     ticket.UserID,
+		Username:   ticket.Username,
 		AgentID:    agentID,
 		Target:     target,
 		ClientWS:   conn,
@@ -205,6 +210,17 @@ func (s *Server) closeVNCSession(session *VNCSession) {
 	delete(vncSessions, session.ID)
 	vncSessionsMu.Unlock()
 	log.Printf("VNC session closed: %s", session.ID)
+
+	host, port := splitTarget(session.Target)
+	s.auditRemoteEnd(session.UserID, session.Username, "", "",
+		&audit.RemoteSessionDetails{
+			Protocol: "vnc",
+			AgentID:  session.AgentID,
+			Host:     host,
+			Port:     port,
+			Session:  session.ID,
+			Duration: time.Since(session.CreatedAt).String(),
+		})
 }
 
 // HandleVNCData 处理 Agent → 浏览器的 VNC 二进制数据

@@ -1,12 +1,29 @@
 import { useRef, useCallback, useEffect } from 'react';
 import type { ScreenUpdate, BitmapRect } from './useDesktopWS';
 
+function decodeBase64(data: string): Uint8Array | null {
+  try {
+    const binary = atob(data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
 export function useCanvasRenderer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bufferRef = useRef<ImageData | null>(null);
   const rafRef = useRef<number>(0);
   const pendingRectsRef = useRef<BitmapRect[]>([]);
   const desktopSizeRef = useRef({ width: 0, height: 0 });
+
+  const setCanvas = useCallback((canvas: HTMLCanvasElement | null) => {
+    canvasRef.current = canvas;
+  }, []);
 
   const initBuffer = useCallback((width: number, height: number) => {
     const canvas = canvasRef.current;
@@ -23,22 +40,6 @@ export function useCanvasRenderer() {
       ctx.fillRect(0, 0, width, height);
     }
   }, []);
-
-  const handleScreenUpdate = useCallback((update: ScreenUpdate) => {
-    const { width, height, rects } = update;
-
-    if (!bufferRef.current ||
-        bufferRef.current.width !== width ||
-        bufferRef.current.height !== height) {
-      initBuffer(width, height);
-    }
-
-    pendingRectsRef.current.push(...rects);
-
-    if (!rafRef.current) {
-      rafRef.current = requestAnimationFrame(flushFrame);
-    }
-  }, [initBuffer]);
 
   const flushFrame = useCallback(() => {
     rafRef.current = 0;
@@ -82,18 +83,21 @@ export function useCanvasRenderer() {
     }
   }, []);
 
-  function decodeBase64(data: string): Uint8Array | null {
-    try {
-      const binary = atob(data);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      return bytes;
-    } catch {
-      return null;
+  const handleScreenUpdate = useCallback((update: ScreenUpdate) => {
+    const { width, height, rects } = update;
+
+    if (!bufferRef.current ||
+        bufferRef.current.width !== width ||
+        bufferRef.current.height !== height) {
+      initBuffer(width, height);
     }
-  }
+
+    pendingRectsRef.current.push(...rects);
+
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(flushFrame);
+    }
+  }, [flushFrame, initBuffer]);
 
   useEffect(() => {
     return () => {
@@ -104,7 +108,7 @@ export function useCanvasRenderer() {
   }, []);
 
   return {
-    canvasRef,
+    setCanvas,
     initBuffer,
     handleScreenUpdate,
     desktopSize: desktopSizeRef,

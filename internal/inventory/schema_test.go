@@ -3,6 +3,7 @@ package inventory
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -782,6 +783,31 @@ func TestWriteAndReadRoundTrip(t *testing.T) {
 	}
 	if loaded.Version != "v1" {
 		t.Errorf("Version = %v", loaded.Version)
+	}
+}
+
+func TestParseRepositoryExampleInventory(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	inv, err := ParseFile(filepath.Join(repoRoot, "examples", "inventory.yaml"))
+	if err != nil {
+		t.Fatalf("ParseFile(examples/inventory.yaml) error = %v", err)
+	}
+
+	if len(inv.ComputeInstances) == 0 {
+		t.Error("example inventory should define computeInstances")
+	}
+	if len(inv.Services) == 0 {
+		t.Error("example inventory should define services")
+	}
+	if len(inv.Gateways) == 0 {
+		t.Error("example inventory should define gateways")
+	}
+	if len(inv.Storages) == 0 {
+		t.Error("example inventory should define storages")
 	}
 }
 

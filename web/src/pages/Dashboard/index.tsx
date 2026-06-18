@@ -1,17 +1,13 @@
-import { Card, Row, Col, Statistic, Progress, Table, Tag, Space, Typography, Button, Input } from 'antd'
+import { Card, Row, Col, Statistic, Progress, Table, Tag, Space, Typography, Button } from 'antd'
 import {
   CloudServerOutlined,
   SafetyOutlined,
   CheckCircleOutlined,
   WarningOutlined,
   ReloadOutlined,
-  SearchOutlined,
 } from '@ant-design/icons'
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
 import { api } from '@/services/api'
-import { logger } from '@/utils/logger'
 import type { ColumnsType } from 'antd/es/table'
 import type { Agent } from '@/types'
 import './index.less'
@@ -19,8 +15,6 @@ import './index.less'
 const { Title, Text } = Typography
 
 const Dashboard = () => {
-  const navigate = useNavigate()
-  const [searchQuery, setSearchQuery] = useState('')
   const { data: status, refetch } = useQuery({
     queryKey: ['status'],
     queryFn: () => api.getStatus(),
@@ -44,23 +38,6 @@ const Dashboard = () => {
     : 0
 
   // 搜索过滤
-  const filteredAgents = (agents || []).filter((agent: Agent) => {
-    if (!searchQuery) return true
-    const query = searchQuery.toLowerCase()
-    return (
-      agent.hostname?.toLowerCase().includes(query) ||
-      agent.ip?.toLowerCase().includes(query) ||
-      agent.id?.toLowerCase().includes(query) ||
-      agent.location?.region?.toLowerCase().includes(query) ||
-      agent.location?.zone?.toLowerCase().includes(query)
-    )
-  })
-
-  const handleSearch = (value: string) => {
-    setSearchQuery(value)
-    logger.debug('Dashboard search:', value)
-  }
-
   const resourceCards = [
     {
       title: '运行中服务',
@@ -106,7 +83,7 @@ const Dashboard = () => {
     },
   ]
 
-  const agentColumns: ColumnsType<any> = [
+  const agentColumns: ColumnsType<Agent> = [
     {
       title: '主机名',
       dataIndex: 'hostname',
@@ -126,7 +103,7 @@ const Dashboard = () => {
     {
       title: '区域',
       key: 'location',
-      render: (_: any, record: any) => `${record.location?.region || '-'}/${record.location?.zone || '-'}`,
+      render: (_value, record) => `${record.location?.region || '-'}/${record.location?.zone || '-'}`,
     },
     {
       title: '状态',
@@ -142,11 +119,11 @@ const Dashboard = () => {
       title: '能力',
       dataIndex: 'capabilities',
       key: 'capabilities',
-      render: (caps: string[]) => (
+      render: (caps: Agent['capabilities']) => (
         <Space size={4}>
-          {caps?.slice(0, 3).map((cap, i) => (
-            <Tag key={i} color="processing" style={{ fontSize: 11 }}>
-              {cap}
+          {caps?.slice(0, 3).map((cap) => (
+            <Tag key={cap.type} color="processing" style={{ fontSize: 11 }}>
+              {cap.type}
             </Tag>
           ))}
           {caps?.length > 3 && <Tag>+{caps.length - 3}</Tag>}
@@ -200,7 +177,7 @@ const Dashboard = () => {
 
       <Card title="Agent 列表" variant="borderless" extra={<a href="/agents">查看全部</a>}>
         <Table
-          dataSource={filteredAgents}
+          dataSource={agents || []}
           columns={agentColumns}
           rowKey="id"
           pagination={{ pageSize: 5 }}

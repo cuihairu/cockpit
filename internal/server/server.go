@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cuihairu/cockpit/internal/alert"
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/config"
@@ -25,31 +23,6 @@ import (
 	inventorysync "github.com/cuihairu/cockpit/internal/sync"
 	"github.com/gorilla/websocket"
 )
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// isOriginAllowed 检查 WebSocket 升级请求的 Origin 是否在白名单内
-func isOriginAllowed(r *http.Request) bool {
-	allowed := os.Getenv("ALLOWED_ORIGINS")
-	if allowed == "" {
-		// 未配置白名单时允许所有来源（开发模式）
-		log.Println("WARNING: ALLOWED_ORIGINS not set, accepting all WebSocket origins. Configure this in production!")
-		return true
-	}
-	origin := r.Header.Get("Origin")
-	for _, a := range strings.Split(allowed, ",") {
-		a = strings.TrimSpace(a)
-		if a == "*" || a == origin {
-			return true
-		}
-	}
-	return false
-}
 
 // Server WebSocket 服务器
 type Server struct {
@@ -311,329 +284,6 @@ func (s *Server) startInventorySync() error {
 	return nil
 }
 
-// handleWebSocket 处理 WebSocket 连接
-func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
-		return
-	}
-
-	// 等待注册消息
-	msg, err := s.codec.ReadMessage(conn)
-	if err != nil {
-		log.Printf("Read register message failed: %v", err)
-		conn.Close()
-		return
-	}
-
-	if msg.Type != protocol.MessageTypeRegister {
-		log.Printf("First message must be register, got: %s", msg.Type)
-		conn.Close()
-		return
-	}
-
-	// 解析注册信息
-	var reg protocol.RegisterPayload
-	payloadBytes, _ := json.Marshal(msg.Payload)
-	if err := json.Unmarshal(payloadBytes, &reg); err != nil {
-		log.Printf("Parse register payload failed: %v", err)
-		conn.Close()
-		return
-	}
-
-	agentID := reg.AgentID
-	if agentID == "" {
-		agentID = protocol.GenerateIDWithPrefix("agent")
-	}
-
-	// 认证检查
-	existingAgent, err := s.db.GetAgent(agentID)
-	if err == nil && existingAgent.SecretHash != "" {
-		// Agent 已存在且有密钥配置，验证密钥
-		if reg.Secret == "" {
-			log.Printf("Agent %s registration failed: missing secret", agentID)
-			s.sendRegisterError(conn, "authentication_required", "Agent secret is required")
-			conn.Close()
-			return
-		}
-		if !storage.VerifyAgentSecret(existingAgent.SecretHash, reg.Secret) {
-			log.Printf("Agent %s registration failed: invalid secret", agentID)
-			s.sendRegisterError(conn, "authentication_failed", "Invalid agent secret")
-			conn.Close()
-			return
-		}
-	} else if existingAgent != nil && existingAgent.SecretHash == "" {
-		// Agent 存在但未配置密钥（旧版本迁移），需要配置
-		log.Printf("Agent %s exists but has no secret configured", agentID)
-	}
-
-	// 检查 Registry 中是否已有活跃连接（Registry 中的 Agent 均为活跃状态）
-	if _, exists := s.registry.Get(agentID); exists {
-		log.Printf("Agent %s already has active connection, rejecting duplicate", agentID)
-		s.sendRegisterError(conn, "duplicate_connection", "Agent already connected")
-		conn.Close()
-		return
-	}
-	// 创建 Agent
-	agent := NewAgent(agentID, conn)
-	agent.Update(&reg)
-
-	// 注册到 Registry
-	if err := s.registry.Register(agent); err != nil {
-		log.Printf("Register agent failed: %v", err)
-		s.sendRegisterError(conn, "registration_failed", err.Error())
-		conn.Close()
-		return
-	}
-
-	// 持久化到数据库
-	storageAgent := toStorageAgent(agent)
-	if existingAgent != nil && existingAgent.SecretHash != "" {
-		// 保留现有的 SecretHash
-		storageAgent.SecretHash = existingAgent.SecretHash
-	}
-	if err := s.db.UpsertAgent(storageAgent); err != nil {
-		log.Printf("Failed to persist agent to database: %v", err)
-	}
-
-	log.Printf("Agent registered: %s at %s/%s", agentID, reg.Location.Region, reg.Location.Zone)
-
-	// 发送注册响应
-	resp := protocol.NewMessage(protocol.MessageTypeRegister, map[string]interface{}{
-		"status":            "accepted",
-		"serverTime":        time.Now().Unix(),
-		"heartbeatInterval": int(30),
-	})
-	s.codec.WriteMessage(conn, resp)
-
-	// 启动读写循环
-	go s.readLoop(agent)
-	go s.writeLoop(agent)
-}
-
-// sendRegisterError 发送注册错误响应
-func (s *Server) sendRegisterError(conn *websocket.Conn, code, message string) {
-	resp := protocol.NewMessage(protocol.MessageTypeError, map[string]interface{}{
-		"code":    code,
-		"message": message,
-	})
-	s.codec.WriteMessage(conn, resp)
-}
-
-// readLoop 读取循环
-func (s *Server) readLoop(agent *Agent) {
-	defer s.registry.Unregister(agent.ID)
-
-	for {
-		msg, err := s.codec.ReadMessage(agent.Conn)
-		if err != nil {
-			log.Printf("Agent %s read error: %v", agent.ID, err)
-			return
-		}
-
-		s.handleMessage(agent, msg)
-	}
-}
-
-// writeLoop 写入循环
-func (s *Server) writeLoop(agent *Agent) {
-	defer agent.Conn.Close()
-
-	for msg := range agent.Send {
-		if err := s.codec.WriteMessage(agent.Conn, msg); err != nil {
-			log.Printf("Agent %s write error: %v", agent.ID, err)
-			return
-		}
-	}
-}
-
-// handleMessage 处理消息
-func (s *Server) handleMessage(agent *Agent, msg *protocol.Message) {
-	switch msg.Type {
-	case protocol.MessageTypeHeartbeat:
-		s.handleHeartbeat(agent, msg)
-	case protocol.MessageTypeRPCResponse:
-		s.handleRPCResponse(msg)
-	case protocol.MessageTypeProxyData:
-		s.handleProxyData(agent, msg)
-	case protocol.MessageTypeProxyClose:
-		s.handleProxyClose(agent, msg)
-	case protocol.MessageTypeProxyError:
-		s.handleProxyError(agent, msg)
-	case protocol.MessageTypeDesktopData:
-		s.HandleDesktopData(msg)
-	case protocol.MessageTypeDesktopClose:
-		s.HandleDesktopClose(msg)
-	default:
-		log.Printf("Unknown message type: %s from agent %s", msg.Type, agent.ID)
-	}
-}
-
-// handleHeartbeat 处理心跳
-func (s *Server) handleHeartbeat(agent *Agent, msg *protocol.Message) {
-	agent.Heartbeat()
-
-	// 解析心跳负载，检查是否包含系统信息
-	if msg.Payload != nil {
-		if systemInfoRaw, ok := msg.Payload["systemInfo"]; ok {
-			// 尝试解析系统信息
-			if systemInfoMap, ok := systemInfoRaw.(map[string]interface{}); ok {
-				s.handleSystemInfo(agent.ID, systemInfoMap)
-			}
-		}
-	}
-
-	// 发送 ACK
-	resp := protocol.NewMessage(protocol.MessageTypeHeartbeat, map[string]interface{}{
-		"status":     "ack",
-		"serverTime": time.Now().Unix(),
-	})
-	resp.ID = msg.ID // 关联请求ID
-
-	select {
-	case agent.Send <- resp:
-	default:
-		log.Printf("Agent %s send channel full", agent.ID)
-	}
-}
-
-// handleSystemInfo 处理系统信息
-func (s *Server) handleSystemInfo(agentID string, systemInfo map[string]interface{}) {
-	now := time.Now()
-
-	// 保存历史指标
-	metric := &storage.SystemMetric{
-		AgentID:   agentID,
-		Timestamp: now,
-	}
-
-	// 解析 CPU 信息
-	if v, ok := systemInfo["cpuUsage"].(float64); ok {
-		metric.CPUUsage = v
-	}
-	if v, ok := systemInfo["cpuCores"].(float64); ok {
-		metric.CPUCores = int(v)
-	}
-	if v, ok := systemInfo["cpuFreqMhz"].(float64); ok {
-		metric.CPUFreqMHz = v
-	}
-
-	// 解析内存信息
-	if v, ok := systemInfo["memTotal"].(float64); ok {
-		metric.MemTotal = uint64(v)
-	}
-	if v, ok := systemInfo["memUsed"].(float64); ok {
-		metric.MemUsed = uint64(v)
-	}
-	if v, ok := systemInfo["memAvailable"].(float64); ok {
-		metric.MemAvailable = uint64(v)
-	}
-	if v, ok := systemInfo["memUsagePercent"].(float64); ok {
-		metric.MemUsagePercent = v
-	}
-
-	// 解析磁盘信息
-	if v, ok := systemInfo["diskTotal"].(float64); ok {
-		metric.DiskTotal = uint64(v)
-	}
-	if v, ok := systemInfo["diskUsed"].(float64); ok {
-		metric.DiskUsed = uint64(v)
-	}
-	if v, ok := systemInfo["diskFree"].(float64); ok {
-		metric.DiskFree = uint64(v)
-	}
-	if v, ok := systemInfo["diskUsagePercent"].(float64); ok {
-		metric.DiskUsagePercent = v
-	}
-
-	// 解析网络信息
-	if v, ok := systemInfo["netBytesSent"].(float64); ok {
-		metric.NetBytesSent = uint64(v)
-	}
-	if v, ok := systemInfo["netBytesRecv"].(float64); ok {
-		metric.NetBytesRecv = uint64(v)
-	}
-
-	// 解析系统信息
-	if v, ok := systemInfo["osName"].(string); ok {
-		metric.OSName = v
-	}
-	if v, ok := systemInfo["osVersion"].(string); ok {
-		metric.OSVersion = v
-	}
-	if v, ok := systemInfo["arch"].(string); ok {
-		metric.Arch = v
-	}
-	if v, ok := systemInfo["uptime"].(float64); ok {
-		metric.Uptime = uint64(v)
-	}
-
-	// 解析负载信息
-	if v, ok := systemInfo["load1"].(float64); ok {
-		metric.Load1 = v
-	}
-	if v, ok := systemInfo["load5"].(float64); ok {
-		metric.Load5 = v
-	}
-	if v, ok := systemInfo["load15"].(float64); ok {
-		metric.Load15 = v
-	}
-
-	metric.CreatedAt = now
-
-	// 保存到数据库
-	if err := s.db.SaveSystemMetric(metric); err != nil {
-		log.Printf("Failed to save system metric for agent %s: %v", agentID, err)
-	}
-
-	// 更新快照
-	snapshot := &storage.SystemInfoSnapshot{
-		AgentID:          agentID,
-		CPUUsage:         metric.CPUUsage,
-		CPUCores:         metric.CPUCores,
-		CPUFreqMHz:       metric.CPUFreqMHz,
-		MemTotal:         metric.MemTotal,
-		MemUsed:          metric.MemUsed,
-		MemAvailable:     metric.MemAvailable,
-		MemUsagePercent:  metric.MemUsagePercent,
-		DiskTotal:        metric.DiskTotal,
-		DiskUsed:         metric.DiskUsed,
-		DiskFree:         metric.DiskFree,
-		DiskUsagePercent: metric.DiskUsagePercent,
-		NetBytesSent:     metric.NetBytesSent,
-		NetBytesRecv:     metric.NetBytesRecv,
-		OSName:           metric.OSName,
-		OSVersion:        metric.OSVersion,
-		Arch:             metric.Arch,
-		Uptime:           metric.Uptime,
-		Load1:            metric.Load1,
-		Load5:            metric.Load5,
-		Load15:           metric.Load15,
-		UpdatedAt:        now,
-	}
-
-	if v, ok := systemInfo["hostname"].(string); ok {
-		snapshot.Hostname = v
-	}
-
-	if err := s.db.UpdateSystemInfoSnapshot(snapshot); err != nil {
-		log.Printf("Failed to update system info snapshot for agent %s: %v", agentID, err)
-	}
-}
-
-// handleRPCResponse 处理 RPC 响应
-func (s *Server) handleRPCResponse(msg *protocol.Message) {
-	if ch, exists := s.registry.GetPendingResponse(msg.ID); exists {
-		select {
-		case ch <- msg:
-		default:
-			log.Printf("Response channel full for message %s", msg.ID)
-		}
-		s.registry.UnregisterPendingResponse(msg.ID)
-	}
-}
-
 // handleHealth 健康检查
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -641,24 +291,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status": "ok",
 		"agents": len(s.registry.List()),
 	})
-}
-
-// cleanupLoop 定期清理离线 Agent
-func (s *Server) cleanupLoop() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			removed := s.registry.CleanupOffline()
-			if len(removed) > 0 {
-				log.Printf("Cleaned up offline agents: %v", removed)
-			}
-		case <-s.ctx.Done():
-			return
-		}
-	}
 }
 
 // CallAgent 调用 Agent（RPC）
@@ -738,48 +370,6 @@ func toStorageAgent(agent *Agent) *storage.Agent {
 	return storageAgent
 }
 
-// alertCheckLoop 定期检查并生成警告
-func (s *Server) alertCheckLoop() {
-	// 启动时立即执行一次
-	go func() {
-		time.Sleep(5 * time.Second) // 等待服务完全启动
-		s.runAlertChecks()
-	}()
-
-	// 每小时检查一次
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
-
-	// 每天凌晨2点清理旧警告
-	cleanupTicker := time.NewTicker(24 * time.Hour)
-	defer cleanupTicker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			s.runAlertChecks()
-		case <-cleanupTicker.C:
-			s.cleanupOldAlerts()
-		case <-s.ctx.Done():
-			return
-		}
-	}
-}
-
-// runAlertChecks 执行警告检查
-func (s *Server) runAlertChecks() {
-	generator := alert.NewGenerator(s.db, s.notification, s.cfg.Notification)
-	generator.CheckAllChecks()
-	log.Println("Alert checks completed")
-}
-
-// cleanupOldAlerts 清理旧警告
-func (s *Server) cleanupOldAlerts() {
-	generator := alert.NewGenerator(s.db, s.notification, s.cfg.Notification)
-	generator.CleanupOldAlerts(30 * 24 * time.Hour) // 保留30天
-	log.Println("Old alerts cleaned up")
-}
-
 // handleLoginWithAudit 处理登录并记录审计日志
 func (s *Server) handleLoginWithAudit(w http.ResponseWriter, r *http.Request) {
 	// 在消费 body 之前先读取用户名用于审计
@@ -844,90 +434,36 @@ func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
 		return
 	}
 
-	proxyID, _ := msg.Payload["proxyId"].(string)
-	connID, _ := msg.Payload["connId"].(string)
+	p, err := protocol.DecodeProxyData(msg)
+	if err != nil {
+		log.Printf("decode proxy data from agent %s: %v", agent.ID, err)
+		return
+	}
 
-	// 检查是否是终端连接
-	terminalFlag, _ := msg.Payload["terminal"].(bool)
-	if terminalFlag || (len(proxyID) > 8 && proxyID[:8] == "terminal") {
-		// 解析数据
-		var data []byte
-		switch v := msg.Payload["data"].(type) {
-		case string:
-			decoded, err := base64.StdEncoding.DecodeString(v)
-			if err != nil {
-				data = []byte(v)
-			} else {
-				data = decoded
-			}
-		case []byte:
-			data = v
-		case []interface{}:
-			data = make([]byte, len(v))
-			for i, b := range v {
-				if f, ok := b.(float64); ok {
-					data[i] = byte(f)
-				}
-			}
-		}
-		// 转发给终端会话
-		if err := s.HandleTerminalData(connID, data); err != nil {
+	// 终端连接：显式标记或 proxyId 以 "terminal" 前缀
+	if p.Terminal || hasPrefix(p.ProxyID, "terminal") {
+		if err := s.HandleTerminalData(p.ConnID, p.Data); err != nil {
 			log.Printf("HandleTerminalData error: %v", err)
 		}
 		return
 	}
 
-	// 检查是否是 VNC 连接
-	if len(proxyID) > 3 && proxyID[:3] == "vnc" {
-		var data []byte
-		switch v := msg.Payload["data"].(type) {
-		case string:
-			decoded, err := base64.StdEncoding.DecodeString(v)
-			if err != nil {
-				data = []byte(v)
-			} else {
-				data = decoded
-			}
-		case []byte:
-			data = v
-		case []interface{}:
-			data = make([]byte, len(v))
-			for i, b := range v {
-				if f, ok := b.(float64); ok {
-					data[i] = byte(f)
-				}
-			}
-		}
-		if err := s.HandleVNCData(connID, data); err != nil {
+	// VNC 连接：proxyId 以 "vnc" 前缀
+	if hasPrefix(p.ProxyID, "vnc") {
+		if err := s.HandleVNCData(p.ConnID, p.Data); err != nil {
 			log.Printf("HandleVNCData error: %v", err)
 		}
 		return
 	}
 
-	// 解析数据
-	var data []byte
-	switch v := msg.Payload["data"].(type) {
-	case string:
-		decoded, err := base64.StdEncoding.DecodeString(v)
-		if err != nil {
-			data = []byte(v)
-		} else {
-			data = decoded
-		}
-	case []byte:
-		data = v
-	case []interface{}:
-		data = make([]byte, len(v))
-		for i, b := range v {
-			if f, ok := b.(float64); ok {
-				data[i] = byte(f)
-			}
-		}
-	}
-
-	if err := s.proxyMgr.HandleProxyData(proxyID, connID, data); err != nil {
+	if err := s.proxyMgr.HandleProxyData(p.ProxyID, p.ConnID, p.Data); err != nil {
 		log.Printf("HandleProxyData error: %v", err)
 	}
+}
+
+// hasPrefix 安全的字符串前缀检查（避免多处重复 len+slice 模式）
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 // handleProxyClose 处理代理关闭消息
@@ -936,62 +472,33 @@ func (s *Server) handleProxyClose(agent *Agent, msg *protocol.Message) {
 		return
 	}
 
-	proxyID, _ := msg.Payload["proxyId"].(string)
-	connID, _ := msg.Payload["connId"].(string)
-	reason, _ := msg.Payload["reason"].(string)
+	p, err := protocol.DecodeProxyClose(msg)
+	if err != nil {
+		log.Printf("decode proxy close from agent %s: %v", agent.ID, err)
+		return
+	}
 
 	// 检查是否是终端连接
-	terminalFlag, _ := msg.Payload["terminal"].(bool)
-	if terminalFlag || (len(proxyID) > 8 && proxyID[:8] == "terminal") {
-		s.HandleTerminalClose(connID, reason)
+	if p.Terminal || hasPrefix(p.ProxyID, "terminal") {
+		s.HandleTerminalClose(p.ConnID, p.Reason)
 		return
 	}
 
 	// 检查是否是 VNC 连接
-	if len(proxyID) > 3 && proxyID[:3] == "vnc" {
-		s.HandleVNCClose(connID, reason)
+	if hasPrefix(p.ProxyID, "vnc") {
+		s.HandleVNCClose(p.ConnID, p.Reason)
 		return
 	}
 
-	s.proxyMgr.HandleProxyClose(proxyID, connID, reason)
+	s.proxyMgr.HandleProxyClose(p.ProxyID, p.ConnID, p.Reason)
 }
 
 // handleProxyError 处理代理错误消息
 func (s *Server) handleProxyError(agent *Agent, msg *protocol.Message) {
-	proxyID, _ := msg.Payload["proxyId"].(string)
-	errorMsg, _ := msg.Payload["error"].(string)
-
-	log.Printf("Proxy error from agent %s, proxy %s: %s", agent.ID, proxyID, errorMsg)
-}
-
-// metricsCleanupLoop 清理旧的系统指标
-func (s *Server) metricsCleanupLoop() {
-	// 每天凌晨3点清理
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
-
-	// 启动时先等待到下次清理时间
-	now := time.Now()
-	nextCleanup := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, now.Location())
-	if nextCleanup.Before(now) {
-		nextCleanup = nextCleanup.Add(24 * time.Hour)
+	p, err := protocol.DecodeProxyError(msg)
+	if err != nil {
+		log.Printf("decode proxy error from agent %s: %v", agent.ID, err)
+		return
 	}
-	time.Sleep(time.Until(nextCleanup))
-
-	for {
-		// 清理30天前的数据
-		count, err := s.db.CleanupOldMetrics(30 * 24 * time.Hour)
-		if err != nil {
-			log.Printf("Failed to cleanup old metrics: %v", err)
-		} else {
-			log.Printf("Cleaned up %d old metric records", count)
-		}
-
-		select {
-		case <-ticker.C:
-			// 继续下一次清理
-		case <-s.ctx.Done():
-			return
-		}
-	}
+	log.Printf("Proxy error from agent %s, proxy %s: %s", agent.ID, p.ProxyID, p.Error)
 }

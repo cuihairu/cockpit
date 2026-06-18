@@ -42,14 +42,15 @@ const RemoteServicesCard: React.FC<RemoteServicesCardProps> = ({
   onConnect,
 }) => {
   const [connectModalVisible, setConnectModalVisible] = useState(false);
-  const [_selectedService, setSelectedService] = useState<RemoteService | null>(null);
   const [form] = Form.useForm();
+  const previewProtocol = Form.useWatch('protocol', form);
+  const previewHost = Form.useWatch('host', form);
+  const previewPort = Form.useWatch('port', form);
 
   // 过滤出运行中的服务
   const activeServices = services.filter((s) => s.running);
 
   const handleConnect = (service: RemoteService) => {
-    setSelectedService(service);
     form.setFieldsValue({
       protocol: service.protocol,
       host: service.host,
@@ -59,7 +60,6 @@ const RemoteServicesCard: React.FC<RemoteServicesCardProps> = ({
   };
 
   const handleQuickConnect = () => {
-    setSelectedService(null);
     form.resetFields();
     setConnectModalVisible(true);
   };
@@ -194,14 +194,14 @@ const RemoteServicesCard: React.FC<RemoteServicesCardProps> = ({
             <strong>连接命令：</strong>
           </div>
           <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
-            {Form.useWatch('protocol', form) === 'ssh' && (
-              <span>ssh -p {Form.useWatch('port', form) || 22} {Form.useWatch('host', form) || 'host'}</span>
+            {previewProtocol === 'ssh' && (
+              <span>ssh -p {previewPort || 22} {previewHost || 'host'}</span>
             )}
-            {Form.useWatch('protocol', form) === 'vnc' && (
-              <span>vncviewer {Form.useWatch('host', form) || 'host'}:{Form.useWatch('port', form) || 5900}</span>
+            {previewProtocol === 'vnc' && (
+              <span>vncviewer {previewHost || 'host'}:{previewPort || 5900}</span>
             )}
-            {Form.useWatch('protocol', form) === 'rdp' && (
-              <span>rdesktop {Form.useWatch('host', form) || 'host'}:{Form.useWatch('port', form) || 3389}</span>
+            {previewProtocol === 'rdp' && (
+              <span>rdesktop {previewHost || 'host'}:{previewPort || 3389}</span>
             )}
           </div>
         </div>

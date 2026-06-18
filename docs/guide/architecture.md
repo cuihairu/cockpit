@@ -40,7 +40,7 @@ Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连接 Ser
 | 数据 | 位置 | 角色 | 生命周期 |
 | --- | --- | --- | --- |
 | 配置文件 | `config/cockpit.yaml` 或 `-config` 指定路径 | Server 启动配置，包括监听地址、数据库、JWT、邮件、通知、inventory | 启动读取；环境变量占位符会展开 |
-| Inventory YAML | `inventory.path` 或 `cockpit sync -inventory` | 声明式资产清单 | 手动 `cockpit sync` 完整写入数据库；`inventory.watch` 目前只做基础 Agent 热同步 |
+| Inventory YAML | `inventory.path` 或 `cockpit sync -inventory` | 声明式资产清单 | 手动 `cockpit sync` 或 `inventory.watch` 热加载都会通过同一套 Syncer 写入数据库 |
 | SQLite | `database.path` | 运行时查询和状态存储 | Server/CLI 打开时自动迁移 |
 | Agent Registry | Server 内存 | 当前在线 Agent 连接池和待响应 RPC | 进程内状态，Server 重启后丢失 |
 | Web UI 本地存储 | Browser `localStorage` | JWT、部分远程桌面连接偏好 | 浏览器侧状态，不作为系统真相源 |
@@ -56,7 +56,7 @@ Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连接 Ser
 | `internal/protocol` | Server 与 Agent 的 WebSocket 消息结构、消息类型、远程桌面子协议 |
 | `internal/storage` | GORM/SQLite 模型、迁移、资源 CRUD、用户、审计、告警、指标、代理配置 |
 | `internal/inventory` | Inventory YAML schema、解析、校验、同步到 storage |
-| `internal/sync` | Server 运行期 inventory 文件监听；当前实现主要同步 Region/Zone/Agent 基础信息 |
+| `internal/sync` | Server 运行期 inventory 文件监听；复用 `internal/inventory.Syncer` 将声明式资源同步到 storage |
 | `internal/auth` | 登录、JWT、中间件、TOTP、密码重置 |
 | `internal/proxy` | Server 侧监听代理端口、Agent 侧连接目标并转发数据 |
 | `internal/pve` / `internal/docker` / `internal/openwrt` | 第三方平台客户端 |
@@ -93,7 +93,7 @@ Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连接 Ser
 - Gateways
 - Storages
 
-Server 的 `inventory.watch: true` 会监听单个 inventory 文件并热加载，但当前 `internal/sync` 的应用逻辑只覆盖 Agent 基础信息，不等同于 `cockpit sync` 的完整资源同步。
+Server 的 `inventory.watch: true` 会监听单个 inventory 文件并热加载，当前实现复用 `inventory.Syncer`，与 `cockpit sync` 走同一套资源同步逻辑。
 
 ### HTTP API 与 Web UI
 

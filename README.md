@@ -99,6 +99,25 @@ export PRODUCTION=true
 
 对外部署时将 `server.host` 改为 `0.0.0.0`，并建议通过反向代理提供 HTTPS/WSS。
 
+## 端到端冒烟脚本
+
+仓库内置一个最小闭环验证脚本，用于本地一键验证 server/agent/inventory sync/资源 API 链路是否正常：
+
+```bash
+./scripts/e2e-smoke.sh
+```
+
+脚本行为：
+
+1. 在临时目录创建最小 `cockpit.yaml` + `inventory.yaml`
+2. 构建 `cockpit` 与 `cockpit-agent` 二进制
+3. 启动 server，等待 `/health` 返回 ok
+4. 启动 agent，等待 `/api/agents` 出现在线记录
+5. 用 `cockpit sync` 同步 inventory，并验证 `/api/resources/{domains,certificates}` 返回 200
+
+退出码 0 表示全链路正常；非 0 时会自动打印 `server.log` 末尾用于排查。
+保留日志便于调试：`E2E_KEEP_LOGS=1 ./scripts/e2e-smoke.sh`。
+
 ## 文档
 
 - [介绍](https://cuihairu.github.io/cockpit/guide/introduction)

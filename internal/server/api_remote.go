@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/google/uuid"
@@ -18,6 +19,8 @@ import (
 // TerminalSession 终端会话
 type TerminalSession struct {
 	ID         string
+	UserID     string
+	Username   string
 	AgentID    string
 	Protocol   protocol.RemoteProtocol
 	Host       string
@@ -100,6 +103,8 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 
 	session := &TerminalSession{
 		ID:         sessionID,
+		UserID:     ticket.UserID,
+		Username:   ticket.Username,
 		AgentID:    agentID,
 		Protocol:   remoteProtocol,
 		Host:       host,
@@ -281,6 +286,16 @@ func (s *Server) closeTerminalSession(session *TerminalSession) {
 	delete(terminalByConn, session.ConnID)
 	terminalSessionsMu.Unlock()
 	log.Printf("Terminal session closed: %s", session.ID)
+
+	s.auditRemoteEnd(session.UserID, session.Username, "", "",
+		&audit.RemoteSessionDetails{
+			Protocol: string(session.Protocol),
+			AgentID:  session.AgentID,
+			Host:     session.Host,
+			Port:     session.Port,
+			Session:  session.ID,
+			Duration: time.Since(session.CreatedAt).String(),
+		})
 }
 
 // HandleTerminalData 处理从 Agent 转发到浏览器终端的数据
@@ -364,6 +379,12 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 校验目标是否在 allow-list 内（除非显式允许任意目标）
+	if allow, reason := s.validateRemoteTarget(req.Host); !allow {
+		rejectTargetDenied(w, reason)
+		return
+	}
+
 	// 获取当前用户
 	userInfo, ok := auth.GetUserFromContext(r)
 	if !ok {
@@ -400,6 +421,22 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to generate ticket", http.StatusInternalServerError)
 		return
 	}
+
+	// 远控会话开始审计（不写 password）
+	s.auditRemoteStart(
+		audit.ActionRemoteStart,
+		userInfo.UserID,
+		userInfo.Username,
+		s.getClientIP(r),
+		r.UserAgent(),
+		&audit.RemoteSessionDetails{
+			Protocol: req.Protocol,
+			AgentID:  req.AgentID,
+			Host:     req.Host,
+			Port:     req.Port,
+			Session:  ticket.ID,
+		},
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{

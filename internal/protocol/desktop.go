@@ -120,3 +120,11 @@ type DesktopDisconnectedPayload struct {
 	SessionID string `json:"sessionId"`
 	Reason    string `json:"reason"`
 }
+
+// DesktopDataHeaderPayload Agent -> Server 桌面数据路由头
+//
+// 仅用于路由分发，原始字段集合保留在 Message.Payload 中由 server 透传给浏览器。
+type DesktopDataHeaderPayload struct {
+	SessionID   string             `json:"sessionId"`
+	DesktopType DesktopMessageType `json:"desktopType"`
+}

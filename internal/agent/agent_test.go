@@ -211,8 +211,8 @@ func TestAgentIDGeneration(t *testing.T) {
 			contains: "my-agent",
 		},
 		{
-			name: "default agent ID",
-			cfg:  Config{},
+			name:     "default agent ID",
+			cfg:      Config{},
 			contains: "agent-",
 		},
 	}
@@ -257,10 +257,10 @@ func TestConfigLabels(t *testing.T) {
 	cfg := Config{
 		ServerURL: "ws://localhost:8080",
 		Labels: map[string]interface{}{
-			"env":       "production",
-			"services":  []string{"docker", "kubernetes"},
-			"gpu":       true,
-			"cores":     8,
+			"env":      "production",
+			"services": []string{"docker", "kubernetes"},
+			"gpu":      true,
+			"cores":    8,
 		},
 	}
 
@@ -437,5 +437,28 @@ func TestAgentStopWithNilConnection(t *testing.T) {
 		// Expected
 	default:
 		t.Error("expected context to be cancelled")
+	}
+}
+
+func TestCloseCurrentConnClearsState(t *testing.T) {
+	agent := NewAgent(Config{ServerURL: "ws://localhost:8080"})
+
+	agent.mu.Lock()
+	agent.connected = true
+	agent.mu.Unlock()
+	agent.registered.Store(true)
+
+	agent.closeCurrentConn()
+
+	agent.mu.RLock()
+	defer agent.mu.RUnlock()
+	if agent.connected {
+		t.Error("expected agent to be disconnected")
+	}
+	if agent.conn != nil {
+		t.Error("expected connection to be cleared")
+	}
+	if agent.registered.Load() {
+		t.Error("expected registered flag to be cleared")
 	}
 }

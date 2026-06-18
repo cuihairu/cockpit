@@ -48,7 +48,9 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
 
   // 用 ref 保存 renderer 的回调，避免 useDesktopWS 回调中引用不稳定的 renderer
   const rendererRef = useRef(renderer);
-  rendererRef.current = renderer;
+  useEffect(() => {
+    rendererRef.current = renderer;
+  }, [renderer]);
 
   const clearTimeoutRef = useRef<(() => void) | null>(null);
 
@@ -89,7 +91,7 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
   });
 
   const canvasRef = useCallback((node: HTMLCanvasElement | null) => {
-    renderer.canvasRef.current = node;
+    renderer.setCanvas(node);
     setCanvas(node);
   }, [renderer, setCanvas]);
 

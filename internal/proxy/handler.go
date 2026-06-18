@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -16,45 +15,52 @@ import (
 
 // Handler Agent 端代理处理器
 type Handler struct {
-	conn      *websocket.Conn
-	conns     map[string]*AgentTargetConn // connID -> AgentTargetConn
-	connSeq   atomic.Uint64
-	mu        sync.RWMutex
-	sendQueue chan *protocol.Message
-	running   atomic.Bool
+	mu       sync.RWMutex
+	conn     *websocket.Conn
+	conns    map[string]*AgentTargetConn // connID -> AgentTargetConn
+	connSeq  atomic.Uint64
+	sendFunc func(*protocol.Message) error
+	running  atomic.Bool
 }
 
 // AgentTargetConn Agent 端的连接
 type AgentTargetConn struct {
-	ID        string
-	ProxyID   string
-	Target    string
-	Conn      net.Conn
-	Created   time.Time
-	mu        sync.RWMutex
-	closed    atomic.Bool
+	ID      string
+	ProxyID string
+	Target  string
+	Conn    net.Conn
+	Created time.Time
+	mu      sync.RWMutex
+	closed  atomic.Bool
 }
 
 // NewHandler 创建 Agent 端代理处理器
 func NewHandler() *Handler {
 	return &Handler{
-		conns:     make(map[string]*AgentTargetConn),
-		sendQueue: make(chan *protocol.Message, 1000),
+		conns: make(map[string]*AgentTargetConn),
 	}
 }
 
-// Start 启动处理器
+// Start 启动处理器并绑定 websocket 连接。
+// 多次调用安全：conn 字段每次都会更新（用于 Agent 重连场景）。
 func (h *Handler) Start(wsConn *websocket.Conn) {
-	if !h.running.CompareAndSwap(false, true) {
-		return
-	}
-
-	h.conn = wsConn
-
-	// 启动发送协程
-	go h.sendLoop()
-
+	h.AttachConn(wsConn)
+	h.running.Store(true)
 	log.Println("Agent proxy handler started")
+}
+
+// SetSendFunc 设置发送函数。Agent 注入统一 writer，避免多 goroutine 并发写 websocket。
+func (h *Handler) SetSendFunc(fn func(*protocol.Message) error) {
+	h.mu.Lock()
+	h.sendFunc = fn
+	h.mu.Unlock()
+}
+
+// AttachConn 更新当前 websocket 连接（Agent 重连后调用以替换旧 conn）
+func (h *Handler) AttachConn(wsConn *websocket.Conn) {
+	h.mu.Lock()
+	h.conn = wsConn
+	h.mu.Unlock()
 }
 
 // Stop 停止处理器
@@ -71,44 +77,42 @@ func (h *Handler) Stop() {
 	h.conns = make(map[string]*AgentTargetConn)
 	h.mu.Unlock()
 
-	close(h.sendQueue)
-
 	log.Println("Agent proxy handler stopped")
 }
 
 // HandleProxyNew 处理新建代理连接请求
 func (h *Handler) HandleProxyNew(msg *protocol.Message) error {
-	proxyID, _ := msg.Payload["proxyId"].(string)
-	_, _ = msg.Payload["proxyType"].(string) // 预留，目前只支持 TCP
-	target, _ := msg.Payload["target"].(string)
-	connID, _ := msg.Payload["connId"].(string)
+	p, err := protocol.DecodeProxyNew(msg)
+	if err != nil {
+		return fmt.Errorf("invalid proxy new message: %w", err)
+	}
 
-	if proxyID == "" || target == "" || connID == "" {
+	if p.ProxyID == "" || p.Target == "" || p.ConnID == "" {
 		return fmt.Errorf("invalid proxy new message: missing required fields")
 	}
 
 	// 连接到目标服务
-	targetConn, err := net.DialTimeout("tcp", target, 10*time.Second)
+	targetConn, err := net.DialTimeout("tcp", p.Target, 10*time.Second)
 	if err != nil {
-		log.Printf("Failed to connect to target %s: %v", target, err)
+		log.Printf("Failed to connect to target %s: %v", p.Target, err)
 		// 发送错误消息给 Server
-		h.SendError(proxyID, connID, err.Error())
+		h.SendError(p.ProxyID, p.ConnID, err.Error())
 		return err
 	}
 
 	agentConn := &AgentTargetConn{
-		ID:      connID,
-		ProxyID: proxyID,
-		Target:  target,
+		ID:      p.ConnID,
+		ProxyID: p.ProxyID,
+		Target:  p.Target,
 		Conn:    targetConn,
 		Created: time.Now(),
 	}
 
 	h.mu.Lock()
-	h.conns[connID] = agentConn
+	h.conns[p.ConnID] = agentConn
 	h.mu.Unlock()
 
-	log.Printf("Agent: New proxy connection %s -> %s", connID, target)
+	log.Printf("Agent: New proxy connection %s -> %s", p.ConnID, p.Target)
 
 	// 启动数据读取协程
 	go h.readFromTarget(agentConn)
@@ -118,52 +122,26 @@ func (h *Handler) HandleProxyNew(msg *protocol.Message) error {
 
 // HandleProxyData 处理来自 Server 的数据
 func (h *Handler) HandleProxyData(msg *protocol.Message) error {
-	connID, _ := msg.Payload["connId"].(string)
-	dataBytes, ok := msg.Payload["data"]
-	if !ok {
-		return fmt.Errorf("missing data in proxy data message")
-	}
-
-	// 解码 Base64 数据（因为 JSON 传输）
-	var data []byte
-	switch v := dataBytes.(type) {
-	case string:
-		decoded, err := base64.StdEncoding.DecodeString(v)
-		if err != nil {
-			data = []byte(v)
-		} else {
-			data = decoded
-		}
-	case []byte:
-		data = v
-	case []interface{}:
-		// JSON 数组
-		data = make([]byte, len(v))
-		for i, b := range v {
-			if f, ok := b.(float64); ok {
-				data[i] = byte(f)
-			}
-		}
-	default:
-		return fmt.Errorf("invalid data type: %T", dataBytes)
+	p, err := protocol.DecodeProxyData(msg)
+	if err != nil {
+		return fmt.Errorf("invalid proxy data message: %w", err)
 	}
 
 	h.mu.RLock()
-	conn, exists := h.conns[connID]
+	conn, exists := h.conns[p.ConnID]
 	h.mu.RUnlock()
 
 	if !exists {
-		return fmt.Errorf("connection %s not found", connID)
+		return fmt.Errorf("connection %s not found", p.ConnID)
 	}
 
 	if conn.closed.Load() {
-		return fmt.Errorf("connection %s already closed", connID)
+		return fmt.Errorf("connection %s already closed", p.ConnID)
 	}
 
 	// 写入数据到目标
-	_, err := conn.Conn.Write(data)
-	if err != nil {
-		log.Printf("Write error to target %s: %v", connID, err)
+	if _, err := conn.Conn.Write(p.Data); err != nil {
+		log.Printf("Write error to target %s: %v", p.ConnID, err)
 		conn.Close()
 		h.SendClose(conn.ProxyID, conn.ID, "write error")
 		return err
@@ -174,17 +152,20 @@ func (h *Handler) HandleProxyData(msg *protocol.Message) error {
 
 // HandleProxyClose 处理来自 Server 的关闭连接请求
 func (h *Handler) HandleProxyClose(msg *protocol.Message) error {
-	connID, _ := msg.Payload["connId"].(string)
+	p, err := protocol.DecodeProxyClose(msg)
+	if err != nil {
+		return fmt.Errorf("invalid proxy close message: %w", err)
+	}
 
 	h.mu.Lock()
-	conn, exists := h.conns[connID]
+	conn, exists := h.conns[p.ConnID]
 	if exists {
-		delete(h.conns, connID)
+		delete(h.conns, p.ConnID)
 	}
 	h.mu.Unlock()
 
 	if exists {
-		log.Printf("Agent: Closing connection %s", connID)
+		log.Printf("Agent: Closing connection %s", p.ConnID)
 		conn.Close()
 	}
 
@@ -229,28 +210,13 @@ func (h *Handler) SendMessage(msg *protocol.Message) error {
 		return fmt.Errorf("handler not running")
 	}
 
-	select {
-	case h.sendQueue <- msg:
-		return nil
-	default:
-		return fmt.Errorf("send queue full")
+	h.mu.RLock()
+	sendFunc := h.sendFunc
+	h.mu.RUnlock()
+	if sendFunc == nil {
+		return fmt.Errorf("send function not configured")
 	}
-}
-
-// sendLoop 发送循环
-func (h *Handler) sendLoop() {
-	for {
-		select {
-		case msg, ok := <-h.sendQueue:
-			if !ok {
-				return
-			}
-			if err := h.conn.WriteJSON(msg); err != nil {
-				log.Printf("Failed to send message: %v", err)
-				return
-			}
-		}
-	}
+	return sendFunc(msg)
 }
 
 // SendError 发送错误消息

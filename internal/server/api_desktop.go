@@ -4,17 +4,33 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
+// splitTarget 将 "host:port" 字符串拆分；解析失败返回零值
+func splitTarget(target string) (string, int) {
+	idx := strings.LastIndex(target, ":")
+	if idx <= 0 {
+		return target, 0
+	}
+	host := target[:idx]
+	port, _ := strconv.Atoi(target[idx+1:])
+	return host, port
+}
+
 // DesktopSession 桌面会话
 type DesktopSession struct {
 	ID         string
+	UserID     string
+	Username   string
 	AgentID    string
 	Target     string
 	ClientWS   *websocket.Conn
@@ -112,6 +128,8 @@ func (s *Server) handleDesktopWebSocket(w http.ResponseWriter, r *http.Request) 
 
 	session := &DesktopSession{
 		ID:         sessionID,
+		UserID:     ticket.UserID,
+		Username:   ticket.Username,
 		AgentID:    agentID,
 		Target:     target,
 		ClientWS:   conn,
@@ -280,17 +298,28 @@ func (s *Server) closeDesktopSession(session *DesktopSession) {
 	delete(desktopSessions, session.ID)
 	desktopSessionsMu.Unlock()
 	log.Printf("Desktop session closed: %s", session.ID)
+
+	host, port := splitTarget(session.Target)
+	s.auditRemoteEnd(session.UserID, session.Username, "", "",
+		&audit.RemoteSessionDetails{
+			Protocol: "rdp",
+			AgentID:  session.AgentID,
+			Host:     host,
+			Port:     port,
+			Session:  session.ID,
+			Duration: time.Since(session.CreatedAt).String(),
+		})
 }
 
 // HandleDesktopData 处理 Agent -> 浏览器的桌面数据
 func (s *Server) HandleDesktopData(msg *protocol.Message) {
-	sessionID, _ := msg.Payload["sessionId"].(string)
-	if sessionID == "" {
+	header, err := protocol.DecodeDesktopDataHeader(msg)
+	if err != nil || header.SessionID == "" {
 		return
 	}
 
 	desktopSessionsMu.Lock()
-	session, exists := desktopSessions[sessionID]
+	session, exists := desktopSessions[header.SessionID]
 	desktopSessionsMu.Unlock()
 
 	if !exists {
@@ -298,9 +327,8 @@ func (s *Server) HandleDesktopData(msg *protocol.Message) {
 	}
 
 	// 将 desktop_data 负载转发给浏览器，desktopType 映射为前端 type
-	desktopType, _ := msg.Payload["desktopType"].(string)
 	agentMsg := map[string]interface{}{
-		"type": desktopType,
+		"type": string(header.DesktopType),
 	}
 
 	for k, v := range msg.Payload {
@@ -315,10 +343,17 @@ func (s *Server) HandleDesktopData(msg *protocol.Message) {
 
 // HandleDesktopClose 处理 Agent 关闭桌面会话
 func (s *Server) HandleDesktopClose(msg *protocol.Message) {
-	sessionID, _ := msg.Payload["sessionId"].(string)
-	reason, _ := msg.Payload["reason"].(string)
-	if reason == "" {
-		reason = "agent closed"
+	disconnected, err := protocol.DecodeDesktopDisconnected(msg)
+	sessionID := ""
+	reason := "agent closed"
+	if err == nil {
+		sessionID = disconnected.SessionID
+		if disconnected.Reason != "" {
+			reason = disconnected.Reason
+		}
+	}
+	if sessionID == "" {
+		return
 	}
 
 	desktopSessionsMu.Lock()

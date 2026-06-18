@@ -102,13 +102,13 @@ metricsClient.interceptors.response.use(
 
 // 获取所有系统信息快照
 export async function getSystemSnapshots(): Promise<SystemInfoSnapshot[]> {
-  const response = await metricsClient.get<any, { data: SystemInfoSnapshot[] }>('/metrics/snapshots');
+  const response = await metricsClient.get<unknown, { data: SystemInfoSnapshot[] }>('/metrics/snapshots');
   return response?.data || [];
 }
 
 // 获取单个 Agent 的系统信息
 export async function getSystemSnapshot(agentId: string): Promise<SystemInfoSnapshot> {
-  return metricsClient.get<any, SystemInfoSnapshot>(`/metrics/snapshot?agent_id=${agentId}`);
+  return metricsClient.get<unknown, SystemInfoSnapshot>(`/metrics/snapshot?agent_id=${agentId}`);
 }
 
 // 获取历史指标
@@ -120,7 +120,7 @@ export async function getMetricsHistory(
     limit?: number;
   },
 ): Promise<MetricsHistoryResponse> {
-  const response = await metricsClient.get<any, MetricsHistoryResponse>(
+  const response = await metricsClient.get<unknown, MetricsHistoryResponse>(
     `/metrics/history?agent_id=${agentId}`,
     { params }
   );

@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 import { Spin } from 'antd';
@@ -24,8 +24,6 @@ const MetricsChart: React.FC<MetricsChartProps> = ({
   min,
   max,
 }) => {
-  const chartRef = useRef<any>(null);
-
   const option: EChartsOption = {
     title: {
       text: title,
@@ -37,9 +35,13 @@ const MetricsChart: React.FC<MetricsChartProps> = ({
     },
     tooltip: {
       trigger: 'axis',
-      formatter: (params: any) => {
+      formatter: (params: unknown) => {
+        if (!Array.isArray(params) || !params[0] || typeof params[0] !== 'object') {
+          return '';
+        }
         const param = params[0];
-        return `${param.name}<br/>${param.seriesName}: ${param.value}${unit}`;
+        const item = param as { name?: string; seriesName?: string; value?: string | number };
+        return `${item.name ?? ''}<br/>${item.seriesName ?? ''}: ${item.value ?? ''}${unit}`;
       },
     },
     grid: {
@@ -96,7 +98,6 @@ const MetricsChart: React.FC<MetricsChartProps> = ({
   return (
     <Spin spinning={loading}>
       <ReactECharts
-        ref={chartRef}
         option={option}
         style={{ height: `${height}px` }}
         notMerge={true}

@@ -1,5 +1,5 @@
 import { Button, Card, Descriptions, Space, Tag } from 'antd'
-import type { RemoteService, WorkbenchTab } from './types'
+import type { RemoteService } from './types'
 
 const ConnectionPanel = ({
   protocol,

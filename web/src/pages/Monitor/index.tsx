@@ -1,100 +1,56 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
 import { Row, Col, Select, Spin, Alert } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import SystemInfoCard from '@/components/SystemInfoCard';
 import MetricsChart from '@/components/MetricsChart';
-import {
-  getSystemSnapshots,
-  getSystemSnapshot,
-  getMetricsHistory,
-  type SystemInfoSnapshot,
-  type SystemMetric,
-} from '@/services/metrics';
-import { logger } from '@/utils/logger';
+import { getSystemSnapshots, getSystemSnapshot, getMetricsHistory } from '@/services/metrics';
 
 const Monitor: React.FC = () => {
-  const [snapshots, setSnapshots] = useState<SystemInfoSnapshot[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
-  const [currentSnapshot, setCurrentSnapshot] = useState<SystemInfoSnapshot | null>(null);
-  const [metricsHistory, setMetricsHistory] = useState<SystemMetric[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const snapshotsQuery = useQuery({
+    queryKey: ['system-snapshots'],
+    queryFn: getSystemSnapshots,
+    refetchInterval: 30000,
+  });
 
-  // 获取所有快照
-  const fetchSnapshots = useCallback(async () => {
-    try {
-      const data = await getSystemSnapshots();
-      setSnapshots(data || []);
-      if (data && data.length > 0 && !selectedAgentId) {
-        setSelectedAgentId(data[0].agentId);
-      }
-    } catch (error) {
-      logger.error('Failed to fetch snapshots:', error);
-    }
-  }, [selectedAgentId]);
+  const snapshots = snapshotsQuery.data || [];
+  const effectiveAgentId = selectedAgentId || snapshots[0]?.agentId || '';
 
-  // 获取单个 Agent 的系统信息
-  const fetchSnapshot = useCallback(async (agentId: string) => {
-    try {
-      const data = await getSystemSnapshot(agentId);
-      setCurrentSnapshot(data);
-    } catch (error) {
-      logger.error('Failed to fetch snapshot:', error);
-    }
-  }, []);
+  const currentSnapshotQuery = useQuery({
+    queryKey: ['system-snapshot', effectiveAgentId],
+    queryFn: () => getSystemSnapshot(effectiveAgentId),
+    enabled: Boolean(effectiveAgentId),
+    refetchInterval: 30000,
+  });
 
-  // 获取历史指标
-  const fetchMetricsHistory = useCallback(async (agentId: string) => {
-    try {
+  const metricsHistoryQuery = useQuery({
+    queryKey: ['metrics-history', effectiveAgentId],
+    queryFn: () => {
       const end = Date.now();
       const start = end - 24 * 60 * 60 * 1000; // 最近24小时
-      const response = await getMetricsHistory(agentId, { start, end, limit: 1000 });
-      setMetricsHistory(response.data || []);
-    } catch (error) {
-      logger.error('Failed to fetch metrics history:', error);
-    }
-  }, []);
+      return getMetricsHistory(effectiveAgentId, { start, end, limit: 1000 });
+    },
+    enabled: Boolean(effectiveAgentId),
+    refetchInterval: 30000,
+  });
+
+  const currentSnapshot = currentSnapshotQuery.data || null;
+  const metricsHistory = useMemo(
+    () => metricsHistoryQuery.data?.data || [],
+    [metricsHistoryQuery.data],
+  );
+  const loading = snapshotsQuery.isLoading;
+  const refreshing =
+    snapshotsQuery.isFetching || currentSnapshotQuery.isFetching || metricsHistoryQuery.isFetching;
 
   // 刷新数据
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    await fetchSnapshots();
-    if (selectedAgentId) {
-      await Promise.all([
-        fetchSnapshot(selectedAgentId),
-        fetchMetricsHistory(selectedAgentId),
-      ]);
-    }
-    setRefreshing(false);
-  }, [selectedAgentId, fetchSnapshots, fetchSnapshot, fetchMetricsHistory]);
-
-  // 初始化
-  useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      await fetchSnapshots();
-      setLoading(false);
-    };
-    init();
-  }, [fetchSnapshots]);
-
-  // 选择 Agent 变化时
-  useEffect(() => {
-    if (selectedAgentId) {
-      fetchSnapshot(selectedAgentId);
-      fetchMetricsHistory(selectedAgentId);
-    }
-  }, [selectedAgentId, fetchSnapshot, fetchMetricsHistory]);
-
-  // 定时刷新
-  useEffect(() => {
-    const interval = setInterval(() => {
-      refresh();
-    }, 30000); // 每30秒刷新
-
-    return () => clearInterval(interval);
-  }, [refresh]);
+  const refresh = () => {
+    void snapshotsQuery.refetch();
+    void currentSnapshotQuery.refetch();
+    void metricsHistoryQuery.refetch();
+  };
 
   // 准备图表数据
   const chartData = metricsHistory.map((m) => ({
@@ -119,7 +75,7 @@ const Monitor: React.FC = () => {
           key="agent-select"
           style={{ width: 250, marginRight: 16 }}
           placeholder="选择 Agent"
-          value={selectedAgentId}
+          value={effectiveAgentId}
           onChange={setSelectedAgentId}
           loading={loading}
         >

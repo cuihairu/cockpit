@@ -105,6 +105,57 @@ domains:
     labels:
       tier: "internal"
 
+# 计算实例
+computeInstances:
+  home-app-vm:
+    name: "Home App VM"
+    type: "vm"
+    agent: "pve01"
+    region: "home"
+    zone: "datacenter-a"
+    cpu: 2
+    memory: 4096
+    disk: 80
+    ipv4: "192.168.1.31"
+    labels:
+      role: "app"
+
+# 服务
+services:
+  cockpit-web:
+    name: "Cockpit Web"
+    type: "http"
+    agent: "vps01"
+    region: "jiangsu-huaian"
+    zone: "vps-zone"
+    url: "https://example.com"
+    interval: 60
+    labels:
+      tier: "production"
+
+# 网关
+gateways:
+  home-router:
+    name: "Home Router"
+    type: "openwrt"
+    agent: "openwrt-router"
+    region: "home"
+    zone: "datacenter-a"
+    ipv4: "192.168.1.1"
+    upstream: "isp"
+
+# 存储
+storages:
+  pve-local:
+    name: "PVE Local Storage"
+    type: "local"
+    agent: "pve01"
+    region: "home"
+    zone: "datacenter-a"
+    path: "/var/lib/vz"
+    labels:
+      role: "vm-storage"
+
 # 资源引用
 resources:
   pve-vm-agent: &pve-vm-agent

@@ -23,7 +23,13 @@ const (
 	ActionTOTPEnable = "totp_enable"
 	ActionTOTPDisable = "totp_disable"
 	ActionTOTPVerify = "totp_verify"
+	// ActionRemoteStart / ActionRemoteEnd 远控会话开始/结束
+	ActionRemoteStart = "remote_start"
+	ActionRemoteEnd   = "remote_end"
 )
+
+// ResourceRemoteSession 远控会话资源类型
+const ResourceRemoteSession = "remote_session"
 
 // Status 状态
 const (
@@ -198,5 +204,35 @@ func (l *Logger) LogTOTPFailed(userID, ip, userAgent string) error {
 		IP:        ip,
 		UserAgent: userAgent,
 		Status:    StatusFailure,
+	})
+}
+
+// RemoteSessionDetails 远控会话审计详情
+//
+// 敏感字段（password/private key）由调用方保证不写入。
+type RemoteSessionDetails struct {
+	Protocol string `json:"protocol"`
+	AgentID  string `json:"agent_id"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Session  string `json:"session_id"`
+	Duration string `json:"duration,omitempty"` // 仅 end 事件
+	Reason   string `json:"reason,omitempty"`   // 仅 end 事件
+}
+
+// LogRemoteSession 记录远控会话审计日志
+//
+// action 取 ActionRemoteStart 或 ActionRemoteEnd；status 取 StatusSuccess/StatusFailure。
+func (l *Logger) LogRemoteSession(action, userID, username, status, ip, userAgent string, details *RemoteSessionDetails) error {
+	return l.Log(&LogEntry{
+		UserID:     userID,
+		Username:   username,
+		Action:     action,
+		Resource:   ResourceRemoteSession,
+		ResourceID: details.Session,
+		Details:    details,
+		IP:         ip,
+		UserAgent:  userAgent,
+		Status:     status,
 	})
 }

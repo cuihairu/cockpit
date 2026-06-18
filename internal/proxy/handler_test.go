@@ -14,18 +14,18 @@ type mockWSConn struct {
 	closed bool
 }
 
-func (m *mockWSConn) WriteJSON(v interface{}) error              { return nil }
-func (m *mockWSConn) Close() error                                { m.closed = true; return nil }
-func (m *mockWSConn) SetWriteDeadline(t time.Time) error         { return nil }
-func (m *mockWSConn) ReadMessage() (int, []byte, error)          { return 0, nil, nil }
-func (m *mockWSConn) SetReadDeadline(t time.Time) error          { return nil }
-func (m *mockWSConn) SetPongHandler(h func(string) error)        {}
-func (m *mockWSConn) WriteMessage(int, []byte) error             { return nil }
-func (m *mockWSConn) WriteControl(int, []byte, time.Time) error  { return nil }
-func (m *mockWSConn) Subprotocol() string                         { return "" }
-func (m *mockWSConn) RemoteAddr() net.Addr                        { return nil }
-func (m *mockWSConn) UnderlyingConn() net.Conn                    { return nil }
-func (m *mockWSConn) MessageReader() io.Reader                    { return nil }
+func (m *mockWSConn) WriteJSON(v interface{}) error             { return nil }
+func (m *mockWSConn) Close() error                              { m.closed = true; return nil }
+func (m *mockWSConn) SetWriteDeadline(t time.Time) error        { return nil }
+func (m *mockWSConn) ReadMessage() (int, []byte, error)         { return 0, nil, nil }
+func (m *mockWSConn) SetReadDeadline(t time.Time) error         { return nil }
+func (m *mockWSConn) SetPongHandler(h func(string) error)       {}
+func (m *mockWSConn) WriteMessage(int, []byte) error            { return nil }
+func (m *mockWSConn) WriteControl(int, []byte, time.Time) error { return nil }
+func (m *mockWSConn) Subprotocol() string                       { return "" }
+func (m *mockWSConn) RemoteAddr() net.Addr                      { return nil }
+func (m *mockWSConn) UnderlyingConn() net.Conn                  { return nil }
+func (m *mockWSConn) MessageReader() io.Reader                  { return nil }
 
 func TestAgentTargetConnClose(t *testing.T) {
 	conn1, conn2 := net.Pipe()
@@ -87,9 +87,6 @@ func TestNewHandler(t *testing.T) {
 	}
 	if h.conns == nil {
 		t.Error("conns map should be initialized")
-	}
-	if h.sendQueue == nil {
-		t.Error("sendQueue should be initialized")
 	}
 	if h.running.Load() {
 		t.Error("handler should not be running initially")
@@ -516,7 +513,6 @@ func TestHandlerStartWithMock(t *testing.T) {
 func TestHandlerStopCleansConns(t *testing.T) {
 	h := NewHandler()
 	h.running.Store(true)
-	h.sendQueue = make(chan *protocol.Message, 1000)
 
 	conn1, _ := net.Pipe()
 	h.mu.Lock()
@@ -536,7 +532,7 @@ func TestHandlerStopCleansConns(t *testing.T) {
 func TestSendMessageRunning(t *testing.T) {
 	h := NewHandler()
 	h.running.Store(true)
-	h.sendQueue = make(chan *protocol.Message, 1000)
+	h.SetSendFunc(func(*protocol.Message) error { return nil })
 
 	msg := protocol.NewMessage(protocol.MessageTypeHeartbeat, nil)
 	err := h.SendMessage(msg)
@@ -548,7 +544,7 @@ func TestSendMessageRunning(t *testing.T) {
 func TestSendErrorRunning(t *testing.T) {
 	h := NewHandler()
 	h.running.Store(true)
-	h.sendQueue = make(chan *protocol.Message, 1000)
+	h.SetSendFunc(func(*protocol.Message) error { return nil })
 
 	h.SendError("p1", "c1", "test error")
 }
@@ -556,7 +552,7 @@ func TestSendErrorRunning(t *testing.T) {
 func TestSendCloseRunning(t *testing.T) {
 	h := NewHandler()
 	h.running.Store(true)
-	h.sendQueue = make(chan *protocol.Message, 1000)
+	h.SetSendFunc(func(*protocol.Message) error { return nil })
 
 	h.SendClose("p1", "c1", "test reason")
 }

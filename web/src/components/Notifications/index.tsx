@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useState } from 'react'
 import { Badge, Dropdown, List, Avatar, Tag, Empty, Spin, Tooltip } from 'antd'
 import {
   BellOutlined,
@@ -27,7 +27,7 @@ const NotificationDropdown = () => {
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
 
-  const fetchAlerts = async () => {
+  const fetchAlerts = useCallback(async () => {
     setLoading(true)
     try {
       const res = await api.getAlerts()
@@ -37,13 +37,14 @@ const NotificationDropdown = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  useEffect(() => {
-    if (open) {
-      fetchAlerts()
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (nextOpen) {
+      void fetchAlerts()
     }
-  }, [open])
+  }
 
   const unreadCount = alerts.filter((a) => !a.read).length
 
@@ -178,7 +179,7 @@ const NotificationDropdown = () => {
   ]
 
   return (
-    <Dropdown menu={{ items: menuItems }} trigger={['click']} open={open} onOpenChange={setOpen}>
+    <Dropdown menu={{ items: menuItems }} trigger={['click']} open={open} onOpenChange={handleOpenChange}>
       <div style={{ cursor: 'pointer' }}>
         <Tooltip title="通知">
           <Badge count={unreadCount} size="small" offset={[-5, 5]}>

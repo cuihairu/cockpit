@@ -152,6 +152,9 @@ type ProxyNewPayload struct {
 	ProxyID   string `json:"proxyId"`             // 代理ID
 	ProxyType string `json:"proxyType"`           // tcp / udp
 	Target    string `json:"target"`              // 目标地址，如 192.168.31.1:80
+	ConnID    string `json:"connId,omitempty"`    // 连接ID（运行时附加）
+	Terminal  bool   `json:"terminal,omitempty"`  // 终端会话标记
+	Protocol  string `json:"protocol,omitempty"`  // 远程协议（ssh/telnet/rdp/vnc…）
 }
 
 // ProxyDataPayload 代理数据转发负载
@@ -162,13 +165,17 @@ type ProxyDataPayload struct {
 
 	// Server -> Agent 时表示新建连接请求
 	NewConn bool   `json:"newConn,omitempty"`    // 是否为新连接
+
+	// 运行时附加：标记 terminal/vnc 等特殊通道，避免依赖 proxyId 前缀
+	Terminal bool `json:"terminal,omitempty"`    // 终端会话标记
 }
 
 // ProxyClosePayload 关闭代理连接负载
 type ProxyClosePayload struct {
-	ProxyID string `json:"proxyId"`               // 代理ID
-	ConnID  string `json:"connId"`                // 连接ID
-	Reason  string `json:"reason,omitempty"`     // 关闭原因
+	ProxyID  string `json:"proxyId"`              // 代理ID
+	ConnID   string `json:"connId"`               // 连接ID
+	Reason   string `json:"reason,omitempty"`    // 关闭原因
+	Terminal bool   `json:"terminal,omitempty"`  // 终端会话标记
 }
 
 // ProxyErrorPayload 代理错误负载

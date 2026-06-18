@@ -65,14 +65,14 @@ remoteClient.interceptors.response.use(
 // 获取所有远程连接配置
 export async function getRemoteConnections(agentId?: string): Promise<RemoteConnection[]> {
   const params = agentId ? { agent_id: agentId } : {};
-  return remoteClient.get<any, RemoteConnection[]>('/connections', { params });
+  return remoteClient.get<unknown, RemoteConnection[]>('/connections', { params });
 }
 
 // 创建远程连接配置
 export async function createRemoteConnection(
   data: CreateRemoteConnectionRequest
 ): Promise<RemoteConnection> {
-  return remoteClient.post<any, RemoteConnection>('/connections', data);
+  return remoteClient.post<unknown, RemoteConnection>('/connections', data);
 }
 
 // 更新远程连接配置
@@ -80,7 +80,7 @@ export async function updateRemoteConnection(
   id: string,
   data: Partial<CreateRemoteConnectionRequest>
 ): Promise<RemoteConnection> {
-  return remoteClient.put<any, RemoteConnection>(`/connections/${id}`, data);
+  return remoteClient.put<unknown, RemoteConnection>(`/connections/${id}`, data);
 }
 
 // 删除远程连接配置
@@ -95,5 +95,5 @@ export async function startTerminalSession(params: {
   port: number;
   protocol: RemoteProtocol;
 }): Promise<{ sessionId: string }> {
-  return remoteClient.post<any, { sessionId: string }>('/terminal/start', params);
+  return remoteClient.post<unknown, { sessionId: string }>('/terminal/start', params);
 }

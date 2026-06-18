@@ -13,6 +13,8 @@ type User struct {
 	Username  string    `gorm:"uniqueIndex;not null" json:"username"`
 	Password  string    `gorm:"not null" json:"-"` // 永不返回密码
 	Email     string    `json:"email"`
+	Phone     string    `json:"phone,omitempty"`
+	Department string   `json:"department,omitempty"`
 	Role      string    `gorm:"index;default:user" json:"role"` // admin, user
 	// TOTP 字段
 	TOTPSecret   string     `gorm:"column:totp_secret" json:"-"`

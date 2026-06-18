@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Button, Card, Col, Layout, Row, Space, Tabs, message } from 'antd'
 import {
   CodeOutlined,
@@ -6,7 +7,6 @@ import {
   EyeOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
-import type { Agent } from '@/types'
 import { api } from '@/services/api'
 import TerminalModal from '@/components/TerminalModal'
 import DesktopModal from '@/components/DesktopModal'
@@ -25,8 +25,6 @@ const protocolTabs: Array<{ key: WorkbenchTab; label: string; icon: React.ReactN
 ]
 
 const Workbench = () => {
-  const [agents, setAgents] = useState<Agent[]>([])
-  const [loading, setLoading] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<WorkbenchTab>('overview')
@@ -34,20 +32,14 @@ const Workbench = () => {
   const [desktopConfig, setDesktopConfig] = useState<SessionConfig | null>(null)
   const [vncConfig, setVncConfig] = useState<SessionConfig | null>(null)
 
-  const loadAgents = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await api.getAgents()
-      setAgents(data)
-      setSelectedAgentId((current) => current || data[0]?.id || '')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const { data: agents = [], isFetching: loading, refetch: loadAgents } = useQuery({
+    queryKey: ['workbench-agents'],
+    queryFn: () => api.getAgents(),
+  })
 
-  useEffect(() => {
-    loadAgents()
-  }, [loadAgents])
+  const refreshAgents = () => {
+    void loadAgents()
+  }
 
   const filteredAgents = useMemo(() => {
     const keyword = query.trim().toLowerCase()
@@ -62,7 +54,8 @@ const Workbench = () => {
     })
   }, [agents, query])
 
-  const selectedAgent = filteredAgents.find((agent) => agent.id === selectedAgentId) || null
+  const effectiveSelectedAgentId = selectedAgentId || filteredAgents[0]?.id || ''
+  const selectedAgent = filteredAgents.find((agent) => agent.id === effectiveSelectedAgentId) || null
   const remoteServices = useMemo(() => getRemoteServices(selectedAgent), [selectedAgent])
 
   const openConnection = (protocol: WorkbenchTab) => {
@@ -104,9 +97,9 @@ const Workbench = () => {
             agents={filteredAgents}
             loading={loading}
             query={query}
-            selectedAgentId={selectedAgentId}
+            selectedAgentId={effectiveSelectedAgentId}
             onQueryChange={setQuery}
-            onRefresh={loadAgents}
+            onRefresh={refreshAgents}
             onSelect={setSelectedAgentId}
           />
         </Col>

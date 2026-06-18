@@ -97,7 +97,12 @@ func (s *Syncer) syncAgents(inv *Inventory) (*ResourceResult, error) {
 			Status:   "offline",
 		}
 
-		for _, cap := range agentLoc.Capabilities {
+		caps := agentLoc.Capabilities
+		if len(caps) == 0 {
+			// 当 inventory 未显式声明 capabilities 时，从 config 键推断
+			caps = detectCapabilities(agentLoc.Config)
+		}
+		for _, cap := range caps {
 			storageAgent.Capabilities = append(storageAgent.Capabilities, storage.Capability{
 				Type:    cap,
 				Version: "",
@@ -105,14 +110,16 @@ func (s *Syncer) syncAgents(inv *Inventory) (*ResourceResult, error) {
 			})
 		}
 
+		// 先查存在性以准确区分 Created/Updated（避免依赖 BeforeCreate hook 时间戳的脆弱判断）
+		_, getErr := s.db.GetAgent(id)
+
 		if err := s.db.UpsertAgent(storageAgent); err != nil {
 			log.Printf("Failed to upsert agent %s: %v", id, err)
 			result.Errors++
 			continue
 		}
 
-		existing, err := s.db.GetAgent(id)
-		if err == nil && existing.FirstSeen.Equal(storageAgent.FirstSeen) {
+		if getErr == nil {
 			result.Updated++
 		} else {
 			result.Created++
@@ -120,6 +127,21 @@ func (s *Syncer) syncAgents(inv *Inventory) (*ResourceResult, error) {
 	}
 
 	return result, nil
+}
+
+// detectCapabilities 从 agent.Config 的键推断 capability 类型
+// 约定：config 含 "pve"/"docker"/"openwrt" 键时分别推断对应 capability
+func detectCapabilities(config map[string]any) []string {
+	if len(config) == 0 {
+		return nil
+	}
+	var caps []string
+	for _, key := range []string{"pve", "docker", "openwrt"} {
+		if _, ok := config[key]; ok {
+			caps = append(caps, key)
+		}
+	}
+	return caps
 }
 
 func (s *Syncer) syncDomains(inv *Inventory) (*ResourceResult, error) {
@@ -141,12 +163,18 @@ func (s *Syncer) syncDomains(inv *Inventory) (*ResourceResult, error) {
 			storageDomain.AgentID = &domain.Agent
 		}
 
+		_, getErr := s.db.GetDomain(id)
+
 		if err := s.db.UpsertDomain(storageDomain); err != nil {
 			log.Printf("Failed to upsert domain %s: %v", id, err)
 			result.Errors++
 			continue
 		}
-		result.Created++
+		if getErr == nil {
+			result.Updated++
+		} else {
+			result.Created++
+		}
 	}
 
 	return result, nil
@@ -181,12 +209,18 @@ func (s *Syncer) syncCertificates(inv *Inventory) (*ResourceResult, error) {
 			storageCert.AgentID = &cert.Agent
 		}
 
+		_, getErr := s.db.GetCertificate(cert.ID)
+
 		if err := s.db.UpsertCertificate(storageCert); err != nil {
 			log.Printf("Failed to upsert certificate %s: %v", cert.ID, err)
 			result.Errors++
 			continue
 		}
-		result.Created++
+		if getErr == nil {
+			result.Updated++
+		} else {
+			result.Created++
+		}
 	}
 
 	return result, nil
@@ -215,12 +249,18 @@ func (s *Syncer) syncComputeInstances(inv *Inventory) (*ResourceResult, error) {
 			Labels:   inst.Labels,
 		}
 
+		_, getErr := s.db.GetComputeInstance(id)
+
 		if err := s.db.UpsertComputeInstance(storageInst); err != nil {
 			log.Printf("Failed to upsert compute instance %s: %v", id, err)
 			result.Errors++
 			continue
 		}
-		result.Created++
+		if getErr == nil {
+			result.Updated++
+		} else {
+			result.Created++
+		}
 	}
 
 	return result, nil
@@ -259,12 +299,18 @@ func (s *Syncer) syncServices(inv *Inventory) (*ResourceResult, error) {
 			storageSvc.Labels["zone"] = svc.Zone
 		}
 
+		_, getErr := s.db.GetService(id)
+
 		if err := s.db.UpsertService(storageSvc); err != nil {
 			log.Printf("Failed to upsert service %s: %v", id, err)
 			result.Errors++
 			continue
 		}
-		result.Created++
+		if getErr == nil {
+			result.Updated++
+		} else {
+			result.Created++
+		}
 	}
 
 	return result, nil
@@ -300,12 +346,18 @@ func (s *Syncer) syncGateways(inv *Inventory) (*ResourceResult, error) {
 			storageGw.Labels["zone"] = gw.Zone
 		}
 
+		_, getErr := s.db.GetGateway(id)
+
 		if err := s.db.UpsertGateway(storageGw); err != nil {
 			log.Printf("Failed to upsert gateway %s: %v", id, err)
 			result.Errors++
 			continue
 		}
-		result.Created++
+		if getErr == nil {
+			result.Updated++
+		} else {
+			result.Created++
+		}
 	}
 
 	return result, nil
@@ -339,12 +391,18 @@ func (s *Syncer) syncStorages(inv *Inventory) (*ResourceResult, error) {
 			storageSt.Labels["zone"] = st.Zone
 		}
 
+		_, getErr := s.db.GetStorage(id)
+
 		if err := s.db.UpsertStorage(storageSt); err != nil {
 			log.Printf("Failed to upsert storage %s: %v", id, err)
 			result.Errors++
 			continue
 		}
-		result.Created++
+		if getErr == nil {
+			result.Updated++
+		} else {
+			result.Created++
+		}
 	}
 
 	return result, nil

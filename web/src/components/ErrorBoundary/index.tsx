@@ -21,7 +21,7 @@ class ErrorBoundary extends Component<Props, State> {
 		this.state = { hasError: false, error: null, errorInfo: null }
 	}
 
-	static getDerivedStateFromError(error: Error): Partial<State> {
+	static getDerivedStateFromError(_error: Error): Partial<State> {
 		// 更新 state 使下一次渲染能够显示降级后的 UI
 		return { hasError: true }
 	}

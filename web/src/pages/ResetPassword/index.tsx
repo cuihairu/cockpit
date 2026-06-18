@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Form, Input, Button, message, Card, Typography, Space, Alert, Progress } from 'antd'
 import { LockOutlined, KeyOutlined, CheckCircleOutlined, ArrowLeftOutlined } from '@ant-design/icons'
-import { useNavigate, useSearchParams, Link } from 'react-router-dom'
+import { Navigate, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { api } from '@/services/api'
+import { getApiErrorMessage } from '@/utils/apiError'
 import './index.less'
 
 const { Title, Text } = Typography
@@ -10,22 +11,15 @@ const { Title, Text } = Typography
 const ResetPassword = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const token = searchParams.get('token') || ''
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [loading, setLoading] = useState(false)
-  const [token, setToken] = useState('')
   const [code, setCode] = useState('')
   const [passwordStrength, setPasswordStrength] = useState(0)
 
-  // 从 URL 获取 token
-  useEffect(() => {
-    const urlToken = searchParams.get('token')
-    if (!urlToken) {
-      message.error('无效的重置链接')
-      navigate('/login')
-      return
-    }
-    setToken(urlToken)
-  }, [searchParams, navigate])
+  if (!token) {
+    return <Navigate to="/login" replace />
+  }
 
   // 验证码验证
   const handleVerifyCode = async (values: { code: string }) => {
@@ -39,8 +33,8 @@ const ResetPassword = () => {
       setCode(values.code)
       setStep(2)
       message.success('验证码验证成功')
-    } catch (err: any) {
-      message.error(err.response?.data?.error || '验证失败')
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '验证失败'))
     } finally {
       setLoading(false)
     }
@@ -65,8 +59,8 @@ const ResetPassword = () => {
       await api.resetPassword(token, code, values.newPassword)
       setStep(3)
       message.success('密码已成功重置')
-    } catch (err: any) {
-      message.error(err.response?.data?.error || '重置密码失败')
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '重置密码失败'))
     } finally {
       setLoading(false)
     }

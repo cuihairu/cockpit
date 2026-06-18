@@ -28,7 +28,7 @@ export interface Agent {
   virtType?: string  // kvm, vmware, qemu, docker, none
   virtRole?: string  // guest (虚拟机), host (物理机)
   // 标签（支持复杂类型）
-  labels?: Record<string, any>
+  labels?: Record<string, unknown>
 }
 
 // 能力定义
@@ -36,7 +36,7 @@ export interface Capability {
   type: string
   endpoint?: string
   version?: string
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 }
 
 // 计算实例
@@ -170,6 +170,10 @@ export interface Gateway {
   displayName: string
   location: Location
   type: 'openwrt'
+  agentId?: string
+  ipv4?: string
+  ipv6?: string
+  upstream?: string
   model?: string
   firmware?: string
   access?: {
@@ -215,7 +219,12 @@ export interface Storage {
   name: string
   displayName: string
   location: Location
-  type: 'nas' | 'san' | 'object-storage'
+  type: 'nas' | 'san' | 'object-storage' | 'local' | 'nfs' | 'iscsi' | 'ceph'
+  agentId?: string
+  path?: string
+  totalGb?: number
+  usedGb?: number
+  availableGb?: number
   provider?: string
   access?: {
     web?: {

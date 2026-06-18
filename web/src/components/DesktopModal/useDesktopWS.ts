@@ -28,7 +28,54 @@ export function useDesktopWS(options: DesktopWSOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const [state, setState] = useState<ConnectionState>('disconnected');
   const optionsRef = useRef(options);
-  optionsRef.current = options;
+
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
+
+  const handleMessage = useCallback((msg: Record<string, unknown>) => {
+    // Server 转发时将 desktopType 映射为 type 字段
+    const type = (msg.type as string) || (msg.desktopType as string) || '';
+
+    switch (type) {
+      case 'connecting':
+        break;
+
+      case 'connected':
+        setState('connected');
+        optionsRef.current.onConnected?.(
+          Number(msg.width) || 1280,
+          Number(msg.height) || 800
+        );
+        break;
+
+      case 'screen_update': {
+        const rects = Array.isArray(msg.rects) ? msg.rects as BitmapRect[] : [];
+        optionsRef.current.onScreenUpdate?.({
+          width: Number(msg.width) || 1280,
+          height: Number(msg.height) || 800,
+          rects,
+        });
+        break;
+      }
+
+      case 'disconnected':
+        setState('disconnected');
+        optionsRef.current.onDisconnected?.((msg.reason as string) || 'Disconnected');
+        break;
+
+      case 'error':
+        optionsRef.current.onError?.((msg.error as string) || 'Unknown error');
+        break;
+
+      case 'clipboard_data':
+        optionsRef.current.onClipboard?.(msg.text as string);
+        break;
+
+      case 'ping':
+        break;
+    }
+  }, []);
 
   const connect = useCallback((params: {
     agentId: string;
@@ -79,51 +126,7 @@ export function useDesktopWS(options: DesktopWSOptions) {
     ws.onclose = () => {
       setState('disconnected');
     };
-  }, []);
-
-  const handleMessage = useCallback((msg: Record<string, unknown>) => {
-    // Server 转发时将 desktopType 映射为 type 字段
-    const type = (msg.type as string) || (msg.desktopType as string) || '';
-
-    switch (type) {
-      case 'connecting':
-        break;
-
-      case 'connected':
-        setState('connected');
-        optionsRef.current.onConnected?.(
-          Number(msg.width) || 1280,
-          Number(msg.height) || 800
-        );
-        break;
-
-      case 'screen_update': {
-        const rects = Array.isArray(msg.rects) ? msg.rects as BitmapRect[] : [];
-        optionsRef.current.onScreenUpdate?.({
-          width: Number(msg.width) || 1280,
-          height: Number(msg.height) || 800,
-          rects,
-        });
-        break;
-      }
-
-      case 'disconnected':
-        setState('disconnected');
-        optionsRef.current.onDisconnected?.((msg.reason as string) || 'Disconnected');
-        break;
-
-      case 'error':
-        optionsRef.current.onError?.((msg.error as string) || 'Unknown error');
-        break;
-
-      case 'clipboard_data':
-        optionsRef.current.onClipboard?.(msg.text as string);
-        break;
-
-      case 'ping':
-        break;
-    }
-  }, []);
+  }, [handleMessage]);
 
   const sendKeyboard = useCallback((scanCode: number, keyDown: boolean, extended: boolean) => {
     const ws = wsRef.current;

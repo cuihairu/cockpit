@@ -1,16 +1,28 @@
 import { useState } from 'react'
 import { Card, Form, Input, Button, message, Descriptions, Avatar, Space, Divider } from 'antd'
 import { UserOutlined, MailOutlined, LockOutlined, SaveOutlined } from '@ant-design/icons'
-import { useUser } from '@/contexts/UserContext'
+import { useUser } from '@/contexts/useUser'
 import { api } from '@/services/api'
-import { logger } from '@/utils/logger'
+import { getApiErrorMessage } from '@/utils/apiError'
+
+interface ProfileFormValues {
+  email?: string
+  phone?: string
+  department?: string
+}
+
+interface PasswordFormValues {
+  currentPassword: string
+  newPassword: string
+  confirmPassword: string
+}
 
 const Profile = () => {
   const { user } = useUser()
   const [loading, setLoading] = useState(false)
   const [passwordForm] = Form.useForm()
 
-  const handleProfileSave = async (values: any) => {
+  const handleProfileSave = async (values: ProfileFormValues) => {
     setLoading(true)
     try {
       await api.updateProfile({
@@ -19,22 +31,22 @@ const Profile = () => {
         department: values.department,
       })
       message.success('个人信息已更新')
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.error || '更新个人信息失败'
+    } catch (err) {
+      const errorMsg = getApiErrorMessage(err, '更新个人信息失败')
       message.error(errorMsg)
     } finally {
       setLoading(false)
     }
   }
 
-  const handlePasswordChange = async (values: any) => {
+  const handlePasswordChange = async (values: PasswordFormValues) => {
     setLoading(true)
     try {
       await api.changePassword(values.currentPassword, values.newPassword)
       message.success('密码已修改')
       passwordForm.resetFields()
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.error || '修改密码失败'
+    } catch (err) {
+      const errorMsg = getApiErrorMessage(err, '修改密码失败')
       message.error(errorMsg)
     } finally {
       setLoading(false)

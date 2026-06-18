@@ -10,6 +10,30 @@
 - 对外 API 和前端页面优先保持兼容，除非当前接口明显不存在或错误。
 - 每完成一个任务至少运行对应包测试；跨模块任务运行 `go test ./...` 和 `pnpm run build`。
 - 不回滚用户已有改动，不删除未确认的功能模块。
+- **文档优先**：动代码之前，先把改动落到本文档或 `docs/guide/architecture.md`，让设计可审阅。
+
+## 进度状态（2026-06-13 更新）
+
+| Phase | 状态 | 备注 |
+| --- | --- | --- |
+| 0 建立可验证基线 | ✅ 已完成 | `go test ./...` 全绿、`go vet ./...` 干净 |
+| 1.1 CLI 命令 | ✅ 已完成 | `internal/cli/{init,sync,status}.go` 已实现 |
+| 1.2 Agent 入口收口 | ✅ 已完成 | `cockpit agent` 改为提示指向 `cockpit-agent`（方案 B） |
+| 2.1 inventory v1 规范 | ✅ 已完成 | `Inventory` 顶层已加 ComputeInstances/Services/Gateways/Storages |
+| 2.2 inventory 同步 SQLite | ✅ 已完成 | 6 类资源同步 + Created/Updated 准确区分（GetXxx 判存在） |
+| 2.3 inventory watch | ✅ 已完成 | watcher 复用 `inventory.Syncer`，消除两套并行同步逻辑 |
+| 3.1 拆 HTTP 路由 | ✅ 已完成 | `Server.registerRoutes` 已抽出，按域分组 |
+| 3.2 拆 AgentHub/Dispatcher | ✅ 已完成 | server.go 从 965 行降至 524 行；拆出 `websocket.go`/`dispatcher.go`/`system_info.go`/`alert_loop.go` |
+| 3.3 Server 行为 bug | ✅ 已完成 | proxyMgr.Start/duplicate agent 判断/handleTicketCreate strconv/JWT 接入均已修复（todo 原描述已过时） |
+| 4.1 拆 Agent RPC Provider | ✅ 已完成 | `handlers.go`(910 行)拆为 `router.go`(107) / `system_provider.go`(57) / `pve_provider.go`(291) / `docker_provider.go`(269) / `openwrt_provider.go`(199) |
+| 4.2 按能力注册 Provider | ✅ 已完成 | `internal/agent/providers.go` 新增 `setupProviders()`，按 capability 类型 + 环境变量条件注册 4 类 Provider |
+| 4.3 Agent 重连可靠性 | ✅ 已完成 | proxy.Handler.AttachConn、reconnecting atomic、desktopHandler 动态 conn |
+| 5.1 协议类型化 | ✅ 已完成 | `internal/protocol/decode.go` 提供 `DecodePayload[T]` 泛型 + Register/Heartbeat/RPCRequest/RPCResponse/ProxyNew/ProxyData/ProxyClose/ProxyError/DesktopDataHeader/DesktopDisconnected 专用 helper。`ProxyData` 三 wire 格式兼容。已完成实际替换：`server.go` handleProxyData/Close/Error、`proxy/handler.go` 三方法、`dispatcher.go` heartbeat、`system_info.go` 改为 `*SystemInfoPayload`、`api_desktop.go` DesktopData/Close、`rdp/handler.go` DesktopClose、`rpc/router.go` RPCRequest。同时补齐协议定义（`ProxyDataPayload.Terminal`、`ProxyClosePayload.Terminal`、`ProxyNewPayload.{ConnID,Terminal,Protocol}`、新增 `DesktopDataHeaderPayload`）。`go test ./...` + `go vet ./...` 全绿 |
+| 5.2 远控权限和审计 | ✅ 已完成 | `config.RemoteControl{AllowArbitraryTarget, AllowedTargets}`；`audit` 新增 `ActionRemoteStart/End` + `LogRemoteSession` + `RemoteSessionDetails`（不含 password）；`server/remote_audit.go` 集中目标校验；Terminal/Desktop/VNC 三类 Session 新增 UserID/Username，关闭时自动写 end 审计 |
+| 6.1 前端 API 对齐 | ✅ 已完成 | 前端 `PUT /api/me/profile` + `PUT /api/settings` 后端补齐；`User` 表增加 Phone/Department 字段（GORM auto-migrate）；`/me` 响应附带 phone/department；前端 `pnpm run build` 通过 |
+| 6.2 拆胖页面 | ✅ 已完成 | 三大页面已按职责拆分：Agents(536→197)→`columns.tsx`/`helpers.tsx`/`AgentDetailModal.tsx`/`useRemoteModals.ts`；Resources(387→80)→`columns.tsx`/`useResources.ts`；Settings(395→66)→`useSettings.ts`/`GeneralSettings.tsx`/`SecuritySettings.tsx`/`AlertSettings.tsx`/`SystemInfo.tsx`/`DisableTOTPModal.tsx`/`authenticatorLinks.ts`。主入口全部 ≤200 行，`pnpm run build` 通过 |
+| 7.1 CI 收口 | ✅ 已完成 | 删除重复的 `go.yml`；保留 `test.yml`（主 CI，阈值从 5% 提到 25%，实测 62%+）/`agent-test.yml`（路径过滤）/`build.yml`（跨平台构建）/`docs.yml`/`nightly.yml` |
+| 7.2 端到端验证 | ✅ 已完成 | 新建 `scripts/e2e-smoke.sh`，本地一键验证 server→agent→inventory sync→/api/resources 闭环；修复副作用 bug：`AuditMiddleware` 包装破坏 WebSocket `Hijacker` 接口（对 `/ws`、`/api/remote/{terminal,desktop,vnc}` 路径跳过包装）；README 增加脚本说明 |
 
 ## 当前判断
 
@@ -20,7 +44,9 @@
 - 最大维护风险：`internal/server` 和 `internal/agent/rpc` 已经变成大聚合模块，职责开始混杂。
 - 最大产品不一致：文档写了 `cockpit init/sync/status`，但 CLI 未实现；`cockpit agent` 是占位，真实 Agent 在 `cmd/cockpit-agent`。
 
-## Phase 0: 建立可验证基线
+> 以上"当前判断"为初始状态描述，**作为历史快照保留**；实际进度以"进度状态"表为准。
+
+## Phase 0: 建立可验证基线 ✅
 
 ### 0.1 记录并修复依赖下载问题
 
@@ -255,6 +281,18 @@
 - 保持 `/ws` 入口不变。
 - 把 `handleWebSocket` 中的认证和注册拆成小函数。
 - 把 `handleMessage` 中的 switch 移到 dispatcher 或至少独立文件。
+
+**实施设计（2026-06-13 补充）**：采用务实分文件方案，先满足"独立文件"底线，server.go 从 965 行降到 ~400 行：
+
+| 新文件 | 内容 | 预估行数 |
+| --- | --- | --- |
+| `internal/server/websocket.go` | `handleWebSocket`、`sendRegisterError`、`readLoop`、`writeLoop`、`isOriginAllowed`、`getEnv` | ~150 |
+| `internal/server/dispatcher.go` | `handleMessage`（switch）、`handleHeartbeat`、`handleRPCResponse` | ~80 |
+| `internal/server/system_info.go` | `handleSystemInfo`（心跳系统信息解析与持久化） | ~120 |
+| `internal/server/alert_loop.go` | `alertCheckLoop`、`runAlertChecks`、`cleanupOldAlerts`、`cleanupLoop`、`metricsCleanupLoop` | ~80 |
+| `internal/server/server.go` | Server struct、NewServer、Start、Shutdown、registerRoutes、startInventorySync、handleHealth、CallAgent、toStorageAgent、handleLoginWithAudit、SendToAgent/GetAgentConn、handleProxyData/Close/Error、decodeProxyData、hasPrefix | ~400 |
+
+抽 AgentHub/AgentAuthenticator/MessageDispatcher **接口**留作后续小步迭代，先保证文件边界清晰。
 
 验收标准：
 

@@ -8,7 +8,7 @@ const isDev = import.meta.env.MODE === 'development'
 type LogLevel = 'info' | 'warn' | 'error' | 'debug'
 
 class Logger {
-  private formatMessage(level: LogLevel, ...args: any[]): string {
+  private formatMessage(level: LogLevel, ...args: unknown[]): string {
     const timestamp = new Date().toISOString()
     const message = args.map(arg => {
       if (typeof arg === 'object') {
@@ -23,24 +23,24 @@ class Logger {
     return `[${timestamp}] [${level.toUpperCase()}] ${message}`
   }
 
-  info(...args: any[]): void {
+  info(...args: unknown[]): void {
     if (isDev) {
       console.info(...args)
     }
   }
 
-  warn(...args: any[]): void {
+  warn(...args: unknown[]): void {
     if (isDev) {
       console.warn(...args)
     }
   }
 
-  error(...args: any[]): void {
+  error(...args: unknown[]): void {
     // 错误始终记录
     console.error(this.formatMessage('error', ...args))
   }
 
-  debug(...args: any[]): void {
+  debug(...args: unknown[]): void {
     if (isDev) {
       console.log(...args)
     }

@@ -1,56 +1,29 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { useState, ReactNode } from 'react'
 import { api } from '@/services/api'
 import type { LoginResponse } from '@/types'
+import { TOTPRequiredError, type User } from './userTypes'
+import { UserContext } from './userContextValue'
 
-interface User {
-  id: string
-  username: string
-  email?: string
-  role: string
-}
+const getStoredUser = (): User | null => {
+  const storedToken = localStorage.getItem('token')
+  const storedUsername = localStorage.getItem('username')
+  const storedRole = localStorage.getItem('role')
 
-interface UserContextType {
-  user: User | null
-  token: string | null
-  login: (username: string, password: string) => Promise<LoginResponse>
-  logout: () => void
-  updateUser: (user: User) => void
-}
+  if (!storedToken || !storedUsername) {
+    return null
+  }
 
-// TOTP 要求错误类
-export class TOTPRequiredError extends Error {
-  public response: LoginResponse
-
-  constructor(response: LoginResponse) {
-    super('TOTP verification required')
-    this.name = 'TOTPRequiredError'
-    this.response = response
+  return {
+    id: localStorage.getItem('userId') || '',
+    username: storedUsername,
+    email: localStorage.getItem('email') || undefined,
+    role: storedRole || 'user',
   }
 }
 
-const UserContext = createContext<UserContextType | undefined>(undefined)
-
 export const UserProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null)
-  const [token, setToken] = useState<string | null>(null)
-
-  useEffect(() => {
-    const storedToken = localStorage.getItem('token')
-    const storedUsername = localStorage.getItem('username')
-    const storedRole = localStorage.getItem('role')
-
-    if (storedToken) {
-      setToken(storedToken)
-      if (storedUsername) {
-        setUser({
-          id: localStorage.getItem('userId') || '',
-          username: storedUsername,
-          email: localStorage.getItem('email') || undefined,
-          role: storedRole || 'user',
-        })
-      }
-    }
-  }, [])
+  const [user, setUser] = useState<User | null>(() => getStoredUser())
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'))
 
   const login = async (username: string, password: string): Promise<LoginResponse> => {
     const res = await api.login(username, password)
@@ -106,10 +79,3 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   )
 }
 
-export const useUser = () => {
-  const context = useContext(UserContext)
-  if (!context) {
-    throw new Error('useUser must be used within a UserProvider')
-  }
-  return context
-}

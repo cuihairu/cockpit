@@ -166,54 +166,35 @@ func (w *Watcher) loadInventory() error {
 	return nil
 }
 
-// applyInventory applies inventory to database
+// applyInventory applies inventory to database via the shared Syncer.
+// 复用 inventory.Syncer 统一同步逻辑，避免 CLI sync 与 watch 两套并行实现。
 func (w *Watcher) applyInventory(inv *inventory.Inventory) error {
-	if w.db == nil {
+	if w.db == nil || inv == nil {
 		return nil
 	}
 
-	// Sync regions and zones
-	for _, region := range inv.Regions {
-		// Sync zones
-		for _, zone := range region.Zones {
-			// Sync agents
-			for _, agent := range zone.Agents {
-				dbAgent := &storage.Agent{
-					ID:       agent.ID,
-					Hostname: agent.Hostname,
-					IP:       agent.IP,
-					Region:   region.Name,
-					Zone:     zone.Name,
-				}
-
-				// Set capabilities
-				if len(agent.Capabilities) > 0 {
-					for _, cap := range agent.Capabilities {
-						dbAgent.Capabilities = append(dbAgent.Capabilities, storage.Capability{
-							Type: cap,
-						})
-					}
-				} else {
-					// Detect from config
-					if _, ok := agent.Config["pve"]; ok {
-						dbAgent.Capabilities = append(dbAgent.Capabilities, storage.Capability{Type: "pve"})
-					}
-					if _, ok := agent.Config["docker"]; ok {
-						dbAgent.Capabilities = append(dbAgent.Capabilities, storage.Capability{Type: "docker"})
-					}
-					if _, ok := agent.Config["openwrt"]; ok {
-						dbAgent.Capabilities = append(dbAgent.Capabilities, storage.Capability{Type: "openwrt"})
-					}
-				}
-
-				if err := w.db.UpsertAgent(dbAgent); err != nil {
-					log.Printf("Failed to sync agent %s: %v", agent.ID, err)
-				}
-			}
-		}
+	result, err := inventory.NewSyncer(w.db).Sync(w.ctx, inv)
+	if err != nil {
+		return err
 	}
 
+	log.Printf("Inventory applied: agents=%d domains=%d certificates=%d compute=%d services=%d gateways=%d storages=%d",
+		countResult(result.Agents),
+		countResult(result.Domains),
+		countResult(result.Certificates),
+		countResult(result.ComputeInstances),
+		countResult(result.Services),
+		countResult(result.Gateways),
+		countResult(result.Storages))
 	return nil
+}
+
+// countResult 汇总 ResourceResult 的处理总数（Created+Updated+Errors）
+func countResult(r *inventory.ResourceResult) int {
+	if r == nil {
+		return 0
+	}
+	return r.Created + r.Updated + r.Errors
 }
 
 // ForceReload forces a reload of inventory

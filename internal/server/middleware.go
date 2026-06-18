@@ -32,6 +32,17 @@ func (r *responseWriter) Write(b []byte) (int, error) {
 // AuditMiddleware 审计日志中间件
 func (s *Server) AuditMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// WebSocket 升级需要 http.Hijacker 接口；包装器会破坏该接口，
+		// 导致 gorilla/websocket 报 "response does not implement http.Hijacker"。
+		// 因此 WebSocket 路径直接透传，跳过审计（WS 会话由专门的远控审计覆盖）。
+		if r.URL.Path == "/ws" ||
+			r.URL.Path == "/api/remote/terminal" ||
+			r.URL.Path == "/api/remote/desktop" ||
+			r.URL.Path == "/api/remote/vnc" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// 保存原始响应写入器
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 

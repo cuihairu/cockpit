@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Card, Table, Tag, Button, Space, Input, Select, DatePicker, Statistic, Row, Col } from 'antd'
 import {
   ReloadOutlined,
@@ -63,10 +64,32 @@ const RESOURCE_MAP: Record<string, string> = {
   settings: '设置',
 }
 
+const fetchAuditLogs = async (
+  filters: Record<string, string | undefined>,
+  page: number,
+  pageSize: number,
+) => {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    page_size: pageSize.toString(),
+  })
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value)
+    }
+  })
+
+  const response = await fetch(`/api/admin/audit/logs?${params}`)
+  return response.json()
+}
+
+const fetchAuditStats = async (): Promise<AuditLogStats> => {
+  const response = await fetch('/api/admin/audit/stats')
+  return response.json()
+}
+
 const AuditLogs = () => {
-  const [loading, setLoading] = useState(false)
-  const [logs, setLogs] = useState<AuditLog[]>([])
-  const [stats, setStats] = useState<AuditLogStats | null>(null)
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 })
   const [filters, setFilters] = useState<{
     action?: string
@@ -77,41 +100,31 @@ const AuditLogs = () => {
     end_time?: string
   }>({})
 
-  const fetchLogs = async (page = pagination.current, pageSize = pagination.pageSize) => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams({
-        page: page.toString(),
-        page_size: pageSize.toString(),
-        ...filters,
-      })
-      const response = await fetch(`/api/admin/audit/logs?${params}`)
-      const data = await response.json()
-      setLogs(data.data || [])
-      setPagination({
-        current: page,
-        pageSize: pageSize,
-        total: data.pagination?.total || 0,
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
+  const logsQuery = useQuery({
+    queryKey: ['audit-logs', filters, pagination.current, pagination.pageSize],
+    queryFn: () => fetchAuditLogs(filters, pagination.current, pagination.pageSize),
+  })
 
-  const fetchStats = async () => {
-    try {
-      const response = await fetch('/api/admin/audit/stats')
-      const data = await response.json()
-      setStats(data)
-    } catch (error) {
-      logger.error('Failed to fetch stats:', error)
-    }
-  }
+  const statsQuery = useQuery({
+    queryKey: ['audit-stats', filters],
+    queryFn: fetchAuditStats,
+  })
+
+  const logs = (logsQuery.data?.data || []) as AuditLog[]
+  const stats = statsQuery.data || null
+  const loading = logsQuery.isFetching
+  const total = logsQuery.data?.pagination?.total || 0
 
   useEffect(() => {
-    fetchLogs()
-    fetchStats()
-  }, [filters])
+    if (statsQuery.error) {
+      logger.error('Failed to fetch stats:', statsQuery.error)
+    }
+  }, [statsQuery.error])
+
+  const refreshLogs = () => {
+    void logsQuery.refetch()
+    void statsQuery.refetch()
+  }
 
   const handleDateRangeChange: RangePickerProps['onChange'] = (dates) => {
     if (dates && dates[0] && dates[1]) {
@@ -120,9 +133,13 @@ const AuditLogs = () => {
         start_time: dates[0].startOf('day').toISOString(),
         end_time: dates[1].endOf('day').toISOString(),
       })
+      setPagination({ ...pagination, current: 1 })
     } else {
-      const { start_time, end_time, ...rest } = filters
-      setFilters(rest)
+      const nextFilters = { ...filters }
+      delete nextFilters.start_time
+      delete nextFilters.end_time
+      setFilters(nextFilters)
+      setPagination({ ...pagination, current: 1 })
     }
   }
 
@@ -253,15 +270,21 @@ const AuditLogs = () => {
               prefix={<SearchOutlined />}
               style={{ width: 200 }}
               value={filters.username}
-              onChange={(e) => setFilters({ ...filters, username: e.target.value })}
-              onPressEnter={() => fetchLogs(1)}
+              onChange={(e) => {
+                setFilters({ ...filters, username: e.target.value })
+                setPagination({ ...pagination, current: 1 })
+              }}
+              onPressEnter={refreshLogs}
               allowClear
             />
             <Select
               placeholder="操作类型"
               style={{ width: 120 }}
               value={filters.action}
-              onChange={(value) => setFilters({ ...filters, action: value })}
+              onChange={(value) => {
+                setFilters({ ...filters, action: value })
+                setPagination({ ...pagination, current: 1 })
+              }}
               allowClear
             >
               {Object.entries(ACTION_MAP).map(([key, { text }]) => (
@@ -272,7 +295,10 @@ const AuditLogs = () => {
               placeholder="资源类型"
               style={{ width: 120 }}
               value={filters.resource}
-              onChange={(value) => setFilters({ ...filters, resource: value })}
+              onChange={(value) => {
+                setFilters({ ...filters, resource: value })
+                setPagination({ ...pagination, current: 1 })
+              }}
               allowClear
             >
               {Object.entries(RESOURCE_MAP).map(([key, value]) => (
@@ -283,7 +309,7 @@ const AuditLogs = () => {
               style={{ width: 280 }}
               onChange={handleDateRangeChange}
             />
-            <Button icon={<ReloadOutlined />} onClick={() => fetchLogs()}>
+            <Button icon={<ReloadOutlined />} onClick={refreshLogs}>
               刷新
             </Button>
             <Button icon={<DownloadOutlined />}>
@@ -300,11 +326,13 @@ const AuditLogs = () => {
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
-            total: pagination.total,
+            total,
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total) => `共 ${total} 条`,
-            onChange: (page, pageSize) => fetchLogs(page, pageSize),
+            onChange: (page, pageSize) => {
+              setPagination({ current: page, pageSize, total })
+            },
           }}
           size="small"
         />

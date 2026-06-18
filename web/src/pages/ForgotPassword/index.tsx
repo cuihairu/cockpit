@@ -1,18 +1,17 @@
 import { useState } from 'react'
 import { Form, Input, Button, message, Card, Typography, Space, Alert, Steps } from 'antd'
-import { MailOutlined, ArrowLeftOutlined, CheckCircleOutlined } from '@ant-design/icons'
+import { MailOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { useNavigate, Link } from 'react-router-dom'
 import { api } from '@/services/api'
 import './index.less'
 
-const { Title, Text, Paragraph } = Typography
+const { Title, Text } = Typography
 
 const ForgotPassword = () => {
   const navigate = useNavigate()
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [loading, setLoading] = useState(false)
   const [username, setUsername] = useState('')
-  const [email, setEmail] = useState('')
   const [maskedEmail, setMaskedEmail] = useState('')
   const [countdown, setCountdown] = useState(0)
   const [resendLoading, setResendLoading] = useState(false)
@@ -23,11 +22,10 @@ const ForgotPassword = () => {
       const response = await api.forgotPassword(values.username)
       setUsername(values.username)
       setMaskedEmail(response.masked_email)
-      setEmail(response.email)
       setStep(2)
       // 开始60秒倒计时
       startCountdown()
-    } catch (err: any) {
+    } catch {
       // 为了安全，即使用户不存在也显示类似的消息
       message.info('如果该用户存在，重置邮件已发送')
     } finally {
@@ -42,7 +40,7 @@ const ForgotPassword = () => {
       setMaskedEmail(response.masked_email)
       message.success('重置邮件已重新发送')
       startCountdown()
-    } catch (err: any) {
+    } catch {
       message.info('如果该用户存在，重置邮件已发送')
     } finally {
       setResendLoading(false)

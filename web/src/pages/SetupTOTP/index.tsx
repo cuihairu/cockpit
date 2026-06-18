@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Button, Steps, Card, Input, message, Space, Alert, Typography } from 'antd'
 import {
   SafetyOutlined,
@@ -10,6 +11,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/services/api'
 import type { TOTPGenerateResponse } from '@/types'
+import { getApiErrorMessage } from '@/utils/apiError'
 import QRCodeDisplay from '@/components/QRCodeDisplay'
 import BackupCodesDisplay from '@/components/BackupCodesDisplay'
 import './index.less'
@@ -21,31 +23,40 @@ type SetupStep = 0 | 1 | 2 | 3
 
 const SetupTOTP = () => {
   const navigate = useNavigate()
-  const [currentStep, setCurrentStep] = useState<SetupStep>(0)
-  const [loading, setLoading] = useState(false)
-  const [totpData, setTotpData] = useState<TOTPGenerateResponse | null>(null)
+  const [currentStep, setCurrentStep] = useState<SetupStep | null>(null)
+  const [verifyLoading, setVerifyLoading] = useState(false)
   const [verifyCode, setVerifyCode] = useState('')
   const [backupSaved, setBackupSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    generateTOTP()
-  }, [])
+  const {
+    data: totpData = null,
+    error: totpError,
+    isFetching: totpFetching,
+    refetch: refetchTOTP,
+  } = useQuery<TOTPGenerateResponse>({
+    queryKey: ['totp-setup'],
+    queryFn: () => api.generateTOTP(),
+  })
 
-  const generateTOTP = async () => {
-    setLoading(true)
-    try {
-      const data = await api.generateTOTP()
-      setTotpData(data)
-      setCurrentStep(1)
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.error || '生成 TOTP 失败'
-      message.error(errorMsg)
+  useEffect(() => {
+    if (totpError) {
+      message.error('生成 TOTP 失败')
       navigate('/settings')
-    } finally {
-      setLoading(false)
     }
-  }
+  }, [navigate, totpError])
+
+  const loading = totpFetching || verifyLoading
+  const activeStep: SetupStep = currentStep ?? (totpData ? 1 : 0)
+
+  const generateTOTP = useCallback(() => {
+    setCurrentStep(0)
+    void refetchTOTP().then((result) => {
+      if (result.data) {
+        setCurrentStep(1)
+      }
+    })
+  }, [refetchTOTP])
 
   const handleVerify = async () => {
     if (!verifyCode.trim() || verifyCode.length !== 6) {
@@ -53,19 +64,19 @@ const SetupTOTP = () => {
       return
     }
 
-    setLoading(true)
+    setVerifyLoading(true)
     setError(null)
 
     try {
       await api.enableTOTP(verifyCode.trim())
       message.success('TOTP 已启用')
       setCurrentStep(3)
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.error || '验证失败'
+    } catch (err) {
+      const errorMsg = getApiErrorMessage(err, '验证失败')
       setError(errorMsg)
       message.error(errorMsg)
     } finally {
-      setLoading(false)
+      setVerifyLoading(false)
     }
   }
 
@@ -118,7 +129,7 @@ const SetupTOTP = () => {
       <Card className="setup-totp-card">
         <div className="setup-totp-header">
           <Title level={3}>启用二次验证</Title>
-          <Steps current={currentStep} className="setup-steps">
+          <Steps current={activeStep} className="setup-steps">
             {steps.map((step, index) => (
               <Step
                 key={index}
@@ -132,7 +143,7 @@ const SetupTOTP = () => {
 
         <div className="setup-totp-body">
           {/* Step 0: Introduction */}
-          {currentStep === 0 && (
+          {activeStep === 0 && (
             <Space direction="vertical" size="large" className="setup-intro">
               <Alert
                 message="什么是二次验证？"
@@ -164,7 +175,7 @@ const SetupTOTP = () => {
           )}
 
           {/* Step 1: Scan QR Code */}
-          {currentStep === 1 && totpData && (
+          {activeStep === 1 && totpData && (
             <Space direction="vertical" size="large" className="setup-qrcode" align="center">
               <div>
                 <Title level={5}>1. 安装认证器应用</Title>
@@ -212,7 +223,7 @@ const SetupTOTP = () => {
           )}
 
           {/* Step 2: Verify Code */}
-          {currentStep === 2 && (
+          {activeStep === 2 && (
             <Space direction="vertical" size="large" className="setup-verify" align="center">
               <div>
                 <Title level={5}>输入验证码</Title>
@@ -259,7 +270,7 @@ const SetupTOTP = () => {
           )}
 
           {/* Step 3: Complete - Show Backup Codes */}
-          {currentStep === 3 && totpData && (
+          {activeStep === 3 && totpData && (
             <Space direction="vertical" size="large" className="setup-complete" align="center">
               <Alert
                 message="TOTP 已启用"

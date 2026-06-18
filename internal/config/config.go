@@ -10,13 +10,23 @@ import (
 
 // Config 顶层配置结构
 type Config struct {
-	Server       *ServerConfig       `yaml:"server"`
-	Database     *DatabaseConfig     `yaml:"database"`
-	JWT          *JWTConfig          `yaml:"jwt"`
-	Email        *EmailConfig        `yaml:"email"`
-	Notification *NotificationConfig `yaml:"notification"`
-	Agent        *AgentConfig        `yaml:"agent"`
-	Inventory    *InventoryConfig    `yaml:"inventory,omitempty"`
+	Server        *ServerConfig        `yaml:"server"`
+	Database      *DatabaseConfig      `yaml:"database"`
+	JWT           *JWTConfig           `yaml:"jwt"`
+	Email         *EmailConfig         `yaml:"email"`
+	Notification  *NotificationConfig  `yaml:"notification"`
+	Agent         *AgentConfig         `yaml:"agent"`
+	Inventory     *InventoryConfig     `yaml:"inventory,omitempty"`
+	RemoteControl *RemoteControlConfig `yaml:"remote_control,omitempty"`
+}
+
+// RemoteControlConfig 远程控制（Terminal/Desktop/VNC）相关配置
+type RemoteControlConfig struct {
+	// AllowArbitraryTarget 为 true 时跳过目标 allow-list 校验（仅开发/调试环境启用）。
+	// 默认 false：host 必须命中 AllowedTargets 或 inventory 中声明的 endpoint。
+	AllowArbitraryTarget bool `yaml:"allow_arbitrary_target"`
+	// AllowedTargets 显式允许的目标主机名/IP 列表（端口不限）。
+	AllowedTargets []string `yaml:"allowed_targets"`
 }
 
 // ServerConfig 服务器配置

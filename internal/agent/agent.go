@@ -7,36 +7,41 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/agent/detector"
 	"github.com/cuihairu/cockpit/internal/agent/rdp"
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
-	"github.com/cuihairu/cockpit/internal/proxy"
 	"github.com/cuihairu/cockpit/internal/protocol"
+	"github.com/cuihairu/cockpit/internal/proxy"
 	"github.com/gorilla/websocket"
 )
 
 // Agent Cockpit Agent
 type Agent struct {
-	serverURL string
-	conn      *websocket.Conn
-	codec     *protocol.Codec
-	rpc       *rpc.Handler
-	collector *Collector   // 系统信息采集器
-	proxyHandler *proxy.Handler // 代理处理器
-	desktopHandler *rdp.Handler // 桌面会话处理器
+	serverURL      string
+	conn           *websocket.Conn
+	codec          *protocol.Codec
+	rpc            *rpc.Handler
+	collector      *Collector     // 系统信息采集器
+	proxyHandler   *proxy.Handler // 代理处理器
+	desktopHandler *rdp.Handler   // 桌面会话处理器
+	outbound       chan *protocol.Message
 
 	// 注册信息
-	agentID  string
-	location protocol.Location
+	agentID      string
+	location     protocol.Location
 	capabilities []protocol.Capability
 
 	// 状态
-	mu        sync.RWMutex
-	connected bool
-	ctx       context.Context
-	cancel    context.CancelFunc
+	mu           sync.RWMutex
+	writeMu      sync.Mutex
+	connected    bool
+	registered   atomic.Bool
+	reconnecting atomic.Bool // 防止并发重连
+	ctx          context.Context
+	cancel       context.CancelFunc
 
 	// 配置
 	config *Config
@@ -44,12 +49,12 @@ type Agent struct {
 
 // Config Agent 配置
 type Config struct {
-	ServerURL   string                 `json:"server_url"`
-	AgentID     string                 `json:"agent_id,omitempty"`
-	Secret      string                 `json:"secret,omitempty"` // Agent 认证密钥
-	Region      string                 `json:"region,omitempty"`
-	Zone        string                 `json:"zone,omitempty"`
-	Labels      map[string]interface{} `json:"labels,omitempty"`
+	ServerURL string                 `json:"server_url"`
+	AgentID   string                 `json:"agent_id,omitempty"`
+	Secret    string                 `json:"secret,omitempty"` // Agent 认证密钥
+	Region    string                 `json:"region,omitempty"`
+	Zone      string                 `json:"zone,omitempty"`
+	Labels    map[string]interface{} `json:"labels,omitempty"`
 }
 
 // NewAgent 创建新 Agent
@@ -57,16 +62,17 @@ func NewAgent(cfg Config) *Agent {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Agent{
-		serverURL:    cfg.ServerURL,
-		codec:        protocol.NewCodec(),
-		rpc:          rpc.NewHandler(),
-		collector:    NewCollector(),
-		proxyHandler: proxy.NewHandler(),
+		serverURL:      cfg.ServerURL,
+		codec:          protocol.NewCodec(),
+		rpc:            rpc.NewHandler(),
+		collector:      NewCollector(),
+		proxyHandler:   proxy.NewHandler(),
 		desktopHandler: rdp.NewHandler(),
-		capabilities: []protocol.Capability{},
-		ctx:          ctx,
-		cancel:       cancel,
-		config:       &cfg,
+		outbound:       make(chan *protocol.Message, 1024),
+		capabilities:   []protocol.Capability{},
+		ctx:            ctx,
+		cancel:         cancel,
+		config:         &cfg,
 	}
 }
 
@@ -82,6 +88,9 @@ func (a *Agent) Start() error {
 		log.Printf("  - %s: %s", cap.Type, cap.Endpoint)
 	}
 
+	// 1.5 按能力注册 RPC Provider
+	a.setupProviders()
+
 	// 2. 连接 Server
 	if err := a.connect(); err != nil {
 		return fmt.Errorf("connect failed: %w", err)
@@ -89,10 +98,12 @@ func (a *Agent) Start() error {
 
 	// 3. 注册
 	if err := a.register(); err != nil {
+		a.closeCurrentConn()
 		return fmt.Errorf("register failed: %w", err)
 	}
 
-	// 4. 启动心跳
+	// 4. 启动统一发送循环和心跳
+	go a.writeLoop()
 	go a.heartbeatLoop()
 
 	// 5. 启动消息循环
@@ -114,9 +125,7 @@ func (a *Agent) Stop() {
 	if a.proxyHandler != nil {
 		a.proxyHandler.Stop()
 	}
-	if a.conn != nil {
-		a.conn.Close()
-	}
+	a.closeCurrentConn()
 }
 
 // connect 连接到 Server
@@ -134,18 +143,92 @@ func (a *Agent) connect() error {
 	a.mu.Lock()
 	a.conn = conn
 	a.connected = true
+	a.registered.Store(false)
 	a.mu.Unlock()
 
 	// 启动代理处理器
+	a.proxyHandler.SetSendFunc(a.sendMessage)
 	a.proxyHandler.Start(conn)
 
 	// 启动桌面处理器
-	a.desktopHandler.SetSendFunc(func(msg *protocol.Message) error {
-		return a.codec.WriteMessage(conn, msg)
-	})
+	a.desktopHandler.SetSendFunc(a.sendMessage)
 
 	log.Printf("Connected to server")
 	return nil
+}
+
+func (a *Agent) closeCurrentConn() {
+	a.mu.Lock()
+	conn := a.conn
+	a.conn = nil
+	a.connected = false
+	a.registered.Store(false)
+	a.mu.Unlock()
+
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+// sendMessage 将业务消息放入统一发送队列。
+// Gorilla WebSocket 不允许同一连接上并发 writer，所有 Agent 子模块写入都必须走 writeLoop。
+func (a *Agent) sendMessage(msg *protocol.Message) error {
+	select {
+	case a.outbound <- msg:
+		return nil
+	case <-a.ctx.Done():
+		return fmt.Errorf("agent stopped")
+	default:
+		return fmt.Errorf("agent outbound queue full")
+	}
+}
+
+func (a *Agent) writeToConn(msg *protocol.Message) error {
+	a.mu.RLock()
+	conn := a.conn
+	a.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("agent not connected")
+	}
+
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
+
+	return a.codec.WriteMessage(conn, msg)
+}
+
+func (a *Agent) writeLoop() {
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case msg := <-a.outbound:
+			if err := a.waitRegistered(); err != nil {
+				return
+			}
+			if err := a.writeToConn(msg); err != nil {
+				log.Printf("Send message failed: %v", err)
+				a.registered.Store(false)
+				go a.reconnect()
+			}
+		}
+	}
+}
+
+func (a *Agent) waitRegistered() error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if a.registered.Load() {
+			return nil
+		}
+		select {
+		case <-a.ctx.Done():
+			return fmt.Errorf("agent stopped")
+		case <-ticker.C:
+		}
+	}
 }
 
 // detectCapabilities 检测能力
@@ -214,7 +297,7 @@ func (a *Agent) register() error {
 	// 发送注册消息
 	msg := protocol.NewMessage(protocol.MessageTypeRegister, payload)
 
-	if err := a.codec.WriteMessage(a.conn, msg); err != nil {
+	if err := a.writeToConn(msg); err != nil {
 		return err
 	}
 
@@ -230,6 +313,7 @@ func (a *Agent) register() error {
 		return fmt.Errorf("expected register response, got: %s", resp.Type)
 	}
 
+	a.registered.Store(true)
 	log.Printf("Registration accepted")
 	return nil
 }
@@ -282,11 +366,7 @@ func (a *Agent) heartbeatLoop() {
 
 // sendHeartbeat 发送心跳
 func (a *Agent) sendHeartbeat() {
-	a.mu.RLock()
-	conn := a.conn
-	a.mu.RUnlock()
-
-	if conn == nil {
+	if !a.registered.Load() {
 		return
 	}
 
@@ -303,7 +383,7 @@ func (a *Agent) sendHeartbeat() {
 
 	msg := protocol.NewMessage(protocol.MessageTypeHeartbeat, payload)
 
-	if err := a.codec.WriteMessage(conn, msg); err != nil {
+	if err := a.sendMessage(msg); err != nil {
 		log.Printf("Send heartbeat failed: %v", err)
 		// 尝试重连
 		go a.reconnect()
@@ -376,12 +456,8 @@ func (a *Agent) handlePing(msg *protocol.Message) {
 	})
 	resp.ID = msg.ID
 
-	a.mu.RLock()
-	conn := a.conn
-	a.mu.RUnlock()
-
-	if conn != nil {
-		a.codec.WriteMessage(conn, resp)
+	if err := a.sendMessage(resp); err != nil {
+		log.Printf("Send ping response failed: %v", err)
 	}
 }
 
@@ -400,28 +476,23 @@ func (a *Agent) handleRPCRequest(msg *protocol.Message) {
 		resp.ID = msg.ID
 	}
 
-	a.mu.RLock()
-	conn := a.conn
-	a.mu.RUnlock()
-
-	if conn != nil {
-		if err := a.codec.WriteMessage(conn, resp); err != nil {
-			log.Printf("Send RPC response failed: %v", err)
-		}
+	if err := a.sendMessage(resp); err != nil {
+		log.Printf("Send RPC response failed: %v", err)
 	}
 }
 
 // reconnect 重连
+// 通过 atomic CAS 防止 heartbeat/messageLoop 并发触发多个重连循环
 func (a *Agent) reconnect() {
+	if !a.reconnecting.CompareAndSwap(false, true) {
+		log.Printf("Reconnect already in progress, skipping")
+		return
+	}
+	defer a.reconnecting.Store(false)
+
 	log.Printf("Attempting to reconnect...")
 
-	a.mu.Lock()
-	if a.conn != nil {
-		a.conn.Close()
-		a.conn = nil
-	}
-	a.connected = false
-	a.mu.Unlock()
+	a.closeCurrentConn()
 
 	// 等待后重连
 	time.Sleep(5 * time.Second)
@@ -441,6 +512,7 @@ func (a *Agent) reconnect() {
 
 		if err := a.register(); err != nil {
 			log.Printf("Re-register failed: %v", err)
+			a.closeCurrentConn()
 			time.Sleep(10 * time.Second)
 			continue
 		}

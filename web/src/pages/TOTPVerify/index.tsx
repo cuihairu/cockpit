@@ -4,6 +4,7 @@ import { SafetyOutlined, KeyOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '@/services/api'
 import type { TOTPVerifyResponse } from '@/types'
+import { getApiErrorMessage } from '@/utils/apiError'
 import './index.less'
 
 const { Title, Text, Link } = Typography
@@ -46,8 +47,8 @@ const TOTPVerify = () => {
 
       // 跳转到首页
       navigate('/')
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.error || '验证失败，请重试'
+    } catch (err) {
+      const errorMsg = getApiErrorMessage(err, '验证失败，请重试')
       setError(errorMsg)
       message.error(errorMsg)
     } finally {

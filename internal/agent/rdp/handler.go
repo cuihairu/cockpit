@@ -147,7 +147,11 @@ func (h *Handler) HandleDesktopData(msg *protocol.Message) {
 
 // HandleDesktopClose 处理关闭桌面会话
 func (h *Handler) HandleDesktopClose(msg *protocol.Message) {
-	sessionID, _ := msg.Payload["sessionId"].(string)
+	disconnected, err := protocol.DecodeDesktopDisconnected(msg)
+	if err != nil {
+		return
+	}
+	sessionID := disconnected.SessionID
 
 	h.mu.Lock()
 	session, exists := h.sessions[sessionID]

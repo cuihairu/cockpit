@@ -13,11 +13,14 @@ export function useInputCapture({ sendKeyboard, sendMouse, enabled }: InputCaptu
 
   // 用 ref 保存最新回调，避免依赖变化导致事件监听器反复重注册
   const sendKeyboardRef = useRef(sendKeyboard);
-  sendKeyboardRef.current = sendKeyboard;
   const sendMouseRef = useRef(sendMouse);
-  sendMouseRef.current = sendMouse;
   const enabledRef = useRef(enabled);
-  enabledRef.current = enabled;
+
+  useEffect(() => {
+    sendKeyboardRef.current = sendKeyboard;
+    sendMouseRef.current = sendMouse;
+    enabledRef.current = enabled;
+  }, [enabled, sendKeyboard, sendMouse]);
 
   const setCanvas = useCallback((canvas: HTMLCanvasElement | null) => {
     canvasRef.current = canvas;
@@ -131,7 +134,7 @@ export function useInputCapture({ sendKeyboard, sendMouse, enabled }: InputCaptu
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []); // 空依赖数组，所有动态值通过 ref 获取
+  }, [getCanvasCoords]); // 动态回调和 enabled 通过 ref 获取
 
   return { setCanvas };
 }

@@ -35,8 +35,12 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleStatus(w, r)
 	case path == "/me":
 		s.handleCurrentUser(w, r)
+	case path == "/me/profile":
+		s.handleCurrentUserProfile(w, r)
 	case path == "/me/password":
 		s.handleCurrentUserPassword(w, r)
+	case path == "/settings":
+		s.handleSettings(w, r)
 	case path == "/agents":
 		s.handleAgentsList(w, r)
 	case strings.HasPrefix(path, "/agents/"):
@@ -123,6 +127,8 @@ func (s *Server) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 		"id":            user.ID,
 		"username":      user.Username,
 		"email":         user.Email,
+		"phone":         user.Phone,
+		"department":    user.Department,
 		"role":          user.Role,
 		"totp_enabled":  user.TOTPEnabled,
 		"totp_setup_at": user.TOTPSetupAt,
@@ -203,6 +209,86 @@ func (s *Server) handleCurrentUserPassword(w http.ResponseWriter, r *http.Reques
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Password updated successfully"})
+}
+
+// handleCurrentUserProfile 更新当前用户信息（email/phone/department）
+//
+// 对应前端 PUT /api/me/profile。
+func (s *Server) handleCurrentUserProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	userID, _ := r.Context().Value("user_id").(string)
+	if userID == "" {
+		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	user, err := s.db.GetUserByID(userID)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "User not found")
+		return
+	}
+
+	var req struct {
+		Email      string `json:"email"`
+		Phone      string `json:"phone"`
+		Department string `json:"department"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 空值不覆盖（避免误清空），仅在显式传入时更新
+	if req.Email != "" {
+		user.Email = req.Email
+	}
+	if req.Phone != "" {
+		user.Phone = req.Phone
+	}
+	if req.Department != "" {
+		user.Department = req.Department
+	}
+
+	if err := s.db.UpdateUser(user); err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to update profile")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":    "Profile updated successfully",
+		"id":         user.ID,
+		"username":   user.Username,
+		"email":      user.Email,
+		"phone":      user.Phone,
+		"department": user.Department,
+	})
+}
+
+// handleSettings 保存前端 UI 偏好设置
+//
+// 对应前端 PUT /api/settings。
+// 本轮设计：前端 UI 偏好实际持久化在前端 localStorage，
+// 后端仅返回 success 以兼容前端调用；预留扩展点供未来服务端持久化。
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// 解析 body 验证格式合法
+	var req map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Settings saved",
+	})
 }
 
 // handleAgentsList 获取 Agent 列表
@@ -351,14 +437,7 @@ func (s *Server) handleComputeInstancesList(w http.ResponseWriter, r *http.Reque
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to list compute instances")
 		return
 	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data":       instances,
-		"total":      len(instances),
-		"page":       1,
-		"pageSize":   len(instances),
-		"totalPages": 1,
-	})
+	s.writeList(w, instances, len(instances))
 }
 
 // handleComputeInstanceGet 获取单个计算实例
@@ -378,14 +457,7 @@ func (s *Server) handleDomainsList(w http.ResponseWriter, r *http.Request) {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to list domains")
 		return
 	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data":       domains,
-		"total":      len(domains),
-		"page":       1,
-		"pageSize":   len(domains),
-		"totalPages": 1,
-	})
+	s.writeList(w, domains, len(domains))
 }
 
 // handleDomainGet 获取单个域名
@@ -405,14 +477,7 @@ func (s *Server) handleCertificatesList(w http.ResponseWriter, r *http.Request) 
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to list certificates")
 		return
 	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data":       certificates,
-		"total":      len(certificates),
-		"page":       1,
-		"pageSize":   len(certificates),
-		"totalPages": 1,
-	})
+	s.writeList(w, certificates, len(certificates))
 }
 
 // handleCertificateGet 获取单个证书
@@ -432,14 +497,7 @@ func (s *Server) handleServicesList(w http.ResponseWriter, r *http.Request) {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to list services")
 		return
 	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data":       services,
-		"total":      len(services),
-		"page":       1,
-		"pageSize":   len(services),
-		"totalPages": 1,
-	})
+	s.writeList(w, services, len(services))
 }
 
 // handleServiceGet 获取单个服务
@@ -459,14 +517,7 @@ func (s *Server) handleGatewaysList(w http.ResponseWriter, r *http.Request) {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to list gateways")
 		return
 	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data":       gateways,
-		"total":      len(gateways),
-		"page":       1,
-		"pageSize":   len(gateways),
-		"totalPages": 1,
-	})
+	s.writeList(w, gateways, len(gateways))
 }
 
 // handleGatewayGet 获取单个网关
@@ -486,14 +537,7 @@ func (s *Server) handleStoragesList(w http.ResponseWriter, r *http.Request) {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to list storages")
 		return
 	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data":       storages,
-		"total":      len(storages),
-		"page":       1,
-		"pageSize":   len(storages),
-		"totalPages": 1,
-	})
+	s.writeList(w, storages, len(storages))
 }
 
 // handleStorageGet 获取单个存储
@@ -540,6 +584,18 @@ func (s *Server) handleError(w http.ResponseWriter, r *http.Request, status int,
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": message,
+	})
+}
+
+// writeList 输出标准分页列表响应（page=1, single page）。
+// 用于资源列表这种一次性返回全量数据的端点，避免 6 处重复样板（DRY）。
+func (s *Server) writeList(w http.ResponseWriter, items interface{}, count int) {
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"data":       items,
+		"total":      count,
+		"page":       1,
+		"pageSize":   count,
+		"totalPages": 1,
 	})
 }
 
