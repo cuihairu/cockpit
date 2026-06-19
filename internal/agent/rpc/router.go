@@ -3,6 +3,7 @@ package rpc
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 
@@ -30,6 +31,21 @@ func (h *Handler) RegisterProvider(p provider.Provider) {
 
 	h.providers[p.Type()] = p
 	log.Printf("Registered provider: %s", p.Type())
+}
+
+// RegisteredTypes returns the provider types currently registered, sorted.
+// Useful for diagnostics and tests that need to assert which providers
+// setupProviders wired up.
+func (h *Handler) RegisteredTypes() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	types := make([]string, 0, len(h.providers))
+	for t := range h.providers {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	return types
 }
 
 // Handle 处理 RPC 请求
