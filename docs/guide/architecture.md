@@ -160,4 +160,4 @@ Server 与 Agent 的消息统一为：
 - `internal/agent/rpc` 的 SystemProvider 始终注册；Docker/PVE/OpenWrt Provider 由 `Agent.setupProviders` 按检测到的 capability 和环境变量（如 `DOCKER_HOST`、`PVE_TOKEN_ID`、`OPENWRT_HOST` 等）条件注册，凭据缺失时仅记录日志跳过，不影响基础心跳。
 - `/api/remote/sessions` 目前是内存会话登记，不是完整连接配置持久化。
 - Web UI 中部分偏好配置保存在浏览器本地，不进入 Server 数据库。
-- docs 中 `docs/superpowers` 是历史设计和计划记录，不代表当前运行架构。
+- `docs/archive`（原 `docs/superpowers`）保存 TOTP、通知模块等历史设计稿和实施计划，仅供追溯，不代表当前运行架构；详见 [`docs/archive/README.md`](../archive/README.md)。
