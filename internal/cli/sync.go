@@ -84,6 +84,9 @@ func (c *SyncCmd) Run() error {
 }
 
 func hasSyncErrors(result *inventory.SyncResult) bool {
+	if result == nil {
+		return false
+	}
 	for _, r := range []*inventory.ResourceResult{
 		result.Agents,
 		result.Domains,
