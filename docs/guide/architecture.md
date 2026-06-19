@@ -157,7 +157,7 @@ Server 与 Agent 的消息统一为：
 ## 当前实现边界
 
 - Inventory 的目录拆分模型尚未成为主要实现路径；当前 CLI 示例和 parser 以单文件 `version: v1` YAML 为准。
-- `internal/agent/rpc` 已定义 PVE/Docker/OpenWrt Provider，但默认 Agent 生命周期当前未自动注册这些 Provider；远程代理和系统指标是更成熟的路径。
+- `internal/agent/rpc` 的 SystemProvider 始终注册；Docker/PVE/OpenWrt Provider 由 `Agent.setupProviders` 按检测到的 capability 和环境变量（如 `DOCKER_HOST`、`PVE_TOKEN_ID`、`OPENWRT_HOST` 等）条件注册，凭据缺失时仅记录日志跳过，不影响基础心跳。
 - `/api/remote/sessions` 目前是内存会话登记，不是完整连接配置持久化。
 - Web UI 中部分偏好配置保存在浏览器本地，不进入 Server 数据库。
 - docs 中 `docs/superpowers` 是历史设计和计划记录，不代表当前运行架构。

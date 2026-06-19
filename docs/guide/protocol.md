@@ -138,7 +138,7 @@ RPC payload 使用 `method` 和 `params`。方法名按 `<provider>.<action>` �
 }
 ```
 
-注意：代码中已定义 PVE、Docker、OpenWrt Provider，但当前 Agent 启动流程未自动注册这些 Provider；调用前需要确认 Agent 侧 Provider 注册路径。
+注意：SystemProvider 在 Agent 启动时始终注册；PVE、Docker、OpenWrt Provider 由 `Agent.setupProviders` 按检测到的 capability 和环境变量（如 `PVE_URL`/`PVE_TOKEN_ID`/`PVE_TOKEN_SECRET`、`DOCKER_HOST`、`OPENWRT_HOST`/`OPENWRT_USER`/`OPENWRT_PASS`）条件注册。凭据缺失时该 Provider 仅记录日志跳过，不影响其他 Provider 和基础心跳。
 
 ## 代理消息
 
