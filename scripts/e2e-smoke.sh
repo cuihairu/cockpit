@@ -28,6 +28,15 @@ ADMIN_PASS="e2e-strong-pass-1"
 log() { printf '\033[1;34m[e2e]\033[0m %s\n' "$*"; }
 err() { printf '\033[1;31m[e2e:err]\033[0m %s\n' "$*" >&2; }
 
+require_cmd() {
+  local cmd="$1"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    err "Missing required command: ${cmd}"
+    err "Install ${cmd} in the environment running this script, or run it from a shell whose PATH includes ${cmd}."
+    exit 1
+  fi
+}
+
 cleanup() {
   rc=$?
   log "Cleaning up (exit code=$rc)"
@@ -45,9 +54,14 @@ cleanup() {
   fi
   exit $rc
 }
+
+for cmd in go curl python3; do
+  require_cmd "$cmd"
+done
+
 trap cleanup EXIT INT TERM
 
-mkdir -p "$WORK_DIR/data"
+mkdir -p "$WORK_DIR/data" "$WORK_DIR/bin"
 
 # ---- 准备配置 ----
 cat > "$WORK_DIR/cockpit.yaml" <<EOF
@@ -66,16 +80,63 @@ version: "v1"
 metadata:
   name: e2e-smoke
   description: End-to-end smoke inventory
+regions:
+  local:
+    name: Local
+    zones:
+      smoke:
+        name: Smoke Zone
+        agents:
+          inventory-agent:
+            hostname: inventory-agent.local
+            ip: 127.0.0.1
+            capabilities:
+              - docker
 domains:
   example.com:
     id: example-com
     domain: example.com
     provider: manual
-certificates:
-  example-com-cert:
-    id: example-com-cert
-    domain: example.com
-    provider: manual
+    agent: inventory-agent
+    certificates:
+      - id: example-com-cert
+        domain: example.com
+        provider: manual
+        agent: inventory-agent
+computeInstances:
+  smoke-vm:
+    name: Smoke VM
+    type: vm
+    agent: inventory-agent
+    region: local
+    zone: smoke
+    cpu: 1
+    memory: 512
+    disk: 10
+services:
+  smoke-http:
+    name: Smoke HTTP
+    type: http
+    agent: inventory-agent
+    region: local
+    zone: smoke
+    url: https://example.com
+gateways:
+  smoke-router:
+    name: Smoke Router
+    type: openwrt
+    agent: inventory-agent
+    region: local
+    zone: smoke
+    ipv4: 127.0.0.1
+storages:
+  smoke-storage:
+    name: Smoke Storage
+    type: local
+    agent: inventory-agent
+    region: local
+    zone: smoke
+    path: /tmp
 EOF
 
 cd "$ROOT_DIR"
@@ -174,18 +235,26 @@ log "Inventory sync done"
 # ---- 验证 resources API ----
 verify_resource() {
   local kind="$1"
-  local code
-  code=$(curl -s -o /dev/null -w "%{http_code}" "${SERVER_URL}/api/resources/${kind}" \
+  local body
+  local total
+
+  body=$(curl -fsS "${SERVER_URL}/api/resources/${kind}" \
     -H "Authorization: Bearer $TOKEN")
-  if [[ "$code" != "200" ]]; then
-    err "GET /api/resources/${kind} returned ${code}"
+  total=$(echo "$body" | python3 -c 'import sys, json; data=json.load(sys.stdin); print(data.get("total", len(data.get("data", []))))' 2>/dev/null || echo 0)
+
+  if [[ "$total" -lt 1 ]]; then
+    err "GET /api/resources/${kind} returned no synced data: ${body}"
     exit 1
   fi
-  log "GET /api/resources/${kind} -> 200"
+  log "GET /api/resources/${kind} -> 200 (${total} item(s))"
 }
 
+verify_resource "compute-instances"
 verify_resource "domains"
 verify_resource "certificates"
+verify_resource "services"
+verify_resource "gateways"
+verify_resource "storages"
 
 log "All smoke checks passed ✓"
 exit 0

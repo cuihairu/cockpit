@@ -2,7 +2,7 @@
 
 个人混合基础设施控制台，用于把分散在本地机房、云 VPS、NAT 后节点上的资源收敛到一个轻量 Server + Agent 控制面。
 
-[![Go](https://github.com/cuihairu/cockpit/actions/workflows/go.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/go.yml)
+[![Test](https://github.com/cuihairu/cockpit/actions/workflows/test.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/test.yml)
 [![Docs](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml)
 [![codecov](https://codecov.io/gh/cuihairu/cockpit/branch/main/graph/badge.svg)](https://codecov.io/gh/cuihairu/cockpit)
 
@@ -107,16 +107,22 @@ export PRODUCTION=true
 ./scripts/e2e-smoke.sh
 ```
 
+Windows PowerShell:
+
+```powershell
+pwsh ./scripts/e2e-smoke.ps1
+```
+
 脚本行为：
 
 1. 在临时目录创建最小 `cockpit.yaml` + `inventory.yaml`
 2. 构建 `cockpit` 与 `cockpit-agent` 二进制
 3. 启动 server，等待 `/health` 返回 ok
 4. 启动 agent，等待 `/api/agents` 出现在线记录
-5. 用 `cockpit sync` 同步 inventory，并验证 `/api/resources/{domains,certificates}` 返回 200
+5. 用 `cockpit sync` 同步 inventory，并验证 `/api/resources/{compute-instances,domains,certificates,services,gateways,storages}` 返回非空结果
 
 退出码 0 表示全链路正常；非 0 时会自动打印 `server.log` 末尾用于排查。
-保留日志便于调试：`E2E_KEEP_LOGS=1 ./scripts/e2e-smoke.sh`。
+保留日志便于调试：`E2E_KEEP_LOGS=1 ./scripts/e2e-smoke.sh` 或 `pwsh ./scripts/e2e-smoke.ps1 -KeepLogs`。
 
 ## 文档
 
