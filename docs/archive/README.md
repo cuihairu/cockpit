@@ -18,7 +18,7 @@ plans/   实施计划：分步骤的执行清单，包含大量 agent 工作流�
 | 日期 | 主题 | 类型 | 当前状态 |
 | --- | --- | --- | --- |
 | 2026-05-26 | TOTP 二次验证 | spec + plan | 已落地，参见 `internal/auth/totp.go` 与前端 Settings 安全设置 |
-| 2026-05-27 | 通知模块（Herald 集成） | spec + plan | 设计稿状态，未完整落地；当前告警走 `internal/notification` 的内置渠道 |
+| 2026-05-27 | 通知模块（Herald 集成） | spec + plan | 已落地，参见 `internal/notification`（Herald 客户端 + 事件映射），由 `internal/alert` 触发 |
 
 ## 维护约定
 
