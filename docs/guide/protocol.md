@@ -215,12 +215,20 @@ JWT 保护接口：
 
 - `GET /api/status`
 - `GET /api/me`
+- `PUT /api/me/profile`
 - `POST|PUT /api/me/password`
+- `GET|PUT /api/settings`
 - `GET /api/agents`
 - `GET /api/agents/{id}`
 - `GET|POST|DELETE /api/agents/{id}/secret`
 - `GET /api/resources/{type}`
 - `GET /api/resources/{type}/{id}`
+- `GET|POST /api/users`（创建限管理员）
+- `PUT|DELETE /api/users/{id}`
+- `POST /api/users/{id}/password`
+- `GET /api/alerts`
+- `PUT /api/alerts/read-all`
+- `GET|PUT|DELETE /api/alerts/{id}`（`PUT /api/alerts/{id}/read` 标记已读）
 - `GET /api/metrics/snapshots`
 - `GET /api/metrics/snapshot?agent_id=...`
 - `GET /api/metrics/history?agent_id=...`
@@ -231,6 +239,12 @@ JWT 保护接口：
 - `GET|DELETE /api/remote/sessions/{id}`
 - `GET /api/admin/audit/logs`
 - `GET /api/admin/audit/stats`
+
+TOTP 设置接口（同样需要 JWT，与上面的公开 `totp/verify` 区分）：
+
+- `POST /api/auth/totp/generate`
+- `POST /api/auth/totp/enable`
+- `POST /api/auth/totp/disable`
 
 资源类型当前支持：
 

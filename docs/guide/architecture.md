@@ -102,12 +102,17 @@ Web UI 默认请求 `/api`。公开接口包括登录、Token 刷新、TOTP 验�
 主要 API 面：
 
 - `/api/status`
-- `/api/agents`
+- `/api/me`、`/api/me/profile`、`/api/me/password`
+- `/api/settings`
+- `/api/agents`、`/api/agents/{id}/secret`
 - `/api/resources/{compute-instances|domains|certificates|services|gateways|storages}`
+- `/api/users`（管理员管理用户）
+- `/api/alerts`（告警列表与已读标记）
 - `/api/metrics/*`
 - `/api/proxies`
-- `/api/remote/*`
+- `/api/remote/*`（tickets / sessions / terminal / desktop / vnc）
 - `/api/admin/audit/*`
+- `/api/auth/totp/*`（generate / enable / disable 需 JWT；verify 公开）
 
 ### 远程访问与代理
 
