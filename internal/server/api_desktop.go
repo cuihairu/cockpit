@@ -39,6 +39,7 @@ type DesktopSession struct {
 	Height     int
 	CreatedAt  time.Time
 	LastActive time.Time
+	mu         sync.Mutex
 	done       chan struct{}
 }
 
@@ -49,7 +50,7 @@ var (
 
 // desktopUpgrader 桌面连接专用 upgrader（更大的缓冲区）
 var desktopUpgrader = websocket.Upgrader{
-	CheckOrigin: isOriginAllowed,
+	CheckOrigin:     isOriginAllowed,
 	ReadBufferSize:  1 * 1024 * 1024, // 1MB
 	WriteBufferSize: 1 * 1024 * 1024,
 }
@@ -110,8 +111,8 @@ func (s *Server) handleDesktopWebSocket(w http.ResponseWriter, r *http.Request) 
 
 	// 升级 WebSocket，接受票据协议
 	upgrader := websocket.Upgrader{
-		CheckOrigin:   isOriginAllowed,
-		Subprotocols:  []string{ticketID},
+		CheckOrigin:     isOriginAllowed,
+		Subprotocols:    []string{ticketID},
 		ReadBufferSize:  1 * 1024 * 1024,
 		WriteBufferSize: 1 * 1024 * 1024,
 	}
@@ -202,7 +203,9 @@ func (s *Server) desktopSendLoop(session *DesktopSession) {
 			return
 		}
 
+		session.mu.Lock()
 		session.LastActive = time.Now()
+		session.mu.Unlock()
 
 		var msg map[string]interface{}
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -270,7 +273,11 @@ func (s *Server) desktopKeepaliveLoop(session *DesktopSession) {
 				return
 			}
 
-			if time.Since(session.LastActive) > 30*time.Minute {
+			session.mu.Lock()
+			lastActive := session.LastActive
+			session.mu.Unlock()
+
+			if time.Since(lastActive) > 30*time.Minute {
 				log.Printf("Desktop session timeout: %s", session.ID)
 				s.closeDesktopSession(session)
 				return

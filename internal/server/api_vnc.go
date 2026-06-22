@@ -23,6 +23,7 @@ type VNCSession struct {
 	ConnID     string
 	CreatedAt  time.Time
 	LastActive time.Time
+	mu         sync.Mutex
 	done       chan struct{}
 }
 
@@ -32,7 +33,7 @@ var (
 )
 
 var vncUpgrader = websocket.Upgrader{
-	CheckOrigin: isOriginAllowed,
+	CheckOrigin:     isOriginAllowed,
 	ReadBufferSize:  1 * 1024 * 1024,
 	WriteBufferSize: 1 * 1024 * 1024,
 }
@@ -73,8 +74,8 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// 升级 WebSocket，接受票据协议
 	upgrader := websocket.Upgrader{
-		CheckOrigin:   isOriginAllowed,
-		Subprotocols:  []string{ticketID},
+		CheckOrigin:     isOriginAllowed,
+		Subprotocols:    []string{ticketID},
 		ReadBufferSize:  1 * 1024 * 1024,
 		WriteBufferSize: 1 * 1024 * 1024,
 	}
@@ -109,12 +110,12 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// 通知 Agent 建立 TCP 代理到 VNC 目标
 	proxyMsg := protocol.NewMessage(protocol.MessageTypeProxyNew, map[string]interface{}{
-		"proxyId":  "vnc-" + connID,
+		"proxyId":   "vnc-" + connID,
 		"proxyType": "tcp",
-		"target":   target,
-		"connId":   connID,
-		"protocol": string(protocol.RemoteProtocolVNC),
-		"password": password,
+		"target":    target,
+		"connId":    connID,
+		"protocol":  string(protocol.RemoteProtocolVNC),
+		"password":  password,
 	})
 
 	if err := agent.SendMessage(proxyMsg); err != nil {
@@ -149,7 +150,9 @@ func (s *Server) vncSendLoop(session *VNCSession) {
 			return
 		}
 
+		session.mu.Lock()
 		session.LastActive = time.Now()
+		session.mu.Unlock()
 
 		// 二进制帧直接转发，文本帧忽略
 		if msgType != websocket.BinaryMessage {
@@ -181,7 +184,11 @@ func (s *Server) vncKeepaliveLoop(session *VNCSession) {
 			s.closeVNCSession(session)
 			return
 		case <-ticker.C:
-			if time.Since(session.LastActive) > 30*time.Minute {
+			session.mu.Lock()
+			lastActive := session.LastActive
+			session.mu.Unlock()
+
+			if time.Since(lastActive) > 30*time.Minute {
 				log.Printf("VNC session timeout: %s", session.ID)
 				s.closeVNCSession(session)
 				return

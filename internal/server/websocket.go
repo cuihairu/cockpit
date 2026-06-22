@@ -1,7 +1,8 @@
 package server
 
 import (
-	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +13,11 @@ import (
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/gorilla/websocket"
 )
+
+type registrationRejection struct {
+	code    string
+	message string
+}
 
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
@@ -61,70 +67,28 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 解析注册信息
-	var reg protocol.RegisterPayload
-	payloadBytes, _ := json.Marshal(msg.Payload)
-	if err := json.Unmarshal(payloadBytes, &reg); err != nil {
+	reg, err := decodeRegisterForWebSocket(msg)
+	if err != nil {
 		log.Printf("Parse register payload failed: %v", err)
 		conn.Close()
 		return
 	}
 
-	agentID := reg.AgentID
-	if agentID == "" {
-		agentID = protocol.GenerateIDWithPrefix("agent")
-	}
-
-	// 认证检查
-	existingAgent, err := s.db.GetAgent(agentID)
-	if err == nil && existingAgent.SecretHash != "" {
-		// Agent 已存在且有密钥配置，验证密钥
-		if reg.Secret == "" {
-			log.Printf("Agent %s registration failed: missing secret", agentID)
-			s.sendRegisterError(conn, "authentication_required", "Agent secret is required")
-			conn.Close()
-			return
-		}
-		if !storage.VerifyAgentSecret(existingAgent.SecretHash, reg.Secret) {
-			log.Printf("Agent %s registration failed: invalid secret", agentID)
-			s.sendRegisterError(conn, "authentication_failed", "Invalid agent secret")
-			conn.Close()
-			return
-		}
-	} else if existingAgent != nil && existingAgent.SecretHash == "" {
-		// Agent 存在但未配置密钥（旧版本迁移），需要配置
-		log.Printf("Agent %s exists but has no secret configured", agentID)
-	}
-
-	// 检查 Registry 中是否已有活跃连接（Registry 中的 Agent 均为活跃状态）
-	if _, exists := s.registry.Get(agentID); exists {
-		log.Printf("Agent %s already has active connection, rejecting duplicate", agentID)
-		s.sendRegisterError(conn, "duplicate_connection", "Agent already connected")
+	agent, rejection, err := s.registerAgentConnection(conn, &reg)
+	if err != nil {
+		log.Printf("Agent %s registration failed: %v", reg.AgentID, err)
+		s.sendRegisterError(conn, "registration_failed", "Registration failed")
 		conn.Close()
 		return
 	}
-	// 创建 Agent
-	agent := NewAgent(agentID, conn)
-	agent.Update(&reg)
-
-	// 注册到 Registry
-	if err := s.registry.Register(agent); err != nil {
-		log.Printf("Register agent failed: %v", err)
-		s.sendRegisterError(conn, "registration_failed", err.Error())
+	if rejection != nil {
+		log.Printf("Agent %s registration rejected: %s", reg.AgentID, rejection.message)
+		s.sendRegisterError(conn, rejection.code, rejection.message)
 		conn.Close()
 		return
 	}
 
-	// 持久化到数据库
-	storageAgent := toStorageAgent(agent)
-	if existingAgent != nil && existingAgent.SecretHash != "" {
-		// 保留现有的 SecretHash
-		storageAgent.SecretHash = existingAgent.SecretHash
-	}
-	if err := s.db.UpsertAgent(storageAgent); err != nil {
-		log.Printf("Failed to persist agent to database: %v", err)
-	}
-
-	log.Printf("Agent registered: %s at %s/%s", agentID, reg.Location.Region, reg.Location.Zone)
+	log.Printf("Agent registered: %s at %s/%s", agent.ID, reg.Location.Region, reg.Location.Zone)
 
 	// 发送注册响应
 	resp := protocol.NewMessage(protocol.MessageTypeRegister, map[string]interface{}{
@@ -137,6 +101,90 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 启动读写循环
 	go s.readLoop(agent)
 	go s.writeLoop(agent)
+}
+
+func decodeRegisterForWebSocket(msg *protocol.Message) (protocol.RegisterPayload, error) {
+	if msg.Payload == nil {
+		return protocol.RegisterPayload{}, nil
+	}
+	return protocol.DecodeRegister(msg)
+}
+
+func (s *Server) registerAgentConnection(conn *websocket.Conn, reg *protocol.RegisterPayload) (*Agent, *registrationRejection, error) {
+	if reg.AgentID == "" {
+		reg.AgentID = protocol.GenerateIDWithPrefix("agent")
+	}
+
+	existingAgent, rejection, err := s.authenticateAgentRegistration(reg)
+	if err != nil {
+		return nil, nil, err
+	}
+	if rejection != nil {
+		return nil, rejection, nil
+	}
+
+	// Registry 中的 Agent 均为活跃连接，已有记录时拒绝重复连接。
+	if _, exists := s.registry.Get(reg.AgentID); exists {
+		return nil, &registrationRejection{
+			code:    "duplicate_connection",
+			message: "Agent already connected",
+		}, nil
+	}
+
+	agent := NewAgent(reg.AgentID, conn)
+	agent.Update(reg)
+
+	if err := s.registry.Register(agent); err != nil {
+		return nil, &registrationRejection{
+			code:    "registration_failed",
+			message: err.Error(),
+		}, nil
+	}
+
+	if err := s.persistRegisteredAgent(agent, existingAgent); err != nil {
+		log.Printf("Failed to persist agent to database: %v", err)
+	}
+
+	return agent, nil, nil
+}
+
+func (s *Server) authenticateAgentRegistration(reg *protocol.RegisterPayload) (*storage.Agent, *registrationRejection, error) {
+	existingAgent, err := s.db.GetAgent(reg.AgentID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("load existing agent %s: %w", reg.AgentID, err)
+	}
+
+	if existingAgent.SecretHash == "" {
+		// 兼容历史数据：已有 Agent 但未配置密钥时仍允许注册。
+		log.Printf("Agent %s exists but has no secret configured", reg.AgentID)
+		return existingAgent, nil, nil
+	}
+
+	if reg.Secret == "" {
+		return existingAgent, &registrationRejection{
+			code:    "authentication_required",
+			message: "Agent secret is required",
+		}, nil
+	}
+	if !storage.VerifyAgentSecret(existingAgent.SecretHash, reg.Secret) {
+		return existingAgent, &registrationRejection{
+			code:    "authentication_failed",
+			message: "Invalid agent secret",
+		}, nil
+	}
+
+	return existingAgent, nil, nil
+}
+
+func (s *Server) persistRegisteredAgent(agent *Agent, existingAgent *storage.Agent) error {
+	storageAgent := toStorageAgent(agent)
+	if existingAgent != nil && existingAgent.SecretHash != "" {
+		storageAgent.SecretHash = existingAgent.SecretHash
+	}
+	return s.db.UpsertAgent(storageAgent)
 }
 
 // sendRegisterError 发送注册错误响应
