@@ -35,6 +35,234 @@
 | 7.1 CI 收口 | ✅ 已完成 | 删除重复的 `go.yml`；保留 `test.yml`（主 CI，阈值从 5% 提到 25%，实测 62%+）/`agent-test.yml`（路径过滤）/`build.yml`（跨平台构建）/`docs.yml`/`nightly.yml` |
 | 7.2 端到端验证 | ✅ 已完成 | 新建 `scripts/e2e-smoke.sh`，本地一键验证 server→agent→inventory sync→/api/resources 闭环；修复副作用 bug：`AuditMiddleware` 包装破坏 WebSocket `Hijacker` 接口（对 `/ws`、`/api/remote/{terminal,desktop,vnc}` 路径跳过包装）；README 增加脚本说明 |
 
+## 当前未完成功能（2026-06-23 复核）
+
+下面不是历史计划，而是基于当前代码重新核实后的真实 backlog。原则：只记录“代码里确实没做完”或“文档/UI 已承诺但链路未闭环”的项。
+
+### P0：前后端协议和主路径不一致
+
+#### 1. 远程终端 / 桌面 / VNC 前端仍走旧的 query-token WebSocket，未切到 ticket + `Sec-WebSocket-Protocol`
+
+代码证据：
+
+- `internal/server/api_remote.go`、`internal/server/api_desktop.go`、`internal/server/api_vnc.go` 的 WebSocket 入口都要求先通过 `POST /api/remote/tickets` 获取 ticket，再从 `Sec-WebSocket-Protocol` 头读取票据。
+- `web/src/components/TerminalModal/index.tsx`
+- `web/src/components/DesktopModal/useDesktopWS.ts`
+- `web/src/components/VNCModal/index.tsx`
+
+当前问题：
+
+- 三个前端连接器仍直接把 `token`、`host`、`port` 等参数拼进 WebSocket query string。
+- 这与当前后端 ticket 协议不一致，也与 `docs/guide/protocol.md`、`docs/websocket-token-auth.md` 不一致。
+- 只要走这些前端路径，远控主链路就不是 README/文档描述的那条安全路径。
+
+建议执行：
+
+- 新增前端 `createRemoteTicket()` 调用，统一命中 `POST /api/remote/tickets`。
+- Terminal/Desktop/VNC 三个 modal 全部改成先拿 ticket，再 `new WebSocket(url, [ticket])`。
+- 删除 query 中直接传 JWT/password 的旧做法。
+- 保持现有 UI 行为不变，只切换握手协议。
+
+验收标准：
+
+- 浏览器发起远控时先出现 `/api/remote/tickets` 请求，再建立对应 WebSocket。
+- Browser WebSocket URL 中不再出现 JWT、password、host/port 等敏感参数。
+- Terminal/Desktop/VNC 三类连接在 Web UI 中可正常建立。
+
+#### 2. 前端残留一套不存在的 `/api/remote/connections` / `/api/remote/terminal/start` API
+
+代码证据：
+
+- `web/src/services/remote.ts`
+- 当前后端只实现了 `/api/remote/tickets`、`/api/remote/sessions`、`/api/remote/{terminal,desktop,vnc}`，未实现 `connections` 和 `terminal/start`。
+
+当前问题：
+
+- 这是一组“看起来有能力、实际上不存在”的前端 API 封装。
+- 虽然当前主页面未必走到这些接口，但它们会继续误导后续开发和文档。
+
+建议执行：
+
+- 二选一：
+  - 删除 `web/src/services/remote.ts` 中未实现的 `connections` / `terminal/start` API，改成只保留真实后端接口。
+  - 或正式补后端远程连接配置 CRUD，并明确与 `/api/remote/sessions` 的边界。
+- 统一 `RemoteProtocol` 类型定义来源，避免页面层继续引用一套“比后端更大”的协议集合。
+
+验收标准：
+
+- `web/src/services/remote.ts` 不再声明后端不存在的接口。
+- 前端类型和后端真实路由一一对应。
+
+### P1：表面可用，但实际未闭环
+
+#### 3. 个人资料里的 `phone` / `department` 目前不会持久化
+
+代码证据：
+
+- `internal/server/api.go` 的 `handleCurrentUserProfile` 会接收并设置 `user.Phone`、`user.Department`。
+- 但 `internal/storage/user.go` 的 `UpdateUser()` 目前只更新 `email` 和 `role`，没有写 `phone`、`department`。
+
+当前问题：
+
+- 前端 `Profile` 页允许编辑手机号和部门。
+- `/api/me` 也会返回这两个字段。
+- 但实际保存后不会落库，属于“UI 看起来成功，数据实际上没保存”。
+
+建议执行：
+
+- 修正 `storage.UpdateUser()`，把 `phone`、`department` 一并写入。
+- 为 `storage/user_test.go` 和 `internal/server/api_test.go` 增加覆盖。
+- 让 Profile 页在加载时真正显示服务端返回的 `phone`、`department`，不要只用本地默认值。
+
+验收标准：
+
+- 更新资料后重新刷新页面，`phone` / `department` 仍然保留。
+- 对应单元测试覆盖通过。
+
+#### 4. `/api/settings` 只是兼容空实现，设置页并没有真正持久化或影响全局 UI
+
+代码证据：
+
+- `internal/server/api.go` 的 `handleSettings()` 只校验 JSON 格式并返回 `"Settings saved"`。
+- `web/src/pages/Settings/GeneralSettings.tsx` 使用硬编码 `initialValues`。
+- `web/src/App.tsx` 顶层 theme/layout 也是硬编码 state，不读取设置页保存结果。
+
+当前问题：
+
+- 设置页已有“站点名称 / 刷新间隔 / 通知 / 主题 / 紧凑模式 / 显示资源数量”表单。
+- 但这些值既不进数据库，也不稳定保存在浏览器，更不会驱动全局布局/主题行为。
+- 当前更像是占位 UI，不是产品功能。
+
+建议执行：
+
+- 先确定最小策略：
+  - 方案 A：明确声明这些设置是浏览器本地偏好，统一保存到 localStorage，并在 `App.tsx` 启动时读取。
+  - 方案 B：补服务端持久化模型，按用户保存设置。
+- 无论选哪种，都要让 Settings 页加载真实当前值，而不是每次回到默认值。
+
+验收标准：
+
+- 修改设置后刷新页面，设置值仍然存在。
+- 至少 `theme` / `siteName` / `refreshInterval` 中的一部分能真实影响 UI 或轮询行为。
+
+#### 5. RDP 功能默认构建产物并不真正可用
+
+代码证据：
+
+- `internal/agent/rdp/handler.go` 只在 `//go:build rdp && !darwin` 条件下启用。
+- 默认构建会落到 `internal/agent/rdp/rdp_stub.go`，其中 `HandleDesktopNew/Data/Close` 都是 no-op。
+- `.github/workflows/build.yml` 和 README 的默认 `go build` 都没有加 `-tags rdp`。
+
+当前问题：
+
+- 文档和 UI 都把桌面/RDP 视为现成功能。
+- 但默认发行物并未启用真正的 RDP handler，桌面连接主路径在默认构建下只是空实现。
+
+建议执行：
+
+- 二选一：
+  - 方案 A：正式把 `rdp` build tag 接入构建、README 和 CI，并说明平台限制。
+  - 方案 B：把 RDP 标记为实验/可选能力，在 UI 和文档中降级说明，避免默认承诺。
+- 同时增加“默认构建下发起桌面连接”的行为测试或显式错误提示。
+
+验收标准：
+
+- 默认用户能明确知道当前二进制是否支持 RDP。
+- 如果不支持，前端/后端返回明确错误，而不是静默 no-op。
+
+### P2：产品边界和文档仍不一致
+
+#### 6. `remote_control.allowed_targets` 文档声称支持 inventory endpoint，但当前实现只读取配置白名单
+
+代码证据：
+
+- `internal/config/config.go` 注释写的是“host 必须命中 AllowedTargets 或 inventory 中声明的 endpoint”。
+- `internal/server/remote_audit.go` 的 `collectAllowedTargets()` 当前只返回配置中的 `AllowedTargets`，没有从 inventory / resources 派生目标。
+
+当前问题：
+
+- 注释和错误消息里都提到了 inventory。
+- 实际代码没有从 `compute/service/gateway/storage` 提取任何可远控 endpoint。
+
+建议执行：
+
+- 要么补真正的 inventory/resource endpoint 汇总逻辑。
+- 要么收紧文档和注释，明确当前只支持显式配置白名单。
+
+验收标准：
+
+- 配置语义、实现和文档三者一致。
+- 远控被拒绝时，错误提示与实际 allow-list 规则一致。
+
+#### 7. `inventory.watch` 文档仍有历史表述，需要按代码事实改写
+
+代码证据：
+
+- `internal/sync/watcher.go` 当前已经复用 `inventory.Syncer`。
+- 但 `docs/guide/concepts.md` 仍写着“热加载当前只覆盖基础 Agent 同步，不等同完整 sync”。
+
+当前问题：
+
+- 这是过时文档，不是功能缺失。
+- 继续保留会让后续开发误判 inventory watch 仍不完整。
+
+建议执行：
+
+- 同步 `docs/guide/concepts.md`、必要时同步 README/architecture 文档。
+
+验收标准：
+
+- 文档对 `cockpit sync` 与 `inventory.watch` 的描述与当前代码一致。
+
+#### 8. 登录页仍展示 `admin / admin` 默认账号，和当前强制 `ADMIN_PASSWORD` 的启动逻辑矛盾
+
+代码证据：
+
+- `internal/server/server.go` 启动时强制要求 `ADMIN_PASSWORD`，且长度至少 8 位。
+- `web/src/pages/Login/index.tsx` 仍把默认表单值写成 `admin / admin`，并显示“默认账号: admin / admin”。
+
+当前问题：
+
+- 这是明显的产品误导。
+- 在当前实现下，`admin/admin` 并不是合法默认登录方式。
+
+建议执行：
+
+- 删除默认密码展示和默认填充值。
+- 改成提示“管理员账号由 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 初始化”。
+
+验收标准：
+
+- 登录页文案与实际启动要求一致。
+
+#### 9. 前端仍把 `ftp` 暴露为可选远控协议，但主远控后端并未支持
+
+代码证据：
+
+- `web/src/services/remote.ts`、`web/src/components/RemoteServices/index.tsx`、`web/src/components/TerminalModal/index.tsx` 都把 `ftp` 作为可选协议。
+- `internal/server/api_remote.go` 的终端主链路只接受 `ssh` / `telnet` / `vnc`，`handleRemoteSessionCreate` 也未真正打通 FTP 语义。
+
+当前问题：
+
+- UI 暗示支持 FTP，但没有明确的服务端会话语义和浏览器交互实现。
+- 这属于“类型先行，功能未落地”。
+
+建议执行：
+
+- 短期先从前端可选项中移除 `ftp`。
+- 若后续需要，再单独设计 FTP/SFTP 的产品形态，而不是塞进终端模型里。
+
+验收标准：
+
+- 前端协议选项与后端真实支持集合一致。
+
+## 建议优先级（2026-06-23）
+
+1. 先修远控主链路协议一致性：ticket + `Sec-WebSocket-Protocol`。
+2. 再修“保存了但其实没落库”的资料与设置问题。
+3. 然后处理 RDP 默认构建策略和前端残留假接口。
+4. 最后收文档/文案不一致项。
+
 ## 当前判断
 
 当前架构方向合理，但实现重心偏移：
