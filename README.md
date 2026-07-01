@@ -79,6 +79,12 @@ export ADMIN_PASSWORD='change-this-password'
 ./cockpit-agent start -server ws://127.0.0.1:9000/ws -region home -zone datacenter
 ```
 
+也可以使用主二进制的兼容入口：
+
+```bash
+./cockpit agent -server ws://127.0.0.1:9000/ws -region home -zone datacenter
+```
+
 ## 关键配置
 
 默认配置路径优先级：

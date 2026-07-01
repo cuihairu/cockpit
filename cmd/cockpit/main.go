@@ -104,7 +104,7 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  init       Initialize configuration and directories")
 	fmt.Println("  server     Start Cockpit Server")
-	fmt.Println("  agent      Start Cockpit Agent (use cockpit-agent instead)")
+	fmt.Println("  agent      Start Cockpit Agent")
 	fmt.Println("  sync       Sync inventory to database")
 	fmt.Println("  status     Show status")
 	fmt.Println("  version    Show version")
@@ -145,15 +145,42 @@ func handleServer() {
 }
 
 func handleAgent() {
-	fmt.Println("Agent functionality has been moved to cockpit-agent")
-	fmt.Println()
-	fmt.Println("Use the following to start an agent:")
-	fmt.Println("  ./cockpit-agent start -server ws://your-server.com:9000")
-	fmt.Println()
-	fmt.Println("Or download binaries from:")
-	fmt.Println("  https://github.com/cuihairu/cockpit/releases")
-	fmt.Println()
-	os.Exit(1)
+	cmd := flag.NewFlagSet("agent", flag.ExitOnError)
+	startCmd := &cli.AgentStartCmd{}
+	startCmd.Bind(cmd)
+	help := cmd.Bool("h", false, "Show help")
+
+	args := os.Args[2:]
+	if len(args) > 0 && args[0] == "start" {
+		args = args[1:]
+	}
+
+	cmd.Parse(args)
+
+	if *help {
+		fmt.Println("Start Cockpit Agent")
+		fmt.Println()
+		cmd.PrintDefaults()
+		fmt.Println()
+		fmt.Println("Examples:")
+		fmt.Println("  cockpit agent -server ws://localhost:9000/ws")
+		fmt.Println("  cockpit agent -server wss://example.com:9000/ws -region home -zone dc-a")
+		fmt.Println("  cockpit agent start -server ws://localhost:9000/ws")
+		fmt.Println()
+		fmt.Println("Compatibility:")
+		fmt.Println("  cockpit-agent start ... remains supported")
+		os.Exit(0)
+	}
+
+	if err := startCmd.Validate(); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		cmd.PrintDefaults()
+		os.Exit(1)
+	}
+
+	if err := startCmd.Run(); err != nil {
+		log.Fatalf("%v", err)
+	}
 }
 
 func handleInit() {

@@ -37,7 +37,7 @@ export const getVirtDisplay = (agent: Agent) => {
 }
 
 export interface RemoteService {
-  protocol: 'ssh' | 'rdp' | 'vnc' | 'telnet' | 'ftp'
+  protocol: 'ssh' | 'rdp' | 'vnc' | 'telnet'
   host: string
   port: number
   name: string
@@ -54,7 +54,7 @@ export const getRemoteServices = (agent: Agent | null): RemoteService[] => {
   for (const [key, value] of Object.entries(remoteCap.metadata)) {
     if (typeof value === 'object' && value !== null && 'running' in value) {
       const service = value as { host: string; port: number; name: string; running: boolean }
-      if (service.running && ['ssh', 'rdp', 'vnc', 'telnet', 'ftp'].includes(key)) {
+      if (service.running && ['ssh', 'rdp', 'vnc', 'telnet'].includes(key)) {
         services.push({
           protocol: key as RemoteService['protocol'],
           host: service.host || '127.0.0.1',

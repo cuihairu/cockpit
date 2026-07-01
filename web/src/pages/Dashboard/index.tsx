@@ -10,15 +10,17 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/services/api'
 import type { ColumnsType } from 'antd/es/table'
 import type { Agent } from '@/types'
+import { useSettingsContext } from '@/contexts/useSettingsContext'
 import './index.less'
 
 const { Title, Text } = Typography
 
 const Dashboard = () => {
+  const { settings } = useSettingsContext()
   const { data: status, refetch } = useQuery({
     queryKey: ['status'],
     queryFn: () => api.getStatus(),
-    refetchInterval: 30000,
+    refetchInterval: settings.refreshInterval * 1000,
   })
 
   const { data: agents } = useQuery({
@@ -145,7 +147,7 @@ const Dashboard = () => {
       </div>
 
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        {resourceCards.map((card, index) => (
+        {(settings.showResourceCount ? resourceCards : resourceCards.slice(0, 4)).map((card, index) => (
           <Col xs={24} sm={12} md={8} lg={4} key={index}>
             <div className={`stat-card ${card.color}`}>
               <div style={{ fontSize: 20, marginBottom: 8 }}>{card.icon}</div>

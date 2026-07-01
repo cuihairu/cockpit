@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, Card, Space, Tabs, Table } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+import { useSettingsContext } from '@/contexts/useSettingsContext'
 import { useResources } from './useResources'
 import {
   certificateColumns,
@@ -15,6 +16,7 @@ import {
 const PAGE_SIZE = 20
 
 const Resources = () => {
+  const { settings } = useSettingsContext()
   const [activeTab, setActiveTab] = useState('compute')
   const { loading, computeInstances, domains, certificates, services, gateways, storages, fetchAll } =
     useResources()
@@ -65,6 +67,12 @@ const Resources = () => {
       children: buildTable(storageColumns, storages),
     },
   ]
+  const visibleTabItems = settings.showResourceCount
+    ? tabItems
+    : tabItems.map((item) => ({
+        ...item,
+        label: item.label.replace(/\s*\(\d+\)$/, ''),
+      }))
 
   return (
     <div className="page-container">
@@ -81,10 +89,17 @@ const Resources = () => {
           </Space>
         }
       >
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
+        <Tabs activeKey={activeKeyFallback(activeTab, visibleTabItems)} onChange={setActiveTab} items={visibleTabItems} />
       </Card>
     </div>
   )
+}
+
+const activeKeyFallback = (activeKey: string, items: Array<{ key: string }>) => {
+  if (items.some((item) => item.key === activeKey)) {
+    return activeKey
+  }
+  return items[0]?.key || activeKey
 }
 
 export default Resources

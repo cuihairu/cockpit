@@ -98,7 +98,7 @@ func TestLoadInventoryWithDB(t *testing.T) {
 
 	w, _ := NewWatcher(Config{
 		InventoryPath: invPath,
-		DB:           db,
+		DB:            db,
 	})
 	defer w.watcher.Close()
 
@@ -173,7 +173,7 @@ func TestApplyInventoryWithRealDB(t *testing.T) {
 	db := testSyncDB(t)
 	w, _ := NewWatcher(Config{
 		InventoryPath: "test.yaml",
-		DB:           db,
+		DB:            db,
 	})
 	defer w.watcher.Close()
 
@@ -222,7 +222,7 @@ func TestApplyInventoryAutoDetectCapabilities(t *testing.T) {
 	db := testSyncDB(t)
 	w, _ := NewWatcher(Config{
 		InventoryPath: "test.yaml",
-		DB:           db,
+		DB:            db,
 	})
 	defer w.watcher.Close()
 
@@ -347,6 +347,46 @@ func TestStartAndStop(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	w.Stop()
+}
+
+func TestStartStrictFailsOnInvalidInitialInventory(t *testing.T) {
+	dir := t.TempDir()
+	invPath := filepath.Join(dir, "inventory.yaml")
+	if err := os.WriteFile(invPath, []byte("not: [valid"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := NewWatcher(Config{
+		InventoryPath: invPath,
+		Strict:        true,
+	})
+	if err != nil {
+		t.Fatalf("NewWatcher() error = %v", err)
+	}
+
+	if err := w.Start(); err == nil {
+		t.Fatal("Start() expected error for invalid inventory in strict mode")
+	}
+}
+
+func TestStartNonStrictAllowsInvalidInitialInventory(t *testing.T) {
+	dir := t.TempDir()
+	invPath := filepath.Join(dir, "inventory.yaml")
+	if err := os.WriteFile(invPath, []byte("not: [valid"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := NewWatcher(Config{
+		InventoryPath: invPath,
+	})
+	if err != nil {
+		t.Fatalf("NewWatcher() error = %v", err)
+	}
+	defer w.Stop()
+
+	if err := w.Start(); err != nil {
+		t.Fatalf("Start() unexpected error: %v", err)
+	}
 }
 
 func TestManagerStartStop(t *testing.T) {

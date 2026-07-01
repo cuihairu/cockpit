@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/inventory"
 )
 
@@ -148,5 +149,33 @@ func TestWriteConfig_IsValidYAML(t *testing.T) {
 	}
 	if string(data[:1]) != "#" {
 		t.Fatalf("expected config to start with comment header, got %q", string(data[:1]))
+	}
+}
+
+func TestWriteConfig_IncludesRuntimeDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.yaml")
+	if err := writeConfig(path); err != nil {
+		t.Fatalf("writeConfig: %v", err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("generated config should load: %v", err)
+	}
+	if cfg.Inventory == nil {
+		t.Fatal("generated config should include inventory settings")
+	}
+	if cfg.Inventory.Strict {
+		t.Fatal("generated config should default inventory.strict to false")
+	}
+	if cfg.RemoteControl == nil {
+		t.Fatal("generated config should include remote_control settings")
+	}
+	if cfg.RemoteControl.AllowArbitraryTarget {
+		t.Fatal("generated config should default remote_control.allow_arbitrary_target to false")
+	}
+	if len(cfg.RemoteControl.AllowedTargets) != 0 {
+		t.Fatalf("generated config allowed_targets = %#v, want empty", cfg.RemoteControl.AllowedTargets)
 	}
 }

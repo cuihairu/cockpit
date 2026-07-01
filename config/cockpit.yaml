@@ -13,6 +13,8 @@ database:
 inventory:
   path: "./examples/inventory.yaml"
   watch: false
+  # true 时 inventory 路径缺失、解析失败或初始同步失败会阻止 Server 启动
+  strict: false
 
 # JWT 认证配置
 jwt:
@@ -61,3 +63,9 @@ notification:
 # Agent 配置
 agent:
   api_key_header: "X-API-Key"
+
+# 远程控制目标白名单
+remote_control:
+  allow_arbitrary_target: false
+  # 默认只允许显式列出的主机/IP；开发环境如需任意目标可改为 true
+  allowed_targets: []

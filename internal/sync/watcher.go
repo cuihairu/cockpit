@@ -15,21 +15,23 @@ import (
 
 // Watcher watches inventory file for changes
 type Watcher struct {
-	mu           sync.RWMutex
+	mu            sync.RWMutex
 	inventoryPath string
-	db           *storage.DB
-	watcher      *fsnotify.Watcher
-	ctx          context.Context
-	cancel       context.CancelFunc
-	lastModTime  time.Time
-	onReload     func(*inventory.Inventory) error
+	db            *storage.DB
+	watcher       *fsnotify.Watcher
+	ctx           context.Context
+	cancel        context.CancelFunc
+	lastModTime   time.Time
+	onReload      func(*inventory.Inventory) error
+	strict        bool
 }
 
 // Config watcher configuration
 type Config struct {
 	InventoryPath string
-	DB           *storage.DB
-	OnReload     func(*inventory.Inventory) error
+	DB            *storage.DB
+	OnReload      func(*inventory.Inventory) error
+	Strict        bool
 }
 
 // NewWatcher creates file watcher
@@ -43,11 +45,12 @@ func NewWatcher(cfg Config) (*Watcher, error) {
 
 	return &Watcher{
 		inventoryPath: cfg.InventoryPath,
-		db:           cfg.DB,
-		watcher:      watcher,
-		ctx:          ctx,
-		cancel:       cancel,
-		onReload:     cfg.OnReload,
+		db:            cfg.DB,
+		watcher:       watcher,
+		ctx:           ctx,
+		cancel:        cancel,
+		onReload:      cfg.OnReload,
+		strict:        cfg.Strict,
 	}, nil
 }
 
@@ -56,11 +59,16 @@ func (w *Watcher) Start() error {
 	// Add watch to directory
 	dir := filepath.Dir(w.inventoryPath)
 	if err := w.watcher.Add(dir); err != nil {
+		w.Stop()
 		return err
 	}
 
 	// Initial load
 	if err := w.loadInventory(); err != nil {
+		if w.strict {
+			w.Stop()
+			return err
+		}
 		log.Printf("Initial load failed: %v", err)
 	}
 
@@ -238,11 +246,14 @@ type Manager struct {
 
 // NewManager creates sync manager
 func NewManager(inventoryPath string, db *storage.DB) (*Manager, error) {
-	cfg := Config{
+	return NewManagerWithConfig(Config{
 		InventoryPath: inventoryPath,
-		DB:           db,
-	}
+		DB:            db,
+	})
+}
 
+// NewManagerWithConfig creates sync manager with full watcher configuration.
+func NewManagerWithConfig(cfg Config) (*Manager, error) {
 	watcher, err := NewWatcher(cfg)
 	if err != nil {
 		return nil, err
@@ -250,7 +261,7 @@ func NewManager(inventoryPath string, db *storage.DB) (*Manager, error) {
 
 	return &Manager{
 		watcher: watcher,
-		db:      db,
+		db:      cfg.DB,
 	}, nil
 }
 

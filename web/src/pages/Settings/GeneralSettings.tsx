@@ -1,23 +1,40 @@
 import { Button, Form, Input, InputNumber, Select, Switch, Tabs } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
+import { useEffect } from 'react'
+import type { UISettings } from '@/contexts/settingsTypes'
 
 interface GeneralSettingsProps {
   loading: boolean
+  settings: UISettings
   onSave: (values: GeneralSettingsValues) => void
 }
 
-interface GeneralSettingsValues {
+export interface GeneralSettingsValues {
   siteName?: string
   refreshInterval?: number | null
   enableNotifications?: boolean
-  theme?: string
+  theme?: 'light' | 'dark' | 'auto'
   compactMode?: boolean
   showResourceCount?: boolean
 }
 
 // 通用设置：基础设置 + 显示设置
-export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ loading, onSave }) => {
+export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ loading, settings, onSave }) => {
   const [generalForm] = Form.useForm()
+  const [displayForm] = Form.useForm()
+
+  useEffect(() => {
+    generalForm.setFieldsValue({
+      siteName: settings.siteName,
+      refreshInterval: settings.refreshInterval,
+      enableNotifications: settings.enableNotifications,
+    })
+    displayForm.setFieldsValue({
+      theme: settings.theme,
+      compactMode: settings.compactMode,
+      showResourceCount: settings.showResourceCount,
+    })
+  }, [displayForm, generalForm, settings])
 
   const items = [
     {
@@ -27,11 +44,6 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ loading, onSav
         <Form
           form={generalForm}
           layout="vertical"
-          initialValues={{
-            siteName: 'Cockpit',
-            refreshInterval: 30,
-            enableNotifications: true,
-          }}
           onFinish={onSave}
         >
           <Form.Item label="站点名称" name="siteName">
@@ -56,8 +68,9 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ loading, onSav
       label: '显示设置',
       children: (
         <Form
+          form={displayForm}
           layout="vertical"
-          initialValues={{ theme: 'light', compactMode: false, showResourceCount: true }}
+          onFinish={onSave}
         >
           <Form.Item label="主题" name="theme">
             <Select style={{ width: 200 }}>

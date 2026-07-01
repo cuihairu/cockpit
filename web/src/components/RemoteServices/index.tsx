@@ -4,12 +4,11 @@ import {
   CodeOutlined,
   DesktopOutlined,
   EyeOutlined,
-  CloudServerOutlined,
   LinkOutlined,
 } from '@ant-design/icons';
 
 // 远程服务类型
-export type RemoteProtocol = 'ssh' | 'rdp' | 'vnc' | 'telnet' | 'ftp';
+export type RemoteProtocol = 'ssh' | 'rdp' | 'vnc' | 'telnet';
 
 export interface RemoteService {
   protocol: RemoteProtocol;
@@ -32,7 +31,6 @@ const PROTOCOL_CONFIG: Record<RemoteProtocol, { name: string; icon: React.ReactN
   rdp: { name: 'RDP', icon: <DesktopOutlined />, color: 'green', defaultPort: 3389 },
   vnc: { name: 'VNC', icon: <EyeOutlined />, color: 'orange', defaultPort: 5900 },
   telnet: { name: 'Telnet', icon: <CodeOutlined />, color: 'default', defaultPort: 23 },
-  ftp: { name: 'FTP', icon: <CloudServerOutlined />, color: 'cyan', defaultPort: 21 },
 };
 
 const RemoteServicesCard: React.FC<RemoteServicesCardProps> = ({

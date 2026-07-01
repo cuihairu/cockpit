@@ -132,6 +132,8 @@ func TestUpdateUser(t *testing.T) {
 	db.CreateUser(user)
 
 	user.Email = "new@example.com"
+	user.Phone = "13800138000"
+	user.Department = "SRE"
 	user.Role = "admin"
 	if err := db.UpdateUser(user); err != nil {
 		t.Fatalf("UpdateUser() error = %v", err)
@@ -143,6 +145,12 @@ func TestUpdateUser(t *testing.T) {
 	}
 	if got.Role != "admin" {
 		t.Errorf("Role = %v, want admin", got.Role)
+	}
+	if got.Phone != "13800138000" {
+		t.Errorf("Phone = %v, want 13800138000", got.Phone)
+	}
+	if got.Department != "SRE" {
+		t.Errorf("Department = %v, want SRE", got.Department)
 	}
 }
 

@@ -157,7 +157,7 @@ func (s *Server) Start() error {
 	}
 
 	if err := s.startInventorySync(); err != nil {
-		log.Printf("Failed to start inventory sync: %v", err)
+		return fmt.Errorf("start inventory sync: %w", err)
 	}
 
 	// 注册所有路由
@@ -270,14 +270,31 @@ func (s *Server) startInventorySync() error {
 		return nil
 	}
 	if s.cfg.Inventory.Path == "" {
-		return fmt.Errorf("inventory.watch enabled but inventory.path is empty")
+		err := fmt.Errorf("inventory.watch enabled but inventory.path is empty")
+		if s.cfg.Inventory.Strict {
+			return err
+		}
+		log.Printf("Inventory sync disabled: %v", err)
+		return nil
 	}
 
-	manager, err := inventorysync.NewManager(s.cfg.Inventory.Path, s.db)
+	manager, err := inventorysync.NewManagerWithConfig(inventorysync.Config{
+		InventoryPath: s.cfg.Inventory.Path,
+		DB:            s.db,
+		Strict:        s.cfg.Inventory.Strict,
+	})
 	if err != nil {
+		if !s.cfg.Inventory.Strict {
+			log.Printf("Inventory sync disabled: %v", err)
+			return nil
+		}
 		return err
 	}
 	if err := manager.Start(); err != nil {
+		if !s.cfg.Inventory.Strict {
+			log.Printf("Inventory initial sync failed; watcher not started: %v", err)
+			return nil
+		}
 		return err
 	}
 	s.inventorySync = manager

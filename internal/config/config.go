@@ -23,7 +23,7 @@ type Config struct {
 // RemoteControlConfig 远程控制（Terminal/Desktop/VNC）相关配置
 type RemoteControlConfig struct {
 	// AllowArbitraryTarget 为 true 时跳过目标 allow-list 校验（仅开发/调试环境启用）。
-	// 默认 false：host 必须命中 AllowedTargets 或 inventory 中声明的 endpoint。
+	// 默认 false：host 必须命中 AllowedTargets。
 	AllowArbitraryTarget bool `yaml:"allow_arbitrary_target"`
 	// AllowedTargets 显式允许的目标主机名/IP 列表（端口不限）。
 	AllowedTargets []string `yaml:"allowed_targets"`
@@ -90,8 +90,9 @@ type AgentConfig struct {
 
 // InventoryConfig Inventory 配置
 type InventoryConfig struct {
-	Path  string `yaml:"path,omitempty"`  // inventory 文件路径
-	Watch bool   `yaml:"watch,omitempty"` // 是否监听文件变化
+	Path   string `yaml:"path,omitempty"`   // inventory 文件路径
+	Watch  bool   `yaml:"watch,omitempty"`  // 是否监听文件变化
+	Strict bool   `yaml:"strict,omitempty"` // 是否在启动时严格校验 inventory
 }
 
 // Load 从文件加载配置
@@ -154,8 +155,9 @@ func LoadOrDefault(path string) *Config {
 				APIKeyHeader: "X-API-Key",
 			},
 			Inventory: &InventoryConfig{
-				Path:  "",
-				Watch: false,
+				Path:   "",
+				Watch:  false,
+				Strict: false,
 			},
 		}
 	}

@@ -1,7 +1,7 @@
-import { useState, lazy, Suspense } from 'react'
+import { useEffect, useMemo, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { App as AntdApp, Spin } from 'antd'
+import { App as AntdApp, Spin, theme as antdTheme } from 'antd'
 import ProLayout, { ProLayoutProps } from '@ant-design/pro-layout'
 import { Button, Dropdown, Avatar, Space, Input, ConfigProvider } from 'antd'
 import {
@@ -16,7 +16,9 @@ import {
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
 import ErrorBoundary from './components/ErrorBoundary'
+import { SettingsProvider } from './contexts/SettingsContext'
 import { UserProvider } from './contexts/UserContext'
+import { useSettingsContext } from './contexts/useSettingsContext'
 import { useUser } from './contexts/useUser'
 import { logger } from '@/utils/logger'
 import logo from '@/assets/logo.svg'
@@ -118,18 +120,25 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 const MainLayout = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const [settings] = useState<{
-    fixSiderbar: boolean
-    layout: 'side' | 'top' | 'mix'
-    theme: 'light' | 'dark'
-    colorWeak: boolean
-  }>({
-    fixSiderbar: true,
-    layout: 'mix',
-    theme: 'light',
-    colorWeak: false,
-  })
+  const { settings } = useSettingsContext()
   const { user, logout } = useUser()
+  const prefersDark = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-color-scheme: dark)').matches
+  const resolvedTheme = settings.theme === 'auto'
+    ? (prefersDark ? 'dark' : 'light')
+    : settings.theme
+
+  useEffect(() => {
+    document.title = settings.siteName
+  }, [settings.siteName])
+
+  const layoutSettings = useMemo(() => ({
+    fixSiderbar: true,
+    layout: 'mix' as const,
+    theme: resolvedTheme === 'dark' ? 'dark' as const : 'light' as const,
+    colorWeak: false,
+  }), [resolvedTheme])
 
   const handleLogout = () => {
     logout()
@@ -198,10 +207,10 @@ const MainLayout = () => {
 
   return (
     <ProLayout
-      {...settings}
-      title="Cockpit"
+      {...layoutSettings}
+      title={settings.siteName}
       logo={logo}
-      navTheme="light"
+      navTheme={resolvedTheme === 'dark' ? 'dark' : 'light'}
       contentWidth="Fluid"
       location={{ pathname: location.pathname }}
       route={routeConfig}
@@ -249,55 +258,78 @@ const MainLayout = () => {
       }}
       menuHeaderRender={false}
     >
-      <Suspense fallback={<PageLoading />}>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/resources" element={<Resources />} />
-          <Route path="/resources/*" element={<Resources />} />
-          <Route path="/workbench" element={<Workbench />} />
-          <Route path="/agents" element={<Navigate to="/workbench" replace />} />
-          <Route path="/monitor" element={<Monitor />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/settings/audit-logs" element={<AuditLogs />} />
-          <Route path="/profile" element={<Profile />} />
-        </Routes>
-      </Suspense>
+      <div className={settings.compactMode ? 'app-density-compact' : undefined}>
+        <Suspense fallback={<PageLoading />}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/resources" element={<Resources />} />
+            <Route path="/resources/*" element={<Resources />} />
+            <Route path="/workbench" element={<Workbench />} />
+            <Route path="/agents" element={<Navigate to="/workbench" replace />} />
+            <Route path="/monitor" element={<Monitor />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings/audit-logs" element={<AuditLogs />} />
+            <Route path="/profile" element={<Profile />} />
+          </Routes>
+        </Suspense>
+      </div>
     </ProLayout>
   )
 }
 
-const App = () => {
+const AppShell = () => {
+  const { settings } = useSettingsContext()
+  const prefersDark = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-color-scheme: dark)').matches
+  const resolvedTheme = settings.theme === 'auto'
+    ? (prefersDark ? 'dark' : 'light')
+    : settings.theme
+  const algorithm = useMemo(() => {
+    if (resolvedTheme === 'dark') {
+      return antdTheme.darkAlgorithm
+    }
+    return antdTheme.defaultAlgorithm
+  }, [resolvedTheme])
+
   return (
-    <ErrorBoundary>
-      <ConfigProvider
-        theme={{
-          token: {
-            colorPrimary: '#165DFF',
-          },
-        }}
-      >
-        <AntdApp>
-          <QueryClientProvider client={queryClient}>
-            <UserProvider>
-              <BrowserRouter>
-                <Routes>
-                  <Route path="/login" element={<Login />} />
-                  <Route
-                    path="/*"
-                    element={
-                      <ProtectedRoute>
-                        <MainLayout />
-                      </ProtectedRoute>
-                    }
-                  />
-                </Routes>
-              </BrowserRouter>
-            </UserProvider>
-          </QueryClientProvider>
-        </AntdApp>
-      </ConfigProvider>
-    </ErrorBoundary>
+    <ConfigProvider
+      theme={{
+        algorithm,
+        token: {
+          colorPrimary: '#165DFF',
+        },
+      }}
+    >
+      <AntdApp>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route
+              path="/*"
+              element={
+                <ProtectedRoute>
+                  <MainLayout />
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+        </BrowserRouter>
+      </AntdApp>
+    </ConfigProvider>
   )
 }
+
+const App = () => (
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <UserProvider>
+        <SettingsProvider>
+          <AppShell />
+        </SettingsProvider>
+      </UserProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
+)
 
 export default App

@@ -1,31 +1,23 @@
-import axios from 'axios';
-import { logger } from '@/utils/logger';
+import axios from 'axios'
+import { logger } from '@/utils/logger'
 
-// 远程连接类型
-export type RemoteProtocol = 'ssh' | 'rdp' | 'vnc' | 'telnet' | 'ftp';
+export type RemoteProtocol = 'ssh' | 'rdp' | 'vnc' | 'telnet'
 
-// 远程连接配置
-export interface RemoteConnection {
-  id: string;
-  name: string;
-  agentId: string;
-  protocol: RemoteProtocol;
-  host: string;
-  port: number;
-  username?: string;
-  description?: string;
-  createdAt: string;
+export interface RemoteTicketRequest {
+  agent_id: string
+  host: string
+  port: number
+  protocol: RemoteProtocol
+  username?: string
+  password?: string
+  domain?: string
+  width?: number
+  height?: number
 }
 
-// 创建远程连接请求
-export interface CreateRemoteConnectionRequest {
-  name: string;
-  agentId: string;
-  protocol: RemoteProtocol;
-  host: string;
-  port: number;
-  username?: string;
-  description?: string;
+export interface RemoteTicketResponse {
+  ticket: string
+  expires_at: string
 }
 
 const remoteClient = axios.create({
@@ -34,66 +26,32 @@ const remoteClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-});
+})
 
-// 请求拦截器
 remoteClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('token')
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      config.headers.Authorization = `Bearer ${token}`
     }
-    return config;
+    return config
   },
   (error) => Promise.reject(error)
-);
+)
 
-// 响应拦截器
 remoteClient.interceptors.response.use(
   (response) => response.data,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('username');
-      window.location.href = '/login';
+      localStorage.removeItem('token')
+      localStorage.removeItem('username')
+      window.location.href = '/login'
     }
-    logger.error('Remote API Error:', error);
-    return Promise.reject(error);
+    logger.error('Remote API Error:', error)
+    return Promise.reject(error)
   }
-);
+)
 
-// 获取所有远程连接配置
-export async function getRemoteConnections(agentId?: string): Promise<RemoteConnection[]> {
-  const params = agentId ? { agent_id: agentId } : {};
-  return remoteClient.get<unknown, RemoteConnection[]>('/connections', { params });
-}
-
-// 创建远程连接配置
-export async function createRemoteConnection(
-  data: CreateRemoteConnectionRequest
-): Promise<RemoteConnection> {
-  return remoteClient.post<unknown, RemoteConnection>('/connections', data);
-}
-
-// 更新远程连接配置
-export async function updateRemoteConnection(
-  id: string,
-  data: Partial<CreateRemoteConnectionRequest>
-): Promise<RemoteConnection> {
-  return remoteClient.put<unknown, RemoteConnection>(`/connections/${id}`, data);
-}
-
-// 删除远程连接配置
-export async function deleteRemoteConnection(id: string): Promise<void> {
-  return remoteClient.delete(`/connections/${id}`);
-}
-
-// 启动远程终端会话
-export async function startTerminalSession(params: {
-  agentId: string;
-  host: string;
-  port: number;
-  protocol: RemoteProtocol;
-}): Promise<{ sessionId: string }> {
-  return remoteClient.post<unknown, { sessionId: string }>('/terminal/start', params);
+export async function createRemoteTicket(data: RemoteTicketRequest): Promise<RemoteTicketResponse> {
+  return remoteClient.post<unknown, RemoteTicketResponse>('/tickets', data)
 }

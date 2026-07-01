@@ -2014,6 +2014,59 @@ func TestServeAPICORSOriginEnv(t *testing.T) {
 	}
 }
 
+func TestHandleCurrentUserProfilePersistsPhoneAndDepartment(t *testing.T) {
+	s := newTestServerWithDB(t)
+
+	user := &storage.User{
+		ID:         "user-1",
+		Username:   "alice",
+		Password:   "hashed-password",
+		Email:      "old@example.com",
+		Phone:      "13000000000",
+		Department: "Old Dept",
+		Role:       "user",
+	}
+	if err := s.db.CreateUser(user); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+
+	body := []byte(`{"email":"new@example.com","phone":"13800138000","department":"Platform"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/me/profile", bytes.NewReader(body))
+	req = withUserID(req, user.ID)
+
+	rec := httptest.NewRecorder()
+	s.handleCurrentUserProfile(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("Decode response: %v", err)
+	}
+	if result["phone"] != "13800138000" {
+		t.Errorf("response phone = %v, want 13800138000", result["phone"])
+	}
+	if result["department"] != "Platform" {
+		t.Errorf("response department = %v, want Platform", result["department"])
+	}
+
+	got, err := s.db.GetUserByID(user.ID)
+	if err != nil {
+		t.Fatalf("GetUserByID() error = %v", err)
+	}
+	if got.Email != "new@example.com" {
+		t.Errorf("Email = %v, want new@example.com", got.Email)
+	}
+	if got.Phone != "13800138000" {
+		t.Errorf("Phone = %v, want 13800138000", got.Phone)
+	}
+	if got.Department != "Platform" {
+		t.Errorf("Department = %v, want Platform", got.Department)
+	}
+}
+
 // ============ Helper functions for user action routing ============
 
 // makeUserHandler creates a handler that routes to handleUserDelete/Update based on method

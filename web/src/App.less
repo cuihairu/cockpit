@@ -439,6 +439,34 @@ body {
   }
 }
 
+.app-density-compact {
+  .page-container,
+  .dashboard-container {
+    padding: 16px;
+  }
+
+  .ant-card {
+    .ant-card-head {
+      min-height: 48px;
+      padding: 0 16px;
+    }
+
+    .ant-card-body {
+      padding: 16px;
+    }
+  }
+
+  .ant-tabs > .ant-tabs-nav {
+    margin-bottom: 16px;
+  }
+
+  .ant-table-wrapper .ant-table-thead > tr > th,
+  .ant-table-wrapper .ant-table-tbody > tr > td {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+}
+
 // 响应式
 @media (max-width: 768px) {
   .ant-pro-top-nav-header {

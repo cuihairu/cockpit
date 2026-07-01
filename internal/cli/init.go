@@ -85,6 +85,7 @@ database:
 inventory:
   path: ./inventory/example.yaml
   watch: false
+  strict: false
 
 jwt:
   secret: change-me-in-production
@@ -104,6 +105,11 @@ jwt:
 #   enabled: true
 #   herald:
 #     base_url: http://localhost:8080
+
+# Remote access target allow-list
+remote_control:
+  allow_arbitrary_target: false
+  allowed_targets: []
 `
 	return os.WriteFile(path, []byte(yaml), 0644)
 }

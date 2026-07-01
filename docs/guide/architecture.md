@@ -33,7 +33,7 @@ Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连接 Ser
 | Cockpit Server | `cmd/cockpit` | HTTP API、Web UI 静态资源、Agent WebSocket 注册与路由、SQLite 持久化、认证、审计、告警、反向代理与远程会话编排 | 直接访问 NAT 后内网服务、直接采集 Agent 本机指标 |
 | Cockpit Agent | `cmd/cockpit-agent` | 节点能力检测、心跳和系统指标上报、RPC/代理/远程桌面执行、连接本机或本网络可达目标 | 用户认证、全局状态持久化、跨 Agent 调度决策 |
 | Web UI | `web/` | 登录、资源视图、工作台、监控、设置、远程连接交互 | 保存最终运行状态、绕过 Server 访问 Agent |
-| CLI | `cockpit init/sync/status/server` | 本地初始化、inventory 同步、状态查询、启动 Server | Agent 启动，Agent 已拆到 `cockpit-agent` |
+| CLI | `cockpit init/sync/status/server/agent` | 本地初始化、inventory 同步、状态查询、启动 Server；`cockpit agent` 兼容 `cockpit-agent start` 的启动参数 | 长期运行时的 Agent 职责仍在 Agent 进程内 |
 
 ## 数据边界
 
@@ -43,7 +43,7 @@ Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连接 Ser
 | Inventory YAML | `inventory.path` 或 `cockpit sync -inventory` | 声明式资产清单 | 手动 `cockpit sync` 或 `inventory.watch` 热加载都会通过同一套 Syncer 写入数据库 |
 | SQLite | `database.path` | 运行时查询和状态存储 | Server/CLI 打开时自动迁移 |
 | Agent Registry | Server 内存 | 当前在线 Agent 连接池和待响应 RPC | 进程内状态，Server 重启后丢失 |
-| Web UI 本地存储 | Browser `localStorage` | JWT、部分远程桌面连接偏好 | 浏览器侧状态，不作为系统真相源 |
+| Web UI 本地存储 | Browser `localStorage` | JWT、远控偏好、主题/站点名称/刷新间隔等 UI 本地偏好 | 浏览器侧状态，不作为系统真相源 |
 
 当前的事实源不是单一的。Inventory 是声明式资产输入，SQLite 是 API 和 UI 的运行时查询面，Agent 心跳会更新在线状态和系统指标。需要区分“资产应当存在”和“节点当前在线/指标当前值”。
 
@@ -76,7 +76,7 @@ Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连接 Ser
 
 ### Agent 注册与心跳
 
-1. `cockpit-agent start -server ws://host:9000/ws` 连接 Server。
+1. `cockpit-agent start -server ws://host:9000/ws` 连接 Server；也可使用兼容入口 `cockpit agent -server ws://host:9000/ws`。
 2. Agent 运行能力检测器，形成 capability 列表。
 3. Agent 首包必须是 `register`。
 4. Server 校验重复连接和已配置的 Agent secret，接受后写入 SQLite 并加入内存 Registry。
@@ -93,7 +93,7 @@ Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连接 Ser
 - Gateways
 - Storages
 
-Server 的 `inventory.watch: true` 会监听单个 inventory 文件并热加载，当前实现复用 `inventory.Syncer`，与 `cockpit sync` 走同一套资源同步逻辑。
+Server 的 `inventory.watch: true` 会监听单个 inventory 文件并热加载，当前实现复用 `inventory.Syncer`，与 `cockpit sync` 走同一套资源同步逻辑。`inventory.strict: true` 会把 inventory 路径缺失、解析失败或初始同步失败视为启动错误；默认 `false` 时只记录日志并继续启动 Server。
 
 ### HTTP API 与 Web UI
 
@@ -125,6 +125,7 @@ Web UI 默认请求 `/api`。公开接口包括登录、Token 刷新、TOTP 验�
 5. Agent 连接目标服务并把数据通过 Server 转发回浏览器。
 
 这个边界保证浏览器不需要知道内网拓扑，也不需要直接连 Agent。
+远控目标默认只允许 `remote_control.allowed_targets` 中显式配置的 host；RDP 桌面还要求 Agent 使用 `rdp` build tag 构建，默认构建会返回明确的不支持错误。
 
 ## 协议边界
 
@@ -164,5 +165,5 @@ Server 与 Agent 的消息统一为：
 - Inventory 的目录拆分模型尚未成为主要实现路径；当前 CLI 示例和 parser 以单文件 `version: v1` YAML 为准。
 - `internal/agent/rpc` 的 SystemProvider 始终注册；Docker/PVE/OpenWrt Provider 由 `Agent.setupProviders` 按检测到的 capability 和环境变量（如 `DOCKER_HOST`、`PVE_TOKEN_ID`、`OPENWRT_HOST` 等）条件注册，凭据缺失时仅记录日志跳过，不影响基础心跳。
 - `/api/remote/sessions` 目前是内存会话登记，不是完整连接配置持久化。
-- Web UI 中部分偏好配置保存在浏览器本地，不进入 Server 数据库。
+- Web UI 中部分偏好配置保存在浏览器本地，不进入 Server 数据库；`/api/settings` 当前仅作为兼容入口，前端本地偏好以浏览器存储值为准。
 - `docs/archive`（原 `docs/superpowers`）保存 TOTP、通知模块等历史设计稿和实施计划，仅供追溯，不代表当前运行架构；详见 [`docs/archive/README.md`](../archive/README.md)。

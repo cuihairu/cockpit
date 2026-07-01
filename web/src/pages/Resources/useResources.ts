@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Certificate, ComputeInstance, Domain, Gateway, Service, Storage } from '@/types'
 import { api } from '@/services/api'
+import { useSettingsContext } from '@/contexts/useSettingsContext'
 
 interface ResourcesData {
   computeInstances: ComputeInstance[]
@@ -34,6 +35,7 @@ const EMPTY_RESOURCES: ResourcesData = {
 
 // 统一管理资源获取与状态，复用全局 QueryClient 缓存与刷新能力
 export const useResources = (): ResourceState => {
+  const { settings } = useSettingsContext()
   const { data = EMPTY_RESOURCES, isFetching, refetch } = useQuery({
     queryKey: ['resources'],
     queryFn: async (): Promise<ResourcesData> => {
@@ -56,6 +58,7 @@ export const useResources = (): ResourceState => {
         storages: storagesData.data || [],
       }
     },
+    refetchInterval: settings.refreshInterval * 1000,
   })
 
   const fetchAll = useCallback(async () => {

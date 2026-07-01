@@ -84,8 +84,25 @@ class ApiService {
   }
 
   // 更新当前用户信息
-  async updateProfile(data: { email?: string; phone?: string; department?: string }): Promise<{ message: string }> {
-    return this.client.put<unknown, { message: string }>('/me/profile', data)
+  async updateProfile(data: { email?: string; phone?: string; department?: string }): Promise<{
+    message: string
+    id: string
+    username: string
+    email?: string
+    phone?: string
+    department?: string
+  }> {
+    return this.client.put<
+      unknown,
+      {
+        message: string
+        id: string
+        username: string
+        email?: string
+        phone?: string
+        department?: string
+      }
+    >('/me/profile', data)
   }
 
   // 保存用户设置

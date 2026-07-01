@@ -3,6 +3,7 @@ import { Modal, Button, Space } from 'antd';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { createRemoteTicket } from '@/services/remote';
 import '@xterm/xterm/css/xterm.css';
 
 const CONNECTION_TIMEOUT = 30000; // 30秒超时
@@ -13,7 +14,7 @@ interface TerminalModalProps {
   agentId: string;
   host: string;
   port: number;
-  protocol: 'ssh' | 'telnet' | 'vnc' | 'rdp' | 'ftp';
+  protocol: 'ssh' | 'telnet' | 'vnc' | 'rdp';
   title?: string;
 }
 
@@ -39,66 +40,76 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     paramsRef.current = { agentId, host, port, protocol };
   }, [agentId, host, port, protocol]);
 
-  const connectWebSocket = useCallback((terminal: Terminal) => {
+  const connectWebSocket = useCallback(async (terminal: Terminal) => {
     const params = paramsRef.current;
-    const token = localStorage.getItem('token');
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/api/remote/terminal?agent_id=${params.agentId}&host=${params.host}&port=${params.port}&protocol=${params.protocol}&token=${token}`;
+    const wsUrl = `${wsProtocol}//${window.location.host}/api/remote/terminal`;
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    try {
+      const ticket = await createRemoteTicket({
+        agent_id: params.agentId,
+        host: params.host,
+        port: params.port,
+        protocol: params.protocol,
+      });
 
-    // 连接超时处理
-    const timeoutTimer = setTimeout(() => {
-      if (ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
-        terminal.writeln('\r\n\x1b[1;31m连接超时，请检查网络或重试\x1b[0m\r\n');
-      }
-    }, CONNECTION_TIMEOUT);
+      const ws = new WebSocket(wsUrl, [ticket.ticket]);
+      wsRef.current = ws;
 
-    ws.onopen = () => {
-      clearTimeout(timeoutTimer);
-      setConnected(true);
-      terminal.writeln('\x1b[1;32m连接成功！\x1b[0m\r\n');
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-
-        switch (msg.type) {
-          case 'data':
-            terminal.write(msg.data);
-            break;
-          case 'resize':
-            // 处理终端大小调整
-            if (fitAddonRef.current) {
-              fitAddonRef.current.fit();
-            }
-            break;
-          case 'error':
-            terminal.writeln(`\r\n\x1b[1;31m错误: ${msg.message}\x1b[0m\r\n`);
-            break;
-          case 'close':
-            terminal.writeln('\r\n\x1b[1;33m连接已关闭\x1b[0m\r\n');
-            setConnected(false);
-            break;
+      // 连接超时处理
+      const timeoutTimer = setTimeout(() => {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+          terminal.writeln('\r\n\x1b[1;31m连接超时，请检查网络或重试\x1b[0m\r\n');
         }
-      } catch {
-        terminal.writeln('\r\n\x1b[1;31m消息解析错误\x1b[0m\r\n');
-      }
-    };
+      }, CONNECTION_TIMEOUT);
 
-    ws.onerror = (_error) => {
-      clearTimeout(timeoutTimer);
-      terminal.writeln('\r\n\x1b[1;31m连接错误\x1b[0m\r\n');
-      setConnected(false);
-    };
+      ws.onopen = () => {
+        clearTimeout(timeoutTimer);
+        setConnected(true);
+        terminal.writeln('\x1b[1;32m连接成功！\x1b[0m\r\n');
+      };
 
-    ws.onclose = () => {
-      clearTimeout(timeoutTimer);
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+
+          switch (msg.type) {
+            case 'data':
+              terminal.write(msg.data);
+              break;
+            case 'resize':
+              if (fitAddonRef.current) {
+                fitAddonRef.current.fit();
+              }
+              break;
+            case 'error':
+              terminal.writeln(`\r\n\x1b[1;31m错误: ${msg.message}\x1b[0m\r\n`);
+              break;
+            case 'close':
+              terminal.writeln('\r\n\x1b[1;33m连接已关闭\x1b[0m\r\n');
+              setConnected(false);
+              break;
+          }
+        } catch {
+          terminal.writeln('\r\n\x1b[1;31m消息解析错误\x1b[0m\r\n');
+        }
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timeoutTimer);
+        terminal.writeln('\r\n\x1b[1;31m连接错误\x1b[0m\r\n');
+        setConnected(false);
+      };
+
+      ws.onclose = () => {
+        clearTimeout(timeoutTimer);
+        setConnected(false);
+      };
+    } catch {
+      terminal.writeln('\r\n\x1b[1;31m获取连接票据失败\x1b[0m\r\n');
       setConnected(false);
-    };
+    }
   }, []);
 
   useEffect(() => {

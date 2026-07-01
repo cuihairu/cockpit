@@ -57,7 +57,10 @@ database:
 inventory:
   path: ./inventory/example.yaml
   watch: false
+  strict: false
 ```
+
+`inventory.watch: true` 会让 Server 监听并热加载单个 inventory 文件。`inventory.strict: true` 会把启动时的 inventory 路径缺失、解析失败或初始同步失败视为 Server 启动错误；默认 `false` 时只记录日志，Server 继续启动。
 
 ## 同步 Inventory
 
@@ -106,6 +109,12 @@ $env:ADMIN_PASSWORD = 'change-this-password'
 
 ```bash
 ./cockpit-agent start -server ws://127.0.0.1:9000/ws -region home -zone datacenter
+```
+
+主二进制也提供兼容入口，参数与 `cockpit-agent start` 相同：
+
+```bash
+./cockpit agent -server ws://127.0.0.1:9000/ws -region home -zone datacenter
 ```
 
 常用参数：

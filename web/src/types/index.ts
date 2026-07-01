@@ -323,6 +323,8 @@ export interface UserInfo {
   id: string
   username: string
   email?: string
+  phone?: string
+  department?: string
   role: string
   totp_enabled: boolean
   totp_setup_at?: string

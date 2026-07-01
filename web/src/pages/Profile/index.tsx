@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, Form, Input, Button, message, Descriptions, Avatar, Space, Divider } from 'antd'
 import { UserOutlined, MailOutlined, LockOutlined, SaveOutlined } from '@ant-design/icons'
 import { useUser } from '@/contexts/useUser'
 import { api } from '@/services/api'
 import { getApiErrorMessage } from '@/utils/apiError'
+import type { UserInfo } from '@/types'
 
 interface ProfileFormValues {
   email?: string
@@ -18,17 +19,63 @@ interface PasswordFormValues {
 }
 
 const Profile = () => {
-  const { user } = useUser()
+  const { user, updateUser } = useUser()
   const [loading, setLoading] = useState(false)
+  const [profileForm] = Form.useForm<ProfileFormValues>()
   const [passwordForm] = Form.useForm()
+
+  const applyProfile = (currentUser: Pick<UserInfo, 'id' | 'username' | 'email' | 'phone' | 'department' | 'role'>) => {
+    profileForm.setFieldsValue({
+      email: currentUser.email || '',
+      phone: currentUser.phone || '',
+      department: currentUser.department || '',
+    })
+
+    updateUser({
+      id: currentUser.id,
+      username: currentUser.username,
+      email: currentUser.email,
+      phone: currentUser.phone,
+      department: currentUser.department,
+      role: currentUser.role,
+    })
+  }
+
+  useEffect(() => {
+    const syncProfile = async () => {
+      try {
+        const currentUser = await api.getCurrentUser()
+        applyProfile(currentUser)
+      } catch {
+        applyProfile({
+          id: user?.id || '',
+          username: user?.username || '',
+          email: user?.email,
+          phone: user?.phone,
+          department: user?.department,
+          role: user?.role || 'user',
+        })
+      }
+    }
+
+    void syncProfile()
+  }, [])
 
   const handleProfileSave = async (values: ProfileFormValues) => {
     setLoading(true)
     try {
-      await api.updateProfile({
+      const result = await api.updateProfile({
         email: values.email,
         phone: values.phone,
         department: values.department,
+      })
+      applyProfile({
+        id: user?.id || '',
+        username: user?.username || '',
+        email: result.email,
+        phone: result.phone,
+        department: result.department,
+        role: user?.role || 'user',
       })
       message.success('个人信息已更新')
     } catch (err) {
@@ -71,12 +118,8 @@ const Profile = () => {
             <Divider />
 
             <Form
+              form={profileForm}
               layout="vertical"
-              initialValues={{
-                email: user?.email || '',
-                phone: '',
-                department: '',
-              }}
               onFinish={handleProfileSave}
             >
               <Form.Item

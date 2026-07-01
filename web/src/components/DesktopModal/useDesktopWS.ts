@@ -1,4 +1,5 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
+import { createRemoteTicket } from '@/services/remote';
 
 export interface DesktopWSOptions {
   onConnected?: (width: number, height: number) => void;
@@ -65,6 +66,7 @@ export function useDesktopWS(options: DesktopWSOptions) {
         break;
 
       case 'error':
+        setState('disconnected');
         optionsRef.current.onError?.((msg.error as string) || 'Unknown error');
         break;
 
@@ -77,7 +79,7 @@ export function useDesktopWS(options: DesktopWSOptions) {
     }
   }, []);
 
-  const connect = useCallback((params: {
+  const connect = useCallback(async (params: {
     agentId: string;
     host: string;
     port: number;
@@ -87,45 +89,49 @@ export function useDesktopWS(options: DesktopWSOptions) {
     width?: number;
     height?: number;
   }) => {
-    const token = localStorage.getItem('token');
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${wsProtocol}//${window.location.host}/api/remote/desktop`;
 
-    const q = new URLSearchParams({
-      agent_id: params.agentId,
-      host: params.host,
-      port: String(params.port),
-      token: token || '',
-      username: params.username,
-      password: params.password,
-      domain: params.domain || '',
-      width: String(params.width || 1280),
-      height: String(params.height || 800),
-    });
-
-    const url = `${wsProtocol}//${window.location.host}/api/remote/desktop?${q}`;
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
     setState('connecting');
 
-    ws.binaryType = 'arraybuffer';
+    try {
+      const ticket = await createRemoteTicket({
+        agent_id: params.agentId,
+        host: params.host,
+        port: params.port,
+        protocol: 'rdp',
+        username: params.username,
+        password: params.password,
+        domain: params.domain,
+        width: params.width,
+        height: params.height,
+      });
 
-    ws.onopen = () => {
-      setState('connecting');
-    };
+      const ws = new WebSocket(url, [ticket.ticket]);
+      wsRef.current = ws;
+      ws.binaryType = 'arraybuffer';
 
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      handleMessage(msg);
-    };
+      ws.onopen = () => {
+        setState('connecting');
+      };
 
-    ws.onerror = () => {
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        handleMessage(msg);
+      };
+
+      ws.onerror = () => {
+        setState('disconnected');
+        optionsRef.current.onError?.('Connection error');
+      };
+
+      ws.onclose = () => {
+        setState('disconnected');
+      };
+    } catch {
       setState('disconnected');
-      optionsRef.current.onError?.('Connection error');
-    };
-
-    ws.onclose = () => {
-      setState('disconnected');
-    };
+      optionsRef.current.onError?.('Failed to create connection ticket');
+    }
   }, [handleMessage]);
 
   const sendKeyboard = useCallback((scanCode: number, keyDown: boolean, extended: boolean) => {

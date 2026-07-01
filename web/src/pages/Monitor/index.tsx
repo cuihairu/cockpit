@@ -3,16 +3,18 @@ import { useQuery } from '@tanstack/react-query';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
 import { Row, Col, Select, Spin, Alert } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
+import { useSettingsContext } from '@/contexts/useSettingsContext';
 import SystemInfoCard from '@/components/SystemInfoCard';
 import MetricsChart from '@/components/MetricsChart';
 import { getSystemSnapshots, getSystemSnapshot, getMetricsHistory } from '@/services/metrics';
 
 const Monitor: React.FC = () => {
+  const { settings } = useSettingsContext();
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
   const snapshotsQuery = useQuery({
     queryKey: ['system-snapshots'],
     queryFn: getSystemSnapshots,
-    refetchInterval: 30000,
+    refetchInterval: settings.refreshInterval * 1000,
   });
 
   const snapshots = snapshotsQuery.data || [];
@@ -22,7 +24,7 @@ const Monitor: React.FC = () => {
     queryKey: ['system-snapshot', effectiveAgentId],
     queryFn: () => getSystemSnapshot(effectiveAgentId),
     enabled: Boolean(effectiveAgentId),
-    refetchInterval: 30000,
+    refetchInterval: settings.refreshInterval * 1000,
   });
 
   const metricsHistoryQuery = useQuery({
@@ -33,7 +35,7 @@ const Monitor: React.FC = () => {
       return getMetricsHistory(effectiveAgentId, { start, end, limit: 1000 });
     },
     enabled: Boolean(effectiveAgentId),
-    refetchInterval: 30000,
+    refetchInterval: settings.refreshInterval * 1000,
   });
 
   const currentSnapshot = currentSnapshotQuery.data || null;

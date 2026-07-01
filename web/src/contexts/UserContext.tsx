@@ -17,6 +17,8 @@ const getStoredUser = (): User | null => {
     id: localStorage.getItem('userId') || '',
     username: storedUsername,
     email: localStorage.getItem('email') || undefined,
+    phone: localStorage.getItem('phone') || undefined,
+    department: localStorage.getItem('department') || undefined,
     role: storedRole || 'user',
   }
 }
@@ -59,6 +61,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem('userId')
     localStorage.removeItem('username')
     localStorage.removeItem('email')
+    localStorage.removeItem('phone')
+    localStorage.removeItem('department')
     localStorage.removeItem('role')
     setToken(null)
     setUser(null)
@@ -66,9 +70,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
   const updateUser = (updatedUser: User) => {
     setUser(updatedUser)
-    if (updatedUser.email) {
-      localStorage.setItem('email', updatedUser.email)
-    }
+    setOptionalStorage('email', updatedUser.email)
+    setOptionalStorage('phone', updatedUser.phone)
+    setOptionalStorage('department', updatedUser.department)
     localStorage.setItem('role', updatedUser.role)
   }
 
@@ -79,3 +83,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   )
 }
 
+const setOptionalStorage = (key: string, value?: string) => {
+  if (value && value.trim() !== '') {
+    localStorage.setItem(key, value)
+    return
+  }
+  localStorage.removeItem(key)
+}

@@ -9,20 +9,20 @@ import (
 
 // User 用户表
 type User struct {
-	ID        string    `gorm:"primaryKey" json:"id"`
-	Username  string    `gorm:"uniqueIndex;not null" json:"username"`
-	Password  string    `gorm:"not null" json:"-"` // 永不返回密码
-	Email     string    `json:"email"`
-	Phone     string    `json:"phone,omitempty"`
-	Department string   `json:"department,omitempty"`
-	Role      string    `gorm:"index;default:user" json:"role"` // admin, user
+	ID         string `gorm:"primaryKey" json:"id"`
+	Username   string `gorm:"uniqueIndex;not null" json:"username"`
+	Password   string `gorm:"not null" json:"-"` // 永不返回密码
+	Email      string `json:"email"`
+	Phone      string `json:"phone,omitempty"`
+	Department string `json:"department,omitempty"`
+	Role       string `gorm:"index;default:user" json:"role"` // admin, user
 	// TOTP 字段
-	TOTPSecret   string     `gorm:"column:totp_secret" json:"-"`
-	TOTPEnabled  bool       `gorm:"column:totp_enabled;default:false" json:"totp_enabled"`
-	BackupCodes  string     `gorm:"column:backup_codes;type:text" json:"-"`
-	TOTPSetupAt  *time.Time `gorm:"column:totp_setup_at" json:"totp_setup_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	TOTPSecret  string     `gorm:"column:totp_secret" json:"-"`
+	TOTPEnabled bool       `gorm:"column:totp_enabled;default:false" json:"totp_enabled"`
+	BackupCodes string     `gorm:"column:backup_codes;type:text" json:"-"`
+	TOTPSetupAt *time.Time `gorm:"column:totp_setup_at" json:"totp_setup_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // BeforeCreate GORM hook
@@ -61,7 +61,7 @@ func (d *DB) GetUserByID(id string) (*User, error) {
 // ListUsers 列出所有用户（不含密码）
 func (d *DB) ListUsers() ([]User, error) {
 	var users []User
-	err := d.db.Select("id", "username", "email", "role", "created_at", "updated_at").
+	err := d.db.Select("id", "username", "email", "phone", "department", "role", "created_at", "updated_at").
 		Order("created_at DESC").
 		Find(&users).Error
 	return users, err
@@ -72,8 +72,10 @@ func (d *DB) UpdateUser(user *User) error {
 	return d.db.Model(&User{}).
 		Where("id = ?", user.ID).
 		Updates(map[string]interface{}{
-			"email": user.Email,
-			"role":  user.Role,
+			"email":      user.Email,
+			"phone":      user.Phone,
+			"department": user.Department,
+			"role":       user.Role,
 		}).Error
 }
 

@@ -3,6 +3,7 @@ import { Modal, Form, Input, message } from 'antd';
 import RemoteToolbar, { type ConnectionState } from '../RemoteToolbar';
 import RFB from '@novnc/novnc';
 import { useConnectionTimeout } from '@/hooks/useConnectionTimeout';
+import { createRemoteTicket } from '@/services/remote';
 
 const CONNECTION_TIMEOUT = 30000; // 30秒超时
 
@@ -62,30 +63,28 @@ const VNCModal: React.FC<VNCModalProps> = ({
   });
 
   const handleConnect = useCallback(() => {
-    form.validateFields().then((values) => {
+    form.validateFields().then(async (values) => {
       if (!vncContainerRef.current) return;
 
       cleanup();
 
-      const token = localStorage.getItem('token');
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-
-      const q = new URLSearchParams({
-        agent_id: agentId,
-        host,
-        port: String(port),
-        token: token || '',
-        password: values.password || '',
-      });
-
-      const url = `${wsProtocol}//${window.location.host}/api/remote/vnc?${q}`;
+      const url = `${wsProtocol}//${window.location.host}/api/remote/vnc`;
 
       setVncState('connecting');
       startTimeout();
 
       try {
+        const ticket = await createRemoteTicket({
+          agent_id: agentId,
+          host,
+          port,
+          protocol: 'vnc',
+          password: values.password || '',
+        });
+
         const rfb = new RFB(vncContainerRef.current, url, {
-          credentials: { password: values.password || '' },
+          wsProtocols: [ticket.ticket],
         });
 
         rfb.addEventListener('connect', () => {

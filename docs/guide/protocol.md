@@ -20,6 +20,8 @@ Agent 使用 WebSocket 主动连接 Server：
 cockpit-agent start -server ws://server:9000/ws
 ```
 
+兼容入口 `cockpit agent -server ws://server:9000/ws` 使用同一套启动参数。
+
 连接建立后，第一条消息必须是 `register`。如果第一条消息不是注册消息，Server 会关闭连接。
 
 消息 envelope：
@@ -198,6 +200,10 @@ Content-Type: application/json
 ```javascript
 new WebSocket("ws://server:9000/api/remote/terminal", [ticket])
 ```
+
+远程目标默认只允许连接 `remote_control.allowed_targets` 中显式配置的 host；设置 `remote_control.allow_arbitrary_target: true` 后才允许任意目标。当前实现不会从 inventory 自动派生远控 allow-list。
+
+RDP 桌面依赖 Agent 以 `rdp` build tag 构建。默认 Agent 构建不会静默吞掉桌面请求，而是通过 `desktop_data` 的 `error` 消息返回“不支持 RDP”的明确错误。
 
 ## HTTP API
 

@@ -53,8 +53,6 @@ const LoginContent = () => {
           autoComplete="off"
           size="large"
           initialValues={{
-            username: 'admin',
-            password: 'admin',
             remember: true
           }}
           className="login-form"
@@ -96,7 +94,7 @@ const LoginContent = () => {
           </Form.Item>
         </Form>
         <div className="login-footer">
-          <p>默认账号: admin / admin</p>
+          <p>管理员账号由 ADMIN_USERNAME / ADMIN_PASSWORD 初始化</p>
         </div>
       </div>
     </div>

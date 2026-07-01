@@ -34,7 +34,7 @@ func (s *Server) validateRemoteTarget(host string) (allow bool, errMsg string) {
 			return true, ""
 		}
 	}
-	return false, fmt.Sprintf("target host %q is not allowed; add to remote_control.allowed_targets or inventory", host)
+	return false, fmt.Sprintf("target host %q is not allowed; add it to remote_control.allowed_targets or enable remote_control.allow_arbitrary_target", host)
 }
 
 // remoteControlConfig 安全读取远控配置（容忍 nil）

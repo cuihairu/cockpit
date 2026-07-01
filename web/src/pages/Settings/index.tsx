@@ -9,6 +9,7 @@ import { DisableTOTPModal } from './DisableTOTPModal'
 const Settings = () => {
   const {
     loading,
+    settings,
     userInfo,
     totpVerifyCode,
     disablingTOTP,
@@ -27,7 +28,7 @@ const Settings = () => {
             {
               key: 'general',
               label: '通用设置',
-              children: <GeneralSettings loading={loading} onSave={saveSettings} />,
+              children: <GeneralSettings loading={loading} settings={settings} onSave={saveSettings} />,
             },
             {
               key: 'security',
