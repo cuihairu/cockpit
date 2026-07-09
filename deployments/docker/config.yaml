@@ -1,0 +1,30 @@
+server:
+  host: 0.0.0.0
+  port: 9000
+  static_dir: /app/web
+
+database:
+  path: /data/cockpit.db
+
+inventory:
+  path: /data/inventory.yaml
+  watch: false
+  strict: false
+
+jwt:
+  secret: "${JWT_SECRET}"
+  expiration: 24h
+
+email:
+  enabled: false
+  base_url: "${BASE_URL}"
+
+notification:
+  enabled: false
+
+agent:
+  api_key_header: X-API-Key
+
+remote_control:
+  allow_arbitrary_target: false
+  allowed_targets: []

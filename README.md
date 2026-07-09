@@ -105,6 +105,8 @@ export PRODUCTION=true
 
 对外部署时将 `server.host` 改为 `0.0.0.0`，并建议通过反向代理提供 HTTPS/WSS。
 
+Docker Compose 部署入口见 [deployments/docker/README.md](deployments/docker/README.md)。
+
 ## 端到端冒烟脚本
 
 仓库内置一个最小闭环验证脚本，用于本地一键验证 server/agent/inventory sync/资源 API 链路是否正常：

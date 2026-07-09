@@ -57,12 +57,12 @@ func (s *Server) handleTOTPGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 从 JWT 中获取用户信息
-	userID := r.Context().Value("user_id").(string)
-	if userID == "" {
+	authUser, ok := auth.GetUserFromContext(r)
+	if !ok || authUser.UserID == "" {
 		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
+	userID := authUser.UserID
 
 	// 获取用户信息
 	user, err := s.db.GetUserByID(userID)
@@ -130,12 +130,12 @@ func (s *Server) handleTOTPEnable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 从 JWT 中获取用户信息
-	userID := r.Context().Value("user_id").(string)
-	if userID == "" {
+	authUser, ok := auth.GetUserFromContext(r)
+	if !ok || authUser.UserID == "" {
 		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
+	userID := authUser.UserID
 
 	var req TOTPEnableRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -257,12 +257,12 @@ func (s *Server) handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 从 JWT 中获取用户信息
-	userID := r.Context().Value("user_id").(string)
-	if userID == "" {
+	authUser, ok := auth.GetUserFromContext(r)
+	if !ok || authUser.UserID == "" {
 		http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
+	userID := authUser.UserID
 
 	var req TOTPDisableRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

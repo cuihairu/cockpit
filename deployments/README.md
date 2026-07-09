@@ -53,6 +53,18 @@ sudo journalctl -u cockpit -f
 http://<server-ip>:9000
 ```
 
+## Docker Server
+
+仓库内置 Dockerfile 与 Docker Compose 配置，适合直接在服务器上部署 Server：
+
+```bash
+cp deployments/docker/.env.example .env
+vi .env
+docker compose up -d --build
+```
+
+详细说明见 [docker/README.md](docker/README.md)。
+
 ## Linux Agent
 
 快速安装：
@@ -142,7 +154,7 @@ Stop-Service -Name CockpitAgent
 ## 生产环境注意
 
 - 必须设置强密码 `ADMIN_PASSWORD`。
-- 建议设置 `PRODUCTION=true` 和强随机 `TOTP_ENCRYPTION_KEY`。
+- 设置 `PRODUCTION=true` 时必须提供强随机 `TOTP_ENCRYPTION_KEY`。
 - 建议设置 `ALLOWED_ORIGINS=https://cockpit.example.com`。
 - 对外访问建议由 Nginx、Caddy、Traefik 等反向代理提供 HTTPS/WSS。
 - Agent 主动连接 Server，不需要在 Agent 节点开放入站端口。

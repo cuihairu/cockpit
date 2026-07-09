@@ -109,21 +109,20 @@ func (s *Server) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 从 JWT 中获取用户信息
-	userID := r.Context().Value("user_id").(string)
-	if userID == "" {
+	authUser, ok := auth.GetUserFromContext(r)
+	if !ok || authUser.UserID == "" {
 		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
-	user, err := s.db.GetUserByID(userID)
+	user, err := s.db.GetUserByID(authUser.UserID)
 	if err != nil {
 		s.handleError(w, r, http.StatusNotFound, "User not found")
 		return
 	}
 
 	// 返回用户信息（不包含密码）
-	userInfo := map[string]interface{}{
+	response := map[string]interface{}{
 		"id":            user.ID,
 		"username":      user.Username,
 		"email":         user.Email,
@@ -136,7 +135,7 @@ func (s *Server) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 		"updated_at":    user.UpdatedAt,
 	}
 
-	s.writeJSON(w, http.StatusOK, userInfo)
+	s.writeJSON(w, http.StatusOK, response)
 }
 
 // handleCurrentUserPassword 修改当前用户密码
@@ -146,14 +145,13 @@ func (s *Server) handleCurrentUserPassword(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// 从 JWT 中获取用户信息
-	userID := r.Context().Value("user_id").(string)
-	if userID == "" {
+	userInfo, ok := auth.GetUserFromContext(r)
+	if !ok || userInfo.UserID == "" {
 		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
-	user, err := s.db.GetUserByID(userID)
+	user, err := s.db.GetUserByID(userInfo.UserID)
 	if err != nil {
 		s.handleError(w, r, http.StatusNotFound, "User not found")
 		return
@@ -203,7 +201,7 @@ func (s *Server) handleCurrentUserPassword(w http.ResponseWriter, r *http.Reques
 	}
 
 	// 更新密码
-	if err := s.db.UpdatePassword(userID, hashedPassword); err != nil {
+	if err := s.db.UpdatePassword(userInfo.UserID, hashedPassword); err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to update password")
 		return
 	}
@@ -220,37 +218,37 @@ func (s *Server) handleCurrentUserProfile(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	userID, _ := r.Context().Value("user_id").(string)
-	if userID == "" {
+	userInfo, ok := auth.GetUserFromContext(r)
+	if !ok || userInfo.UserID == "" {
 		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
-	user, err := s.db.GetUserByID(userID)
+	user, err := s.db.GetUserByID(userInfo.UserID)
 	if err != nil {
 		s.handleError(w, r, http.StatusNotFound, "User not found")
 		return
 	}
 
 	var req struct {
-		Email      string `json:"email"`
-		Phone      string `json:"phone"`
-		Department string `json:"department"`
+		Email      *string `json:"email"`
+		Phone      *string `json:"phone"`
+		Department *string `json:"department"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	// 空值不覆盖（避免误清空），仅在显式传入时更新
-	if req.Email != "" {
-		user.Email = req.Email
+	// 使用指针区分“字段未传”和“显式清空”。
+	if req.Email != nil {
+		user.Email = *req.Email
 	}
-	if req.Phone != "" {
-		user.Phone = req.Phone
+	if req.Phone != nil {
+		user.Phone = *req.Phone
 	}
-	if req.Department != "" {
-		user.Department = req.Department
+	if req.Department != nil {
+		user.Department = *req.Department
 	}
 
 	if err := s.db.UpdateUser(user); err != nil {

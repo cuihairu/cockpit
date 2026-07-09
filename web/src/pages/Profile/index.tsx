@@ -42,24 +42,37 @@ const Profile = () => {
   }
 
   useEffect(() => {
+    let ignore = false
+
     const syncProfile = async () => {
+      if (!user) return
+
       try {
         const currentUser = await api.getCurrentUser()
-        applyProfile(currentUser)
-      } catch {
-        applyProfile({
-          id: user?.id || '',
-          username: user?.username || '',
-          email: user?.email,
-          phone: user?.phone,
-          department: user?.department,
-          role: user?.role || 'user',
-        })
+        if (!ignore) {
+          applyProfile(currentUser)
+        }
+      } catch (err) {
+        if (!ignore) {
+          message.error(getApiErrorMessage(err, '加载个人信息失败'))
+          applyProfile({
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            phone: user.phone,
+            department: user.department,
+            role: user.role,
+          })
+        }
       }
     }
 
     void syncProfile()
-  }, [])
+
+    return () => {
+      ignore = true
+    }
+  }, [profileForm, updateUser, user?.id])
 
   const handleProfileSave = async (values: ProfileFormValues) => {
     setLoading(true)
@@ -70,8 +83,8 @@ const Profile = () => {
         department: values.department,
       })
       applyProfile({
-        id: user?.id || '',
-        username: user?.username || '',
+        id: result.id || user?.id || '',
+        username: result.username || user?.username || '',
         email: result.email,
         phone: result.phone,
         department: result.department,
@@ -110,7 +123,7 @@ const Profile = () => {
               <Avatar size={80} icon={<UserOutlined />} />
               <Descriptions column={1}>
                 <Descriptions.Item label="用户名">{user?.username || 'Admin'}</Descriptions.Item>
-                <Descriptions.Item label="角色">管理员</Descriptions.Item>
+                <Descriptions.Item label="角色">{user?.role === 'admin' ? '管理员' : '用户'}</Descriptions.Item>
                 <Descriptions.Item label="状态">在线</Descriptions.Item>
               </Descriptions>
             </Space>

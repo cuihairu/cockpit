@@ -35,7 +35,7 @@ export const useSettings = () => {
         }
       }
     }
-    fetchUserInfo()
+    void fetchUserInfo()
   }, [])
 
   const saveSettings = async (values: GeneralSettingsValues) => {

@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,11 +9,6 @@ import (
 
 	"github.com/cuihairu/cockpit/internal/storage"
 )
-
-// ctxUserID sets user_id in context for handlers that use r.Context().Value("user_id")
-func withUserID(r *http.Request, userID string) *http.Request {
-	return r.WithContext(context.WithValue(r.Context(), "user_id", userID))
-}
 
 func TestHandleTOTPGenerateWrongMethod(t *testing.T) {
 	s := newTestServerWithDB(t)
@@ -30,8 +24,7 @@ func TestHandleTOTPGenerateSuccess(t *testing.T) {
 	s.db.CreateUser(&storage.User{Username: "admin", Role: "admin"})
 	u, _ := s.db.GetUserByUsername("admin")
 
-	_, req := doAuthenticatedRequest(s, "POST", "/api/auth/totp/generate", nil)
-	req = withUserID(req, u.ID)
+	_, req := doAuthenticatedRequestForUser(t, "POST", "/api/auth/totp/generate", nil, u)
 	rec := callWithAuth(s, s.handleTOTPGenerate, req)
 
 	if rec.Code != http.StatusOK {
@@ -52,8 +45,8 @@ func TestHandleTOTPGenerateSuccess(t *testing.T) {
 
 func TestHandleTOTPGenerateUserNotFound(t *testing.T) {
 	s := newTestServerWithDB(t)
-	_, req := doAuthenticatedRequest(s, "POST", "/api/auth/totp/generate", nil)
-	req = withUserID(req, "nonexistent-id")
+	missingUser := &storage.User{ID: "nonexistent-id", Username: "ghost", Role: "admin"}
+	_, req := doAuthenticatedRequestForUser(t, "POST", "/api/auth/totp/generate", nil, missingUser)
 	rec := callWithAuth(s, s.handleTOTPGenerate, req)
 
 	if rec.Code != http.StatusNotFound {
@@ -76,8 +69,7 @@ func TestHandleTOTPEnableNoSetup(t *testing.T) {
 	u, _ := s.db.GetUserByUsername("admin")
 
 	body, _ := json.Marshal(TOTPEnableRequest{Code: "123456"})
-	_, req := doAuthenticatedRequest(s, "POST", "/api/auth/totp/enable", body)
-	req = withUserID(req, u.ID)
+	_, req := doAuthenticatedRequestForUser(t, "POST", "/api/auth/totp/enable", body, u)
 	rec := callWithAuth(s, s.handleTOTPEnable, req)
 
 	if rec.Code != http.StatusBadRequest {
@@ -131,8 +123,7 @@ func TestHandleTOTPDisableNotEnabled(t *testing.T) {
 	u, _ := s.db.GetUserByUsername("admin")
 
 	body, _ := json.Marshal(TOTPDisableRequest{Code: "123456"})
-	_, req := doAuthenticatedRequest(s, "POST", "/api/auth/totp/disable", body)
-	req = withUserID(req, u.ID)
+	_, req := doAuthenticatedRequestForUser(t, "POST", "/api/auth/totp/disable", body, u)
 	rec := callWithAuth(s, s.handleTOTPDisable, req)
 
 	if rec.Code != http.StatusBadRequest {
@@ -154,8 +145,7 @@ func TestHandleCurrentUserSuccess(t *testing.T) {
 	s.db.CreateUser(&storage.User{Username: "testuser", Role: "admin", Email: "test@test.com"})
 	u, _ := s.db.GetUserByUsername("testuser")
 
-	_, req := doAuthenticatedRequest(s, "GET", "/api/auth/me", nil)
-	req = withUserID(req, u.ID)
+	_, req := doAuthenticatedRequestForUser(t, "GET", "/api/auth/me", nil, u)
 	rec := callWithAuth(s, s.handleCurrentUser, req)
 
 	if rec.Code != http.StatusOK {
@@ -170,8 +160,8 @@ func TestHandleCurrentUserSuccess(t *testing.T) {
 
 func TestHandleCurrentUserNotFound(t *testing.T) {
 	s := newTestServerWithDB(t)
-	_, req := doAuthenticatedRequest(s, "GET", "/api/auth/me", nil)
-	req = withUserID(req, "nonexistent-id")
+	missingUser := &storage.User{ID: "nonexistent-id", Username: "ghost", Role: "admin"}
+	_, req := doAuthenticatedRequestForUser(t, "GET", "/api/auth/me", nil, missingUser)
 	rec := callWithAuth(s, s.handleCurrentUser, req)
 
 	if rec.Code != http.StatusNotFound {
@@ -195,8 +185,7 @@ func TestHandleCurrentUserPasswordSuccess(t *testing.T) {
 	u, _ := s.db.GetUserByUsername("testuser")
 
 	body, _ := json.Marshal(map[string]string{"currentPassword": "oldpass", "newPassword": "newpass123"})
-	_, req := doAuthenticatedRequest(s, "PUT", "/api/auth/me/password", body)
-	req = withUserID(req, u.ID)
+	_, req := doAuthenticatedRequestForUser(t, "PUT", "/api/auth/me/password", body, u)
 	rec := callWithAuth(s, s.handleCurrentUserPassword, req)
 
 	if rec.Code != http.StatusOK {
@@ -211,8 +200,7 @@ func TestHandleCurrentUserPasswordWrongOldPassword(t *testing.T) {
 	u, _ := s.db.GetUserByUsername("testuser")
 
 	body, _ := json.Marshal(map[string]string{"currentPassword": "wrongpass", "newPassword": "newpass123"})
-	_, req := doAuthenticatedRequest(s, "PUT", "/api/auth/me/password", body)
-	req = withUserID(req, u.ID)
+	_, req := doAuthenticatedRequestForUser(t, "PUT", "/api/auth/me/password", body, u)
 	rec := callWithAuth(s, s.handleCurrentUserPassword, req)
 
 	if rec.Code != http.StatusUnauthorized {
@@ -226,8 +214,7 @@ func TestHandleCurrentUserPasswordEmptyNew(t *testing.T) {
 	u, _ := s.db.GetUserByUsername("testuser")
 
 	body, _ := json.Marshal(map[string]string{"currentPassword": "old", "newPassword": ""})
-	_, req := doAuthenticatedRequest(s, "PUT", "/api/auth/me/password", body)
-	req = withUserID(req, u.ID)
+	_, req := doAuthenticatedRequestForUser(t, "PUT", "/api/auth/me/password", body, u)
 	rec := callWithAuth(s, s.handleCurrentUserPassword, req)
 
 	if rec.Code != http.StatusBadRequest {
@@ -241,8 +228,7 @@ func TestHandleCurrentUserPasswordShortNew(t *testing.T) {
 	u, _ := s.db.GetUserByUsername("testuser")
 
 	body, _ := json.Marshal(map[string]string{"currentPassword": "old", "newPassword": "ab"})
-	_, req := doAuthenticatedRequest(s, "PUT", "/api/auth/me/password", body)
-	req = withUserID(req, u.ID)
+	_, req := doAuthenticatedRequestForUser(t, "PUT", "/api/auth/me/password", body, u)
 	rec := callWithAuth(s, s.handleCurrentUserPassword, req)
 
 	if rec.Code != http.StatusBadRequest {

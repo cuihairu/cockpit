@@ -14,8 +14,13 @@ declare module '*.less' {
 }
 
 declare module '@novnc/novnc' {
+  interface RFBOptions {
+    credentials?: { password?: string }
+    wsProtocols?: string[]
+  }
+
   export default class RFB {
-    constructor(target: HTMLElement, url: string, options?: { credentials?: { password?: string } })
+    constructor(target: HTMLElement, url: string, options?: RFBOptions)
     disconnect(): void
     sendCredentials(creds: { password: string }): void
     sendKey(keysym: number, code: string, down?: boolean): void

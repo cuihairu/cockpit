@@ -1,6 +1,6 @@
+import { useEffect } from 'react'
 import { Button, Form, Input, InputNumber, Select, Switch, Tabs } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
-import { useEffect } from 'react'
 import type { UISettings } from '@/contexts/settingsTypes'
 
 interface GeneralSettingsProps {
@@ -86,7 +86,7 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ loading, setti
             <Switch />
           </Form.Item>
           <Form.Item>
-            <Button type="primary" htmlType="submit" icon={<SaveOutlined />}>
+            <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={loading}>
               保存设置
             </Button>
           </Form.Item>

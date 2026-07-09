@@ -6,9 +6,7 @@ import {
   EyeOutlined,
   LinkOutlined,
 } from '@ant-design/icons';
-
-// 远程服务类型
-export type RemoteProtocol = 'ssh' | 'rdp' | 'vnc' | 'telnet';
+import type { RemoteProtocol } from '@/services/remote';
 
 export interface RemoteService {
   protocol: RemoteProtocol;
@@ -68,7 +66,6 @@ const RemoteServicesCard: React.FC<RemoteServicesCardProps> = ({
       if (onConnect) {
         onConnect(protocol, host, port);
       } else {
-        // 默认行为：复制连接命令
         copyConnectCommand(protocol, host, port);
       }
       setConnectModalVisible(false);

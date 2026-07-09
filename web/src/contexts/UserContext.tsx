@@ -1,4 +1,4 @@
-import { useState, ReactNode } from 'react'
+import { useCallback, useState, ReactNode } from 'react'
 import { api } from '@/services/api'
 import type { LoginResponse } from '@/types'
 import { TOTPRequiredError, type User } from './userTypes'
@@ -45,6 +45,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     localStorage.setItem('userId', user_id)
     localStorage.setItem('username', userName)
     localStorage.setItem('role', res.role || 'user')
+    localStorage.removeItem('email')
+    localStorage.removeItem('phone')
+    localStorage.removeItem('department')
 
     setToken(token)
     setUser({
@@ -56,7 +59,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     return res
   }
 
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem('token')
     localStorage.removeItem('userId')
     localStorage.removeItem('username')
@@ -66,15 +69,15 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem('role')
     setToken(null)
     setUser(null)
-  }
+  }, [])
 
-  const updateUser = (updatedUser: User) => {
+  const updateUser = useCallback((updatedUser: User) => {
     setUser(updatedUser)
     setOptionalStorage('email', updatedUser.email)
     setOptionalStorage('phone', updatedUser.phone)
     setOptionalStorage('department', updatedUser.department)
     localStorage.setItem('role', updatedUser.role)
-  }
+  }, [])
 
   return (
     <UserContext.Provider value={{ user, token, login, logout, updateUser }}>

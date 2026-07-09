@@ -12,4 +12,5 @@ export interface UISettings {
 export interface SettingsContextType {
   settings: UISettings
   updateSettings: (patch: Partial<UISettings>) => void
+  resolvedTheme: Exclude<UITheme, 'auto'>
 }

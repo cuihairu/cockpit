@@ -195,6 +195,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 注册系统指标 API
 	s.registerMetricsAPI(mux)
+	s.registerDockerAPI(mux)
 
 	// 注册远程连接 API
 	s.registerRemoteAPI(mux)

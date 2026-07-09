@@ -90,48 +90,43 @@ export function useDesktopWS(options: DesktopWSOptions) {
     height?: number;
   }) => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${wsProtocol}//${window.location.host}/api/remote/desktop`;
-
     setState('connecting');
 
+    let ticket: string;
     try {
-      const ticket = await createRemoteTicket({
-        agent_id: params.agentId,
-        host: params.host,
-        port: params.port,
+      const result = await createRemoteTicket({
+        ...params,
         protocol: 'rdp',
-        username: params.username,
-        password: params.password,
-        domain: params.domain,
-        width: params.width,
-        height: params.height,
       });
-
-      const ws = new WebSocket(url, [ticket.ticket]);
-      wsRef.current = ws;
-      ws.binaryType = 'arraybuffer';
-
-      ws.onopen = () => {
-        setState('connecting');
-      };
-
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        handleMessage(msg);
-      };
-
-      ws.onerror = () => {
-        setState('disconnected');
-        optionsRef.current.onError?.('Connection error');
-      };
-
-      ws.onclose = () => {
-        setState('disconnected');
-      };
+      ticket = result.ticket;
     } catch {
       setState('disconnected');
       optionsRef.current.onError?.('Failed to create connection ticket');
+      return;
     }
+
+    const url = `${wsProtocol}//${window.location.host}/api/remote/desktop`;
+    const ws = new WebSocket(url, [ticket]);
+    wsRef.current = ws;
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      setState('connecting');
+    };
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      handleMessage(msg);
+    };
+
+    ws.onerror = () => {
+      setState('disconnected');
+      optionsRef.current.onError?.('Connection error');
+    };
+
+    ws.onclose = () => {
+      setState('disconnected');
+    };
   }, [handleMessage]);
 
   const sendKeyboard = useCallback((scanCode: number, keyDown: boolean, extended: boolean) => {

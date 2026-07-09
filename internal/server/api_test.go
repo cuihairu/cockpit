@@ -15,11 +15,21 @@ import (
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
-// authenticateAdminRequest sets up admin user and injects auth context via middleware.
-// Returns (recorder, request) ready for handler invocation.
 func doAuthenticatedRequest(s *Server, method, path string, body []byte) (*httptest.ResponseRecorder, *http.Request) {
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
 	token, _ := auth.GenerateToken("1", "admin", "admin")
+	req.Header.Set("Authorization", "Bearer "+token)
+	return httptest.NewRecorder(), req
+}
+
+func doAuthenticatedRequestForUser(t *testing.T, method, path string, body []byte, user *storage.User) (*httptest.ResponseRecorder, *http.Request) {
+	t.Helper()
+
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	token, err := auth.GenerateToken(user.ID, user.Username, user.Role)
+	if err != nil {
+		t.Fatalf("GenerateToken() error = %v", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	return httptest.NewRecorder(), req
 }
@@ -65,7 +75,12 @@ func authenticateAdminRequest(t *testing.T, s *Server, r *http.Request) *http.Re
 		t.Fatalf("Failed to init admin: %v", err)
 	}
 
-	token, err := auth.GenerateToken("1", "admin", "admin")
+	admin, err := s.db.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("Failed to get admin: %v", err)
+	}
+
+	token, err := auth.GenerateToken(admin.ID, admin.Username, admin.Role)
 	if err != nil {
 		t.Fatalf("Failed to generate token: %v", err)
 	}
@@ -396,6 +411,67 @@ func TestHandleUsersList(t *testing.T) {
 
 	if result.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", result.Code, http.StatusOK)
+	}
+}
+
+func TestHandleCurrentUserProfilePersistsPhoneAndDepartment(t *testing.T) {
+	s := newTestServerWithDB(t)
+
+	user := &storage.User{
+		Username:   "alice",
+		Password:   "hashedpass",
+		Email:      "old@example.com",
+		Phone:      "10086",
+		Department: "ops",
+		Role:       "user",
+	}
+	if err := s.db.CreateUser(user); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+
+	token, err := auth.GenerateToken(user.ID, user.Username, user.Role)
+	if err != nil {
+		t.Fatalf("GenerateToken() error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"email":      "new@example.com",
+		"phone":      "13800138000",
+		"department": "platform",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/me/profile", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	rr := httptest.NewRecorder()
+	auth.Middleware(s.handleCurrentUserProfile)(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
+		t.Fatalf("Decode response: %v", err)
+	}
+	if result["phone"] != "13800138000" {
+		t.Errorf("response phone = %v, want 13800138000", result["phone"])
+	}
+	if result["department"] != "platform" {
+		t.Errorf("response department = %v, want platform", result["department"])
+	}
+
+	updated, err := s.db.GetUserByID(user.ID)
+	if err != nil {
+		t.Fatalf("GetUserByID() error = %v", err)
+	}
+	if updated.Email != "new@example.com" {
+		t.Errorf("Email = %v, want new@example.com", updated.Email)
+	}
+	if updated.Phone != "13800138000" {
+		t.Errorf("Phone = %v, want 13800138000", updated.Phone)
+	}
+	if updated.Department != "platform" {
+		t.Errorf("Department = %v, want platform", updated.Department)
 	}
 }
 
@@ -2011,59 +2087,6 @@ func TestServeAPICORSOriginEnv(t *testing.T) {
 
 	if rec.Header().Get("Access-Control-Allow-Origin") != "http://test.com" {
 		t.Errorf("CORS origin = %q, want %q", rec.Header().Get("Access-Control-Allow-Origin"), "http://test.com")
-	}
-}
-
-func TestHandleCurrentUserProfilePersistsPhoneAndDepartment(t *testing.T) {
-	s := newTestServerWithDB(t)
-
-	user := &storage.User{
-		ID:         "user-1",
-		Username:   "alice",
-		Password:   "hashed-password",
-		Email:      "old@example.com",
-		Phone:      "13000000000",
-		Department: "Old Dept",
-		Role:       "user",
-	}
-	if err := s.db.CreateUser(user); err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
-	}
-
-	body := []byte(`{"email":"new@example.com","phone":"13800138000","department":"Platform"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/me/profile", bytes.NewReader(body))
-	req = withUserID(req, user.ID)
-
-	rec := httptest.NewRecorder()
-	s.handleCurrentUserProfile(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
-		t.Fatalf("Decode response: %v", err)
-	}
-	if result["phone"] != "13800138000" {
-		t.Errorf("response phone = %v, want 13800138000", result["phone"])
-	}
-	if result["department"] != "Platform" {
-		t.Errorf("response department = %v, want Platform", result["department"])
-	}
-
-	got, err := s.db.GetUserByID(user.ID)
-	if err != nil {
-		t.Fatalf("GetUserByID() error = %v", err)
-	}
-	if got.Email != "new@example.com" {
-		t.Errorf("Email = %v, want new@example.com", got.Email)
-	}
-	if got.Phone != "13800138000" {
-		t.Errorf("Phone = %v, want 13800138000", got.Phone)
-	}
-	if got.Department != "Platform" {
-		t.Errorf("Department = %v, want Platform", got.Department)
 	}
 }
 

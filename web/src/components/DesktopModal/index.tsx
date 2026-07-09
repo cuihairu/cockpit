@@ -123,7 +123,7 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
       }, CONNECTION_TIMEOUT);
       clearTimeoutRef.current = () => clearTimeout(timer);
 
-      connect({
+      void connect({
         agentId,
         host,
         port,

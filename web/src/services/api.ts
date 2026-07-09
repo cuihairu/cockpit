@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios'
+import type { UISettings } from '@/contexts/settingsTypes'
 import type {
   Agent,
   ComputeInstance,
@@ -106,14 +107,7 @@ class ApiService {
   }
 
   // 保存用户设置
-  async saveSettings(data: {
-    siteName?: string
-    refreshInterval?: number
-    enableNotifications?: boolean
-    theme?: string
-    compactMode?: boolean
-    showResourceCount?: boolean
-  }): Promise<{ message: string }> {
+  async saveSettings(data: Partial<UISettings>): Promise<{ message: string }> {
     return this.client.put<unknown, { message: string }>('/settings', data)
   }
 

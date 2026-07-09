@@ -7,6 +7,8 @@ import {
 } from '@ant-design/icons'
 import type React from 'react'
 import type { Agent } from '@/types'
+import type { RemoteProtocol } from '@/services/remote'
+import type { RemoteProtocol } from '@/services/remote'
 
 // 虚拟化类型显示配置
 export const virtTypeConfig: Record<
@@ -37,7 +39,7 @@ export const getVirtDisplay = (agent: Agent) => {
 }
 
 export interface RemoteService {
-  protocol: 'ssh' | 'rdp' | 'vnc' | 'telnet'
+  protocol: RemoteProtocol
   host: string
   port: number
   name: string

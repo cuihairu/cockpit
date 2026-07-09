@@ -1,4 +1,4 @@
-import { useEffect, useMemo, lazy, Suspense } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntdApp, Spin, theme as antdTheme } from 'antd'
@@ -120,25 +120,12 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 const MainLayout = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { settings } = useSettingsContext()
+  const { settings, resolvedTheme } = useSettingsContext()
   const { user, logout } = useUser()
-  const prefersDark = typeof window !== 'undefined'
-    && typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-color-scheme: dark)').matches
-  const resolvedTheme = settings.theme === 'auto'
-    ? (prefersDark ? 'dark' : 'light')
-    : settings.theme
 
   useEffect(() => {
     document.title = settings.siteName
   }, [settings.siteName])
-
-  const layoutSettings = useMemo(() => ({
-    fixSiderbar: true,
-    layout: 'mix' as const,
-    theme: resolvedTheme === 'dark' ? 'dark' as const : 'light' as const,
-    colorWeak: false,
-  }), [resolvedTheme])
 
   const handleLogout = () => {
     logout()
@@ -180,7 +167,7 @@ const MainLayout = () => {
         icon={<QuestionCircleOutlined />}
         href="https://cuihairu.github.io/cockpit/"
         target="_blank"
-        style={{ color: '#4E5969' }}
+        style={{ color: resolvedTheme === 'dark' ? '#fff' : '#4E5969' }}
       >
         文档
       </Button>
@@ -188,7 +175,9 @@ const MainLayout = () => {
       <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
         <Space style={{ cursor: 'pointer' }}>
           <Avatar size="small" icon={<UserOutlined />} />
-          <span style={{ color: '#1D2129', fontSize: 14 }}>{user?.username || 'Admin'}</span>
+          <span style={{ color: resolvedTheme === 'dark' ? '#fff' : '#1D2129', fontSize: 14 }}>
+            {user?.username || 'Admin'}
+          </span>
         </Space>
       </Dropdown>
     </Space>
@@ -207,10 +196,13 @@ const MainLayout = () => {
 
   return (
     <ProLayout
-      {...layoutSettings}
+      fixSiderbar
+      layout={settings.compactMode ? 'side' : 'mix'}
+      theme={resolvedTheme}
+      colorWeak={false}
       title={settings.siteName}
       logo={logo}
-      navTheme={resolvedTheme === 'dark' ? 'dark' : 'light'}
+      navTheme={resolvedTheme}
       contentWidth="Fluid"
       location={{ pathname: location.pathname }}
       route={routeConfig}
@@ -278,26 +270,20 @@ const MainLayout = () => {
 }
 
 const AppShell = () => {
-  const { settings } = useSettingsContext()
-  const prefersDark = typeof window !== 'undefined'
-    && typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-color-scheme: dark)').matches
-  const resolvedTheme = settings.theme === 'auto'
-    ? (prefersDark ? 'dark' : 'light')
-    : settings.theme
-  const algorithm = useMemo(() => {
-    if (resolvedTheme === 'dark') {
-      return antdTheme.darkAlgorithm
-    }
-    return antdTheme.defaultAlgorithm
-  }, [resolvedTheme])
+  const { resolvedTheme } = useSettingsContext()
 
   return (
     <ConfigProvider
       theme={{
-        algorithm,
+        algorithm: resolvedTheme === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {
           colorPrimary: '#165DFF',
+        },
+        components: {
+          Layout: {
+            headerBg: resolvedTheme === 'dark' ? '#141414' : '#fff',
+            siderBg: resolvedTheme === 'dark' ? '#141414' : '#fff',
+          },
         },
       }}
     >

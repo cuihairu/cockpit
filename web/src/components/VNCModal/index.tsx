@@ -75,8 +75,8 @@ const VNCModal: React.FC<VNCModalProps> = ({
       startTimeout();
 
       try {
-        const ticket = await createRemoteTicket({
-          agent_id: agentId,
+        const { ticket } = await createRemoteTicket({
+          agentId,
           host,
           port,
           protocol: 'vnc',
@@ -84,7 +84,8 @@ const VNCModal: React.FC<VNCModalProps> = ({
         });
 
         const rfb = new RFB(vncContainerRef.current, url, {
-          wsProtocols: [ticket.ticket],
+          credentials: { password: values.password || '' },
+          wsProtocols: [ticket],
         });
 
         rfb.addEventListener('connect', () => {
