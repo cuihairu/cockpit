@@ -68,7 +68,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: agent-coverage-report
           path: coverage.html
@@ -168,7 +168,7 @@ jobs:
           fi
 
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: agent-coverage
           path: coverage/

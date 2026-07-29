@@ -66,7 +66,7 @@ jobs:
           fi
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: cockpit-${{ matrix.os }}-amd64
           path: dist/*
