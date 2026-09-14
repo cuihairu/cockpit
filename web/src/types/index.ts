@@ -468,3 +468,52 @@ export interface NotificationSendResult {
   ok: boolean
   error?: string
 }
+
+// ========== 备份管理 ==========
+
+// 备份任务配置（备份在 Agent 侧本地执行，见 docs/guide/backup-design.md）
+export interface BackupConfig {
+  id: number
+  agent_id: string
+  name: string // 备份文件名前缀
+  sources: string[] // 源路径列表
+  dest_dir: string
+  schedule: string // manual / daily@HH:mm / every:Nh
+  retention: number // 保留份数，0 = 不清理
+  enabled: boolean
+  last_run_at: number
+  next_run_at: number // manual 恒为 0
+  last_status: string // "" / running / success / failed
+  created_at: number
+}
+
+// 备份配置创建/更新请求
+export interface BackupConfigInput {
+  agent_id: string
+  name: string
+  sources: string[]
+  dest_dir: string
+  schedule: string
+  retention: number
+  enabled: boolean
+}
+
+// 备份单次运行记录
+export interface BackupRun {
+  id: number
+  configId: number
+  taskId: string
+  status: 'running' | 'success' | 'failed' | 'timeout'
+  file: string
+  size: number
+  error?: string
+  startedAt: number
+  finishedAt: number
+}
+
+// Agent 备份目录下的产物文件
+export interface BackupFile {
+  name: string
+  size: number
+  mtime: number
+}

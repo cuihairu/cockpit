@@ -26,6 +26,10 @@ import type {
   ProbeConfig,
   NotificationStatus,
   NotificationSendResult,
+  BackupConfig,
+  BackupConfigInput,
+  BackupRun,
+  BackupFile,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -405,6 +409,52 @@ class ApiService {
   // 向全部启用渠道发送测试通知，返回逐渠道结果
   async testNotification(): Promise<{ results: NotificationSendResult[] }> {
     return this.client.post<unknown, { results: NotificationSendResult[] }>('/notification/test')
+  }
+
+  // ========== 备份管理 ==========
+  // 备份配置列表
+  async getBackupConfigs(): Promise<{ configs: BackupConfig[] }> {
+    return this.client.get<unknown, { configs: BackupConfig[] }>('/backups/configs')
+  }
+
+  // 创建备份配置
+  async createBackupConfig(input: BackupConfigInput): Promise<BackupConfig> {
+    return this.client.post<unknown, BackupConfig>('/backups/configs', input)
+  }
+
+  // 更新备份配置
+  async updateBackupConfig(id: number, input: BackupConfigInput): Promise<BackupConfig> {
+    return this.client.put<unknown, BackupConfig>(`/backups/configs/${id}`, input)
+  }
+
+  // 删除备份配置（级联删除运行历史）
+  async deleteBackupConfig(id: number): Promise<void> {
+    await this.client.delete(`/backups/configs/${id}`)
+  }
+
+  // 立即运行一次备份
+  async runBackup(id: number): Promise<{ status: string }> {
+    return this.client.post<unknown, { status: string }>(`/backups/configs/${id}/run`)
+  }
+
+  // 全部运行历史
+  async getBackupRuns(limit = 50): Promise<{ runs: BackupRun[] }> {
+    return this.client.get<unknown, { runs: BackupRun[] }>(`/backups/runs?limit=${limit}`)
+  }
+
+  // 某配置的运行历史
+  async getBackupConfigRuns(id: number, limit = 50): Promise<{ runs: BackupRun[] }> {
+    return this.client.get<unknown, { runs: BackupRun[] }>(`/backups/configs/${id}/runs?limit=${limit}`)
+  }
+
+  // 浏览 Agent 备份目录产物
+  async getBackupFiles(id: number): Promise<{ files: BackupFile[] }> {
+    return this.client.get<unknown, { files: BackupFile[] }>(`/backups/configs/${id}/files`)
+  }
+
+  // 删除 Agent 上的单个备份文件
+  async deleteBackupFile(id: number, name: string): Promise<void> {
+    await this.client.post(`/backups/configs/${id}/files/delete`, { name })
   }
 }
 

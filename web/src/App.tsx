@@ -14,6 +14,7 @@ import {
   AppstoreOutlined,
   ContainerOutlined,
   RocketOutlined,
+  CloudUploadOutlined,
 } from '@ant-design/icons'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
@@ -32,6 +33,7 @@ const Resources = lazy(() => import('./pages/Resources'))
 const Workbench = lazy(() => import('./pages/Workbench'))
 const Docker = lazy(() => import('./pages/Docker'))
 const Stacks = lazy(() => import('./pages/Stacks'))
+const Backups = lazy(() => import('./pages/Backups'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Profile = lazy(() => import('./pages/Profile'))
 const AuditLogs = lazy(() => import('./pages/AuditLogs'))
@@ -107,6 +109,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/stacks',
       name: '应用部署',
       icon: <RocketOutlined />,
+    },
+    {
+      path: '/backups',
+      name: '备份管理',
+      icon: <CloudUploadOutlined />,
     },
     {
       path: '/monitor',
@@ -274,6 +281,7 @@ const MainLayout = () => {
             <Route path="/agents" element={<Navigate to="/workbench" replace />} />
             <Route path="/docker" element={<Docker />} />
             <Route path="/stacks" element={<Stacks />} />
+            <Route path="/backups" element={<Backups />} />
             <Route path="/monitor" element={<Monitor />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/audit-logs" element={<AuditLogs />} />
