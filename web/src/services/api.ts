@@ -15,6 +15,12 @@ import type {
   TOTPVerifyResponse,
   LoginResponse,
   UserInfo,
+  StackView,
+  StackDetail,
+  StackCompose,
+  StackComposeSaveResponse,
+  StackTaskStartResponse,
+  StackTask,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -225,6 +231,62 @@ class ApiService {
       `/docker/agents/${agentId}/containers/${containerId}/logs`,
       { params: { tail: opts?.tail ?? '100', timestamps: opts?.timestamps ?? false } },
     )
+  }
+
+  // ========== 应用部署（Compose Stack，通过 Agent RPC 代理） ==========
+  // 聚合所有 agent 的 Stack 列表
+  async getStacks(): Promise<{ stacks: StackView[] }> {
+    return this.client.get<unknown, { stacks: StackView[] }>('/stacks')
+  }
+
+  // Stack 详情（服务列表与运行状态）
+  async getStackDetail(agentId: string, name: string): Promise<StackDetail> {
+    return this.client.get<unknown, StackDetail>(`/stacks/agents/${agentId}/${name}`)
+  }
+
+  // 读取 Stack 的 compose.yml 与 .env 内容
+  async getStackCompose(agentId: string, name: string): Promise<StackCompose> {
+    return this.client.get<unknown, StackCompose>(`/stacks/agents/${agentId}/${name}/compose`)
+  }
+
+  // 保存 compose.yml / .env；YAML 校验失败时返回 502，error 含 docker compose config 输出
+  async saveStackCompose(
+    agentId: string,
+    name: string,
+    data: { compose: string; env?: string },
+  ): Promise<StackComposeSaveResponse> {
+    return this.client.put<unknown, StackComposeSaveResponse>(
+      `/stacks/agents/${agentId}/${name}/compose`,
+      data,
+    )
+  }
+
+  // 启动 / 停止 Stack（异步任务）
+  async stackAction(agentId: string, name: string, action: 'up' | 'down'): Promise<StackTaskStartResponse> {
+    return this.client.post<unknown, StackTaskStartResponse>(
+      `/stacks/agents/${agentId}/${name}/${action}`,
+    )
+  }
+
+  // 查询 Stack 异步任务状态
+  async getStackTask(agentId: string, taskId: string): Promise<StackTask> {
+    return this.client.get<unknown, StackTask>(`/stacks/agents/${agentId}/tasks/${taskId}`)
+  }
+
+  // Stack 部署日志（可按服务过滤）
+  async getStackLogs(
+    agentId: string,
+    name: string,
+    opts?: { service?: string; tail?: number },
+  ): Promise<{ logs: string }> {
+    return this.client.get<unknown, { logs: string }>(`/stacks/agents/${agentId}/${name}/logs`, {
+      params: { service: opts?.service, tail: opts?.tail ?? 200 },
+    })
+  }
+
+  // 删除 Stack（异步任务：先 down 再删目录）
+  async deleteStack(agentId: string, name: string): Promise<StackTaskStartResponse> {
+    return this.client.delete<unknown, StackTaskStartResponse>(`/stacks/agents/${agentId}/${name}`)
   }
 
   // ========== 计算实例 ==========

@@ -146,10 +146,10 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 
 ### M1 —— P1 本体（本次立项范围）
 
-- [ ] Agent：`internal/agent/rpc/stack_provider.go`（list/status/file/task/up/down/logs/remove + compose CLI 检测）
-- [ ] Agent：providers.go 注册逻辑 + 单测（fake 脚本模拟 compose CLI）
-- [ ] Server：`api_stacks.go` + storage stacks 表 + 审计事件
-- [ ] Web：Stacks 页面（列表/详情/编辑/部署/日志轮询）
+- [x] Agent：`internal/agent/rpc/stack_provider.go`（list/status/file/task/up/down/logs/remove + compose CLI 检测）
+- [x] Agent：providers.go 注册逻辑 + 单测（fake 脚本模拟 compose CLI）
+- [x] Server：`api_stacks.go` + storage stacks 表 + 审计事件
+- [x] Web：Stacks 页面（列表/详情/编辑/部署/日志轮询）
 - [ ] 验收：在一台测试机上完成「新建 → 编辑 compose → up → 改配置 → up（重建）→ down → 删除」全流程；同名并发 up 返回 409；agent 断连后列表显示缓存灰态
 
 ### M1.5 —— 体验补齐

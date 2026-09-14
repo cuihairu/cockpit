@@ -350,3 +350,67 @@ export interface UserInfo {
   totp_enabled: boolean
   totp_setup_at?: string
 }
+
+// ========== 应用部署（Compose Stack） ==========
+// Stack 内单个服务的信息
+export interface StackService {
+  name: string
+  image: string
+  state: string // running / exited 等（docker 状态）
+  status: string // 可读状态串，如 "Up 2 hours"
+  containerId: string
+}
+
+// Stack 列表视图（聚合所有 agent；离线 agent 条目 online=false 且无 services）
+export interface StackView {
+  agentId: string
+  agentName: string
+  name: string
+  running: number
+  total: number
+  lastAction: string // 最近部署动作，如 up / down
+  lastStatus: string // 最近部署结果，如 success / failed
+  lastDeployedAt: number // Unix 秒级时间戳，0 = 无部署记录
+  online: boolean
+  services?: StackService[]
+}
+
+// Stack 详情（单个 agent 上的单个 Stack）
+export interface StackDetail {
+  name: string
+  running: number
+  total: number
+  services: StackService[]
+}
+
+// Stack 的 compose.yml 与 .env 内容
+export interface StackCompose {
+  name: string
+  compose: string
+  env: string
+  composeFile: string // 服务端实际文件路径
+  modifiedAt: number // Unix 秒级时间戳
+}
+
+// 保存 compose 文件的响应
+export interface StackComposeSaveResponse {
+  status: string // "saved"
+  created: boolean // 是否为新创建的 Stack
+}
+
+// Stack 异步任务启动响应（up / down / 删除）
+export interface StackTaskStartResponse {
+  taskId: string
+  status: string // "started"
+}
+
+// Stack 异步任务状态
+export interface StackTask {
+  id: string
+  stack: string
+  action: string // up / down / delete
+  status: 'running' | 'success' | 'failed'
+  log: string
+  startedAt: number // Unix 秒级时间戳
+  finishedAt: number // Unix 秒级时间戳，0 = 未结束
+}
