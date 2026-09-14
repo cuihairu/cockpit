@@ -19,6 +19,7 @@ const (
 	CertificateExpiring = "certificate.expiring"
 	CertificateWarning  = "certificate.warning"
 	ServiceDown         = "service.down"
+	ServiceUp           = "service.up" // 恢复通知（probe 边沿检测，需在 events 白名单显式启用）
 	AgentOffline        = "agent.offline"
 	DomainExpired       = "domain.expired"
 )

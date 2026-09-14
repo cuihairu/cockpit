@@ -206,11 +206,11 @@ func TestNewServerInitializesRuntimeConfig(t *testing.T) {
 	if s.cfg != cfg {
 		t.Fatal("Server should keep the provided config")
 	}
-	if s.notification == nil {
-		t.Fatal("Server.notification should be initialized when notification is enabled")
+	if s.notifier == nil {
+		t.Fatal("Server.notifier should be initialized when notification is enabled")
 	}
-	if !s.notification.IsEnabled() {
-		t.Fatal("Server.notification should be enabled")
+	if !s.notifier.Enabled() {
+		t.Fatal("Server.notifier should be enabled")
 	}
 
 	auth.SetEmailConfig(s.cfg.Email)

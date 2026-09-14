@@ -2,28 +2,44 @@ package probe
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/cert"
 	"github.com/cuihairu/cockpit/internal/health"
+	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
+// 探测间隔边界（秒）：下限防自 DDoS，上限不如关闭拨测
+const (
+	MinIntervalSeconds = 30
+	MaxIntervalSeconds = 3600
+	DefaultInterval    = 5 * time.Minute
+)
+
+// IntervalSettingKey 探测间隔在 storage.Setting 表中的键
+const IntervalSettingKey = "probe.interval_seconds"
+
+// serviceFailureThreshold 连续失败多少次才判定 down 并通知（过滤瞬时抖动）
+const serviceFailureThreshold = 2
+
 // ProbeResult 单次探测结果
 type ProbeResult struct {
-	ResourceType string        `json:"resource_type"` // domain / service / certificate
-	ResourceID   string        `json:"resource_id"`
-	Name         string        `json:"name"`
-	Status       string        `json:"status"`        // healthy / unhealthy / degraded
-	LatencyMs    int64         `json:"latency_ms"`
-	Message      string        `json:"message"`
-	CheckedAt    time.Time     `json:"checked_at"`
-	Error        string        `json:"error,omitempty"`
+	ResourceType string    `json:"resource_type"` // domain / service / certificate
+	ResourceID   string    `json:"resource_id"`
+	Name         string    `json:"name"`
+	Status       string    `json:"status"` // healthy / unhealthy / degraded
+	LatencyMs    int64     `json:"latency_ms"`
+	Message      string    `json:"message"`
+	CheckedAt    time.Time `json:"checked_at"`
+	Error        string    `json:"error,omitempty"`
 }
 
 // ProbeResults 一轮探测的结果集
@@ -37,31 +53,70 @@ type ProbeResults struct {
 	Duration     time.Duration `json:"duration"`
 }
 
+// serviceState 单个服务的连续失败计数与已通知标记（拨测边沿通知用）
+type serviceState struct {
+	failCount int
+	notified  bool
+}
+
 // Runner 自动健康探测运行器
 type Runner struct {
 	db            *storage.DB
 	healthChecker *health.Checker
 	certMonitor   *cert.Monitor
-	interval      time.Duration
+	// intervalSeconds 探测间隔（秒）。atomic 读写：API 线程 SetInterval，
+	// 探测循环 time.After(Interval()) 每轮重读，间隔变化下一轮生效。
+	intervalSeconds atomic.Int64
+	notifier        *notification.Service
+	// serviceStates 服务边沿状态；仅在探测循环 goroutine 内访问，无需加锁
+	serviceStates map[string]*serviceState
 	ctx           context.Context
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
 }
 
 // NewRunner 创建探测运行器
-func NewRunner(db *storage.DB, interval time.Duration) *Runner {
+func NewRunner(db *storage.DB, interval time.Duration, notifier *notification.Service) *Runner {
 	if interval <= 0 {
-		interval = 5 * time.Minute
+		interval = DefaultInterval
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Runner{
+	r := &Runner{
 		db:            db,
 		healthChecker: health.NewChecker(health.Config{Timeout: 10 * time.Second}),
 		certMonitor:   cert.NewMonitor(cert.Config{Timeout: 10 * time.Second}),
-		interval:      interval,
+		notifier:      notifier,
+		serviceStates: make(map[string]*serviceState),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
+	r.intervalSeconds.Store(int64(interval / time.Second))
+	return r
+}
+
+// Interval 当前探测间隔
+func (r *Runner) Interval() time.Duration {
+	secs := r.intervalSeconds.Load()
+	if secs <= 0 {
+		secs = int64(DefaultInterval / time.Second)
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// SetInterval 动态调整探测间隔（下一轮探测生效）；非正值忽略。
+// 超出 [Min, Max] 边界的值被夹紧，调用方（API 层）已先行校验。
+func (r *Runner) SetInterval(d time.Duration) {
+	secs := int64(d / time.Second)
+	if secs <= 0 {
+		return
+	}
+	if secs < MinIntervalSeconds {
+		secs = MinIntervalSeconds
+	}
+	if secs > MaxIntervalSeconds {
+		secs = MaxIntervalSeconds
+	}
+	r.intervalSeconds.Store(secs)
 }
 
 // Start 启动定期探测循环
@@ -77,12 +132,10 @@ func (r *Runner) Start() {
 		}
 		r.RunAllChecks()
 
-		ticker := time.NewTicker(r.interval)
-		defer ticker.Stop()
-
 		for {
+			// 每轮重读间隔：SetInterval 后下一轮天然生效（Ticker 做不到）
 			select {
-			case <-ticker.C:
+			case <-time.After(r.Interval()):
 				r.RunAllChecks()
 			case <-r.ctx.Done():
 				return
@@ -244,8 +297,64 @@ func (r *Runner) checkServices() []ProbeResult {
 		if err := r.db.UpdateServiceStatus(s.ID, result.Status, int(result.LatencyMs), time.Now()); err != nil {
 			log.Printf("[probe] Failed to update service %s: %v", s.Name, err)
 		}
+
+		// 边沿通知：连续失败达阈值发 down，恢复发 up（仅在探测循环 goroutine 内执行）
+		r.trackServiceEdge(result)
 	}
 	return results
+}
+
+// trackServiceEdge 服务状态边沿检测与即时通知。
+// 连续 serviceFailureThreshold 次失败才判定 down（过滤瞬时抖动），
+// 通知发出后不再重复；恢复（探测成功）时发 service.up 恢复通知。
+// 事件是否真正投递由 notification.Service 按 cfg.Events 白名单过滤。
+func (r *Runner) trackServiceEdge(res ProbeResult) {
+	key := res.ResourceType + "/" + res.ResourceID
+	st := r.serviceStates[key]
+	if st == nil {
+		st = &serviceState{}
+		r.serviceStates[key] = st
+	}
+
+	if res.Error != "" || res.Status == "down" {
+		st.failCount++
+		if st.failCount == serviceFailureThreshold && !st.notified {
+			st.notified = true
+			r.notifyService(res, notification.ServiceDown,
+				fmt.Sprintf("服务 %s 连续 %d 次探测失败：%s", res.Name, st.failCount, res.Message))
+		}
+		return
+	}
+
+	// 探测成功：失败计数归零；此前已通知过 down 则补发恢复通知
+	if st.notified {
+		st.notified = false
+		st.failCount = 0
+		r.notifyService(res, notification.ServiceUp,
+			fmt.Sprintf("服务 %s 已恢复（延迟 %dms）", res.Name, res.LatencyMs))
+		return
+	}
+	st.failCount = 0
+}
+
+// notifyService 通过通知服务异步发送服务状态变化通知
+func (r *Runner) notifyService(res ProbeResult, eventType, message string) {
+	if r.notifier == nil {
+		return
+	}
+	level := "info"
+	if eventType == notification.ServiceDown {
+		level = "error"
+	}
+	r.notifier.SendNonBlocking(&notification.Notification{
+		EventType:    eventType,
+		Title:        res.Name,
+		Message:      message,
+		Level:        level,
+		ResourceType: res.ResourceType,
+		ResourceID:   res.ResourceID,
+		Time:         time.Now(),
+	})
 }
 
 // probeService 探测单个服务

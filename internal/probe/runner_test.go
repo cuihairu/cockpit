@@ -1,6 +1,8 @@
 package probe
 
 import (
+	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/config"
+	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
@@ -21,27 +25,154 @@ func newTestRunner(t *testing.T) (*Runner, *storage.DB) {
 	}
 	t.Cleanup(func() { db.Close() })
 	// interval 0 lets NewRunner apply its default
-	return NewRunner(db, 0), db
+	return NewRunner(db, 0, nil), db
 }
 
 func TestNewRunnerDefaultsInterval(t *testing.T) {
 	r, _ := newTestRunner(t)
-	if r.interval != 5*time.Minute {
-		t.Errorf("interval = %v, want 5m", r.interval)
+	if r.Interval() != 5*time.Minute {
+		t.Errorf("interval = %v, want 5m", r.Interval())
 	}
 }
 
 func TestNewRunnerKeepsPositiveInterval(t *testing.T) {
 	r, _ := newTestRunner(t)
-	r2 := NewRunner(r.db, 30*time.Second)
-	if r2.interval != 30*time.Second {
-		t.Errorf("interval = %v, want 30s", r2.interval)
+	r2 := NewRunner(r.db, 30*time.Second, nil)
+	if r2.Interval() != 30*time.Second {
+		t.Errorf("interval = %v, want 30s", r2.Interval())
 	}
 	if r2.healthChecker == nil {
 		t.Error("healthChecker should be initialized")
 	}
 	if r2.certMonitor == nil {
 		t.Error("certMonitor should be initialized")
+	}
+}
+
+func TestSetIntervalClampsToBounds(t *testing.T) {
+	r, _ := newTestRunner(t)
+
+	r.SetInterval(0)
+	r.SetInterval(-5 * time.Second)
+	if got := r.Interval(); got != 5*time.Minute {
+		t.Errorf("non-positive SetInterval should be ignored, got %v", got)
+	}
+
+	r.SetInterval(5 * time.Second) // 低于下限 → 夹紧到 30s
+	if got := r.Interval(); got != time.Duration(probeMinIntervalForTest)*time.Second {
+		t.Errorf("interval = %v, want clamped %ds", got, probeMinIntervalForTest)
+	}
+
+	r.SetInterval(48 * time.Hour) // 高于上限 → 夹紧到 1h
+	if got := r.Interval(); got != time.Duration(probeMaxIntervalForTest)*time.Second {
+		t.Errorf("interval = %v, want clapped %ds", got, probeMaxIntervalForTest)
+	}
+
+	r.SetInterval(2 * time.Minute)
+	if got := r.Interval(); got != 2*time.Minute {
+		t.Errorf("interval = %v, want 2m", got)
+	}
+}
+
+// probeMinIntervalForTest / probeMaxIntervalForTest 复述包级常量，便于错误信息可读
+const (
+	probeMinIntervalForTest = MinIntervalSeconds
+	probeMaxIntervalForTest = MaxIntervalSeconds
+)
+
+// newEdgeTestRunner 带指向本地 httptest 的 webhook 通知服务的 Runner
+func newEdgeTestRunner(t *testing.T, events map[string]*config.EventConfig) (*Runner, *storage.DB, chan []byte) {
+	t.Helper()
+	received := make(chan []byte, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, _ := io.ReadAll(req.Body)
+		select {
+		case received <- body:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &config.NotificationConfig{
+		Enabled: true,
+		Webhook: []*config.WebhookConfig{{URL: srv.URL}},
+		Events:  events,
+	}
+	r, db := newTestRunner(t)
+	r.notifier = notification.NewService(cfg)
+	return r, db, received
+}
+
+func TestTrackServiceEdgeNotifications(t *testing.T) {
+	r, _, received := newEdgeTestRunner(t, map[string]*config.EventConfig{
+		"down": {Type: notification.ServiceDown, Enabled: true},
+		"up":   {Type: notification.ServiceUp, Enabled: true},
+	})
+
+	down := ProbeResult{ResourceType: "service", ResourceID: "svc-1", Name: "web", Status: "down", Error: "conn refused", Message: "conn refused"}
+	up := ProbeResult{ResourceType: "service", ResourceID: "svc-1", Name: "web", Status: "up", Message: "HTTP 200"}
+
+	// 第 1 次失败：未达阈值，不通知
+	r.trackServiceEdge(down)
+	select {
+	case b := <-received:
+		t.Fatalf("unexpected notification after 1st failure: %s", b)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// 第 2 次失败：达到阈值 → service.down
+	r.trackServiceEdge(down)
+	expectEvent(t, received, notification.ServiceDown)
+
+	// 第 3 次失败：已通知过，不重复
+	r.trackServiceEdge(down)
+	select {
+	case b := <-received:
+		t.Fatalf("duplicate down notification: %s", b)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// 恢复：补发 service.up
+	r.trackServiceEdge(up)
+	expectEvent(t, received, notification.ServiceUp)
+
+	// 持续正常：不再发
+	r.trackServiceEdge(up)
+	select {
+	case b := <-received:
+		t.Fatalf("unexpected up notification: %s", b)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// expectEvent 等待并断言下一个 webhook 通知的 event_type
+func expectEvent(t *testing.T, received chan []byte, eventType string) {
+	t.Helper()
+	select {
+	case b := <-received:
+		var payload map[string]interface{}
+		if err := json.Unmarshal(b, &payload); err != nil {
+			t.Fatalf("decode notification: %v (%s)", err, b)
+		}
+		if payload["event_type"] != eventType {
+			t.Fatalf("event_type = %v, want %s", payload["event_type"], eventType)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s notification", eventType)
+	}
+}
+
+func TestTrackServiceEdgeRespectsWhitelist(t *testing.T) {
+	// 白名单未启用 service.down：边沿检测照常计数但不投递
+	r, _, received := newEdgeTestRunner(t, map[string]*config.EventConfig{})
+	down := ProbeResult{ResourceType: "service", ResourceID: "svc-1", Name: "web", Status: "down", Error: "x", Message: "x"}
+	r.trackServiceEdge(down)
+	r.trackServiceEdge(down)
+	select {
+	case b := <-received:
+		t.Fatalf("filtered event should not be delivered: %s", b)
+	case <-time.After(300 * time.Millisecond):
 	}
 }
 

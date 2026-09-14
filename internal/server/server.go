@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,7 +35,7 @@ type Server struct {
 	auth           *auth.Service
 	audit          *audit.Logger
 	proxyMgr       *proxy.Manager
-	notification   *notification.Client
+	notifier       *notification.Service
 	remoteSessions *RemoteSessionManager
 	ticketMgr      *TicketManager
 	inventorySync  *inventorysync.Manager
@@ -67,11 +68,8 @@ func NewServer(cfg *config.Config) *Server {
 		Expiration: cfg.JWT.Expiration,
 	})
 
-	// 初始化通知客户端
-	var notificationClient *notification.Client
-	if cfg.Notification != nil && cfg.Notification.Enabled {
-		notificationClient = notification.NewClient(cfg.Notification)
-	}
+	// 初始化多渠道通知服务（herald/ntfy/webhook/telegram；未启用时为空实现）
+	notifier := notification.NewService(cfg.Notification)
 
 	// 检查 TOTP 加密密钥
 	if storage.IsUsingDefaultKey() {
@@ -96,7 +94,7 @@ func NewServer(cfg *config.Config) *Server {
 		auth:           authService,
 		audit:          audit.NewLogger(db),
 		proxyMgr:       proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
-		notification:   notificationClient,
+		notifier:       notifier,
 		remoteSessions: NewRemoteSessionManager(),
 		ticketMgr:      NewTicketManager(),
 		cfg:            cfg,
@@ -199,6 +197,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 注册 Compose Stack API
 	s.registerStacksAPI(mux)
+
+	// 注册拨测与通知 API
+	s.registerProbeAPI(mux)
 
 	// 注册远程连接 API
 	s.registerRemoteAPI(mux)
@@ -319,11 +320,18 @@ func (s *Server) startInventorySync() error {
 	return nil
 }
 
-// startProbeRunner 启动自动健康探测
+// startProbeRunner 启动自动健康探测；DB 中保存过间隔则覆盖默认值
 func (s *Server) startProbeRunner() {
-	s.probeRunner = probe.NewRunner(s.db, 5*time.Minute)
+	interval := probe.DefaultInterval
+	if v, err := s.db.GetSetting(probe.IntervalSettingKey); err == nil && v != "" {
+		if secs, convErr := strconv.Atoi(v); convErr == nil &&
+			secs >= probe.MinIntervalSeconds && secs <= probe.MaxIntervalSeconds {
+			interval = time.Duration(secs) * time.Second
+		}
+	}
+	s.probeRunner = probe.NewRunner(s.db, interval, s.notifier)
 	s.probeRunner.Start()
-	log.Println("Probe runner started (interval: 5m)")
+	log.Printf("Probe runner started (interval: %s)", interval)
 }
 
 // handleHealth 健康检查

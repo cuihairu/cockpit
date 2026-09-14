@@ -75,15 +75,41 @@ type SMTPConfig struct {
 
 // NotificationConfig 通知配置
 type NotificationConfig struct {
-	Enabled bool                    `yaml:"enabled"`
-	Herald  *HeraldConfig           `yaml:"herald"`
-	Events  map[string]*EventConfig `yaml:"events"`
+	Enabled  bool                    `yaml:"enabled"`
+	Herald   *HeraldConfig           `yaml:"herald"`
+	Ntfy     []*NtfyConfig           `yaml:"ntfy"`
+	Webhook  []*WebhookConfig        `yaml:"webhook"`
+	Telegram []*TelegramConfig       `yaml:"telegram"`
+	Events   map[string]*EventConfig `yaml:"events"`
 }
 
 // HeraldConfig Herald 服务配置
 type HeraldConfig struct {
 	BaseURL string        `yaml:"base_url"`
 	Timeout time.Duration `yaml:"timeout"`
+}
+
+// NtfyConfig ntfy 渠道配置（JSON 发布模式，POST {server}/）
+type NtfyConfig struct {
+	Server   string        `yaml:"server"`
+	Topic    string        `yaml:"topic"`
+	Token    string        `yaml:"token,omitempty"`
+	Priority string        `yaml:"priority,omitempty"` // min/low/default/high/urgent，空则按 level 推导
+	Timeout  time.Duration `yaml:"timeout,omitempty"`
+}
+
+// WebhookConfig 通用 webhook 渠道配置
+type WebhookConfig struct {
+	URL     string        `yaml:"url"`
+	Secret  string        `yaml:"secret,omitempty"` // 作为 X-Cockpit-Secret 头，供接收方鉴权
+	Timeout time.Duration `yaml:"timeout,omitempty"`
+}
+
+// TelegramConfig Telegram Bot 渠道配置
+type TelegramConfig struct {
+	BotToken string        `yaml:"bot_token"`
+	ChatID   string        `yaml:"chat_id"`
+	Timeout  time.Duration `yaml:"timeout,omitempty"`
 }
 
 // EventConfig 事件配置

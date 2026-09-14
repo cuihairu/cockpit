@@ -164,7 +164,7 @@ func TestCheckExpiringCertificatesSendsNotification(t *testing.T) {
 			},
 		},
 	}
-	g := NewGenerator(db, notification.NewClient(notifCfg), notifCfg)
+	g := NewGenerator(db, notification.NewService(notifCfg), notifCfg)
 
 	cert := &storage.Certificate{
 		DomainName: "expired.example.com",

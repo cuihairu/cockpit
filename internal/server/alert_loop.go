@@ -55,14 +55,14 @@ func (s *Server) alertCheckLoop() {
 
 // runAlertChecks 执行警告检查
 func (s *Server) runAlertChecks() {
-	generator := alert.NewGenerator(s.db, s.notification, s.cfg.Notification)
+	generator := alert.NewGenerator(s.db, s.notifier, s.cfg.Notification)
 	generator.CheckAllChecks()
 	log.Println("Alert checks completed")
 }
 
 // cleanupOldAlerts 清理旧警告
 func (s *Server) cleanupOldAlerts() {
-	generator := alert.NewGenerator(s.db, s.notification, s.cfg.Notification)
+	generator := alert.NewGenerator(s.db, s.notifier, s.cfg.Notification)
 	generator.CleanupOldAlerts(30 * 24 * time.Hour) // 保留30天
 	log.Println("Old alerts cleaned up")
 }

@@ -13,15 +13,15 @@ import (
 // Generator 警告生成器
 type Generator struct {
 	db              *storage.DB
-	notification    *notification.Client
+	notifier        *notification.Service
 	notificationCfg *config.NotificationConfig
 }
 
 // NewGenerator 创建警告生成器
-func NewGenerator(db *storage.DB, notif *notification.Client, notifCfg *config.NotificationConfig) *Generator {
+func NewGenerator(db *storage.DB, notifier *notification.Service, notifCfg *config.NotificationConfig) *Generator {
 	return &Generator{
 		db:              db,
-		notification:    notif,
+		notifier:        notifier,
 		notificationCfg: notifCfg,
 	}
 }
@@ -32,7 +32,7 @@ func (g *Generator) CheckAllChecks() {
 	g.CheckDownServices()
 	g.CheckOfflineAgents()
 	g.CheckExpiredDomains()
-	g.CheckDiskSpace(80)  // 80% 磁盘使用率阈值
+	g.CheckDiskSpace(80)   // 80% 磁盘使用率阈值
 	g.CheckMemoryUsage(85) // 85% 内存使用率阈值
 }
 
@@ -192,8 +192,8 @@ func (g *Generator) createAlertIfNotExists(alertType, title, message, resourceID
 		log.Printf("Failed to create alert: %v", err)
 	}
 
-	// 发送外部通知（非阻塞）
-	notification.SendAlertNonBlocking(g.notification, alert, g.notificationCfg)
+	// 发送外部通知（非阻塞，多渠道扇出；事件白名单在 Service 内过滤）
+	g.notifier.SendAlertNonBlocking(alert)
 }
 
 // CleanupOldAlerts 清理旧警告

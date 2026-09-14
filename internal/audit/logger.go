@@ -42,6 +42,12 @@ const ResourceStack = "stack"
 // ResourceRemoteSession 远控会话资源类型
 const ResourceRemoteSession = "remote_session"
 
+// ResourceProbe 拨测配置资源类型
+const ResourceProbe = "probe"
+
+// ResourceNotification 通知渠道资源类型
+const ResourceNotification = "notification"
+
 // Status 状态
 const (
 	StatusSuccess = "success"
