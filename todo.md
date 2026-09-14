@@ -732,7 +732,7 @@
 
 ### P1 — 中期（运维自动化）
 
-- **应用部署（Compose Stack）**：Docker Compose Stack 管理（上传/编辑 compose.yml、up/down、状态总览），类似 Portainer 的轻量版。→ 方案参考：Komodo 的 Git-to-deploy（栈文件存 Git 仓库 + 触发部署）+ Dockge 的 compose-file-first；Cockpit 已有 `docker_provider` RPC 链路，投入产出比最高。**建议 P1 首个启动。** ✅ 方案设计完成（2026-09-14）：`docs/guide/stack-deploy-design.md`；✅ M1 开发完成（2026-09-14）：Agent stack provider + `/api/stacks` REST + storage 缓存 + 审计 + Web `/stacks` 页面（列表/详情/compose 编辑/异步任务轮询/部署日志）；✅ 本机端到端验收通过（2026-09-14，`scripts/local-acceptance/`，32 项断言全过；顺带修复 detector 不支持 `DOCKER_HOST=unix://` 惯例格式），剩余：真实 Docker 测试机验收（镜像拉取/容器健康/compose 完整语义/目录权限）。
+- **应用部署（Compose Stack）**：Docker Compose Stack 管理（上传/编辑 compose.yml、up/down、状态总览），类似 Portainer 的轻量版。→ 方案参考：Komodo 的 Git-to-deploy（栈文件存 Git 仓库 + 触发部署）+ Dockge 的 compose-file-first；Cockpit 已有 `docker_provider` RPC 链路，投入产出比最高。**建议 P1 首个启动。** ✅ 方案设计完成（2026-09-14）：`docs/guide/stack-deploy-design.md`；✅ M1 开发完成（2026-09-14）：Agent stack provider + `/api/stacks` REST + storage 缓存 + 审计 + Web `/stacks` 页面（列表/详情/compose 编辑/异步任务轮询/部署日志）；✅ M1.5 体验补齐完成（2026-09-14）：restart/pull 动作、部署历史表+详情页时间线、模板库（5 个常见服务模板）+import、stacks 目录自检提示；✅ 本机端到端验收通过（2026-09-14，`scripts/local-acceptance/`，42 项断言全过，覆盖 M1+M1.5；顺带修复 detector 不支持 `DOCKER_HOST=unix://` 惯例格式），剩余：真实 Docker 测试机验收（镜像拉取/容器健康/compose 完整语义/目录权限）。
 - **拨测增强**：探测间隔可配置（当前硬编码 5 分钟）、通知渠道集成（ntfy/webhook/Telegram，告警框架已有）、心跳条式状态历史 UI。→ 方案参考：Uptime Kuma；Cockpit 差异化优势是 probe 天然联动 inventory 资源 + 经 Agent 所在网络分布式探测。
 - **备份管理**：数据库/配置/卷的快照与恢复，定时备份策略 + 异地保留。这是个人云数据安全的核心缺口。
 - **反向代理/路由管理**：Nginx/Caddy/Traefik 配置可视化与下发，把「网关」资源从记录升级为可管理对象。

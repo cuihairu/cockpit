@@ -20,7 +20,10 @@
 #   A11 down → 任务 success → running 归零
 #   A12 remove → 目录删除、列表移除
 #   A13 agent 断连 → 列表显示缓存灰态 online=false
-#   A14 审计含 stack.up/down/remove 事件；.env 内容不泄漏进审计
+#   A14 审计含 stack up/down/remove/restart/pull 事件；.env 内容不泄漏进审计
+#   A15 restart / pull 动作（M1.5）→ 任务 success
+#   A16 部署历史：server 记录 + 后台回填终态（含 up/restart/pull）
+#   A17 目录自检信息（stack.info → agentInfo.dirWritable）
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -225,6 +228,37 @@ gone() {
 retry 10 bash -c "true"
 check_eq "A12 列表已移除 demo" "$(gone)" "yes"
 
+step "A15. cache-demo 重建 + restart / pull（M1.5 新动作）"
+resp="$(curl -s -X POST "$API/stacks/agents/$AGENT_ID/cache-demo/up" "${AUTH[@]}")"
+UP2_TASK="$(echo "$resp" | jq -r '.taskId // empty')"
+retry 30 bash -c "curl -s '${AUTH[@]}' '$API/stacks/agents/$AGENT_ID/tasks/$UP2_TASK' | jq -e '.status == \"success\"' >/dev/null"
+check_eq "A15.1 cache-demo up success" "$(curl -s "${AUTH[@]}" "$API/stacks/agents/$AGENT_ID/tasks/$UP2_TASK" | jq -r '.status')" "success"
+resp="$(curl -s -w '\n%{http_code}' -X POST "$API/stacks/agents/$AGENT_ID/cache-demo/restart" "${AUTH[@]}")"
+code="$(echo "$resp" | tail -1)"; body="$(echo "$resp" | head -n -1)"
+check_eq "A15.2 restart 返回 200" "$code" "200"
+RESTART_TASK="$(echo "$body" | jq -r '.taskId // empty')"
+retry 30 bash -c "curl -s '${AUTH[@]}' '$API/stacks/agents/$AGENT_ID/tasks/$RESTART_TASK' | jq -e '.status == \"success\"' >/dev/null"
+check_eq "A15.3 restart 任务 success" "$(curl -s "${AUTH[@]}" "$API/stacks/agents/$AGENT_ID/tasks/$RESTART_TASK" | jq -r '.status')" "success"
+resp="$(curl -s -X POST "$API/stacks/agents/$AGENT_ID/cache-demo/pull" "${AUTH[@]}")"
+PULL_TASK="$(echo "$resp" | jq -r '.taskId // empty')"
+retry 30 bash -c "curl -s '${AUTH[@]}' '$API/stacks/agents/$AGENT_ID/tasks/$PULL_TASK' | jq -e '.status == \"success\"' >/dev/null"
+check_eq "A15.4 pull 任务 success" "$(curl -s "${AUTH[@]}" "$API/stacks/agents/$AGENT_ID/tasks/$PULL_TASK" | jq -r '.status')" "success"
+
+step "A16. 部署历史（server 侧记录 + 后台回填终态）"
+hist_ok() {
+  curl -s "${AUTH[@]}" "$API/stacks/agents/$AGENT_ID/cache-demo/history" | jq -e \
+    '[.deployments[] | select(.action == "up" and .status == "success" and .finishedAt > 0)] | length > 0' >/dev/null
+}
+retry 30 hist_ok
+check_eq "A16.1 up 历史带终态" "$(hist_ok && echo yes || echo no)" "yes"
+actions="$(curl -s "${AUTH[@]}" "$API/stacks/agents/$AGENT_ID/cache-demo/history" | jq -r '[.deployments[].action] | unique | sort | join(",")')"
+check_eq "A16.2 历史含 up/restart/pull" "$actions" "pull,restart,up"
+
+step "A17. 目录自检信息（stack.info）"
+agg="$(curl -sL "${AUTH[@]}" "$API/stacks")"
+check_eq "A17.1 聚合响应含 agentInfo" "$(echo "$agg" | jq -r --arg id "$AGENT_ID" '.agentInfo[$id].dirWritable // empty')" "true"
+check_eq "A17.2 自检带 stacks 目录路径" "$(echo "$agg" | jq -r --arg id "$AGENT_ID" '.agentInfo[$id].dir // empty' | grep -c 'stacks' || true)" "1"
+
 step "A13. agent 断连 → 缓存灰态"
 kill "$AGENT_PID" 2>/dev/null; wait "$AGENT_PID" 2>/dev/null; AGENT_PID=''
 gray() {
@@ -236,7 +270,7 @@ check_eq "A13 cache-demo 灰态 online=false" "$(gray && echo yes || echo no)" "
 
 step "A14. 审计事件 + .env 不泄漏"
 audit="$(curl -s "${AUTH[@]}" "$API/admin/audit/logs?page=1&page_size=100&resource=stack")"
-for ev in stack_create stack_up stack_down stack_remove; do
+for ev in stack_create stack_up stack_down stack_remove stack_restart stack_pull; do
   check_eq "A14 审计含 $ev" "$(echo "$audit" | grep -c "$ev" || true)" "1"
 done
 check_eq "A14 .env 值不进审计" "$(echo "$audit" | grep -c "$ENV_SECRET" || true)" "0"

@@ -129,6 +129,21 @@ case "$sub" in
     echo "[fake] Network ${project}_default  Removed"
     ;;
 
+  restart)
+    project="$(parse_kv -p "$@" || true)"
+    if [ ! -f "$STATE_DIR/$project.json" ]; then
+      echo "fake-docker: no running services for '$project'" >&2
+      exit 1
+    fi
+    echo "[fake] Container ${project}-*  Restarting"
+    ;;
+
+  pull)
+    project="$(parse_kv -p "$@" || true)"
+    echo "[fake] Pulling images for project '$project' ..."
+    echo "[fake] ${project} Pulled"
+    ;;
+
   logs)
     echo "demo-nginx-1  | 172.17.0.1 - - [14/Sep/2026:00:00:00] \"GET / HTTP/1.1\" 200"
     echo "demo-nginx-1  | fake compose logs ok (accept-logs-ok)"

@@ -81,6 +81,9 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 | `stack.logs` | `name, service?, tail?` | compose logs 文本 | 同步 |
 | `stack.task.get` | `task_id` | `{stack, action, status: running/success/failed, log, startedAt, finishedAt}` | 同步 |
 | `stack.remove` | `name` | 先 `down`（已停则跳过），成功后删目录 | 异步 |
+| `stack.restart` | `name` | `{task_id}`，等价 `docker compose restart`（M1.5） | 异步 |
+| `stack.pull` | `name` | `{task_id}`，等价 `docker compose pull`（M1.5） | 异步 |
+| `stack.info` | — | `{dir, dirWritable, dirError?, composeVersion?}`，目录可写性探针 + compose 版本（M1.5） | 同步 |
 
 实现要点：
 
@@ -101,7 +104,8 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 | `GET /api/stacks/agents/{agentId}/{name}` | `stack.status` | stack 详情 |
 | `GET /api/stacks/agents/{agentId}/{name}/compose` | `stack.file.get` | 读文件 |
 | `PUT /api/stacks/agents/{agentId}/{name}/compose` | `stack.file.save` | 写文件（body: `{compose, env}`） |
-| `POST /api/stacks/agents/{agentId}/{name}/{action}` | `stack.up` / `stack.down` | action ∈ {up, down}，返回 `{task_id}` |
+| `POST /api/stacks/agents/{agentId}/{name}/{action}` | `stack.up` / `stack.down` / `stack.restart` / `stack.pull` | action ∈ {up, down, restart, pull}，返回 `{task_id}` |
+| `GET /api/stacks/agents/{agentId}/{name}/history` | — | 部署历史（server 侧 `stack_deployments` 表），`?limit=`（默认 50，上限 200）（M1.5） |
 | `GET /api/stacks/agents/{agentId}/{name}/logs` | `stack.logs` | `?service=&tail=` |
 | `GET /api/stacks/agents/{agentId}/tasks/{taskId}` | `stack.task.get` | 任务轮询 |
 | `DELETE /api/stacks/agents/{agentId}/{name}` | `stack.remove` | 删 stack（body 可选 `{force}`） |
@@ -153,12 +157,12 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 - [x] 验收（本机端到端，2026-09-14）：真实 server/agent 二进制 + fake Docker Engine（`scripts/local-acceptance/`），32 项断言全部通过且可重复，覆盖「创建 → 校验失败不落盘 → up（并发 409）→ 状态联动 → logs → down → 删除 → 断连灰态 → 审计闭环 + .env 不泄漏」，记录见下文[验收记录](#验收记录)
 - [ ] 验收（真实 Docker 测试机）：镜像真实拉取、容器健康/端口/重启策略、compose build/pull/profiles/healthcheck 语义、`COCKPIT_STACKS_DIR` 权限实践（0700）
 
-### M1.5 —— 体验补齐
+### M1.5 —— 体验补齐（2026-09-14 完成）
 
-- [ ] 部署历史表 + 详情页时间线
-- [ ] 模板库扩充（常见个人服务）+ import（粘贴已有 compose.yml）
-- [ ] `restart` / `pull` 动作；多文件 compose（`include:`）支持评估
-- [ ] stacks 目录权限/位置的自检提示
+- [x] 部署历史表 + 详情页时间线：`stack_deployments` 表（server 侧记录），启动类动作下发时插 running、后台 goroutine 2s 轮询任务终态回填（agent 离线不终止，重连后继续拿真实终态；15min 超时兜底标 failed）；详情页「历史」Tab 时间线
+- [x] 模板库扩充（空/Nginx/WordPress/Nginx Proxy Manager/Uptime Kuma）+ import（新建弹窗选模板填充或直接粘贴 compose.yml，保存即建）
+- [x] `restart` / `pull` 动作（异步任务，与 up/down 同一 launchTask 通道 + 审计 stack_restart/stack_pull）；多文件 compose（`include:`）评估结论：当前单文件语义够用，等 P2 Git 仓库场景出现真实多文件需求再议
+- [x] stacks 目录权限/位置的自检提示：`stack.info` RPC（目录可写性探针 + compose 版本），列表接口透传 `agentInfo`，目录异常时列表页顶部 Alert
 
 ### P2 —— Git-to-deploy（Komodo 式升级）
 
@@ -201,6 +205,16 @@ docker 库（要求 scheme）又会解析失败。修复：`detector.normalizeUn
 
 **遗留（真实 Docker 测试机）**：镜像真实拉取、容器健康/端口/重启策略、
 compose build/pull/profiles/healthcheck 语义、`COCKPIT_STACKS_DIR` 权限实践。
+
+### 2026-09-14 本机端到端验收 · M1.5 增补
+
+同一套脚本扩展后跑 M1.5 新功能，42 项断言全部通过，重跑可重复：
+
+- **A15 restart/pull**：两动作均经 up 同款异步任务通道，任务轮询到 success
+- **A16 部署历史**：`/history` 返回 server 侧记录，up/restart/pull 三动作齐全，
+  终态由后台 goroutine 回填（`finishedAt > 0` 且 status=success）
+- **A17 目录自检**：聚合接口 `agentInfo` 带 `dirWritable=true` 与 stacks 目录路径
+- **A14 审计扩展**：六个事件齐全（create/up/down/remove/restart/pull），`.env` 值仍不泄漏
 
 ## 参考
 
