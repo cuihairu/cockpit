@@ -23,6 +23,9 @@ import type {
   StackTask,
   StackInfo,
   StackDeployment,
+  ProbeConfig,
+  NotificationStatus,
+  NotificationSendResult,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -379,6 +382,29 @@ class ApiService {
 
   async markAllAlertsRead(): Promise<void> {
     return this.client.put('/alerts/read-all')
+  }
+
+  // ========== 拨测与通知（拨测增强） ==========
+  // 当前探测配置（间隔秒数与合法范围）
+  async getProbeConfig(): Promise<ProbeConfig> {
+    return this.client.get<unknown, ProbeConfig>('/probe/config')
+  }
+
+  // 修改探测间隔（秒，30-3600），立即生效并持久化
+  async saveProbeConfig(intervalSeconds: number): Promise<ProbeConfig> {
+    return this.client.put<unknown, ProbeConfig>('/probe/config', {
+      interval_seconds: intervalSeconds,
+    })
+  }
+
+  // 通知服务状态（渠道摘要 + 事件开关，不含凭据）
+  async getNotificationStatus(): Promise<NotificationStatus> {
+    return this.client.get<unknown, NotificationStatus>('/notification/status')
+  }
+
+  // 向全部启用渠道发送测试通知，返回逐渠道结果
+  async testNotification(): Promise<{ results: NotificationSendResult[] }> {
+    return this.client.post<unknown, { results: NotificationSendResult[] }>('/notification/test')
   }
 }
 

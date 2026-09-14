@@ -434,3 +434,37 @@ export interface StackDeployment {
   startedAt: number // Unix 秒级时间戳
   finishedAt: number // Unix 秒级时间戳，0 = 未结束
 }
+
+// 拨测配置（探测间隔可配置）
+export interface ProbeConfig {
+  interval_seconds: number
+  min_interval_seconds: number
+  max_interval_seconds: number
+}
+
+// 通知渠道摘要（不含 token/secret 凭据）
+export interface NotificationChannelSummary {
+  channel: string // herald / ntfy / webhook / telegram
+  target: string
+}
+
+// 通知事件开关（config.yaml notification.events 透传）
+export interface NotificationEventRow {
+  type: string // service.down / service.up / certificate.expired ...
+  enabled: boolean
+}
+
+// 通知服务状态
+export interface NotificationStatus {
+  enabled: boolean
+  channels: NotificationChannelSummary[]
+  events: NotificationEventRow[]
+}
+
+// 单渠道投递结果
+export interface NotificationSendResult {
+  channel: string
+  target?: string
+  ok: boolean
+  error?: string
+}
