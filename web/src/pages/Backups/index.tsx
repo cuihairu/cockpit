@@ -25,15 +25,17 @@ import {
 import {
   CaretRightOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   FolderOpenOutlined,
   HistoryOutlined,
   PlusOutlined,
+  UndoOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { api } from '@/services/api'
-import type { BackupConfig, BackupConfigInput, BackupFile, BackupRun } from '@/types'
+import type { BackupConfig, BackupConfigInput, BackupFile, BackupRun, BackupTask } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
@@ -79,6 +81,12 @@ const Backups = () => {
   const [saving, setSaving] = useState(false)
   const [historyFor, setHistoryFor] = useState<BackupConfig | null>(null)
   const [filesFor, setFilesFor] = useState<BackupConfig | null>(null)
+  // 恢复（restore）：表单阶段 → 提交后切任务视图轮询
+  const [restoreTarget, setRestoreTarget] = useState<{ cfg: BackupConfig; file: BackupFile } | null>(null)
+  const [restoreForm] = Form.useForm<{ destDir: string; confirmName: string }>()
+  const [restoreTaskId, setRestoreTaskId] = useState<string | null>(null)
+  const [restoreDestDir, setRestoreDestDir] = useState('')
+  const [restoring, setRestoring] = useState(false)
   const [form] = Form.useForm<{
     agentId: string
     name: string
@@ -317,6 +325,62 @@ const Backups = () => {
     onError: (err) => message.error(getApiErrorMessage(err, '删除备份文件失败')),
   })
 
+  // 下载：axios blob 带 JWT（window.open 带不上 Authorization），createObjectURL 触发保存
+  const [downloading, setDownloading] = useState<string | null>(null)
+  const downloadFile = async (configId: number, name: string) => {
+    setDownloading(name)
+    try {
+      const blob = await api.downloadBackupFile(configId, name)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '下载备份文件失败'))
+    } finally {
+      setDownloading(null)
+    }
+  }
+
+  const openRestore = (cfg: BackupConfig, file: BackupFile) => {
+    setRestoreTarget({ cfg, file })
+    setRestoreTaskId(null)
+    restoreForm.setFieldsValue({ destDir: '', confirmName: '' })
+  }
+
+  const submitRestore = async () => {
+    if (!restoreTarget) return
+    try {
+      const values = await restoreForm.validateFields()
+      setRestoring(true)
+      setRestoreDestDir(values.destDir)
+      const started = await api.restoreBackup(restoreTarget.cfg.id, {
+        file: restoreTarget.file.name,
+        dest_dir: values.destDir,
+        confirm_name: values.confirmName,
+      })
+      message.success('恢复任务已下发')
+      setRestoreTaskId(started.taskId)
+    } catch (err) {
+      if (err && typeof err === 'object' && 'errorFields' in err) return
+      message.error(getApiErrorMessage(err, '触发恢复失败'))
+    } finally {
+      setRestoring(false)
+    }
+  }
+
+  // 恢复任务状态轮询（有 taskId 时启用，终态自动停）
+  const restoreTaskQuery = useQuery({
+    queryKey: ['backup-restore-task', restoreTarget?.cfg.id, restoreTaskId],
+    queryFn: () => api.getBackupTask(restoreTarget!.cfg.id, restoreTaskId!),
+    enabled: !!restoreTarget && !!restoreTaskId,
+    refetchInterval: (query) =>
+      query.state.data?.status === 'running' ? 2000 : false,
+  })
+  const restoreTask: BackupTask | undefined = restoreTaskQuery.data
+
   const runColumns: ColumnsType<BackupRun> = [
     {
       title: '状态',
@@ -367,15 +431,34 @@ const Backups = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 80,
+      width: 190,
       render: (_, f) => (
-        <Popconfirm
-          title="删除该备份文件？"
-          description="此操作不可恢复"
-          onConfirm={() => filesFor && deleteFileMutation.mutate({ configId: filesFor.id, name: f.name })}
-        >
-          <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
+        <Space size={0}>
+          <Button
+            type="link"
+            size="small"
+            icon={<DownloadOutlined />}
+            loading={downloading === f.name}
+            onClick={() => filesFor && downloadFile(filesFor.id, f.name)}
+          >
+            下载
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<UndoOutlined />}
+            onClick={() => filesFor && openRestore(filesFor, f)}
+          >
+            恢复
+          </Button>
+          <Popconfirm
+            title="删除该备份文件？"
+            description="此操作不可恢复"
+            onConfirm={() => filesFor && deleteFileMutation.mutate({ configId: filesFor.id, name: f.name })}
+          >
+            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </Space>
       ),
     },
   ]
@@ -499,7 +582,7 @@ const Backups = () => {
 
       <Drawer
         title={`备份文件：${filesFor?.dest_dir ?? ''}`}
-        width={640}
+        width={720}
         open={!!filesFor}
         onClose={() => setFilesFor(null)}
       >
@@ -523,6 +606,107 @@ const Backups = () => {
           <Empty description="目标目录暂无备份包（目录不存在或为空）" />
         )}
       </Drawer>
+
+      <Modal
+        title={restoreTaskId ? `恢复进度：${restoreTarget?.file.name ?? ''}` : `恢复备份：${restoreTarget?.file.name ?? ''}`}
+        open={!!restoreTarget}
+        onCancel={() => {
+          if (restoreTask?.status === 'running') {
+            message.warning('恢复任务仍在运行，关闭窗口不影响任务执行')
+          }
+          setRestoreTarget(null)
+        }}
+        footer={
+          restoreTaskId
+            ? restoreTask?.status === 'running'
+              ? [<Button key="close" onClick={() => setRestoreTarget(null)}>后台运行，关闭</Button>]
+              : [<Button key="done" type="primary" onClick={() => setRestoreTarget(null)}>完成</Button>]
+            : [
+                <Button key="cancel" onClick={() => setRestoreTarget(null)}>取消</Button>,
+                <Button key="ok" type="primary" danger loading={restoring} onClick={submitRestore}>
+                  开始恢复
+                </Button>,
+              ]
+        }
+        width={560}
+        destroyOnClose
+      >
+        {restoreTarget && !restoreTaskId && (
+          <>
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message="恢复到独立目录，不会覆盖任何现有数据"
+              description={`备份包：${restoreTarget.file.name}（${formatBytes(restoreTarget.file.size)}，${formatTime(restoreTarget.file.mtime)}）。
+                解包目标是 Agent 主机上一个不存在或为空的目录，恢复完成后需要手动将文件迁移回原位。`}
+            />
+            <Form form={restoreForm} layout="vertical">
+              <Form.Item
+                name="destDir"
+                label="恢复目标目录"
+                rules={[
+                  { required: true, message: '请输入恢复目标目录' },
+                  { pattern: /^\//, message: '必须是 Agent 主机上的绝对路径' },
+                ]}
+                extra="必须是不存在或为空的目录（如 /tmp/restore-nginx），已存在且非空会被拒绝"
+              >
+                <Input placeholder="/tmp/restore-20260914" />
+              </Form.Item>
+              <Form.Item
+                name="confirmName"
+                label={`输入备份文件名确认（${restoreTarget.file.name}）`}
+                rules={[
+                  { required: true, message: '请输入备份文件名' },
+                  {
+                    validator: (_, v: string) =>
+                      v === restoreTarget.file.name
+                        ? Promise.resolve()
+                        : Promise.reject(new Error('输入与备份文件名不一致')),
+                  },
+                ]}
+              >
+                <Input placeholder={restoreTarget.file.name} allowClear />
+              </Form.Item>
+            </Form>
+          </>
+        )}
+        {restoreTarget && restoreTaskId && (
+          <>
+            <Space style={{ marginBottom: 12 }}>
+              {restoreTask?.status === 'success' ? (
+                <Tag color="success">恢复成功</Tag>
+              ) : restoreTask?.status === 'failed' ? (
+                <Tag color="error">恢复失败</Tag>
+              ) : (
+                <Tag color="processing">解包中…</Tag>
+              )}
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                目标目录：{restoreDestDir}
+              </Typography.Text>
+            </Space>
+            {restoreTask?.status === 'failed' && restoreTask.error && (
+              <Alert type="error" showIcon style={{ marginBottom: 12 }} message={restoreTask.error} />
+            )}
+            <pre
+              style={{
+                margin: 0,
+                padding: 12,
+                maxHeight: 280,
+                overflow: 'auto',
+                fontSize: 12,
+                lineHeight: 1.6,
+                background: 'rgba(0,0,0,0.04)',
+                borderRadius: 6,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}
+            >
+              {restoreTask?.log || '等待任务输出…'}
+            </pre>
+          </>
+        )}
+      </Modal>
     </Space>
   )
 }

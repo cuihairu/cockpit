@@ -30,6 +30,7 @@ import type {
   BackupConfigInput,
   BackupRun,
   BackupFile,
+  BackupTask,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -455,6 +456,28 @@ class ApiService {
   // 删除 Agent 上的单个备份文件
   async deleteBackupFile(id: number, name: string): Promise<void> {
     await this.client.post(`/backups/configs/${id}/files/delete`, { name })
+  }
+
+  // 恢复备份到独立目录（双确认：confirm_name 必须与 file 一致）
+  async restoreBackup(
+    id: number,
+    input: { file: string; dest_dir: string; confirm_name: string }
+  ): Promise<{ taskId: string; status: string }> {
+    return this.client.post<unknown, { taskId: string; status: string }>(`/backups/configs/${id}/restore`, input)
+  }
+
+  // 轮询 Agent 侧任务状态（restore 等，不落库）
+  async getBackupTask(id: number, taskId: string): Promise<BackupTask> {
+    return this.client.get<unknown, BackupTask>(`/backups/configs/${id}/tasks/${encodeURIComponent(taskId)}`)
+  }
+
+  // 下载备份文件（blob，带 JWT；调用方负责 createObjectURL 触发保存）
+  async downloadBackupFile(id: number, name: string): Promise<Blob> {
+    const resp = await this.client.get(`/backups/configs/${id}/files/download`, {
+      params: { name },
+      responseType: 'blob',
+    })
+    return resp as unknown as Blob
   }
 }
 

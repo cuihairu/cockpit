@@ -517,3 +517,16 @@ export interface BackupFile {
   size: number
   mtime: number
 }
+
+// Agent 侧任务状态（restore 等，server 转发不落库）
+export interface BackupTask {
+  taskId: string
+  action: 'backup' | 'restore'
+  status: 'running' | 'success' | 'failed'
+  error?: string
+  file?: string
+  size?: number
+  startedAt?: number
+  finishedAt?: number
+  log?: string
+}
