@@ -26,7 +26,16 @@ const (
 	// ActionRemoteStart / ActionRemoteEnd 远控会话开始/结束
 	ActionRemoteStart = "remote_start"
 	ActionRemoteEnd   = "remote_end"
+	// Compose Stack 部署（见 docs/guide/stack-deploy-design.md）
+	ActionStackCreate = "stack_create"
+	ActionStackUpdate = "stack_update"
+	ActionStackUp     = "stack_up"
+	ActionStackDown   = "stack_down"
+	ActionStackRemove = "stack_remove"
 )
+
+// ResourceStack Compose Stack 资源类型
+const ResourceStack = "stack"
 
 // ResourceRemoteSession 远控会话资源类型
 const ResourceRemoteSession = "remote_session"

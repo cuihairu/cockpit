@@ -103,6 +103,7 @@ func (d *DB) migrate() error {
 		&Proxy{},
 		&SystemMetric{},
 		&SystemInfoSnapshot{},
+		&Stack{},
 	)
 }
 

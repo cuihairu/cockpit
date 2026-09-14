@@ -181,3 +181,18 @@ type ComputeInstanceFilter struct {
 	Type   string
 	Status string
 }
+
+// Stack Compose Stack 索引缓存（真相源是 Agent 主机上的 stack 目录，
+// 见 docs/guide/stack-deploy-design.md；此表仅供跨 Agent 聚合视图与
+// 离线时的灰态展示）
+type Stack struct {
+	ID             uint      `gorm:"primarykey" json:"id"`
+	AgentID        string    `gorm:"index;uniqueIndex:idx_stack_agent_name" json:"agentId"`
+	Name           string    `gorm:"uniqueIndex:idx_stack_agent_name" json:"name"`
+	Running        int       `json:"running"`
+	Total          int       `json:"total"`
+	LastAction     string    `json:"lastAction"`
+	LastStatus     string    `json:"lastStatus"`
+	LastDeployedAt int64     `json:"lastDeployedAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}

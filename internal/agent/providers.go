@@ -3,9 +3,12 @@ package agent
 import (
 	"log"
 	"os"
+	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
+	"github.com/cuihairu/cockpit/internal/docker"
 	"github.com/cuihairu/cockpit/internal/protocol"
 )
 
@@ -14,6 +17,7 @@ import (
 // 注册规则：
 //   - SystemProvider：始终注册（内置基础能力）
 //   - DockerProvider：检测到 "docker-api" capability 时注册，host 取自 Capability.Endpoint
+//   - StackProvider：跟随 docker-api capability，另需 linux/darwin + docker compose CLI 可用
 //   - PVEProvider：检测到 "pve-api" capability 且环境变量 PVE_TOKEN_ID / PVE_TOKEN_SECRET 同时存在时注册
 //   - OpenWrtProvider：检测到 "openwrt" capability 且 OPENWRT_HOST/OPENWRT_USER/OPENWRT_PASS 存在时注册
 //
@@ -31,6 +35,7 @@ func (a *Agent) setupProviders() {
 		switch cap.Type {
 		case "docker-api":
 			a.registerDockerProvider(cap)
+			a.registerStackProvider(cap)
 		case "pve-api":
 			a.registerPVEProvider(cap)
 		case "openwrt":
@@ -56,6 +61,38 @@ func (a *Agent) registerDockerProvider(cap protocol.Capability) {
 		return
 	}
 	a.rpc.RegisterProvider(p)
+}
+
+// registerStackProvider 注册 Compose Stack Provider。
+//
+// 叠加条件：docker-api capability + linux/darwin + docker compose CLI 可用 +
+// Docker daemon 可连。任一不满足则跳过，不影响容器管理（方案见
+// docs/guide/stack-deploy-design.md）。stacks 根目录可用
+// COCKPIT_STACKS_DIR 覆盖，默认 /var/lib/cockpit/stacks。
+func (a *Agent) registerStackProvider(cap protocol.Capability) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		log.Printf("Skip stack provider: unsupported OS %s", runtime.GOOS)
+		return
+	}
+	if !rpc.ComposeAvailable() {
+		log.Printf("Skip stack provider: docker compose CLI not available")
+		return
+	}
+
+	host := cap.Endpoint
+	if host == "" {
+		host = os.Getenv("DOCKER_HOST")
+	}
+	dockerClient, err := docker.NewClient(docker.Config{Host: host, Timeout: 30 * time.Second})
+	if err != nil {
+		log.Printf("Skip stack provider: connect docker daemon: %v", err)
+		return
+	}
+
+	a.rpc.RegisterProvider(rpc.NewStackProvider(rpc.StackConfig{
+		Dir:    os.Getenv("COCKPIT_STACKS_DIR"),
+		Docker: dockerClient,
+	}))
 }
 
 // registerPVEProvider 注册 PVE Provider
