@@ -1,8 +1,13 @@
 package server
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -65,6 +70,14 @@ func (s *Server) handleBackupsAPI(w http.ResponseWriter, r *http.Request) {
 		s.withBackupConfig(w, r, parts[1], s.handleBackupFiles)
 	case len(parts) == 4 && parts[0] == "configs" && parts[2] == "files" && parts[3] == "delete" && r.Method == http.MethodPost:
 		s.withBackupConfig(w, r, parts[1], s.handleBackupFileDelete)
+	case len(parts) == 4 && parts[0] == "configs" && parts[2] == "files" && parts[3] == "download" && r.Method == http.MethodGet:
+		s.withBackupConfig(w, r, parts[1], s.handleBackupFileDownload)
+	case len(parts) == 4 && parts[0] == "configs" && parts[2] == "tasks" && r.Method == http.MethodGet:
+		s.withBackupConfig(w, r, parts[1], func(w http.ResponseWriter, r *http.Request, cfg *storage.BackupConfig) {
+			s.handleBackupTaskGet(w, r, cfg, parts[3])
+		})
+	case len(parts) == 3 && parts[0] == "configs" && parts[2] == "restore" && r.Method == http.MethodPost:
+		s.withBackupConfig(w, r, parts[1], s.handleBackupRestore)
 	default:
 		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 	}
@@ -369,6 +382,161 @@ func (s *Server) handleBackupFileDelete(w http.ResponseWriter, r *http.Request, 
 	}
 	s.auditBackup(r, audit.ActionBackupDeleteFile, cfg.ID, cfg.Name, map[string]interface{}{"file": req.Name})
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// handleBackupRestore 恢复备份到独立目录（M1.5，见 backup-design.md D9-D11）。
+// 双确认：confirmName 必须与 file 完全一致（GitHub 删仓库模式），误触无法触发。
+func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request, cfg *storage.BackupConfig) {
+	var req struct {
+		File        string `json:"file"`
+		DestDir     string `json:"dest_dir"`
+		ConfirmName string `json:"confirm_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if !backupFileNameRe.MatchString(req.File) {
+		s.handleError(w, r, http.StatusBadRequest, "invalid file name")
+		return
+	}
+	if req.ConfirmName != req.File {
+		s.handleError(w, r, http.StatusBadRequest, "confirm_name must match file name")
+		return
+	}
+	destDir := filepath.Clean(req.DestDir)
+	if !filepath.IsAbs(destDir) || destDir == string(filepath.Separator) {
+		s.handleError(w, r, http.StatusBadRequest, "dest_dir must be an absolute path other than /")
+		return
+	}
+	if _, ok := s.registry.Get(cfg.AgentID); !ok {
+		s.handleError(w, r, http.StatusServiceUnavailable, "agent offline")
+		return
+	}
+	resp, err := s.CallAgent(cfg.AgentID, "backup.restore", map[string]interface{}{
+		"dir": cfg.DestDir, "name": req.File, "destDir": destDir,
+	})
+	if err != nil {
+		s.handleError(w, r, http.StatusBadGateway, "failed to reach agent: "+err.Error())
+		return
+	}
+	rpcResp, err := protocol.DecodeRPCResponse(resp)
+	if err != nil || rpcResp.Status == "error" {
+		s.handleError(w, r, http.StatusBadGateway, "failed to start restore on agent")
+		return
+	}
+	s.auditBackup(r, audit.ActionBackupRestore, cfg.ID, cfg.Name,
+		map[string]interface{}{"file": req.File, "dest_dir": destDir})
+	data, _ := rpcResp.Data.(map[string]interface{})
+	s.writeJSON(w, http.StatusOK, data)
+}
+
+// backupTaskIDRe 任务 ID 是 agent 生成的受限字符串，转发前先收紧
+var backupTaskIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// handleBackupTaskGet 转发 backup.task.get，供前端轮询 restore 任务状态与日志
+//（restore 不落 BackupRun 表——那是备份运行的语义）
+func (s *Server) handleBackupTaskGet(w http.ResponseWriter, r *http.Request, cfg *storage.BackupConfig, taskID string) {
+	if !backupTaskIDRe.MatchString(taskID) {
+		s.handleError(w, r, http.StatusBadRequest, "invalid task id")
+		return
+	}
+	if _, ok := s.registry.Get(cfg.AgentID); !ok {
+		s.handleError(w, r, http.StatusServiceUnavailable, "agent offline")
+		return
+	}
+	resp, err := s.CallAgent(cfg.AgentID, "backup.task.get", map[string]interface{}{"taskId": taskID})
+	if err != nil {
+		s.handleError(w, r, http.StatusBadGateway, "failed to reach agent: "+err.Error())
+		return
+	}
+	rpcResp, err := protocol.DecodeRPCResponse(resp)
+	if err != nil || rpcResp.Status == "error" {
+		s.handleError(w, r, http.StatusBadGateway, "failed to query task on agent")
+		return
+	}
+	data, _ := rpcResp.Data.(map[string]interface{})
+	s.writeJSON(w, http.StatusOK, data)
+}
+
+// backupDownloadChunk server 每次从 agent 拉的分块大小（agent 上限 1MB）
+const backupDownloadChunk = 256 * 1024
+
+// backupDownloadTimeout 下载总超时；大包慢盘也给足余量
+const backupDownloadTimeout = 15 * time.Minute
+
+// handleBackupFileDownload 分块拉取备份文件并流式转发给浏览器（M1.5 D12）。
+// server 不落盘：每块 base64 解码后直接写 ResponseWriter；首块带回文件总大小
+// 作 Content-Length，客户端中断即停。
+func (s *Server) handleBackupFileDownload(w http.ResponseWriter, r *http.Request, cfg *storage.BackupConfig) {
+	name := r.URL.Query().Get("name")
+	if !backupFileNameRe.MatchString(name) {
+		s.handleError(w, r, http.StatusBadRequest, "invalid file name")
+		return
+	}
+	if _, ok := s.registry.Get(cfg.AgentID); !ok {
+		s.handleError(w, r, http.StatusServiceUnavailable, "agent offline")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), backupDownloadTimeout)
+	defer cancel()
+
+	readChunk := func(offset int64) (data []byte, total int64, eof bool, err error) {
+		resp, err := s.CallAgent(cfg.AgentID, "backup.read", map[string]interface{}{
+			"dir": cfg.DestDir, "name": name,
+			"offset": float64(offset), "length": float64(backupDownloadChunk),
+		})
+		if err != nil {
+			return nil, 0, false, err
+		}
+		rpcResp, err := protocol.DecodeRPCResponse(resp)
+		if err != nil || rpcResp.Status == "error" {
+			return nil, 0, false, fmt.Errorf("agent read error")
+		}
+		m, _ := rpcResp.Data.(map[string]interface{})
+		b64, _ := m["data"].(string)
+		data, err = base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return nil, 0, false, fmt.Errorf("bad chunk data")
+		}
+		if v, ok := m["size"].(float64); ok {
+			total = int64(v)
+		}
+		eof, _ = m["eof"].(bool)
+		return data, total, eof, nil
+	}
+
+	offset := int64(0)
+	chunk, total, eof, err := readChunk(0)
+	if err != nil {
+		s.handleError(w, r, http.StatusBadGateway, "failed to read backup file: "+err.Error())
+		return
+	}
+	if total > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
+	}
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, name))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return // 客户端断开或超时，静默截断
+		default:
+		}
+		if _, err := w.Write(chunk); err != nil {
+			return
+		}
+		if eof || len(chunk) == 0 {
+			break
+		}
+		offset += int64(len(chunk))
+		if chunk, _, eof, err = readChunk(offset); err != nil {
+			return // 中途失败：Content-Length 不完整，客户端侧可感知异常
+		}
+	}
 }
 
 // ============ helpers ============

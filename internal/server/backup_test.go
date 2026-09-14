@@ -1,10 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -400,5 +405,199 @@ func TestDispatchDueBackupsAdvancesNextRun(t *testing.T) {
 	runs, _ := s.db.ListBackupRuns(cfg.ID, 10)
 	if len(runs) != 1 {
 		t.Errorf("runs = %d, want 1 (no double dispatch)", len(runs))
+	}
+}
+
+// ============ M1.5 restore / task 转发 / 下载 ============
+
+const backupRestoreFile = "etc-20260914-030000.tar.gz"
+
+func TestBackupRestoreRequiresConfirmName(t *testing.T) {
+	s := newBackupTestServer(t)
+	var dispatched string
+	var gotParams map[string]interface{}
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		dispatched = method
+		gotParams = params
+		return map[string]interface{}{"taskId": "babc", "status": "started"}, ""
+	})
+	if err := s.db.CreateBackupConfig(newBackupCfg("a1", "etc", "manual", true)); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := s.db.GetBackupConfig(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// confirm_name 不匹配 → 400 且不下发
+	rec := httptest.NewRecorder()
+	body := fmt.Sprintf(`{"file":%q,"dest_dir":"/mnt/restore","confirm_name":"wrong.tar.gz"}`, backupRestoreFile)
+	s.handleBackupRestore(rec, httptest.NewRequest(http.MethodPost, "/r", strings.NewReader(body)), cfg)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("mismatched confirm code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if dispatched != "" {
+		t.Fatal("restore dispatched despite confirm mismatch")
+	}
+
+	// 一致 → 下发 backup.restore，dir 取自配置，destDir 透传
+	rec = httptest.NewRecorder()
+	body = fmt.Sprintf(`{"file":%q,"dest_dir":"/mnt/restore","confirm_name":%q}`, backupRestoreFile, backupRestoreFile)
+	s.handleBackupRestore(rec, httptest.NewRequest(http.MethodPost, "/r", strings.NewReader(body)), cfg)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restore code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if dispatched != "backup.restore" {
+		t.Fatalf("dispatched method = %q", dispatched)
+	}
+	if gotParams["dir"] != cfg.DestDir || gotParams["name"] != backupRestoreFile || gotParams["destDir"] != "/mnt/restore" {
+		t.Fatalf("params = %v", gotParams)
+	}
+	var started struct {
+		TaskID string `json:"taskId"`
+		Status string `json:"status"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &started)
+	if started.TaskID != "babc" || started.Status != "started" {
+		t.Fatalf("started = %+v", started)
+	}
+}
+
+func TestBackupRestoreValidatesParams(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeBackupAgent(t, s, "a1", nil)
+	if err := s.db.CreateBackupConfig(newBackupCfg("a1", "etc", "manual", true)); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := s.db.GetBackupConfig(1)
+
+	cases := []struct {
+		desc, body string
+	}{
+		{"traversal file", `{"file":"../evil.tar.gz","dest_dir":"/mnt/r","confirm_name":"../evil.tar.gz"}`},
+		{"not tar.gz", `{"file":"etc.zip","dest_dir":"/mnt/r","confirm_name":"etc.zip"}`},
+		{"relative dest", fmt.Sprintf(`{"file":%q,"dest_dir":"rel","confirm_name":%q}`, backupRestoreFile, backupRestoreFile)},
+		{"root dest", fmt.Sprintf(`{"file":%q,"dest_dir":"/","confirm_name":%q}`, backupRestoreFile, backupRestoreFile)},
+	}
+	for _, c := range cases {
+		rec := httptest.NewRecorder()
+		s.handleBackupRestore(rec, httptest.NewRequest(http.MethodPost, "/r", strings.NewReader(c.body)), cfg)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: code = %d, want 400", c.desc, rec.Code)
+		}
+	}
+}
+
+func TestBackupTaskGetForwards(t *testing.T) {
+	s := newBackupTestServer(t)
+	var gotTaskID string
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		if method != "backup.task.get" {
+			return nil, "unexpected method " + method
+		}
+		gotTaskID, _ = params["taskId"].(string)
+		return map[string]interface{}{
+			"taskId": gotTaskID, "action": "restore", "status": "success",
+			"log": "[restore] done: 3 entries",
+		}, ""
+	})
+	if err := s.db.CreateBackupConfig(newBackupCfg("a1", "etc", "manual", true)); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := s.db.GetBackupConfig(1)
+
+	// 非法 taskId → 400 且不下发
+	rec := httptest.NewRecorder()
+	s.handleBackupTaskGet(rec, httptest.NewRequest(http.MethodGet, "/t", nil), cfg, "../../etc")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid task id code = %d", rec.Code)
+	}
+	if gotTaskID != "" {
+		t.Fatal("dispatched with invalid task id")
+	}
+
+	// 合法 → 转发并透传数据
+	rec = httptest.NewRecorder()
+	s.handleBackupTaskGet(rec, httptest.NewRequest(http.MethodGet, "/t", nil), cfg, "babc123")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("task get code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if gotTaskID != "babc123" {
+		t.Fatalf("forwarded taskId = %q", gotTaskID)
+	}
+	var task map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &task)
+	if task["action"] != "restore" || task["status"] != "success" {
+		t.Fatalf("task = %v", task)
+	}
+}
+
+// TestBackupFileDownload 分块流转发：响应体逐字节等于原文件
+func TestBackupFileDownload(t *testing.T) {
+	s := newBackupTestServer(t)
+	// 1.5 块：覆盖满块 + 尾块不满两条路径
+	content := make([]byte, backupDownloadChunk+100)
+	for i := range content {
+		content[i] = byte(i % 253)
+	}
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		if method != "backup.read" {
+			return nil, "unexpected method " + method
+		}
+		if params["dir"] != "/mnt/bak" || params["name"] != backupRestoreFile {
+			return nil, "bad params"
+		}
+		offset := int64(params["offset"].(float64))
+		length := int64(params["length"].(float64))
+		if offset >= int64(len(content)) {
+			return map[string]interface{}{"data": "", "size": len(content), "eof": true}, ""
+		}
+		end := offset + length
+		if end > int64(len(content)) {
+			end = int64(len(content))
+		}
+		return map[string]interface{}{
+			"data": base64.StdEncoding.EncodeToString(content[offset:end]),
+			"size": len(content),
+			"eof":  end >= int64(len(content)),
+		}, ""
+	})
+	if err := s.db.CreateBackupConfig(newBackupCfg("a1", "etc", "manual", true)); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := s.db.GetBackupConfig(1)
+
+	rec := httptest.NewRecorder()
+	url := "/api/backups/configs/1/files/download?name=" + backupRestoreFile
+	s.handleBackupFileDownload(rec, httptest.NewRequest(http.MethodGet, url, nil), cfg)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("download code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.Bytes(); !bytes.Equal(got, content) {
+		t.Fatalf("downloaded %d bytes, want %d (mismatch)", len(got), len(content))
+	}
+	if cl := rec.Header().Get("Content-Length"); cl != strconv.Itoa(len(content)) {
+		t.Errorf("Content-Length = %q, want %d", cl, len(content))
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, backupRestoreFile) {
+		t.Errorf("Content-Disposition = %q", cd)
+	}
+}
+
+func TestBackupFileDownloadRejectsUnsafeName(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeBackupAgent(t, s, "a1", nil)
+	if err := s.db.CreateBackupConfig(newBackupCfg("a1", "etc", "manual", true)); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := s.db.GetBackupConfig(1)
+
+	for _, name := range []string{"../secret.txt", "a.zip", "sub/a.tar.gz", ""} {
+		rec := httptest.NewRecorder()
+		s.handleBackupFileDownload(rec,
+			httptest.NewRequest(http.MethodGet, "/api/backups/configs/1/files/download?name="+url.QueryEscape(name), nil), cfg)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("name %q: code = %d, want 400", name, rec.Code)
+		}
 	}
 }

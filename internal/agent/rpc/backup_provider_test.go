@@ -2,10 +2,14 @@ package rpc
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
+	"encoding/base64"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -353,4 +357,250 @@ func (p *BackupProvider) hasRunningTask() bool {
 		}
 	}
 	return false
+}
+
+// ============ M1.5 restore / read ============
+
+// runRestoreAndWait 同步执行一次恢复并返回终态任务
+func runRestoreAndWait(t *testing.T, p *BackupProvider, dir, name, destDir string) map[string]interface{} {
+	t.Helper()
+	res, err := p.Call("restore", map[string]interface{}{
+		"dir": dir, "name": name, "destDir": destDir,
+	})
+	if err != nil {
+		t.Fatalf("backup.restore: %v", err)
+	}
+	started := res.(map[string]interface{})
+	return waitBackupTask(t, p, started["taskId"].(string))
+}
+
+func TestBackupRestoreRoundtrip(t *testing.T) {
+	p := newBackupTestProvider(t)
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "app.conf"), []byte("key=value"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "sub", "data.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backupDir := t.TempDir()
+	task := runBackupAndWait(t, p, "roundtrip", []string{src}, backupDir, 0)
+	if task["status"] != backupTaskSuccess {
+		t.Fatalf("backup failed: %v", task["error"])
+	}
+	name := task["file"].(string)
+
+	restoreDir := filepath.Join(t.TempDir(), "restored") // 不存在 → 允许
+	task = runRestoreAndWait(t, p, backupDir, name, restoreDir)
+	if task["status"] != backupTaskSuccess {
+		t.Fatalf("restore failed: %v %s", task["error"], task["status"])
+	}
+	// basename 顶层目录结构 + 内容一致
+	base := filepath.Base(src)
+	got, err := os.ReadFile(filepath.Join(restoreDir, base, "app.conf"))
+	if err != nil || string(got) != "key=value" {
+		t.Fatalf("restored app.conf mismatch: %q err=%v", got, err)
+	}
+	got, err = os.ReadFile(filepath.Join(restoreDir, base, "sub", "data.txt"))
+	if err != nil || string(got) != "hello" {
+		t.Fatalf("restored sub/data.txt mismatch: %q err=%v", got, err)
+	}
+	// GetTask 报告 action=restore
+	res, _ := p.GetTask(task["taskId"].(string))
+	if res["action"] != "restore" {
+		t.Fatalf("task action = %v, want restore", res["action"])
+	}
+}
+
+func TestBackupRestoreRejectsNonEmptyDest(t *testing.T) {
+	p := newBackupTestProvider(t)
+	backupDir := t.TempDir()
+	task := runBackupAndWait(t, p, "ne", []string{t.TempDir()}, backupDir, 0)
+	if task["status"] != backupTaskSuccess {
+		t.Fatalf("backup failed: %v", task["error"])
+	}
+	name := task["file"].(string)
+
+	destDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(destDir, "existing.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Call("restore", map[string]interface{}{
+		"dir": backupDir, "name": name, "destDir": destDir,
+	}); err == nil {
+		t.Fatal("restore to non-empty destDir should be rejected")
+	}
+	// 已有文件不得被动过
+	got, err := os.ReadFile(filepath.Join(destDir, "existing.txt"))
+	if err != nil || string(got) != "x" {
+		t.Fatalf("existing file disturbed: %q err=%v", got, err)
+	}
+}
+
+func TestBackupRestoreRejectsUnsafeParams(t *testing.T) {
+	p := newBackupTestProvider(t)
+	backupDir := t.TempDir()
+	task := runBackupAndWait(t, p, "us", []string{t.TempDir()}, backupDir, 0)
+	name := task["file"].(string)
+
+	cases := []struct {
+		label, dir, name, destDir string
+	}{
+		{"relative dir", "rel/path", name, t.TempDir()},
+		{"traversal name", backupDir, "../evil.tar.gz", t.TempDir()},
+		{"destDir root", backupDir, name, "/"},
+		{"relative destDir", backupDir, name, "rel/dest"},
+		{"missing archive", backupDir, "nope-20260101-000000.tar.gz", t.TempDir()},
+	}
+	for _, c := range cases {
+		if _, err := p.Call("restore", map[string]interface{}{
+			"dir": c.dir, "name": c.name, "destDir": c.destDir,
+		}); err == nil {
+			t.Errorf("%s: restore should be rejected", c.label)
+		}
+	}
+}
+
+// TestBackupRestoreZipSlipSkipped 手工构造带 ../ 逃逸条目的恶意包，验证条目被跳过
+func TestBackupRestoreZipSlipSkipped(t *testing.T) {
+	p := newBackupTestProvider(t)
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	mal := []byte("pwned")
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "../../evil.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(mal)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(mal); err != nil {
+		t.Fatal(err)
+	}
+	// 正常条目也要能写入
+	ok := []byte("fine")
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "app/ok.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(ok)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(ok); err != nil {
+		t.Fatal(err)
+	}
+	// 不支持的条目类型（硬链接）跳过
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "app/hard.txt", Typeflag: tar.TypeLink, Linkname: "ok.txt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tw.Close()
+	gw.Close()
+	archive := "evil-20260101-000000.tar.gz"
+	if err := os.WriteFile(filepath.Join(dir, archive), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	restoreRoot := t.TempDir()
+	destDir := filepath.Join(restoreRoot, "dest")
+	task := runRestoreAndWait(t, p, dir, archive, destDir)
+	if task["status"] != backupTaskSuccess {
+		t.Fatalf("restore failed: %v", task["error"])
+	}
+	// 逃逸文件不存在
+	if _, err := os.Stat(filepath.Join(restoreRoot, "evil.txt")); err == nil {
+		t.Fatal("zip slip: file escaped destDir")
+	}
+	// 正常条目存在；恶意条目被跳过
+	if _, err := os.Stat(filepath.Join(destDir, "app", "ok.txt")); err != nil {
+		t.Fatalf("legitimate entry missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "evil.txt")); err == nil {
+		t.Fatal("unsafe entry was extracted")
+	}
+	// 日志记录了跳过
+	res, _ := p.GetTask(task["taskId"].(string))
+	if log, _ := res["log"].(string); !strings.Contains(log, "unsafe entry") {
+		t.Fatalf("log should mention unsafe entry: %q", log)
+	}
+}
+
+func TestBackupReadChunk(t *testing.T) {
+	p := newBackupTestProvider(t)
+	dir := t.TempDir()
+	// 1MB + 10B：跨两块，末块不满
+	want := make([]byte, backupReadChunkLimit+10)
+	for i := range want {
+		want[i] = byte(i % 251)
+	}
+	name := "chunk-20260101-000000.tar.gz"
+	if err := os.WriteFile(filepath.Join(dir, name), want, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []byte
+	var offset float64
+	for {
+		res, err := p.Call("read", map[string]interface{}{
+			"dir": dir, "name": name, "offset": offset, "length": float64(256 * 1024),
+		})
+		if err != nil {
+			t.Fatalf("backup.read: %v", err)
+		}
+		m := res.(map[string]interface{})
+		data, _ := base64.StdEncoding.DecodeString(m["data"].(string))
+		got = append(got, data...)
+		if m["eof"].(bool) {
+			// size 经 RPC JSON 层为 float64，直连调用为 int64，统一转浮点比较
+			if size, _ := strconv.ParseFloat(fmt.Sprint(m["size"]), 64); int64(size) != int64(len(want)) {
+				t.Fatalf("size = %v, want %d", m["size"], len(want))
+			}
+			break
+		}
+		offset += float64(len(data))
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("chunked read mismatch: got %d bytes, want %d", len(got), len(want))
+	}
+
+	// offset == size → 空数据 + eof
+	res, err := p.Call("read", map[string]interface{}{
+		"dir": dir, "name": name, "offset": float64(len(want)), "length": float64(1024),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := res.(map[string]interface{})
+	if m["data"] != "" || m["eof"] != true {
+		t.Fatalf("eof read: got %v", m)
+	}
+	// offset 超出 size 同样 eof
+	res, _ = p.Call("read", map[string]interface{}{
+		"dir": dir, "name": name, "offset": float64(len(want) + 100), "length": float64(1024),
+	})
+	if m = res.(map[string]interface{}); m["eof"] != true {
+		t.Fatalf("past-eof read: got %v", m)
+	}
+}
+
+func TestBackupReadRejectsUnsafeParams(t *testing.T) {
+	p := newBackupTestProvider(t)
+	dir := t.TempDir()
+	cases := []struct {
+		label, dir, name string
+	}{
+		{"relative dir", "rel", "a-20260101-000000.tar.gz"},
+		{"traversal name", dir, "../secret.txt"},
+		{"not tar.gz", dir, "a.txt"},
+		{"slash in name", dir, "sub/a.tar.gz"},
+	}
+	for _, c := range cases {
+		if _, err := p.Call("read", map[string]interface{}{
+			"dir": c.dir, "name": c.name, "offset": float64(0), "length": float64(1024),
+		}); err == nil {
+			t.Errorf("%s: read should be rejected", c.label)
+		}
+	}
 }

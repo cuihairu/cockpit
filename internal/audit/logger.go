@@ -36,6 +36,7 @@ const (
 	ActionStackPull    = "stack_pull"
 	// 备份管理（见 docs/guide/backup-design.md）
 	ActionBackupRun        = "backup_run"
+	ActionBackupRestore    = "backup_restore"
 	ActionBackupDeleteFile = "backup_delete_file"
 )
 
