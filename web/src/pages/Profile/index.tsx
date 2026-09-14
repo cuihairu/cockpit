@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useEffectEvent, useState } from 'react'
 import { Card, Form, Input, Button, message, Descriptions, Avatar, Space, Divider } from 'antd'
 import { UserOutlined, MailOutlined, LockOutlined, SaveOutlined } from '@ant-design/icons'
 import { useUser } from '@/contexts/useUser'
@@ -41,6 +41,8 @@ const Profile = () => {
     })
   }
 
+  const applyCurrentProfile = useEffectEvent(applyProfile)
+
   useEffect(() => {
     let ignore = false
 
@@ -50,12 +52,12 @@ const Profile = () => {
       try {
         const currentUser = await api.getCurrentUser()
         if (!ignore) {
-          applyProfile(currentUser)
+          applyCurrentProfile(currentUser)
         }
       } catch (err) {
         if (!ignore) {
           message.error(getApiErrorMessage(err, '加载个人信息失败'))
-          applyProfile({
+          applyCurrentProfile({
             id: user.id,
             username: user.username,
             email: user.email,
@@ -72,7 +74,7 @@ const Profile = () => {
     return () => {
       ignore = true
     }
-  }, [profileForm, updateUser, user?.id])
+  }, [user])
 
   const handleProfileSave = async (values: ProfileFormValues) => {
     setLoading(true)
