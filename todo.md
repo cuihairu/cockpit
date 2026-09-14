@@ -710,6 +710,44 @@
 8. Phase 6：前端整理。
 9. Phase 7：CI 和端到端验证。
 
+## 当前待办（2026-09-14）
+
+路线图 P0 三项已实现，工作区存在约 1682 行未提交改动（`go build` / `go test ./...` 全绿）。按「每个任务单独提交」原则收口：
+
+1. `internal/probe/` 健康探测 runner + Storage 状态更新方法（含 `runner_test.go`）。
+2. `web/src/pages/Docker/` 前端 Docker 页面 + `api.ts`/`types` 配套改动。
+3. 测试补充（`agent_ws_test`、`codec_ws_test`、`handler_flow_test`、`watcher_reload_test` 等 10 个新测试文件）+ `docs/guide/agent-egress-sdwan.md` + sidebar/参考对比文档。
+
+收口后进入路线图 P1，首选「应用部署（Compose Stack）」，其次「拨测增强」。与同类项目的完整对比分析见 `docs/guide/reference-projects.md`。
+
+## 未来路线图（个人云场景功能扩展）
+
+> 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
+
+### P0 — 近期（核心场景补全）✅ 全部完成
+
+- ✅ **Docker 容器生命周期管理**：已实现。后端 `docker_provider.go` 支持 start/stop/restart/remove/pause/unpause，前端 `/docker` 页面操作列含全部按钮（停止/重启/暂停/启动/恢复/删除，带二次确认 Modal）。路由设计：`POST /api/docker/agents/{id}/containers/{cid}/{action}`。前端通过 `useMutation` 操作后自动刷新容器列表。
+- ✅ **Docker 容器日志实时查看**：已实现。后端 `containers.logs` 支持 tail/timestamps，前端「日志」按钮打开 Modal（深色终端风格背景，支持 50/100/200/500/2000 行选择，可手动刷新，自动剥离 Docker 流多路复用头控制字符）。路由设计：`GET /api/docker/agents/{id}/containers/{cid}/logs?tail=N&timestamps=true`。
+- ✅ **自动健康探测**：已实现。新增 `internal/probe/runner.go`，每 5 分钟一轮完整探测。域名走 DNS + HTTP HEAD；服务按 type 自动选探测方式；证书走 TLS 握手。通过 `UpdateServiceStatus/UpdateDomainStatus/UpdateCertificateStatus` 回写数据库。Storage 层新增 3 个状态更新方法。（遗留增强项已列入 P1「拨测增强」。）
+
+### P1 — 中期（运维自动化）
+
+- **应用部署（Compose Stack）**：Docker Compose Stack 管理（上传/编辑 compose.yml、up/down、状态总览），类似 Portainer 的轻量版。→ 方案参考：Komodo 的 Git-to-deploy（栈文件存 Git 仓库 + 触发部署）+ Dockge 的 compose-file-first；Cockpit 已有 `docker_provider` RPC 链路，投入产出比最高。**建议 P1 首个启动。**
+- **拨测增强**：探测间隔可配置（当前硬编码 5 分钟）、通知渠道集成（ntfy/webhook/Telegram，告警框架已有）、心跳条式状态历史 UI。→ 方案参考：Uptime Kuma；Cockpit 差异化优势是 probe 天然联动 inventory 资源 + 经 Agent 所在网络分布式探测。
+- **备份管理**：数据库/配置/卷的快照与恢复，定时备份策略 + 异地保留。这是个人云数据安全的核心缺口。
+- **反向代理/路由管理**：Nginx/Caddy/Traefik 配置可视化与下发，把「网关」资源从记录升级为可管理对象。
+- **文件管理器**：通过 Agent 远程文件浏览/上传/下载（Workbench 目前只有终端和桌面），支撑配置编辑与日志文件查看。→ 可同时参考 Guacamole 的远控文件传输通道设计。
+
+### P2 — 远期（生态扩展）
+
+- **drift 漂移视图**：inventory 声明与 Agent 实报不一致时在 API/UI 高亮。→ 方案参考：NetBox 的期望态（desired）/实际态（actual）分离；Git-first CMDB 的差异化卖点。
+- **远控会话录制**：终端输出录制，补强远控审计（当前审计只有会话开始/结束）。→ 方案参考：Guacamole 会话录制、Teleport 会话粒度审计。
+- **DNS 管理**：Cloudflare API 集成，域名资源联动记录增删改。
+- **定时任务/Cron 管理**：Agent 侧 crontab 可视化与调度，支撑自动化运维。→ 可与 Komodo「自动化程序」编排理念结合。
+- **日志聚合查看**：Agent 推送容器/系统日志，WebUI 统一检索（可接 Loki/轻量自研）。
+- **移动端适配**：当前 Ant Design 响应式基础可用但不保证，关键页面（Dashboard/Monitor）做移动端优化。
+- **防火墙管理**：iptables/nftables 规则可视化（仅在有明确需求时推进）。
+
 ## 暂不建议做的事
 
 - 暂不引入 Kubernetes 风格 CRD 全量模型，除非先明确 v2 inventory 迁移方案。

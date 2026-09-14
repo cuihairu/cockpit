@@ -31,8 +31,15 @@ export default defineConfig({
           text: '架构',
           items: [
             { text: '架构与边界', link: '/guide/architecture' },
+            { text: 'Agent 出口与 SD-WAN', link: '/guide/agent-egress-sdwan' },
             { text: '协议定义', link: '/guide/protocol' },
             { text: 'WebSocket 认证', link: '/websocket-token-auth' }
+          ]
+        },
+        {
+          text: '规划',
+          items: [
+            { text: '参考项目对比与借鉴', link: '/guide/reference-projects' }
           ]
         }
       ]
