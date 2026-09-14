@@ -178,11 +178,50 @@ type BackupRun struct {
 - **文件浏览** Drawer：列 destDir 下备份文件（名称/大小/时间）+ 删除 Popconfirm；
 - 空状态引导创建第一条备份配置。
 
+## M1.5 设计：恢复（restore）与备份文件下载
+
+### 关键决策（M1.5 增补）
+
+| # | 决策 | 选择 | 理由 |
+|---|------|------|------|
+| D9 | restore 目标 | destDir 必须**不存在或为空目录**，绝不覆盖现有数据 | 「独立目录解包」的强保证：恢复产物与在线数据物理隔离，迁移回原位是用户显式动作 |
+| D10 | restore 双确认 | UI Modal 输入备份名 + API `confirmName` 字段必须与 `file` 一致 | GitHub 删除仓库模式：危险操作强制显式输入，误触不可能触发 |
+| D11 | restore 执行 | 异步任务（复用 backup 任务模型）+ Zip Slip 防护 | 大包解包分钟级；tar 解包路径穿越是经典攻击面 |
+| D12 | 下载通道 | 分块 RPC `backup.read {offset, length}`（base64 块）经 server 流转发 | 复用既有出站 WebSocket，无需协议扩展；server 不落盘直接流给浏览器 |
+
+### Agent 侧新增 RPC
+
+| 方法 | 参数 | 返回 | 同步/异步 |
+|------|------|------|-----------|
+| `backup.restore` | `{dir, name, destDir}` | `{taskId}` | 异步任务 |
+| `backup.read` | `{dir, name, offset, length}` | `{data(base64), size, eof}` | 同步分块 |
+
+- restore 校验：dir/name/destDir 路径安全同既有规则；destDir Clean 后不得为 `/`；
+  destDir 已存在且非空 → 拒绝（D9）；备份文件必须存在；
+- 解包安全：条目 `filepath.Join(destDir, hdr.Name)` 后强制前缀在 destDir 内（Zip Slip）；
+  reg/dir/symlink 三类照常，其余 typeflag（设备/硬链接等）跳过 warning；
+  单条目失败 warning 继续，日志记条目计数；
+- `backup.read` 单块上限 1MB（server 用 256KB）；返回文件总大小供进度与 EOF 判断。
+
+### Server 侧新增 REST
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/backups/configs/{id}/restore` | `{file, destDir, confirmName}`；confirmName ≠ file → 400；下发 backup.restore + 审计 `backup_restore` |
+| GET | `/api/backups/configs/{id}/tasks/{taskId}` | 转发 `backup.task.get`（restore 任务状态/日志轮询，不落库） |
+| GET | `/api/backups/configs/{id}/files/download?name=` | 循环 backup.read 分块拉取，流式写 ResponseWriter（attachment），客户端断开即停，总超时 15 分钟 |
+
+- 下载不落 server 磁盘；name 走同一文件名正则校验。
+
+### Web UI（备份文件 Drawer 增强）
+
+- 每个备份文件行操作：**下载** / **恢复** / 删除；
+- 下载：axios blob（带 JWT）+ `URL.createObjectURL` 触发保存；
+- 恢复 Modal：展示文件名/大小/时间，填写目标目录（独立新目录），**输入备份名才能点确认**（D10）；
+  提交后 Modal 切换为任务视图，轮询任务状态并展示解包日志尾部，终态显示成功/失败。
+
 ## 不做（后续项）
 
-- 恢复（restore）：解包回原路径是高危操作，M1.5 单独设计（解到独立恢复目录 + 双确认，
-  不做原地覆盖）；
-- 经 server 下载备份文件：WebSocket RPC 不适合流式传文件，需要独立传输通道设计；
 - S3/对象存储异地：agent 侧 rclone 集成或 server 中转，独立立项；
 - server 自身 DB 备份（SQLite `VACUUM INTO`）：独立小功能；
 - 数据库热备钩子（mysqldump / pg_dump / sqlite .backup 前置钩子）；
@@ -205,12 +244,16 @@ type BackupRun struct {
       storage CRUD 与级联、调度 NextRunAt 计算各形态、server API 全分支
 - [x] 文档收尾 + todo.md 同步
 
-### M1.5 —— 恢复与传输（后续）
+### M1.5 —— 恢复与备份文件下载（2026-09-14 完成）
 
-- [ ] backup.restore（解包到独立恢复目录，双确认 + 审计）
-- [ ] 备份文件经 server 下载（传输通道设计）
-- [ ] S3/rclone 异地
-- [ ] server 自身 SQLite 备份
+- [x] agent：`backup.restore`（独立目录解包 + Zip Slip 防护 + 异步任务）与
+      `backup.read`（分块 base64 读取）
+- [x] server：restore REST（confirmName 双确认 + 审计 `backup_restore`）+
+      任务轮询转发 + 文件下载流转发（Content-Length 透明透传，15 分钟总超时）
+- [x] web：文件行「下载/恢复」操作（axios blob 下载）+ 恢复 Modal（输入备份名确认 +
+      提交后任务视图轮询解包日志）
+- [x] 测试：restore roundtrip / 非空目录拒绝 / Zip Slip 拒绝（恶意包构造）/
+      分块读取边界（跨块 + EOF + 越界）/ server confirm 校验与下载流转发逐字节比对
 
 ## 参考
 
