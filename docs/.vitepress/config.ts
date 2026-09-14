@@ -39,7 +39,8 @@ export default defineConfig({
         {
           text: '规划',
           items: [
-            { text: '参考项目对比与借鉴', link: '/guide/reference-projects' }
+            { text: '参考项目对比与借鉴', link: '/guide/reference-projects' },
+            { text: 'P1 方案：应用部署', link: '/guide/stack-deploy-design' }
           ]
         }
       ]
