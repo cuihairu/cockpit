@@ -8,6 +8,8 @@ import type {
   Service,
   Gateway,
   Storage,
+  ContainerInfo,
+  ImageInfo,
   PaginatedResponse,
   TOTPGenerateResponse,
   TOTPVerifyResponse,
@@ -167,6 +169,62 @@ class ApiService {
 
   async getAgent(id: string): Promise<Agent> {
     return this.client.get<unknown, Agent>(`/agents/${id}`)
+  }
+
+  // ========== Docker（通过 Agent RPC 代理） ==========
+  async getContainers(agentId: string, all = true): Promise<ContainerInfo[]> {
+    return this.client.get<unknown, ContainerInfo[]>(`/docker/agents/${agentId}/containers`, {
+      params: { all },
+    })
+  }
+
+  async getImages(agentId: string): Promise<ImageInfo[]> {
+    return this.client.get<unknown, ImageInfo[]>(`/docker/agents/${agentId}/images`)
+  }
+
+  async startContainer(agentId: string, containerId: string): Promise<void> {
+    await this.client.post(`/docker/agents/${agentId}/containers/${containerId}/start`)
+  }
+
+  async stopContainer(agentId: string, containerId: string, timeout?: number): Promise<void> {
+    await this.client.post(`/docker/agents/${agentId}/containers/${containerId}/stop`, undefined, {
+      params: timeout !== undefined ? { timeout } : undefined,
+    })
+  }
+
+  async restartContainer(agentId: string, containerId: string, timeout?: number): Promise<void> {
+    await this.client.post(`/docker/agents/${agentId}/containers/${containerId}/restart`, undefined, {
+      params: timeout !== undefined ? { timeout } : undefined,
+    })
+  }
+
+  async pauseContainer(agentId: string, containerId: string): Promise<void> {
+    await this.client.post(`/docker/agents/${agentId}/containers/${containerId}/pause`)
+  }
+
+  async unpauseContainer(agentId: string, containerId: string): Promise<void> {
+    await this.client.post(`/docker/agents/${agentId}/containers/${containerId}/unpause`)
+  }
+
+  async removeContainer(
+    agentId: string,
+    containerId: string,
+    opts?: { force?: boolean; volumes?: boolean },
+  ): Promise<void> {
+    await this.client.delete(`/docker/agents/${agentId}/containers/${containerId}`, {
+      params: opts,
+    })
+  }
+
+  async getContainerLogs(
+    agentId: string,
+    containerId: string,
+    opts?: { tail?: string; timestamps?: boolean },
+  ): Promise<string> {
+    return this.client.get<unknown, string>(
+      `/docker/agents/${agentId}/containers/${containerId}/logs`,
+      { params: { tail: opts?.tail ?? '100', timestamps: opts?.timestamps ?? false } },
+    )
   }
 
   // ========== 计算实例 ==========

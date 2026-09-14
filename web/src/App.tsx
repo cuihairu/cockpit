@@ -12,6 +12,7 @@ import {
   LogoutOutlined,
   QuestionCircleOutlined,
   AppstoreOutlined,
+  ContainerOutlined,
 } from '@ant-design/icons'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
@@ -28,6 +29,7 @@ import './App.less'
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Resources = lazy(() => import('./pages/Resources'))
 const Workbench = lazy(() => import('./pages/Workbench'))
+const Docker = lazy(() => import('./pages/Docker'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Profile = lazy(() => import('./pages/Profile'))
 const AuditLogs = lazy(() => import('./pages/AuditLogs'))
@@ -93,6 +95,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/workbench',
       name: '工作台',
       icon: <ApiOutlined />,
+    },
+    {
+      path: '/docker',
+      name: '容器管理',
+      icon: <ContainerOutlined />,
     },
     {
       path: '/monitor',
@@ -258,6 +265,7 @@ const MainLayout = () => {
             <Route path="/resources/*" element={<Resources />} />
             <Route path="/workbench" element={<Workbench />} />
             <Route path="/agents" element={<Navigate to="/workbench" replace />} />
+            <Route path="/docker" element={<Docker />} />
             <Route path="/monitor" element={<Monitor />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/audit-logs" element={<AuditLogs />} />

@@ -39,6 +39,27 @@ export interface Capability {
   metadata?: Record<string, unknown>
 }
 
+// Docker 容器信息（字段对齐后端 internal/docker/client.go ContainerInfo）
+// 注意：Go json 序列化保持大写缩写词命名，Created 为 Unix 秒级时间戳
+export interface ContainerInfo {
+  ID: string
+  Name: string
+  Image: string
+  ImageID: string
+  State: string // running / paused / exited / created 等
+  Status: string // 可读状态串，如 "Up 2 hours"
+  Labels: Record<string, string>
+  Created: number // Unix 秒级时间戳
+}
+
+// Docker 镜像信息（字段对齐后端 internal/docker/client.go ImageInfo）
+export interface ImageInfo {
+  ID: string
+  RepoTags: string[]
+  Size: number // 字节
+  Created: number // Unix 秒级时间戳
+}
+
 // 计算实例
 export interface ComputeInstance {
   id: string
