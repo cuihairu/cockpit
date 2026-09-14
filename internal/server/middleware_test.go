@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
@@ -225,6 +226,53 @@ func TestResponseWriterWriteHeader(t *testing.T) {
 	rw.WriteHeader(http.StatusOK)
 	if rw.statusCode != http.StatusNotFound {
 		t.Errorf("statusCode should not change, got %d", rw.statusCode)
+	}
+}
+
+func TestCORSMiddlewareHandlesAPIOptionsBeforeNext(t *testing.T) {
+	t.Setenv("ALLOWED_ORIGINS", "https://example.com")
+	s := newTestServer()
+	nextCalled := false
+
+	handler := s.CORSMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/agents", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if nextCalled {
+		t.Fatal("next handler should not be called for API OPTIONS")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://example.com" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+}
+
+func TestCORSMiddlewareSkipsNonAPIPaths(t *testing.T) {
+	os.Unsetenv("ALLOWED_ORIGINS")
+	s := newTestServer()
+	nextCalled := false
+
+	handler := s.CORSMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/health", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !nextCalled {
+		t.Fatal("next handler should be called for non-API paths")
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
 	}
 }
 

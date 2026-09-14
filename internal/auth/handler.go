@@ -36,6 +36,7 @@ var DB *storage.DB
 // InitDB 初始化数据库连接
 func InitDB(db *storage.DB) {
 	DB = db
+	defaultService.SetDB(db)
 }
 
 // InitAdmin 初始化管理员用户
@@ -45,6 +46,11 @@ func InitAdmin(db *storage.DB, username, password string) error {
 
 // HandleLogin 处理登录
 func HandleLogin(w http.ResponseWriter, r *http.Request) {
+	defaultService.HandleLogin(w, r)
+}
+
+// HandleLogin 处理登录
+func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
 		return
@@ -57,7 +63,12 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 验证用户名密码
-	user, err := DB.VerifyPassword(req.Username, req.Password)
+	db := s.DB()
+	if db == nil {
+		http.Error(w, `{"error":"Authentication service unavailable"}`, http.StatusInternalServerError)
+		return
+	}
+	user, err := db.VerifyPassword(req.Username, req.Password)
 	if err != nil {
 		http.Error(w, `{"error":"Invalid username or password"}`, http.StatusUnauthorized)
 		return
@@ -78,7 +89,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 生成 token
-	token, err := GenerateToken(user.ID, user.Username, user.Role)
+	token, err := s.GenerateToken(user.ID, user.Username, user.Role)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to generate token"}`, http.StatusInternalServerError)
 		return
@@ -99,6 +110,11 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 // HandleRefresh 处理 token 刷新
 func HandleRefresh(w http.ResponseWriter, r *http.Request) {
+	defaultService.HandleRefresh(w, r)
+}
+
+// HandleRefresh 处理 token 刷新
+func (s *Service) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
 		return
@@ -116,7 +132,7 @@ func HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
-	newToken, err := RefreshToken(tokenString)
+	newToken, err := s.RefreshToken(tokenString)
 	if err != nil {
 		http.Error(w, `{"error":"Invalid token"}`, http.StatusUnauthorized)
 		return
@@ -124,6 +140,17 @@ func HandleRefresh(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"token": newToken})
+}
+
+// DB 返回认证服务当前数据库。
+func (s *Service) DB() *storage.DB {
+	if s == nil {
+		return DB
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.db
 }
 
 // TmpTokenData 临时令牌数据

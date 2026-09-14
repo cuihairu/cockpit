@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/audit"
+	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
@@ -229,7 +229,7 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	auth.ConsumeTmpToken(req.TmpToken)
 
 	// 生成认证令牌
-	token, err := auth.GenerateToken(user.ID, user.Username, user.Role)
+	token, err := s.authService().GenerateToken(user.ID, user.Username, user.Role)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to generate token"}`, http.StatusInternalServerError)
 		return

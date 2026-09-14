@@ -30,6 +30,7 @@ type Server struct {
 	registry       *Registry
 	codec          *protocol.Codec
 	db             *storage.DB
+	auth           *auth.Service
 	audit          *audit.Logger
 	proxyMgr       *proxy.Manager
 	notification   *notification.Client
@@ -58,15 +59,10 @@ func NewServer(cfg *config.Config) *Server {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 
-	// 配置 JWT
-	if cfg.JWT != nil {
-		if cfg.JWT.Secret != "" {
-			auth.SetSecret(cfg.JWT.Secret)
-		}
-		if cfg.JWT.Expiration > 0 {
-			auth.SetExpiration(cfg.JWT.Expiration)
-		}
-	}
+	authService := auth.NewService(db, auth.Options{
+		Secret:     cfg.JWT.Secret,
+		Expiration: cfg.JWT.Expiration,
+	})
 
 	// 初始化通知客户端
 	var notificationClient *notification.Client
@@ -94,6 +90,7 @@ func NewServer(cfg *config.Config) *Server {
 		registry:       NewRegistry(),
 		codec:          protocol.NewCodec(),
 		db:             db,
+		auth:           authService,
 		audit:          audit.NewLogger(db),
 		proxyMgr:       proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
 		notification:   notificationClient,
@@ -114,9 +111,6 @@ func NewServer(cfg *config.Config) *Server {
 func (s *Server) Start() error {
 	// 设置邮件配置
 	auth.SetEmailConfig(s.cfg.Email)
-
-	// 初始化认证（设置数据库）
-	auth.InitDB(s.db)
 
 	// 初始化管理员用户
 	adminUser := getEnv("ADMIN_USERNAME", "admin")
@@ -163,8 +157,8 @@ func (s *Server) Start() error {
 	// 注册所有路由
 	s.registerRoutes(mux)
 
-	// 应用审计中间件
-	handler := s.AuditMiddleware(mux)
+	// 预检请求必须先于认证处理，否则跨域 OPTIONS 会被 JWT 中间件拒绝。
+	handler := s.CORSMiddleware(s.AuditMiddleware(mux))
 
 	server := &http.Server{
 		Addr:    s.addr,
@@ -210,7 +204,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/api/auth/login", s.handleLoginWithAudit)
-	mux.HandleFunc("/api/auth/refresh", auth.HandleRefresh)
+	mux.HandleFunc("/api/auth/refresh", s.authService().HandleRefresh)
 	mux.HandleFunc("/api/auth/totp/verify", s.handleTOTPVerify) // TOTP 验证不需要 JWT（使用临时令牌）
 	mux.HandleFunc("/api/auth/forgot-password", s.handleForgotPassword)
 	mux.HandleFunc("/api/auth/reset-password", s.handleResetPassword)
@@ -223,7 +217,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 			if r.URL.Path == "/api/auth/login" {
 				s.handleLoginWithAudit(w, r)
 			} else if r.URL.Path == "/api/auth/refresh" {
-				auth.HandleRefresh(w, r)
+				s.authService().HandleRefresh(w, r)
 			} else if r.URL.Path == "/api/auth/totp/verify" {
 				s.handleTOTPVerify(w, r)
 			}
@@ -231,25 +225,36 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		}
 		// TOTP 设置路由需要认证
 		if r.URL.Path == "/api/auth/totp/generate" {
-			auth.Middleware(s.handleTOTPGenerate)(w, r)
+			s.authService().Middleware(s.handleTOTPGenerate)(w, r)
 			return
 		}
 		if r.URL.Path == "/api/auth/totp/enable" {
-			auth.Middleware(s.handleTOTPEnable)(w, r)
+			s.authService().Middleware(s.handleTOTPEnable)(w, r)
 			return
 		}
 		if r.URL.Path == "/api/auth/totp/disable" {
-			auth.Middleware(s.handleTOTPDisable)(w, r)
+			s.authService().Middleware(s.handleTOTPDisable)(w, r)
 			return
 		}
 		// 其他 API 需要认证
-		auth.Middleware(s.serveAPI)(w, r)
+		s.authService().Middleware(s.serveAPI)(w, r)
 	})
 
 	// Web UI (SPA) - 必须放在最后作为 fallback
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		s.spaHandler().ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) authService() *auth.Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.auth != nil {
+		return s.auth
+	}
+	s.auth = auth.NewService(s.db, auth.Options{Secret: "test-secret", Expiration: 24 * time.Hour})
+	return s.auth
 }
 
 // Shutdown 关闭服务器
@@ -410,7 +415,7 @@ func (s *Server) handleLoginWithAudit(w http.ResponseWriter, r *http.Request) {
 	recorder := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
 	// 调用原始的登录处理函数
-	auth.HandleLogin(recorder, r)
+	s.authService().HandleLogin(recorder, r)
 
 	// 根据响应状态码记录审计日志
 	if username == "" {

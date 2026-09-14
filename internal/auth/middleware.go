@@ -8,6 +8,11 @@ import (
 
 // Middleware 认证中间件
 func Middleware(next http.HandlerFunc) http.HandlerFunc {
+	return defaultService.Middleware(next)
+}
+
+// Middleware 认证中间件
+func (s *Service) Middleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 从 Authorization header 获取 token
 		authHeader := r.Header.Get("Authorization")
@@ -25,7 +30,7 @@ func Middleware(next http.HandlerFunc) http.HandlerFunc {
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
 		// 验证 token
-		claims, err := ValidateToken(tokenString)
+		claims, err := s.ValidateToken(tokenString)
 		if err != nil {
 			http.Error(w, `{"error":"Invalid or expired token"}`, http.StatusUnauthorized)
 			return
@@ -42,6 +47,11 @@ func Middleware(next http.HandlerFunc) http.HandlerFunc {
 
 // OptionalMiddleware 可选认证中间件（不强制要求登录）
 func OptionalMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return defaultService.OptionalMiddleware(next)
+}
+
+// OptionalMiddleware 可选认证中间件（不强制要求登录）
+func (s *Service) OptionalMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
@@ -55,7 +65,7 @@ func OptionalMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		claims, err := ValidateToken(tokenString)
+		claims, err := s.ValidateToken(tokenString)
 		if err != nil {
 			next(w, r)
 			return

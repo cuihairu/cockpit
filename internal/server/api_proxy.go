@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/audit"
+	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/google/uuid"
 )
@@ -134,17 +134,17 @@ func (s *Server) handleProxyCreate(w http.ResponseWriter, r *http.Request) {
 	// 记录审计日志
 	// UserID is now string, no conversion needed
 	s.audit.Log(&audit.LogEntry{
-		UserID:     userInfo.UserID,
-		Username:   userInfo.Username,
-		Action:     "create",
-		Resource:   "proxy",
+		UserID:   userInfo.UserID,
+		Username: userInfo.Username,
+		Action:   "create",
+		Resource: "proxy",
 		Details: map[string]interface{}{
 			"name":       req.Name,
 			"target":     req.Target,
 			"remotePort": req.RemotePort,
 			"publicBind": req.PublicBind,
 		},
-		IP:    s.getClientIP(r),
+		IP:     s.getClientIP(r),
 		Status: audit.StatusSuccess,
 	})
 
@@ -348,19 +348,19 @@ func (s *Server) registerProxyAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/proxies", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			auth.Middleware(s.handleProxies)(w, r)
+			s.authService().Middleware(s.handleProxies)(w, r)
 		case http.MethodPost:
-			auth.Middleware(s.handleProxyCreate)(w, r)
+			s.authService().Middleware(s.handleProxyCreate)(w, r)
 		case http.MethodPut, http.MethodPatch:
-			auth.Middleware(s.handleProxyUpdate)(w, r)
+			s.authService().Middleware(s.handleProxyUpdate)(w, r)
 		case http.MethodDelete:
-			auth.Middleware(s.handleProxyDelete)(w, r)
+			s.authService().Middleware(s.handleProxyDelete)(w, r)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
 
 	mux.HandleFunc("/api/proxies/status", func(w http.ResponseWriter, r *http.Request) {
-		auth.Middleware(s.handleProxyStatus)(w, r)
+		s.authService().Middleware(s.handleProxyStatus)(w, r)
 	})
 }

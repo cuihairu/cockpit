@@ -5,25 +5,23 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/cuihairu/cockpit/internal/auth"
 )
 
 // registerMetricsAPI 注册系统指标 API
 func (s *Server) registerMetricsAPI(mux *http.ServeMux) {
 	// 获取系统信息快照（所有 Agent）
 	mux.HandleFunc("/api/metrics/snapshots", func(w http.ResponseWriter, r *http.Request) {
-		auth.Middleware(s.handleSnapshots)(w, r)
+		s.authService().Middleware(s.handleSnapshots)(w, r)
 	})
 
 	// 获取单个 Agent 的系统信息
 	mux.HandleFunc("/api/metrics/snapshot", func(w http.ResponseWriter, r *http.Request) {
-		auth.Middleware(s.handleSnapshot)(w, r)
+		s.authService().Middleware(s.handleSnapshot)(w, r)
 	})
 
 	// 获取历史指标
 	mux.HandleFunc("/api/metrics/history", func(w http.ResponseWriter, r *http.Request) {
-		auth.Middleware(s.handleMetricsHistory)(w, r)
+		s.authService().Middleware(s.handleMetricsHistory)(w, r)
 	})
 }
 
@@ -120,9 +118,9 @@ func (s *Server) handleMetricsHistory(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"data": metrics,
+		"data":  metrics,
 		"start": start.Unix(),
-		"end": end.Unix(),
+		"end":   end.Unix(),
 		"count": len(metrics),
 	})
 }

@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/cuihairu/cockpit/internal/auth"
@@ -13,12 +12,7 @@ import (
 // serveAPI 处理 API 请求
 func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	// 设置 CORS
-	allowed := os.Getenv("ALLOWED_ORIGINS")
-	if allowed != "" {
-		w.Header().Set("Access-Control-Allow-Origin", allowed)
-	}
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	setCORSHeaders(w)
 
 	// 处理 OPTIONS 预检请求
 	if r.Method == http.MethodOptions {

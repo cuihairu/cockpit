@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/protocol"
 )
 
@@ -17,7 +16,7 @@ const dockerAPIPrefix = "/api/docker/"
 
 func (s *Server) registerDockerAPI(mux *http.ServeMux) {
 	mux.HandleFunc(dockerAPIPrefix, func(w http.ResponseWriter, r *http.Request) {
-		auth.Middleware(s.handleDocker)(w, r)
+		s.authService().Middleware(s.handleDocker)(w, r)
 	})
 }
 

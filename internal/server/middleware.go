@@ -4,6 +4,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -27,6 +28,33 @@ func (r *responseWriter) Write(b []byte) (int, error) {
 		r.WriteHeader(http.StatusOK)
 	}
 	return r.ResponseWriter.Write(b)
+}
+
+// CORSMiddleware 统一处理 API 跨域响应和预检请求。
+func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		setCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func setCORSHeaders(w http.ResponseWriter) {
+	allowed := os.Getenv("ALLOWED_ORIGINS")
+	if allowed != "" {
+		w.Header().Set("Access-Control-Allow-Origin", allowed)
+	}
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 }
 
 // AuditMiddleware 审计日志中间件
