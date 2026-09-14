@@ -17,6 +17,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/notification"
+	"github.com/cuihairu/cockpit/internal/probe"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/proxy"
 	"github.com/cuihairu/cockpit/internal/storage"
@@ -37,6 +38,7 @@ type Server struct {
 	remoteSessions *RemoteSessionManager
 	ticketMgr      *TicketManager
 	inventorySync  *inventorysync.Manager
+	probeRunner    *probe.Runner
 	cfg            *config.Config
 	upgrader       websocket.Upgrader
 
@@ -155,6 +157,9 @@ func (s *Server) Start() error {
 		return fmt.Errorf("start inventory sync: %w", err)
 	}
 
+	// 启动自动健康探测（5 分钟间隔）
+	s.startProbeRunner()
+
 	// 注册所有路由
 	s.registerRoutes(mux)
 
@@ -264,6 +269,9 @@ func (s *Server) Shutdown() {
 	if s.inventorySync != nil {
 		s.inventorySync.Stop()
 	}
+	if s.probeRunner != nil {
+		s.probeRunner.Stop()
+	}
 	if s.proxyMgr != nil {
 		s.proxyMgr.Stop()
 	}
@@ -306,6 +314,13 @@ func (s *Server) startInventorySync() error {
 	}
 	s.inventorySync = manager
 	return nil
+}
+
+// startProbeRunner 启动自动健康探测
+func (s *Server) startProbeRunner() {
+	s.probeRunner = probe.NewRunner(s.db, 5*time.Minute)
+	s.probeRunner.Start()
+	log.Println("Probe runner started (interval: 5m)")
 }
 
 // handleHealth 健康检查

@@ -263,6 +263,11 @@ func (d *DB) UpsertDomain(domain *Domain) error {
 		FirstOrCreate(domain).Error
 }
 
+// UpdateDomainStatus 更新域名探测状态
+func (d *DB) UpdateDomainStatus(id, status string) error {
+	return d.db.Model(&Domain{}).Where("id = ?", id).Update("status", status).Error
+}
+
 // GetDomain 获取单个域名
 func (d *DB) GetDomain(id string) (*Domain, error) {
 	var domain Domain
@@ -302,6 +307,17 @@ func (d *DB) UpsertCertificate(cert *Certificate) error {
 	return d.db.Where("id = ?", cert.ID).
 		Assign(cert).
 		FirstOrCreate(cert).Error
+}
+
+// UpdateCertificateStatus 更新证书探测状态
+func (d *DB) UpdateCertificateStatus(id, status string, expiresAt time.Time) error {
+	updates := map[string]interface{}{
+		"status": status,
+	}
+	if !expiresAt.IsZero() {
+		updates["expires_at"] = expiresAt
+	}
+	return d.db.Model(&Certificate{}).Where("id = ?", id).Updates(updates).Error
 }
 
 // GetCertificate 获取单个证书
@@ -344,6 +360,15 @@ func (d *DB) UpsertService(service *Service) error {
 	return d.db.Where("id = ?", service.ID).
 		Assign(service).
 		FirstOrCreate(service).Error
+}
+
+// UpdateServiceStatus 更新服务探测状态
+func (d *DB) UpdateServiceStatus(id, status string, responseTimeMs int, lastCheck time.Time) error {
+	return d.db.Model(&Service{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":          status,
+		"response_time_ms": responseTimeMs,
+		"last_check":      lastCheck,
+	}).Error
 }
 
 // GetService 获取单个服务
