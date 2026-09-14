@@ -51,7 +51,33 @@ func TestDockerDetectWithEnvSocket(t *testing.T) {
 	if cap == nil {
 		t.Fatal("Detect() should report capability for reachable socket")
 	}
-	if cap.Type != "docker-api" || cap.Endpoint != sockPath {
+	// 裸 socket 路径规范化为 unix:// endpoint（docker 库 WithHost 要求 scheme）
+	if cap.Type != "docker-api" || cap.Endpoint != "unix://"+sockPath {
+		t.Errorf("capability = %+v", cap)
+	}
+}
+
+func TestDockerDetectWithUnixSchemeEnv(t *testing.T) {
+	// docker 官方惯例格式 DOCKER_HOST=unix:///path 之前无法检出
+	// （testSocket 直接 stat 带前缀的字符串），这里固定该行为。
+	d := &DockerDetector{}
+
+	sockPath := filepath.Join(t.TempDir(), "docker.sock")
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+	defer ln.Close()
+
+	t.Setenv("DOCKER_HOST", "unix://"+sockPath)
+	cap, err := d.Detect()
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+	if cap == nil {
+		t.Fatal("Detect() should report capability for reachable unix:// socket")
+	}
+	if cap.Type != "docker-api" || cap.Endpoint != "unix://"+sockPath {
 		t.Errorf("capability = %+v", cap)
 	}
 }
