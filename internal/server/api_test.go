@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -932,6 +933,42 @@ func TestHandleAuditLogsWithFilters(t *testing.T) {
 	}
 }
 
+func TestHandleAuditLogsWithTimeFilters(t *testing.T) {
+	s := newTestServerWithDB(t)
+	setupAdmin(s)
+
+	now := time.Now().UTC()
+	if err := s.db.CreateAuditLog(&storage.AuditLog{
+		Username:  "admin",
+		Action:    "login",
+		Resource:  "user",
+		Status:    "success",
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateAuditLog() error = %v", err)
+	}
+
+	start := now.Add(-time.Hour).Format(time.RFC3339)
+	end := now.Add(time.Hour).Format(time.RFC3339)
+
+	_, req := doAuthenticatedRequest(s, "GET", "/api/admin/audit/logs?start_time="+url.QueryEscape(start)+"&end_time="+url.QueryEscape(end), nil)
+	result := callWithAuth(s, s.handleAuditLogs, req)
+
+	if result.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", result.Code, http.StatusOK)
+	}
+
+	var resp struct {
+		Data []storage.AuditLog `json:"data"`
+	}
+	if err := json.NewDecoder(result.Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("data count = %d, want 1", len(resp.Data))
+	}
+}
+
 func TestHandleAuditLogsWrongMethod(t *testing.T) {
 	s := newTestServerWithDB(t)
 	setupAdmin(s)
@@ -953,6 +990,53 @@ func TestHandleAuditLogStats(t *testing.T) {
 
 	if result.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", result.Code, http.StatusOK)
+	}
+}
+
+func TestHandleAuditLogsExport(t *testing.T) {
+	s := newTestServerWithDB(t)
+	setupAdmin(s)
+
+	now := time.Now().UTC()
+	if err := s.db.CreateAuditLog(&storage.AuditLog{
+		Username:  "admin",
+		Action:    "remote_start",
+		Resource:  "remote_session",
+		Status:    "failure",
+		IP:        "10.0.0.1",
+		Details:   `{"reason":"denied"}`,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateAuditLog() error = %v", err)
+	}
+
+	_, req := doAuthenticatedRequest(s, "GET", "/api/admin/audit/export?resource=remote_session&status=failure", nil)
+	result := callWithAuth(s, s.handleAuditLogsExport, req)
+
+	if result.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", result.Code, http.StatusOK)
+	}
+	if got := result.Header().Get("Content-Type"); got == "" || got[:8] != "text/csv" {
+		t.Fatalf("content-type = %q, want text/csv", got)
+	}
+	body := result.Body.String()
+	if !strings.Contains(body, "id,created_at,username,action,resource,status,ip,resource_id,details") {
+		t.Fatalf("csv header missing: %s", body)
+	}
+	if !strings.Contains(body, "remote_start,remote_session,failure,10.0.0.1") {
+		t.Fatalf("csv row missing filtered log: %s", body)
+	}
+}
+
+func TestHandleAuditLogsExportWrongMethod(t *testing.T) {
+	s := newTestServerWithDB(t)
+	setupAdmin(s)
+
+	_, req := doAuthenticatedRequest(s, "POST", "/api/admin/audit/export", nil)
+	result := callWithAuth(s, s.handleAuditLogsExport, req)
+
+	if result.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want %d", result.Code, http.StatusMethodNotAllowed)
 	}
 }
 

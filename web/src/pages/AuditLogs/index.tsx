@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, Table, Tag, Button, Space, Input, Select, DatePicker, Statistic, Row, Col } from 'antd'
+import { Card, Table, Tag, Button, Space, Input, Select, DatePicker, Statistic, Row, Col, message } from 'antd'
 import {
   ReloadOutlined,
   SearchOutlined,
@@ -18,7 +18,7 @@ const { RangePicker } = DatePicker
 
 interface AuditLog {
   id: number
-  user_id: number
+  user_id: string
   username: string
   action: string
   resource: string
@@ -28,6 +28,17 @@ interface AuditLog {
   user_agent: string
   status: string
   created_at: string
+}
+
+interface RemoteAuditDetails {
+  protocol?: string
+  agent_id?: string
+  host?: string
+  port?: number
+  session_id?: string
+  egress?: string
+  duration?: string
+  reason?: string
 }
 
 interface AuditLogStats {
@@ -62,6 +73,77 @@ const RESOURCE_MAP: Record<string, string> = {
   gateway: '网关',
   storage: '存储',
   settings: '设置',
+  remote_session: '远控会话',
+}
+
+function parseAuditDetails(details: string): Record<string, unknown> | null {
+  if (!details) return null
+  try {
+    return JSON.parse(details) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function isRemoteAuditDetails(details: Record<string, unknown> | null): details is Record<string, unknown> & RemoteAuditDetails {
+  return Boolean(details && ('protocol' in details || 'agent_id' in details || 'egress' in details || 'reason' in details))
+}
+
+function renderRemoteAuditDetails(details: RemoteAuditDetails) {
+  return (
+    <Space direction="vertical" size={2} style={{ fontSize: 12 }}>
+      {details.protocol && (
+        <span>
+          <strong>协议:</strong> {String(details.protocol).toUpperCase()}
+        </span>
+      )}
+      {details.agent_id && (
+        <span>
+          <strong>Agent:</strong> {details.agent_id}
+        </span>
+      )}
+      {(details.host || details.port) && (
+        <span>
+          <strong>目标:</strong> {details.host || '-'}{details.port ? `:${details.port}` : ''}
+        </span>
+      )}
+      {details.egress && (
+        <span>
+          <strong>出口:</strong> {details.egress}
+        </span>
+      )}
+      {details.reason && (
+        <span style={{ color: '#F53F3F' }}>
+          <strong>原因:</strong> {details.reason}
+        </span>
+      )}
+      {details.duration && (
+        <span>
+          <strong>时长:</strong> {details.duration}
+        </span>
+      )}
+    </Space>
+  )
+}
+
+function renderGenericAuditDetails(details: Record<string, unknown> | null, raw: string) {
+  if (!details) {
+    return <span style={{ fontSize: 12 }}>{raw}</span>
+  }
+
+  return (
+    <pre
+      style={{
+        margin: 0,
+        fontSize: 12,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace',
+      }}
+    >
+      {JSON.stringify(details, null, 2)}
+    </pre>
+  )
 }
 
 const fetchAuditLogs = async (
@@ -88,6 +170,52 @@ const fetchAuditStats = async (): Promise<AuditLogStats> => {
   const response = await fetch('/api/admin/audit/stats')
   return response.json()
 }
+
+const exportAuditLogs = async (filters: Record<string, string | undefined>) => {
+  const params = new URLSearchParams()
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value)
+    }
+  })
+
+  const token = localStorage.getItem('token')
+  const response = await fetch(`/api/admin/audit/export?${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+
+  if (!response.ok) {
+    throw new Error(`导出失败: ${response.status}`)
+  }
+
+  const blob = await response.blob()
+  const url = window.URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `audit-logs-${dayjs().format('YYYYMMDD-HHmmss')}.csv`
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  window.URL.revokeObjectURL(url)
+}
+
+const isRemoteSessionFilterActive = (filters: {
+  action?: string
+  resource?: string
+  username?: string
+  status?: string
+  start_time?: string
+  end_time?: string
+}) => filters.resource === 'remote_session'
+
+const isFailedRemoteFilterActive = (filters: {
+  action?: string
+  resource?: string
+  username?: string
+  status?: string
+  start_time?: string
+  end_time?: string
+}) => filters.resource === 'remote_session' && filters.status === 'failure'
 
 const AuditLogs = () => {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 })
@@ -124,6 +252,33 @@ const AuditLogs = () => {
   const refreshLogs = () => {
     void logsQuery.refetch()
     void statsQuery.refetch()
+  }
+
+  const handleExport = async () => {
+    try {
+      await exportAuditLogs(filters)
+      void message.success('导出成功')
+    } catch (error) {
+      logger.error('Failed to export audit logs:', error)
+      void message.error('导出失败')
+    }
+  }
+
+  const applyRemoteSessionFilter = () => {
+    setFilters({
+      ...filters,
+      resource: 'remote_session',
+    })
+    setPagination({ ...pagination, current: 1 })
+  }
+
+  const applyFailedRemoteFilter = () => {
+    setFilters({
+      ...filters,
+      resource: 'remote_session',
+      status: 'failure',
+    })
+    setPagination({ ...pagination, current: 1 })
   }
 
   const handleDateRangeChange: RangePickerProps['onChange'] = (dates) => {
@@ -217,12 +372,13 @@ const AuditLogs = () => {
       ellipsis: true,
       render: (details: string) => {
         if (!details) return '-'
-        try {
-          const obj = JSON.parse(details)
-          return <span style={{ fontSize: 12 }}>{JSON.stringify(obj, null, 2)}</span>
-        } catch {
-          return <span style={{ fontSize: 12 }}>{details}</span>
+
+        const parsed = parseAuditDetails(details)
+        if (isRemoteAuditDetails(parsed)) {
+          return renderRemoteAuditDetails(parsed)
         }
+
+        return renderGenericAuditDetails(parsed, details)
       },
     },
   ]
@@ -265,6 +421,19 @@ const AuditLogs = () => {
         title="审计日志"
         extra={
           <Space>
+            <Button
+              type={isRemoteSessionFilterActive(filters) && !isFailedRemoteFilterActive(filters) ? 'primary' : 'default'}
+              onClick={applyRemoteSessionFilter}
+            >
+              远控会话
+            </Button>
+            <Button
+              danger
+              type={isFailedRemoteFilterActive(filters) ? 'primary' : 'default'}
+              onClick={applyFailedRemoteFilter}
+            >
+              失败远控
+            </Button>
             <Input
               placeholder="搜索用户名"
               prefix={<SearchOutlined />}
@@ -312,7 +481,7 @@ const AuditLogs = () => {
             <Button icon={<ReloadOutlined />} onClick={refreshLogs}>
               刷新
             </Button>
-            <Button icon={<DownloadOutlined />}>
+            <Button icon={<DownloadOutlined />} onClick={() => void handleExport()}>
               导出
             </Button>
           </Space>
