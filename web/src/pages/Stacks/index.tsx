@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import axios from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Alert,
   Button,
   Card,
   Empty,
@@ -26,6 +27,7 @@ import TerminalBlock from './TerminalBlock'
 import {
   DEFAULT_COMPOSE_TEMPLATE,
   STACK_NAME_PATTERN,
+  STACK_TEMPLATES,
   extractApiError,
   formatTimestamp,
   lastStatusColor,
@@ -58,6 +60,16 @@ const Stacks = () => {
     queryFn: () => api.getStacks(),
   })
   const stacks = useMemo(() => stacksData?.stacks ?? [], [stacksData])
+  // 各 agent 的 stacks 目录自检信息（M1.5）
+  const agentInfo = useMemo(() => stacksData?.agentInfo ?? {}, [stacksData])
+  // 目录不可写 / compose 缺失的 agent 告警
+  const dirIssues = useMemo(
+    () =>
+      Object.entries(agentInfo).filter(
+        ([, info]) => !info.dirWritable,
+      ),
+    [agentInfo],
+  )
 
   // 在线且有 Docker 能力的 agent（新建 Stack 时可选）
   const { data: agents = [], isFetching: agentsLoading } = useQuery({
@@ -198,6 +210,21 @@ const Stacks = () => {
           </Space>
         }
       >
+        {/* 目录自检提示：stacks 目录不可写的 agent 无法保存/部署 Stack */}
+        {dirIssues.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="部分 Agent 的 stacks 目录异常"
+            description={dirIssues.map(([id, info]) => (
+              <div key={id} style={{ fontSize: 12 }}>
+                <Typography.Text code>{id}</Typography.Text>：目录 {info.dir} 不可写
+                {info.dirError ? `（${info.dirError}）` : ''}
+              </div>
+            ))}
+          />
+        )}
         <Table
           columns={columns}
           dataSource={stacks}
@@ -266,6 +293,17 @@ const Stacks = () => {
             ]}
           >
             <Input placeholder="如 my-blog" maxLength={64} showCount />
+          </Form.Item>
+          <Form.Item label="模板（选择后填充，可再编辑）">
+            <Select
+              placeholder="选择模板或粘贴已有 compose.yml"
+              options={STACK_TEMPLATES.map((t) => ({ value: t.key, label: t.label }))}
+              onChange={(key: string) => {
+                const tpl = STACK_TEMPLATES.find((t) => t.key === key)
+                if (tpl) form.setFieldValue('compose', tpl.compose)
+              }}
+              allowClear
+            />
           </Form.Item>
           <Form.Item
             name="compose"

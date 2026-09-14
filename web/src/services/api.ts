@@ -21,6 +21,8 @@ import type {
   StackComposeSaveResponse,
   StackTaskStartResponse,
   StackTask,
+  StackInfo,
+  StackDeployment,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -234,9 +236,9 @@ class ApiService {
   }
 
   // ========== 应用部署（Compose Stack，通过 Agent RPC 代理） ==========
-  // 聚合所有 agent 的 Stack 列表
-  async getStacks(): Promise<{ stacks: StackView[] }> {
-    return this.client.get<unknown, { stacks: StackView[] }>('/stacks')
+  // 聚合所有 agent 的 Stack 列表（agentInfo 为各 agent 的目录自检信息，M1.5）
+  async getStacks(): Promise<{ stacks: StackView[]; agentInfo?: Record<string, StackInfo> }> {
+    return this.client.get<unknown, { stacks: StackView[]; agentInfo?: Record<string, StackInfo> }>('/stacks')
   }
 
   // Stack 详情（服务列表与运行状态）
@@ -261,10 +263,22 @@ class ApiService {
     )
   }
 
-  // 启动 / 停止 Stack（异步任务）
-  async stackAction(agentId: string, name: string, action: 'up' | 'down'): Promise<StackTaskStartResponse> {
+  // 启动 / 停止 / 重启 / 拉取镜像 Stack（异步任务）
+  async stackAction(
+    agentId: string,
+    name: string,
+    action: 'up' | 'down' | 'restart' | 'pull',
+  ): Promise<StackTaskStartResponse> {
     return this.client.post<unknown, StackTaskStartResponse>(
       `/stacks/agents/${agentId}/${name}/${action}`,
+    )
+  }
+
+  // Stack 部署历史（server 侧记录，agent 离线时仍可查）
+  async getStackHistory(agentId: string, name: string, limit = 50): Promise<{ deployments: StackDeployment[] }> {
+    return this.client.get<unknown, { deployments: StackDeployment[] }>(
+      `/stacks/agents/${agentId}/${name}/history`,
+      { params: { limit } },
     )
   }
 

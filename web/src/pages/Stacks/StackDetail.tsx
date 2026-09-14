@@ -5,6 +5,7 @@ import {
   Button,
   Collapse,
   Drawer,
+  Empty,
   Input,
   Modal,
   Popconfirm,
@@ -13,10 +14,12 @@ import {
   Table,
   Tabs,
   Tag,
+  Timeline,
   Typography,
   message,
 } from 'antd'
 import {
+  CloudDownloadOutlined,
   DeleteOutlined,
   EyeOutlined,
   PlayCircleOutlined,
@@ -200,9 +203,9 @@ const StackDetail = ({
     ? `${taskActionLabel[taskMeta.action] || taskMeta.action}任务日志 — ${stackName}`
     : ''
 
-  // 启动 / 停止
+  // 启动 / 停止 / 重启 / 拉取镜像
   const actionMutation = useMutation({
-    mutationFn: ({ action }: { action: 'up' | 'down' }) =>
+    mutationFn: ({ action }: { action: 'up' | 'down' | 'restart' | 'pull' }) =>
       api.stackAction(agentId, stackName, action),
     onSuccess: (res, vars) => {
       message.info(`${taskActionLabel[vars.action]}任务已下发，正在执行...`)
@@ -278,6 +281,40 @@ const StackDetail = ({
   const running = detail?.running ?? stack?.running ?? 0
   const total = detail?.total ?? stack?.total ?? 0
 
+  // 部署历史（M1.5）：server 侧记录，进入 Tab 或任务结束后刷新
+  const { data: historyData, isFetching: historyLoading, refetch: refetchHistory } = useQuery({
+    queryKey: ['stacks', 'history', agentId, stackName],
+    queryFn: () => api.getStackHistory(agentId, stackName),
+    enabled: open && !!agentId && !!stackName && activeKey === 'history',
+  })
+  useEffect(() => {
+    if (activeKey === 'history') void refetchHistory()
+  }, [activeKey, taskData?.status, refetchHistory])
+
+  const historyItems = (historyData?.deployments ?? []).map((d) => {
+    const label = taskActionLabel[d.action] || d.action
+    const dot =
+      d.status === 'success'
+        ? 'green'
+        : d.status === 'failed'
+          ? 'red'
+          : 'blue'
+    const duration =
+      d.finishedAt > 0 ? `${d.finishedAt - d.startedAt}s` : '进行中'
+    return {
+      color: dot,
+      children: (
+        <Space size={8} wrap>
+          <Tag color={dot === 'blue' ? 'processing' : dot}>{label}</Tag>
+          <Typography.Text style={{ fontSize: 12 }}>{formatTimestamp(d.startedAt)}</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {d.status === 'success' ? '成功' : d.status === 'failed' ? '失败' : '执行中'} · {duration}
+          </Typography.Text>
+        </Space>
+      ),
+    }
+  })
+
   const serviceOptions = (detail?.services ?? stack?.services ?? []).map((s) => ({
     value: s.name,
     label: s.name,
@@ -306,6 +343,22 @@ const StackDetail = ({
               onClick={() => actionMutation.mutate({ action: 'down' })}
             >
               停止
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              disabled={taskPending || running === 0}
+              loading={actionMutation.isPending && actionMutation.variables?.action === 'restart'}
+              onClick={() => actionMutation.mutate({ action: 'restart' })}
+            >
+              重启
+            </Button>
+            <Button
+              icon={<CloudDownloadOutlined />}
+              disabled={taskPending}
+              loading={actionMutation.isPending && actionMutation.variables?.action === 'pull'}
+              onClick={() => actionMutation.mutate({ action: 'pull' })}
+            >
+              拉取镜像
             </Button>
             <Button
               icon={<ReloadOutlined />}
@@ -431,6 +484,19 @@ const StackDetail = ({
           </Space>
           <TerminalBlock content={logsData?.logs ?? ''} loading={logsLoading} maxHeight={520} />
         </Space>
+      ),
+    },
+    {
+      key: 'history',
+      label: '历史',
+      children: historyItems.length > 0 ? (
+        <Timeline items={historyItems} />
+      ) : (
+        <Empty
+          description={
+            historyLoading ? '正在加载部署历史...' : '暂无部署记录，启动或停止 Stack 后这里会显示时间线'
+          }
+        />
       ),
     },
   ]

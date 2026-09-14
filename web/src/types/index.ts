@@ -414,3 +414,23 @@ export interface StackTask {
   startedAt: number // Unix 秒级时间戳
   finishedAt: number // Unix 秒级时间戳，0 = 未结束
 }
+
+// Agent 侧 stacks 目录自检信息（M1.5）
+export interface StackInfo {
+  dir: string
+  dirWritable: boolean
+  dirError?: string
+  composeVersion?: string
+}
+
+// Stack 部署历史（server 侧记录；agent 离线时仍可查）
+export interface StackDeployment {
+  id: number
+  agentId: string
+  stackName: string
+  action: string // up / down / restart / pull / remove
+  status: 'running' | 'success' | 'failed'
+  taskId: string
+  startedAt: number // Unix 秒级时间戳
+  finishedAt: number // Unix 秒级时间戳，0 = 未结束
+}

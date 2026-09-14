@@ -83,5 +83,94 @@ export const serviceStateColor: Record<string, string> = {
 export const taskActionLabel: Record<string, string> = {
   up: '启动',
   down: '停止',
+  restart: '重启',
+  pull: '拉取镜像',
+  remove: '删除',
   delete: '删除',
 }
+
+// 新建 Stack 模板库（M1.5）：常见个人服务
+export interface StackTemplate {
+  key: string
+  label: string
+  compose: string
+}
+
+export const STACK_TEMPLATES: StackTemplate[] = [
+  {
+    key: 'empty',
+    label: '空模板',
+    compose: `# 从零开始编写 compose.yml\nservices: {}\n`,
+  },
+  {
+    key: 'nginx',
+    label: 'Nginx 静态站',
+    compose: DEFAULT_COMPOSE_TEMPLATE,
+  },
+  {
+    key: 'wordpress',
+    label: 'WordPress 博客',
+    compose: `# WordPress + MySQL
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: change-me
+      MYSQL_DATABASE: wordpress
+    volumes:
+      - db_data:/var/lib/mysql
+  wordpress:
+    image: wordpress:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_PASSWORD: change-me
+    volumes:
+      - wp_data:/var/www/html
+    depends_on:
+      - db
+volumes:
+  db_data:
+  wp_data:
+`,
+  },
+  {
+    key: 'npm',
+    label: 'Nginx Proxy Manager',
+    compose: `# 反向代理 + 证书管理（默认账号 admin@example.com / changeme）
+services:
+  app:
+    image: jc21/nginx-proxy-manager:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "81:81"
+      - "443:443"
+    volumes:
+      - data:/data
+      - letsencrypt:/etc/letsencrypt
+volumes:
+  data:
+  letsencrypt:
+`,
+  },
+  {
+    key: 'uptime-kuma',
+    label: 'Uptime Kuma 拨测',
+    compose: `# 服务拨测面板
+services:
+  kuma:
+    image: louislam/uptime-kuma:1
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - kuma_data:/app/data
+volumes:
+  kuma_data:
+`,
+  },
+]
