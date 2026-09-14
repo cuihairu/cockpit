@@ -22,6 +22,7 @@ const (
 	ServiceUp           = "service.up" // 恢复通知（probe 边沿检测，需在 events 白名单显式启用）
 	AgentOffline        = "agent.offline"
 	DomainExpired       = "domain.expired"
+	BackupFailed        = "backup.failed" // 备份任务失败（backup 调度循环，需在 events 白名单显式启用）
 )
 
 // getAlertEventType 根据 Alert 获取对应的事件类型

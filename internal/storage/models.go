@@ -210,3 +210,35 @@ type StackDeployment struct {
 	StartedAt  int64  `json:"startedAt"`
 	FinishedAt int64  `json:"finishedAt"` // 0 = 尚未结束
 }
+
+// BackupConfig 备份任务配置（server 调度数据源；备份文件在 Agent 侧本地生成，
+// 见 docs/guide/backup-design.md）
+type BackupConfig struct {
+	ID         uint      `gorm:"primarykey" json:"id"`
+	AgentID    string    `gorm:"index;size:64" json:"agentId"`
+	Name       string    `gorm:"size:64" json:"name"`   // 备份文件名前缀
+	Sources    string    `gorm:"type:text" json:"sources"` // JSON 数组字符串，源路径列表
+	DestDir    string    `gorm:"size:512" json:"destDir"`
+	Schedule   string    `gorm:"size:32" json:"schedule"` // manual / daily@HH:mm / every:Nh
+	Retention  int       `json:"retention"`               // 保留份数，0=不清理
+	Enabled    bool      `json:"enabled"`
+	LastRunAt  int64     `json:"lastRunAt"`
+	NextRunAt  int64     `json:"nextRunAt"` // manual 恒为 0
+	LastStatus string    `gorm:"size:16" json:"lastStatus"` // "" / running / success / failed
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+// BackupRun 备份单次运行记录。下发 backup.run 时插入 running，
+// server 轮询任务终态后回填（复用 StackDeployment 模式）。
+type BackupRun struct {
+	ID         uint   `gorm:"primarykey" json:"id"`
+	ConfigID   uint   `gorm:"index" json:"configId"`
+	TaskID     string `gorm:"size:64" json:"taskId"`
+	Status     string `gorm:"size:16" json:"status"` // running / success / failed / timeout
+	File       string `gorm:"size:256" json:"file"`  // 备份文件名（不含目录）
+	Size       int64  `json:"size"`
+	Error      string `gorm:"size:512" json:"error,omitempty"`
+	StartedAt  int64  `json:"startedAt"`
+	FinishedAt int64  `json:"finishedAt"` // 0 = 尚未结束
+}

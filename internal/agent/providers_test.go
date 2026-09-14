@@ -2,6 +2,8 @@ package agent
 
 import (
 	"os"
+	"runtime"
+	"sort"
 	"testing"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
@@ -37,10 +39,7 @@ func TestSetupProviders_SystemAlwaysRegistered(t *testing.T) {
 	a := NewAgent(Config{ServerURL: "ws://test"})
 	a.setupProviders()
 
-	got := a.rpc.RegisteredTypes()
-	if len(got) != 1 || got[0] != "system" {
-		t.Fatalf("expected only [system] registered, got %v", got)
-	}
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes())
 }
 
 func TestSetupProviders_NilRpcIsNoop(t *testing.T) {
@@ -62,7 +61,7 @@ func TestSetupProviders_PVERegisteredWithEnv(t *testing.T) {
 	a.capabilities = []protocol.Capability{{Type: "pve-api"}}
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"pve", "system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes("pve"))
 }
 
 func TestSetupProviders_PVESkippedWhenCapabilityMissing(t *testing.T) {
@@ -77,7 +76,7 @@ func TestSetupProviders_PVESkippedWhenCapabilityMissing(t *testing.T) {
 	a.capabilities = nil
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes())
 }
 
 func TestSetupProviders_PVESkippedWhenEnvMissing(t *testing.T) {
@@ -92,7 +91,7 @@ func TestSetupProviders_PVESkippedWhenEnvMissing(t *testing.T) {
 	a.capabilities = []protocol.Capability{{Type: "pve-api"}}
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes())
 }
 
 func TestSetupProviders_PVESkippedWhenOnlyTokenIDPresent(t *testing.T) {
@@ -107,7 +106,7 @@ func TestSetupProviders_PVESkippedWhenOnlyTokenIDPresent(t *testing.T) {
 	a.capabilities = []protocol.Capability{{Type: "pve-api", Endpoint: "https://pve.test:8006"}}
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes())
 }
 
 func TestSetupProviders_OpenWrtRegisteredWithEnv(t *testing.T) {
@@ -122,7 +121,7 @@ func TestSetupProviders_OpenWrtRegisteredWithEnv(t *testing.T) {
 	a.capabilities = []protocol.Capability{{Type: "openwrt"}}
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"openwrt", "system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes("openwrt"))
 }
 
 func TestSetupProviders_OpenWrtCustomPort(t *testing.T) {
@@ -137,7 +136,7 @@ func TestSetupProviders_OpenWrtCustomPort(t *testing.T) {
 	a.capabilities = []protocol.Capability{{Type: "openwrt"}}
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"openwrt", "system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes("openwrt"))
 }
 
 func TestSetupProviders_OpenWrtSkippedWhenEnvMissing(t *testing.T) {
@@ -151,7 +150,7 @@ func TestSetupProviders_OpenWrtSkippedWhenEnvMissing(t *testing.T) {
 	a.capabilities = []protocol.Capability{{Type: "openwrt"}}
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes())
 }
 
 func TestSetupProviders_OpenWrtInvalidPortIgnored(t *testing.T) {
@@ -167,7 +166,7 @@ func TestSetupProviders_OpenWrtInvalidPortIgnored(t *testing.T) {
 	a.capabilities = []protocol.Capability{{Type: "openwrt"}}
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"openwrt", "system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes("openwrt"))
 }
 
 func TestSetupProviders_DockerSkippedWhenNoEndpoint(t *testing.T) {
@@ -184,7 +183,7 @@ func TestSetupProviders_DockerSkippedWhenNoEndpoint(t *testing.T) {
 	a.capabilities = []protocol.Capability{{Type: "docker-api"}}
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes())
 }
 
 func TestSetupProviders_DockerUsesCapabilityEndpoint(t *testing.T) {
@@ -247,7 +246,7 @@ func TestSetupProviders_MultipleCapabilities(t *testing.T) {
 	}
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"openwrt", "pve", "system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes("openwrt", "pve"))
 }
 
 func TestSetupProviders_UnknownCapabilityIgnored(t *testing.T) {
@@ -259,7 +258,19 @@ func TestSetupProviders_UnknownCapabilityIgnored(t *testing.T) {
 	}
 	a.setupProviders()
 
-	assertRegistered(t, a.rpc.RegisteredTypes(), []string{"system"})
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes())
+}
+
+// baseTypes 平台相关的无条件注册类型，测试期望以它为基础：
+// system 始终注册；backup 仅 Linux 注册（与 setupProviders 的注册条件一致）。
+func baseTypes(extra ...string) []string {
+	want := []string{"system"}
+	if runtime.GOOS == "linux" {
+		want = append(want, "backup")
+	}
+	want = append(want, extra...)
+	sort.Strings(want)
+	return want
 }
 
 // assertRegistered checks that got contains exactly the want types (both sorted).

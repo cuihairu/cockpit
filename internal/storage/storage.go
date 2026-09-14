@@ -106,6 +106,8 @@ func (d *DB) migrate() error {
 		&Stack{},
 		&StackDeployment{},
 		&Setting{},
+		&BackupConfig{},
+		&BackupRun{},
 	)
 }
 

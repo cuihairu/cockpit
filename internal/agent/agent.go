@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -254,6 +255,15 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		} else {
 			log.Printf("  Not detected: %s", d.Name())
 		}
+	}
+
+	// backup capability：Linux 文件打包零外部依赖，无需专门 detector
+	if runtime.GOOS == "linux" {
+		capabilities = append(capabilities, protocol.Capability{
+			Type:     "backup",
+			Version:  "1",
+			Metadata: map[string]interface{}{"maxTasks": rpc.BackupMaxTasks},
+		})
 	}
 
 	return capabilities

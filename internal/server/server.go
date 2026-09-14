@@ -179,6 +179,8 @@ func (s *Server) Start() error {
 	go s.alertCheckLoop()
 	// 启动系统指标清理协程
 	go s.metricsCleanupLoop()
+	// 启动备份调度循环
+	s.startBackupLoop()
 
 	return server.ListenAndServe()
 }
@@ -200,6 +202,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 注册拨测与通知 API
 	s.registerProbeAPI(mux)
+
+	// 注册备份管理 API
+	s.registerBackupsAPI(mux)
 
 	// 注册远程连接 API
 	s.registerRemoteAPI(mux)

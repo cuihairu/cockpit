@@ -34,10 +34,16 @@ const (
 	ActionStackRemove = "stack_remove"
 	ActionStackRestart = "stack_restart"
 	ActionStackPull    = "stack_pull"
+	// 备份管理（见 docs/guide/backup-design.md）
+	ActionBackupRun        = "backup_run"
+	ActionBackupDeleteFile = "backup_delete_file"
 )
 
 // ResourceStack Compose Stack 资源类型
 const ResourceStack = "stack"
+
+// ResourceBackup 备份配置资源类型
+const ResourceBackup = "backup"
 
 // ResourceRemoteSession 远控会话资源类型
 const ResourceRemoteSession = "remote_session"

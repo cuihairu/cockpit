@@ -30,6 +30,12 @@ func (a *Agent) setupProviders() {
 	// 1. SystemProvider 始终注册
 	a.rpc.RegisterProvider(rpc.NewSystemProvider())
 
+	// 1.5 Backup Provider：Linux 文件打包零外部依赖，无条件注册（与
+	// detectCapabilities 追加 backup capability 的条件一致）
+	if runtime.GOOS == "linux" {
+		a.rpc.RegisterProvider(rpc.NewBackupProvider(rpc.BackupConfig{}))
+	}
+
 	// 2. 按检测到的能力注册
 	for _, cap := range a.capabilities {
 		switch cap.Type {
