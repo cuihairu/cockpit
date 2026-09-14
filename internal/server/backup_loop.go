@@ -21,13 +21,14 @@ import (
 
 const (
 	backupCheckInterval = time.Minute
-	backupTrackInterval = 5 * time.Second
 	backupTrackTimeout  = 30 * time.Minute // 大目录打包可能很久
 	backupMaxRetention  = 365
 	backupMaxIntervalH  = 168 // every:Nh 上限一周
 )
 
 var (
+	// backupTrackInterval 任务终态轮询间隔；var 便于测试缩短等待
+	backupTrackInterval = 5 * time.Second
 	// backupNameRe 备份名约束（与 agent 侧一致）
 	backupNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 	// backupFileNameRe 删除文件时的文件名校验（与 agent 侧一致）

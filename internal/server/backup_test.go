@@ -89,6 +89,8 @@ func newBackupTestServer(t *testing.T) *Server {
 	db := testServerDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+	// 任务终态轮询间隔缩短，track 测试不再贴 10s 等待窗口边缘（CI flaky 根因）
+	backupTrackInterval = 20 * time.Millisecond
 	return &Server{
 		registry: NewRegistry(),
 		db:       db,
