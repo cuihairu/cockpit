@@ -150,7 +150,8 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 - [x] Agent：providers.go 注册逻辑 + 单测（fake 脚本模拟 compose CLI）
 - [x] Server：`api_stacks.go` + storage stacks 表 + 审计事件
 - [x] Web：Stacks 页面（列表/详情/编辑/部署/日志轮询）
-- [ ] 验收：在一台测试机上完成「新建 → 编辑 compose → up → 改配置 → up（重建）→ down → 删除」全流程；同名并发 up 返回 409；agent 断连后列表显示缓存灰态
+- [x] 验收（本机端到端，2026-09-14）：真实 server/agent 二进制 + fake Docker Engine（`scripts/local-acceptance/`），32 项断言全部通过且可重复，覆盖「创建 → 校验失败不落盘 → up（并发 409）→ 状态联动 → logs → down → 删除 → 断连灰态 → 审计闭环 + .env 不泄漏」，记录见下文[验收记录](#验收记录)
+- [ ] 验收（真实 Docker 测试机）：镜像真实拉取、容器健康/端口/重启策略、compose build/pull/profiles/healthcheck 语义、`COCKPIT_STACKS_DIR` 权限实践（0700）
 
 ### M1.5 —— 体验补齐
 
@@ -175,8 +176,35 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 | 用户手改文件与 UI 编辑冲突 | compose-file-first 原则：保存即覆盖（带 modifiedAt 乐观提示，不强做 merge） |
 | Windows agent | P1 不支持，provider 注册时检测 `runtime.GOOS`，非 linux/darwin 直接跳过并记日志 |
 
+## 验收记录
+
+### 2026-09-14 本机端到端验收（无真实 Docker）
+
+**方式**：`scripts/local-acceptance/run-acceptance.sh` 一键运行——真实
+`cockpit` server 与 `cockpit-agent` 二进制，Docker 侧用替身（unix socket 上的
+最小 Engine API + PATH 内 compose CLI 假体，`up` 后状态真实联动 `status` 查询）。
+链路完整经过 REST → JWT → 审计 → WebSocket RPC → stack provider → compose 调用。
+
+**结果**：32 项断言全部通过，重跑可重复；`go test ./...` 全绿。
+
+**覆盖**：创建（created=true）→ compose/.env 回读一致 → 非法 compose 校验失败
+不落盘 → 列表 → up 异步任务（taskId/轮询 success）→ 同名并发 up 409 →
+status 联动（running=2/total=2）→ logs → down → remove 删目录 →
+agent 断连缓存灰态（online=false）→ 审计事件（stack_create/up/down/remove）
+齐全且 `.env` 值不泄漏。
+
+**验收中发现并修复**：`DOCKER_HOST` 不支持 Docker 官方惯例格式
+`unix:///path`——detector 直接 `stat` 带前缀字符串必然失败，导致真机上用户
+设置标准格式时 agent 漏检 docker 能力；而裸路径形式虽能检出，endpoint 传给
+docker 库（要求 scheme）又会解析失败。修复：`detector.normalizeUnixHost`
+兼容两种形式并统一输出 `unix://` endpoint（含单测）。
+
+**遗留（真实 Docker 测试机）**：镜像真实拉取、容器健康/端口/重启策略、
+compose build/pull/profiles/healthcheck 语义、`COCKPIT_STACKS_DIR` 权限实践。
+
 ## 参考
 
 - [Komodo Git-to-deploy](https://komo.do/docs/intro)——Core/Periphery 同构、自动化程序（可对照本方案 P2）
 - [Dockge](https://github.com/louislam/dockge)——compose-file-first、目录即栈
 - 内部：[参考项目对比与借鉴](./reference-projects.md)、[协议定义](./protocol.md)、`todo.md` P1 条目
+

@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# fake-docker 模拟 docker CLI 的 compose 子命令，供 Cockpit Compose Stack
+# 本地验收使用（放进 PATH 后由 stack provider 以 "docker compose ..." 调用）。
+#
+# 行为约定：
+#   compose version              输出版本（provider 探测用）
+#   compose config -q ...        校验：文件可读且含顶层 services:；内容含
+#                                "invalid-" 视为非法（模拟 docker compose config 报错）
+#   compose up -d ...            睡眠 FAKE_COMPOSE_UP_DELAY 秒（制造并发 409 窗口），
+#                                解析顶层 services 及 image 写状态
+#                                <project>.json（fake-docker-daemon 据此返回容器）
+#   compose down ...             删除 <project>.json
+#   compose logs ...             输出固定日志行
+#
+# 环境变量：FAKE_COMPOSE_STATE_DIR（必填）
+set -u
+
+STATE_DIR="${FAKE_COMPOSE_STATE_DIR:-}"
+if [ -z "$STATE_DIR" ]; then
+  echo "fake-docker: FAKE_COMPOSE_STATE_DIR is required" >&2
+  exit 1
+fi
+mkdir -p "$STATE_DIR"
+
+# parse_kv 从参数列表里取 "-X VALUE" 形式的 VALUE
+parse_kv() {
+  local key="$1"; shift
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "$key" ] && [ $# -ge 2 ]; then
+      echo "$2"
+      return 0
+    fi
+    shift
+  done
+  return 1
+}
+
+unsupported() {
+  echo "fake-docker: unsupported invocation: docker $*" >&2
+  exit 1
+}
+
+# find_sub 从参数中取 compose 子命令：子命令可能出现在 flag 之前或之后
+# （provider 实际调用形如 "docker compose --project-directory DIR -f FILE config -q"），
+# 跳过 "-X VALUE" 形式的 flag 对，把第一个自由 token 视为子命令。
+find_sub() {
+  local skip=0 a
+  for a in "$@"; do
+    if [ "$skip" = 1 ]; then skip=0; continue; fi
+    case "$a" in
+      -p|-f|--project-directory) skip=1 ;;
+      -*) ;;
+      *) echo "$a"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+cmd="${1:-}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  compose) ;;
+  version)
+    echo "Docker version 27.3.1-fake, build fake"
+    exit 0
+    ;;
+  *) unsupported "$cmd $*" ;;
+esac
+
+sub="$(find_sub "$@")" || unsupported "compose $*"
+case "$sub" in
+  version)
+    echo "Docker Compose version v2.39.0-fake"
+    ;;
+
+  config)
+    file="$(parse_kv -f "$@" || true)"
+    if [ -z "$file" ] || [ ! -r "$file" ]; then
+      echo "fake-docker: open $file: no such file" >&2
+      exit 1
+    fi
+    if ! grep -q '^services:' "$file"; then
+      echo "fake-docker: top level object must be a mapping containing 'services'" >&2
+      exit 15
+    fi
+    if grep -q 'invalid-' "$file"; then
+      echo "fake-docker: yaml: line 2: unknown field 'invalid-something' in service" >&2
+      exit 15
+    fi
+    ;;
+
+  up)
+    project="$(parse_kv -p "$@" || true)"
+    file="$(parse_kv -f "$@" || true)"
+    if [ -z "$project" ] || [ -z "$file" ] || [ ! -r "$file" ]; then
+      echo "fake-docker: compose up requires -p PROJECT and readable -f FILE" >&2
+      exit 1
+    fi
+    echo "[fake] Pulling images for project '$project' ..."
+    echo "[fake] Network ${project}_default  Creating"
+    echo "[fake] Network ${project}_default  Created"
+    sleep "${FAKE_COMPOSE_UP_DELAY:-2}"
+    # 解析顶层 service 名与 image，生成容器状态 JSON
+    body="$(sed -n '/^services:/,$p' "$file")"
+    svcs="$(echo "$body" | grep -E '^  [A-Za-z0-9_-]+:' | sed -E 's/^  ([A-Za-z0-9_-]+):.*/\1/')"
+    items=""
+    for svc in $svcs; do
+      image="$(echo "$body" | sed -n "/^  $svc:/,/^[A-Za-z]/p" | grep -E '^[[:space:]]+image:' | head -1 | sed -E 's/.*image:[[:space:]]*//; s/["'\'']//g')"
+      [ -n "$image" ] || image="unknown:latest"
+      id="fake$(printf '%s%s' "$project" "$svc" | md5sum | cut -c1-10)"
+      item="{\"ID\":\"$id\",\"Names\":[\"/${project}-${svc}-1\"],\"Image\":\"$image\",\"Created\":1700000000,\"State\":\"running\",\"Status\":\"Up 1 second\",\"Labels\":{\"com.docker.compose.project\":\"$project\",\"com.docker.compose.service\":\"$svc\"}}"
+      if [ -n "$items" ]; then items="$items,$item"; else items="$item"; fi
+      echo "[fake] Container ${project}-${svc}-1  Starting"
+    done
+    printf '[%s]\n' "$items" > "$STATE_DIR/$project.json"
+    for svc in $svcs; do
+      echo "[fake] Container ${project}-${svc}-1  Started"
+    done
+    ;;
+
+  down)
+    project="$(parse_kv -p "$@" || true)"
+    if [ -z "$project" ]; then
+      echo "fake-docker: compose down requires -p PROJECT" >&2
+      exit 1
+    fi
+    echo "[fake] Container ${project}-*  Stopping"
+    rm -f "$STATE_DIR/$project.json"
+    echo "[fake] Network ${project}_default  Removed"
+    ;;
+
+  logs)
+    echo "demo-nginx-1  | 172.17.0.1 - - [14/Sep/2026:00:00:00] \"GET / HTTP/1.1\" 200"
+    echo "demo-nginx-1  | fake compose logs ok (accept-logs-ok)"
+    ;;
+
+  *) unsupported "compose $sub $*" ;;
+esac
+exit 0
