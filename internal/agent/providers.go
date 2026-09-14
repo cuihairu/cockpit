@@ -65,11 +65,20 @@ func (a *Agent) registerDockerProvider(cap protocol.Capability) {
 
 // registerStackProvider 注册 Compose Stack Provider。
 //
-// 叠加条件：docker-api capability + linux/darwin + docker compose CLI 可用 +
-// Docker daemon 可连。任一不满足则跳过，不影响容器管理（方案见
-// docs/guide/stack-deploy-design.md）。stacks 根目录可用
-// COCKPIT_STACKS_DIR 覆盖，默认 /var/lib/cockpit/stacks。
+// 叠加条件：docker-api capability 带明确 endpoint（与 docker provider
+// 同一纪律，endpoint 缺失时不兜底连默认 socket）+ linux/darwin +
+// docker compose CLI 可用 + Docker daemon 可连。任一不满足则跳过，
+// 不影响容器管理（方案见 docs/guide/stack-deploy-design.md）。
+// stacks 根目录可用 COCKPIT_STACKS_DIR 覆盖，默认 /var/lib/cockpit/stacks。
 func (a *Agent) registerStackProvider(cap protocol.Capability) {
+	host := cap.Endpoint
+	if host == "" {
+		host = os.Getenv("DOCKER_HOST")
+	}
+	if host == "" {
+		log.Printf("Skip stack provider: no endpoint detected")
+		return
+	}
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		log.Printf("Skip stack provider: unsupported OS %s", runtime.GOOS)
 		return
@@ -79,10 +88,6 @@ func (a *Agent) registerStackProvider(cap protocol.Capability) {
 		return
 	}
 
-	host := cap.Endpoint
-	if host == "" {
-		host = os.Getenv("DOCKER_HOST")
-	}
 	dockerClient, err := docker.NewClient(docker.Config{Host: host, Timeout: 30 * time.Second})
 	if err != nil {
 		log.Printf("Skip stack provider: connect docker daemon: %v", err)

@@ -174,6 +174,9 @@ func TestSetupProviders_DockerSkippedWhenNoEndpoint(t *testing.T) {
 	// Docker constructor does a Ping, so without a real daemon the provider
 	// cannot be registered. Assert the env-detection skip path instead: no
 	// endpoint anywhere means registerDockerProvider bails before constructing.
+	// The stack provider follows the same endpoint discipline (it must not
+	// fall back to the default socket), so it is skipped here too — on any
+	// machine, with or without docker installed.
 	withEnv(t, map[string]string{"DOCKER_HOST": ""})
 
 	a := NewAgent(Config{ServerURL: "ws://test"})
@@ -223,7 +226,9 @@ func TestSetupProviders_DockerUsesDockerHostEnv(t *testing.T) {
 }
 
 func TestSetupProviders_MultipleCapabilities(t *testing.T) {
-	// pve + openwrt both register; docker without daemon is skipped.
+	// pve + openwrt both register; docker without an endpoint is skipped,
+	// and the stack provider is skipped with it (same endpoint requirement,
+	// checked before any docker/compose probing — hermetic on all hosts).
 	withEnv(t, map[string]string{
 		"PVE_URL":          "https://pve.test:8006",
 		"PVE_TOKEN_ID":     "root@pam!test",
