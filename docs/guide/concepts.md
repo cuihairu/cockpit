@@ -164,7 +164,7 @@ Browser
 
 终端和 VNC 使用 `proxy_*` 消息做 TCP 数据转发；桌面连接使用 `desktop_*` 消息传输 RDP 会话事件和屏幕更新。
 
-远程目标默认必须命中 `remote_control.allowed_targets` 中显式配置的主机名或 IP；开发/调试环境可以设置 `remote_control.allow_arbitrary_target: true` 跳过该限制。当前实现不会自动从 inventory 推导可远控目标。
+远程目标默认必须命中 `remote_control.allowed_targets` 中显式配置的主机名、IP 或 CIDR；开发/调试环境可以设置 `remote_control.allow_arbitrary_target: true` 跳过该限制。当前实现不会自动从 inventory 推导可远控目标。
 
 RDP 桌面能力是可选构建能力。默认构建的 Agent 会明确返回“不支持 RDP”的错误；需要真实 RDP 连接时，在支持的平台上使用 `go build -tags rdp ./cmd/cockpit-agent` 构建 Agent。
 

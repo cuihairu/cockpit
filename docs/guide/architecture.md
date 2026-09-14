@@ -125,7 +125,7 @@ Web UI 默认请求 `/api`。公开接口包括登录、Token 刷新、TOTP 验�
 5. Agent 连接目标服务并把数据通过 Server 转发回浏览器。
 
 这个边界保证浏览器不需要知道内网拓扑，也不需要直接连 Agent。
-远控目标默认只允许 `remote_control.allowed_targets` 中显式配置的 host；RDP 桌面还要求 Agent 使用 `rdp` build tag 构建，默认构建会返回明确的不支持错误。
+远控目标默认只允许 `remote_control.allowed_targets` 中显式配置的主机名、IP 或 CIDR；RDP 桌面还要求 Agent 使用 `rdp` build tag 构建，默认构建会返回明确的不支持错误。
 
 ## 协议边界
 

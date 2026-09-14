@@ -338,10 +338,10 @@ func (s *Server) HandleTerminalClose(connID string, reason string) {
 
 // registerRemoteAPI 注册远程连接 API
 func (s *Server) registerRemoteAPI(mux *http.ServeMux) {
-	mux.HandleFunc("/api/remote/tickets", auth.Middleware(s.handleTicketCreate))
+	mux.HandleFunc("/api/remote/tickets", s.authService().Middleware(s.handleTicketCreate))
 	mux.HandleFunc("/api/remote/terminal", s.handleTerminalWebSocket)
-	mux.HandleFunc("/api/remote/sessions", auth.Middleware(s.handleRemoteSessions))
-	mux.HandleFunc("/api/remote/sessions/", auth.Middleware(s.handleRemoteSession))
+	mux.HandleFunc("/api/remote/sessions", s.authService().Middleware(s.handleRemoteSessions))
+	mux.HandleFunc("/api/remote/sessions/", s.authService().Middleware(s.handleRemoteSession))
 }
 
 // handleTicketCreate 创建短期 WebSocket 连接票据
@@ -368,26 +368,68 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userInfo, _ := auth.GetUserFromContext(r)
+	clientIP := s.getClientIP(r)
+	userAgent := r.UserAgent()
+
 	if req.AgentID == "" || req.Host == "" || req.Port <= 0 || req.Protocol == "" {
+		s.auditRemoteFailure(
+			userInfo.UserID,
+			userInfo.Username,
+			clientIP,
+			userAgent,
+			&audit.RemoteSessionDetails{
+				Protocol: req.Protocol,
+				AgentID:  req.AgentID,
+				Host:     req.Host,
+				Port:     req.Port,
+				Reason:   "missing required fields",
+			},
+		)
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
 		return
 	}
 
 	// 检查 Agent 是否在线
 	if _, exists := s.registry.Get(req.AgentID); !exists {
+		s.auditRemoteFailure(
+			userInfo.UserID,
+			userInfo.Username,
+			clientIP,
+			userAgent,
+			&audit.RemoteSessionDetails{
+				Protocol: req.Protocol,
+				AgentID:  req.AgentID,
+				Host:     req.Host,
+				Port:     req.Port,
+				Reason:   "agent not found or offline",
+			},
+		)
 		http.Error(w, "Agent not found or offline", http.StatusNotFound)
 		return
 	}
 
-	// 校验目标是否在 allow-list 内（除非显式允许任意目标）
-	if allow, reason := s.validateRemoteTarget(req.Host); !allow {
+	// 校验目标是否在 allow-list 和 Agent 出口策略内（除非显式允许任意目标）
+	egressMatch, reason := s.matchRemoteEgress(req.AgentID, req.Host, req.Port)
+	if egressMatch == nil {
+		s.auditRemoteFailure(
+			userInfo.UserID,
+			userInfo.Username,
+			clientIP,
+			userAgent,
+			&audit.RemoteSessionDetails{
+				Protocol: req.Protocol,
+				AgentID:  req.AgentID,
+				Host:     req.Host,
+				Port:     req.Port,
+				Reason:   reason,
+			},
+		)
 		rejectTargetDenied(w, reason)
 		return
 	}
 
-	// 获取当前用户
-	userInfo, ok := auth.GetUserFromContext(r)
-	if !ok {
+	if userInfo.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -418,6 +460,20 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 	// 生成票据
 	ticket, err := s.ticketMgr.GenerateTicket(userInfo.UserID, userInfo.Username, params)
 	if err != nil {
+		s.auditRemoteFailure(
+			userInfo.UserID,
+			userInfo.Username,
+			clientIP,
+			userAgent,
+			&audit.RemoteSessionDetails{
+				Protocol: req.Protocol,
+				AgentID:  req.AgentID,
+				Host:     req.Host,
+				Port:     req.Port,
+				Egress:   egressMatch.summary(),
+				Reason:   "failed to generate ticket",
+			},
+		)
 		http.Error(w, "Failed to generate ticket", http.StatusInternalServerError)
 		return
 	}
@@ -427,14 +483,15 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 		audit.ActionRemoteStart,
 		userInfo.UserID,
 		userInfo.Username,
-		s.getClientIP(r),
-		r.UserAgent(),
+		clientIP,
+		userAgent,
 		&audit.RemoteSessionDetails{
 			Protocol: req.Protocol,
 			AgentID:  req.AgentID,
 			Host:     req.Host,
 			Port:     req.Port,
 			Session:  ticket.ID,
+			Egress:   egressMatch.summary(),
 		},
 	)
 

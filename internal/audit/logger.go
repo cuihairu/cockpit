@@ -216,6 +216,7 @@ type RemoteSessionDetails struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	Session  string `json:"session_id"`
+	Egress   string `json:"egress,omitempty"`   // 命中的出口策略摘要
 	Duration string `json:"duration,omitempty"` // 仅 end 事件
 	Reason   string `json:"reason,omitempty"`   // 仅 end 事件
 }

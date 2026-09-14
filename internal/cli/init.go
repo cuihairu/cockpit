@@ -106,10 +106,18 @@ jwt:
 #   herald:
 #     base_url: http://localhost:8080
 
-# Remote access target allow-list
+# Remote access target allow-list (host/IP/CIDR)
 remote_control:
   allow_arbitrary_target: false
   allowed_targets: []
+  # egress:
+  #   - agent_id: office-agent
+  #     allowed_targets:
+  #       - 192.168.10.0/24
+  #       - db.internal
+  #     allowed_ports:
+  #       - 22
+  #       - 3389
 `
 	return os.WriteFile(path, []byte(yaml), 0644)
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
+	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
@@ -57,10 +58,12 @@ func newTestServerWithDB(t *testing.T) *Server {
 	t.Cleanup(func() { db.Close() })
 
 	auth.InitDB(db)
+	authService := auth.NewService(db, auth.Options{Secret: "test-secret", Expiration: 24 * time.Hour})
 
 	return &Server{
 		registry:       NewRegistry(),
 		db:             db,
+		auth:           authService,
 		remoteSessions: NewRemoteSessionManager(),
 		audit:          audit.NewLogger(db),
 	}
@@ -80,7 +83,7 @@ func authenticateAdminRequest(t *testing.T, s *Server, r *http.Request) *http.Re
 		t.Fatalf("Failed to get admin: %v", err)
 	}
 
-	token, err := auth.GenerateToken(admin.ID, admin.Username, admin.Role)
+	token, err := s.auth.GenerateToken(admin.ID, admin.Username, admin.Role)
 	if err != nil {
 		t.Fatalf("Failed to generate token: %v", err)
 	}
@@ -114,6 +117,130 @@ func TestServeAPINotFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleTicketCreateRejectsAgentOutsideEgressPolicy(t *testing.T) {
+	s := newTestServerWithDB(t)
+	s.ticketMgr = NewTicketManager()
+	s.cfg = &config.Config{
+		RemoteControl: &config.RemoteControlConfig{
+			AllowedTargets: []string{"192.168.10.0/24"},
+			EgressPolicies: []*config.RemoteEgressPolicy{
+				{
+					AgentID:        "office-agent",
+					AllowedTargets: []string{"192.168.10.0/24"},
+					AllowedPorts:   []int{22},
+				},
+			},
+		},
+	}
+	if err := s.registry.Register(NewAgent("home-agent", nil)); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	body := []byte(`{"agent_id":"home-agent","host":"192.168.10.42","port":22,"protocol":"ssh"}`)
+	req := authenticateAdminRequest(t, s, httptest.NewRequest(http.MethodPost, "/api/remote/tickets", bytes.NewReader(body)))
+	rec := httptest.NewRecorder()
+
+	s.authService().Middleware(s.handleTicketCreate)(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("remote_control.egress")) {
+		t.Fatalf("body = %q, want egress guidance", rec.Body.String())
+	}
+
+	logs, total, err := s.db.GetAuditLogs(0, 10, map[string]interface{}{
+		"action": audit.ActionRemoteStart,
+		"status": audit.StatusFailure,
+	})
+	if err != nil {
+		t.Fatalf("GetAuditLogs() error = %v", err)
+	}
+	if total != 1 || len(logs) != 1 {
+		t.Fatalf("failure audit logs count = %d/%d, want 1", len(logs), total)
+	}
+	if !bytes.Contains([]byte(logs[0].Details), []byte(`"reason":"agent \"home-agent\" is not allowed for remote egress; add it to remote_control.egress"`)) {
+		t.Fatalf("audit details = %s, want rejection reason", logs[0].Details)
+	}
+}
+
+func TestHandleTicketCreateAuditsMatchedEgressPolicy(t *testing.T) {
+	s := newTestServerWithDB(t)
+	s.ticketMgr = NewTicketManager()
+	s.cfg = &config.Config{
+		RemoteControl: &config.RemoteControlConfig{
+			AllowedTargets: []string{"192.168.10.0/24"},
+			EgressPolicies: []*config.RemoteEgressPolicy{
+				{
+					AgentID:        "office-agent",
+					AllowedTargets: []string{"192.168.10.0/24"},
+					AllowedPorts:   []int{22},
+				},
+			},
+		},
+	}
+	if err := s.registry.Register(NewAgent("office-agent", nil)); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	body := []byte(`{"agent_id":"office-agent","host":"192.168.10.42","port":22,"protocol":"ssh"}`)
+	req := authenticateAdminRequest(t, s, httptest.NewRequest(http.MethodPost, "/api/remote/tickets", bytes.NewReader(body)))
+	rec := httptest.NewRecorder()
+
+	s.authService().Middleware(s.handleTicketCreate)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	logs, total, err := s.db.GetAuditLogs(0, 10, map[string]interface{}{
+		"action": audit.ActionRemoteStart,
+	})
+	if err != nil {
+		t.Fatalf("GetAuditLogs() error = %v", err)
+	}
+	if total != 1 || len(logs) != 1 {
+		t.Fatalf("audit logs count = %d/%d, want 1", len(logs), total)
+	}
+	if !bytes.Contains([]byte(logs[0].Details), []byte(`"egress":"agent:office-agent port:22"`)) {
+		t.Fatalf("audit details = %s, want egress summary", logs[0].Details)
+	}
+}
+
+func TestHandleTicketCreateAuditsOfflineAgentFailure(t *testing.T) {
+	s := newTestServerWithDB(t)
+	s.ticketMgr = NewTicketManager()
+	s.cfg = &config.Config{
+		RemoteControl: &config.RemoteControlConfig{
+			AllowedTargets: []string{"192.168.10.0/24"},
+		},
+	}
+
+	body := []byte(`{"agent_id":"offline-agent","host":"192.168.10.42","port":22,"protocol":"ssh"}`)
+	req := authenticateAdminRequest(t, s, httptest.NewRequest(http.MethodPost, "/api/remote/tickets", bytes.NewReader(body)))
+	rec := httptest.NewRecorder()
+
+	s.authService().Middleware(s.handleTicketCreate)(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+
+	logs, total, err := s.db.GetAuditLogs(0, 10, map[string]interface{}{
+		"action": audit.ActionRemoteStart,
+		"status": audit.StatusFailure,
+	})
+	if err != nil {
+		t.Fatalf("GetAuditLogs() error = %v", err)
+	}
+	if total != 1 || len(logs) != 1 {
+		t.Fatalf("failure audit logs count = %d/%d, want 1", len(logs), total)
+	}
+	if !bytes.Contains([]byte(logs[0].Details), []byte(`"reason":"agent not found or offline"`)) {
+		t.Fatalf("audit details = %s, want offline reason", logs[0].Details)
 	}
 }
 

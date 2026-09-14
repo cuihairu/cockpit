@@ -167,3 +167,86 @@ func TestLoadDefaults(t *testing.T) {
 		t.Error("Expected inventory strict to be disabled by default")
 	}
 }
+
+func TestLoadAppliesDefaultsToPartialConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "partial.yaml")
+
+	content := []byte(`
+server:
+  host: "0.0.0.0"
+`)
+	if err := os.WriteFile(configPath, content, 0644); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	if cfg.Server == nil || cfg.Server.Host != "0.0.0.0" || cfg.Server.Port != 9000 {
+		t.Fatalf("server defaults not applied correctly: %#v", cfg.Server)
+	}
+	if cfg.Database == nil || cfg.Database.Path != "./data/cockpit.db" {
+		t.Fatalf("database defaults not applied correctly: %#v", cfg.Database)
+	}
+	if cfg.JWT == nil || cfg.JWT.Secret == "" || cfg.JWT.Expiration != 24*time.Hour {
+		t.Fatalf("jwt defaults not applied correctly: %#v", cfg.JWT)
+	}
+	if cfg.Agent == nil || cfg.Agent.APIKeyHeader != "X-API-Key" {
+		t.Fatalf("agent defaults not applied correctly: %#v", cfg.Agent)
+	}
+	if cfg.Inventory == nil {
+		t.Fatal("Expected Inventory config to be non-nil")
+	}
+	if cfg.RemoteControl == nil {
+		t.Fatal("Expected RemoteControl config to be non-nil")
+	}
+}
+
+func TestLoadRemoteControlEgressPolicies(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "egress.yaml")
+
+	content := []byte(`
+remote_control:
+  allow_arbitrary_target: false
+  allowed_targets:
+    - "10.0.0.10"
+  egress:
+    - agent_id: "office-agent"
+      allowed_targets:
+        - "192.168.10.0/24"
+        - "db.internal"
+      allowed_ports:
+        - 22
+        - 3389
+`)
+	if err := os.WriteFile(configPath, content, 0644); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	if cfg.RemoteControl == nil {
+		t.Fatal("Expected RemoteControl config to be non-nil")
+	}
+	if len(cfg.RemoteControl.EgressPolicies) != 1 {
+		t.Fatalf("Expected 1 egress policy, got %d", len(cfg.RemoteControl.EgressPolicies))
+	}
+
+	policy := cfg.RemoteControl.EgressPolicies[0]
+	if policy.AgentID != "office-agent" {
+		t.Fatalf("policy.AgentID = %q, want office-agent", policy.AgentID)
+	}
+	if len(policy.AllowedTargets) != 2 {
+		t.Fatalf("policy.AllowedTargets = %#v, want 2 entries", policy.AllowedTargets)
+	}
+	if len(policy.AllowedPorts) != 2 || policy.AllowedPorts[0] != 22 || policy.AllowedPorts[1] != 3389 {
+		t.Fatalf("policy.AllowedPorts = %#v, want [22 3389]", policy.AllowedPorts)
+	}
+}

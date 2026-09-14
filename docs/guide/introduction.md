@@ -78,4 +78,5 @@ Cockpit 不要求替代已有控制台。当前代码中已经有 PVE、Docker�
 1. [快速开始](/guide/getting-started)
 2. [核心概念](/guide/concepts)
 3. [架构与边界](/guide/architecture)
-4. [协议与 API 边界](/guide/protocol)
+4. [Agent 出口与 SD-WAN 能力边界](/guide/agent-egress-sdwan)
+5. [协议与 API 边界](/guide/protocol)

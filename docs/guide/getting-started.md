@@ -160,4 +160,5 @@ server:
 
 - [核心概念](/guide/concepts)
 - [架构与边界](/guide/architecture)
+- [Agent 出口与 SD-WAN 能力边界](/guide/agent-egress-sdwan)
 - [协议与 API 边界](/guide/protocol)

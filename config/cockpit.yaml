@@ -2,8 +2,8 @@
 
 # 服务器配置
 server:
-  host: "127.0.0.1"  # 默认仅监听本地，生产环境需显式配置 0.0.0.0
-  port: 9000
+  host: "0.0.0.0"  # 监听所有接口，支持局域网和 Cloudflare Tunnel 访问
+  port: 9090
 
 # 数据库配置
 database:
@@ -67,5 +67,14 @@ agent:
 # 远程控制目标白名单
 remote_control:
   allow_arbitrary_target: false
-  # 默认只允许显式列出的主机/IP；开发环境如需任意目标可改为 true
+  # 默认只允许显式列出的主机、IP 或 CIDR；开发环境如需任意目标可改为 true
   allowed_targets: []
+  # 可选：按 Agent 进一步限制出口目标和端口
+  # egress:
+  #   - agent_id: "office-agent"
+  #     allowed_targets:
+  #       - "192.168.10.0/24"
+  #       - "db.internal"
+  #     allowed_ports:
+  #       - 22
+  #       - 3389

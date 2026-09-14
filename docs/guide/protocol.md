@@ -201,7 +201,7 @@ Content-Type: application/json
 new WebSocket("ws://server:9000/api/remote/terminal", [ticket])
 ```
 
-远程目标默认只允许连接 `remote_control.allowed_targets` 中显式配置的 host；设置 `remote_control.allow_arbitrary_target: true` 后才允许任意目标。当前实现不会从 inventory 自动派生远控 allow-list。
+远程目标默认只允许连接 `remote_control.allowed_targets` 中显式配置的主机名、IP 或 CIDR；设置 `remote_control.allow_arbitrary_target: true` 后才允许任意目标。当前实现不会从 inventory 自动派生远控 allow-list。
 
 RDP 桌面依赖 Agent 以 `rdp` build tag 构建。默认 Agent 构建不会静默吞掉桌面请求，而是通过 `desktop_data` 的 `error` 消息返回“不支持 RDP”的明确错误。
 

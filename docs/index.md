@@ -32,4 +32,7 @@ features:
   - icon: 🧭
     title: 清晰边界
     details: Server 负责控制面和持久化，Agent 负责节点侧采集、代理和执行
+  - icon: 🚪
+    title: Agent 出口
+    details: 明确 Agent 作为内网访问出口的能力边界，以及与完整 SD-WAN 的差距
 ---

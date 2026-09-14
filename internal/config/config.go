@@ -25,8 +25,17 @@ type RemoteControlConfig struct {
 	// AllowArbitraryTarget 为 true 时跳过目标 allow-list 校验（仅开发/调试环境启用）。
 	// 默认 false：host 必须命中 AllowedTargets。
 	AllowArbitraryTarget bool `yaml:"allow_arbitrary_target"`
-	// AllowedTargets 显式允许的目标主机名/IP 列表（端口不限）。
+	// AllowedTargets 显式允许的目标主机名、IP 或 CIDR 列表（端口不限）。
 	AllowedTargets []string `yaml:"allowed_targets"`
+	// EgressPolicies 按 Agent 约束可访问的目标和端口；为空时不启用按 Agent 限制。
+	EgressPolicies []*RemoteEgressPolicy `yaml:"egress,omitempty"`
+}
+
+// RemoteEgressPolicy 定义某个 Agent 可访问的目标范围。
+type RemoteEgressPolicy struct {
+	AgentID        string   `yaml:"agent_id"`
+	AllowedTargets []string `yaml:"allowed_targets,omitempty"`
+	AllowedPorts   []int    `yaml:"allowed_ports,omitempty"`
 }
 
 // ServerConfig 服务器配置
@@ -110,6 +119,7 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	applyDefaults(&cfg)
 	return &cfg, nil
 }
 
@@ -132,34 +142,67 @@ func expandEnvInContent(content string) string {
 func LoadOrDefault(path string) *Config {
 	cfg, err := Load(path)
 	if err != nil {
-		// 返回默认配置
-		return &Config{
-			Server: &ServerConfig{
-				Host: "127.0.0.1", // 默认仅监听本地，更安全
-				Port: 9000,
-			},
-			Database: &DatabaseConfig{
-				Path: "./data/cockpit.db",
-			},
-			JWT: &JWTConfig{
-				Secret:     "change-me",
-				Expiration: 24 * time.Hour,
-			},
-			Email: &EmailConfig{
-				Enabled: false,
-			},
-			Notification: &NotificationConfig{
-				Enabled: false,
-			},
-			Agent: &AgentConfig{
-				APIKeyHeader: "X-API-Key",
-			},
-			Inventory: &InventoryConfig{
-				Path:   "",
-				Watch:  false,
-				Strict: false,
-			},
-		}
+		cfg = &Config{}
 	}
+	applyDefaults(cfg)
 	return cfg
+}
+
+// Normalize 返回补齐默认值后的配置。
+func Normalize(cfg *Config) *Config {
+	if cfg == nil {
+		cfg = &Config{}
+	}
+	applyDefaults(cfg)
+	return cfg
+}
+
+func applyDefaults(cfg *Config) {
+	if cfg.Server == nil {
+		cfg.Server = &ServerConfig{}
+	}
+	if cfg.Server.Host == "" {
+		cfg.Server.Host = "127.0.0.1" // 默认仅监听本地，更安全
+	}
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 9000
+	}
+
+	if cfg.Database == nil {
+		cfg.Database = &DatabaseConfig{}
+	}
+	if cfg.Database.Path == "" {
+		cfg.Database.Path = "./data/cockpit.db"
+	}
+
+	if cfg.JWT == nil {
+		cfg.JWT = &JWTConfig{}
+	}
+	if cfg.JWT.Secret == "" {
+		cfg.JWT.Secret = "change-me"
+	}
+	if cfg.JWT.Expiration == 0 {
+		cfg.JWT.Expiration = 24 * time.Hour
+	}
+
+	if cfg.Email == nil {
+		cfg.Email = &EmailConfig{}
+	}
+	if cfg.Notification == nil {
+		cfg.Notification = &NotificationConfig{}
+	}
+
+	if cfg.Agent == nil {
+		cfg.Agent = &AgentConfig{}
+	}
+	if cfg.Agent.APIKeyHeader == "" {
+		cfg.Agent.APIKeyHeader = "X-API-Key"
+	}
+
+	if cfg.Inventory == nil {
+		cfg.Inventory = &InventoryConfig{}
+	}
+	if cfg.RemoteControl == nil {
+		cfg.RemoteControl = &RemoteControlConfig{}
+	}
 }
