@@ -211,8 +211,8 @@ func (s *Server) auditStackAction(r *http.Request, action, agentID, name string,
 	}
 	details := map[string]interface{}{"agentId": agentID}
 	// 保存结果带 created 标记时区分 create/update 事件
-	if v, ok := data.(map[string]interface{})["created"].(bool); ok && v {
-		if action == audit.ActionStackUpdate {
+	if m, ok := data.(map[string]interface{}); ok {
+		if v, ok := m["created"].(bool); ok && v && action == audit.ActionStackUpdate {
 			action = audit.ActionStackCreate
 		}
 	}
