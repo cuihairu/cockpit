@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -134,6 +135,24 @@ func (s *Server) handleStacks(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		}
+	case "restart":
+		if r.Method == http.MethodPost {
+			s.handleStackRPC(w, r, agentID, "stack.restart", map[string]interface{}{"name": name}, audit.ActionStackRestart)
+		} else {
+			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	case "pull":
+		if r.Method == http.MethodPost {
+			s.handleStackRPC(w, r, agentID, "stack.pull", map[string]interface{}{"name": name}, audit.ActionStackPull)
+		} else {
+			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	case "history":
+		if r.Method == http.MethodGet {
+			s.handleStackHistory(w, r, agentID, name)
+		} else {
+			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		}
 	case "logs":
 		if r.Method == http.MethodGet {
 			params := map[string]interface{}{"name": name}
@@ -199,8 +218,130 @@ func (s *Server) handleStackRPC(w http.ResponseWriter, r *http.Request, agentID,
 
 	if auditAction != "" {
 		s.auditStackAction(r, auditAction, agentID, stackString(params, "name"), rpcResp.Data)
+		// 启动类动作拿到 taskId 后记录部署历史并由后台跟踪终态
+		if data, ok := rpcResp.Data.(map[string]interface{}); ok {
+			if taskID := stackString(data, "taskId"); taskID != "" {
+				s.startStackDeployment(agentID, stackString(params, "name"), auditAction, taskID)
+			}
+		}
 	}
 	s.writeJSON(w, http.StatusOK, rpcResp.Data)
+}
+
+// stackTrackingActions 会产生异步任务的启动类动作（需要记部署历史）
+var stackTrackingActions = map[string]string{
+	audit.ActionStackUp:      "up",
+	audit.ActionStackDown:    "down",
+	audit.ActionStackRestart: "restart",
+	audit.ActionStackPull:    "pull",
+	audit.ActionStackRemove:  "remove",
+}
+
+// stackTaskTrackInterval 后台跟踪任务终态的轮询间隔
+const stackTaskTrackInterval = 2 * time.Second
+
+// stackTaskTrackTimeout 跟踪超时：超过后标记 failed（防止 goroutine 无限轮询）
+const stackTaskTrackTimeout = 15 * time.Minute
+
+// startStackDeployment 写入 running 历史记录并启动后台终态跟踪
+func (s *Server) startStackDeployment(agentID, stackName, auditAction, taskID string) {
+	action, ok := stackTrackingActions[auditAction]
+	if !ok || stackName == "" {
+		return
+	}
+	rec := &storage.StackDeployment{
+		AgentID:   agentID,
+		StackName: stackName,
+		Action:    action,
+		Status:    "running",
+		TaskID:    taskID,
+		StartedAt: time.Now().Unix(),
+	}
+	if err := s.db.CreateStackDeployment(rec); err != nil {
+		fmt.Printf("create stack deployment %s/%s: %v\n", agentID, stackName, err)
+		return
+	}
+	go s.trackStackTask(agentID, taskID, rec.ID)
+}
+
+// trackStackTask 轮询 agent 任务状态直到终态/超时/server 关闭，回填历史。
+// agent 离线（ErrAgentNotFound）不终止：重连后能继续拿到真实终态。
+func (s *Server) trackStackTask(agentID, taskID string, recID uint) {
+	deadline := time.Now().Add(stackTaskTrackTimeout)
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(stackTaskTrackInterval):
+		}
+
+		status, finishedAt, done := s.pollStackTask(agentID, taskID)
+		if !done {
+			if time.Now().After(deadline) {
+				status, finishedAt = "failed", time.Now().Unix()
+				done = true
+			} else {
+				continue
+			}
+		}
+		if err := s.db.FinishStackDeployment(taskID, status, finishedAt); err != nil {
+			fmt.Printf("finish stack deployment %s (rec %d): %v\n", taskID, recID, err)
+		}
+		return
+	}
+}
+
+// pollStackTask 查询一次任务状态，返回 (status, finishedAt, 是否终态)。
+// unknown task（agent 重启丢失任务态）视为 failed 终态。
+func (s *Server) pollStackTask(agentID, taskID string) (string, int64, bool) {
+	resp, err := s.CallAgent(agentID, "stack.task.get", map[string]interface{}{"taskId": taskID})
+	if err == ErrAgentNotFound {
+		// agent 离线：任务态未知，保持 running 等待重连
+		return "", 0, false
+	}
+	if err != nil {
+		return "", 0, false
+	}
+	rpcResp, err := protocol.DecodeRPCResponse(resp)
+	if err != nil {
+		return "", 0, false
+	}
+	if rpcResp.Status == "error" {
+		if strings.Contains(rpcResp.Error, "not found") {
+			return "failed", time.Now().Unix(), true
+		}
+		return "", 0, false
+	}
+	data, ok := rpcResp.Data.(map[string]interface{})
+	if !ok {
+		return "", 0, false
+	}
+	switch stackString(data, "status") {
+	case "success":
+		return "success", stackInt64(data, "finishedAt"), true
+	case "failed":
+		return "failed", stackInt64(data, "finishedAt"), true
+	}
+	return "", 0, false
+}
+
+func stackInt64(m map[string]interface{}, key string) int64 {
+	v, _ := m[key].(float64)
+	return int64(v)
+}
+
+// handleStackHistory 部署历史（server 侧记录，agent 不在线时也可查）
+func (s *Server) handleStackHistory(w http.ResponseWriter, r *http.Request, agentID, name string) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	list, err := s.db.ListStackDeployments(agentID, name, limit)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "query stack history: "+err.Error())
+		return
+	}
+	if list == nil {
+		list = make([]*storage.StackDeployment, 0)
+	}
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"deployments": list})
 }
 
 // auditStackAction 记录 stack 审计事件
@@ -281,7 +422,26 @@ func (s *Server) handleAgentStacks(w http.ResponseWriter, r *http.Request, agent
 		views = append(views, s.stackViewFromItem(agent, item, true))
 		s.cacheStack(agent.ID, item)
 	}
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{"stacks": views})
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"stacks": views,
+		"info":   s.fetchStackInfo(agentID),
+	})
+}
+
+// fetchStackInfo 拉取 agent 侧自检信息（目录可写性/compose 版本），失败返回 nil
+func (s *Server) fetchStackInfo(agentID string) map[string]interface{} {
+	resp, err := s.CallAgent(agentID, "stack.info", map[string]interface{}{})
+	if err != nil {
+		return nil
+	}
+	rpcResp, err := protocol.DecodeRPCResponse(resp)
+	if err != nil || rpcResp.Status != "success" {
+		return nil
+	}
+	if m, ok := rpcResp.Data.(map[string]interface{}); ok {
+		return m
+	}
+	return nil
 }
 
 // handleStacksAll 聚合所有具备 docker 能力 agent 的 stack 列表；
@@ -297,6 +457,7 @@ func (s *Server) handleStacksAll(w http.ResponseWriter, r *http.Request) {
 	type fetchResult struct {
 		agent *Agent
 		items []map[string]interface{}
+		info  map[string]interface{}
 	}
 	results := make(chan fetchResult, len(agents))
 	var wg sync.WaitGroup
@@ -322,7 +483,7 @@ func (s *Server) handleStacksAll(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			results <- fetchResult{agent: ag, items: items}
+			results <- fetchResult{agent: ag, items: items, info: s.fetchStackInfo(ag.ID)}
 		}(ag)
 	}
 	go func() {
@@ -331,6 +492,7 @@ func (s *Server) handleStacksAll(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	views := make([]stackView, 0)
+	agentInfo := make(map[string]interface{})
 	onlineAgents := make(map[string]bool)
 	deadline := time.After(stackAggregateTimeout)
 loop:
@@ -341,6 +503,9 @@ loop:
 				break loop
 			}
 			onlineAgents[res.agent.ID] = true
+			if res.info != nil {
+				agentInfo[res.agent.ID] = res.info
+			}
 			for _, item := range res.items {
 				views = append(views, s.stackViewFromItem(res.agent, item, true))
 				s.cacheStack(res.agent.ID, item)
@@ -371,7 +536,10 @@ loop:
 		}
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{"stacks": views})
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"stacks":    views,
+		"agentInfo": agentInfo,
+	})
 }
 
 // stackViewFromItem 把 agent 的 stack.list 条目转为聚合视图

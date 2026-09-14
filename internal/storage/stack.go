@@ -34,3 +34,32 @@ func (d *DB) ListStacksByAgent(agentID string) ([]*Stack, error) {
 func (d *DB) DeleteStacksByAgent(agentID string) error {
 	return d.db.Where("agent_id = ?", agentID).Delete(&Stack{}).Error
 }
+
+// ============ StackDeployment 部署历史 ============
+
+// CreateStackDeployment 插入一条 running 部署记录
+func (d *DB) CreateStackDeployment(rec *StackDeployment) error {
+	return d.db.Create(rec).Error
+}
+
+// FinishStackDeployment 按任务 ID 回填终态与结束时间
+func (d *DB) FinishStackDeployment(taskID, status string, finishedAt int64) error {
+	return d.db.Model(&StackDeployment{}).Where("task_id = ?", taskID).
+		Updates(map[string]interface{}{"status": status, "finished_at": finishedAt}).Error
+}
+
+// ListStackDeployments 按 (agent, stack) 倒序取部署历史
+func (d *DB) ListStackDeployments(agentID, stackName string, limit int) ([]*StackDeployment, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var list []*StackDeployment
+	err := d.db.Where("agent_id = ? AND stack_name = ?", agentID, stackName).
+		Order("id DESC").Limit(limit).Find(&list).Error
+	return list, err
+}
+
+// DeleteStackDeploymentsByAgent 删除某个 agent 的全部部署历史
+func (d *DB) DeleteStackDeploymentsByAgent(agentID string) error {
+	return d.db.Where("agent_id = ?", agentID).Delete(&StackDeployment{}).Error
+}

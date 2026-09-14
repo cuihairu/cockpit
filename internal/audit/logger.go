@@ -32,6 +32,8 @@ const (
 	ActionStackUp     = "stack_up"
 	ActionStackDown   = "stack_down"
 	ActionStackRemove = "stack_remove"
+	ActionStackRestart = "stack_restart"
+	ActionStackPull    = "stack_pull"
 )
 
 // ResourceStack Compose Stack 资源类型

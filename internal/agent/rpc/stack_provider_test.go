@@ -464,9 +464,75 @@ func TestStackProviderRemove(t *testing.T) {
 
 func TestStackProviderUpNotFound(t *testing.T) {
 	p := newTestStackProvider(t, "exit 0", &mockStackDocker{})
-	for _, action := range []string{"up", "down", "remove"} {
+	for _, action := range []string{"up", "down", "restart", "pull", "remove"} {
 		if _, err := p.Call(action, map[string]interface{}{"name": "ghost"}); err == nil {
 			t.Errorf("%s on missing stack should fail", action)
+		}
+	}
+}
+
+func TestStackProviderRestartAndPull(t *testing.T) {
+	p := newTestStackProvider(t, `exit 0`, &mockStackDocker{})
+	writeStack(t, p.dir, "web", "compose.yml", "services: {}\n")
+
+	resp, err := p.Call("restart", map[string]interface{}{"name": "web"})
+	if err != nil {
+		t.Fatalf("restart error = %v", err)
+	}
+	task := waitForTask(t, p, resp.(map[string]interface{})["taskId"].(string))
+	if task["status"] != stackTaskSuccess || task["action"] != "restart" {
+		t.Errorf("restart task = %v/%v", task["action"], task["status"])
+	}
+
+	resp, err = p.Call("pull", map[string]interface{}{"name": "web"})
+	if err != nil {
+		t.Fatalf("pull error = %v", err)
+	}
+	task = waitForTask(t, p, resp.(map[string]interface{})["taskId"].(string))
+	if task["status"] != stackTaskSuccess || task["action"] != "pull" {
+		t.Errorf("pull task = %v/%v", task["action"], task["status"])
+	}
+}
+
+func TestStackProviderInfo(t *testing.T) {
+	p := newTestStackProvider(t, `echo "v2.39.0"`, &mockStackDocker{})
+	raw, err := p.Call("info", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("info error = %v", err)
+	}
+	info, ok := raw.(*StackInfo)
+	if !ok {
+		t.Fatalf("info type = %T, want *StackInfo", raw)
+	}
+	if info.Dir != p.dir {
+		t.Errorf("info dir = %v, want %v", info.Dir, p.dir)
+	}
+	if !info.DirWritable {
+		t.Errorf("info dirWritable = false, want true (err=%v)", info.DirError)
+	}
+
+	// 目录不可写（非 root 下 chmod 后创建探针文件失败）
+	if os.Geteuid() != 0 {
+		readOnly := filepath.Join(t.TempDir(), "ro")
+		if err := os.MkdirAll(readOnly, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		p2 := newTestStackProvider(t, `exit 0`, &mockStackDocker{})
+		p2.dir = readOnly
+		if err := os.Chmod(readOnly, 0o500); err != nil {
+			t.Fatalf("chmod: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(readOnly, 0o700) })
+		raw2, err := p2.Call("info", map[string]interface{}{})
+		if err != nil {
+			t.Fatalf("info error = %v", err)
+		}
+		info2 := raw2.(*StackInfo)
+		if info2.DirWritable {
+			t.Error("readonly dir dirWritable = true, want false")
+		}
+		if info2.DirError == "" {
+			t.Error("readonly dir should carry dirError")
 		}
 	}
 }

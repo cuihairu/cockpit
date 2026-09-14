@@ -104,6 +104,7 @@ func (d *DB) migrate() error {
 		&SystemMetric{},
 		&SystemInfoSnapshot{},
 		&Stack{},
+		&StackDeployment{},
 	)
 }
 

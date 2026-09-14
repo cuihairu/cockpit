@@ -196,3 +196,17 @@ type Stack struct {
 	LastDeployedAt int64     `json:"lastDeployedAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
+
+// StackDeployment Compose Stack 部署历史（server 侧记录，M1.5）。
+// 启动类动作（up/down/restart/pull/remove）下发时插入 running 记录，
+// server 后台轮询任务终态后回填。
+type StackDeployment struct {
+	ID         uint   `gorm:"primarykey" json:"id"`
+	AgentID    string `gorm:"index:idx_stack_deploy_agent_stack;size:64" json:"agentId"`
+	StackName  string `gorm:"index:idx_stack_deploy_agent_stack;size:64" json:"stackName"`
+	Action     string `gorm:"size:16" json:"action"`
+	Status     string `gorm:"size:16" json:"status"` // running / success / failed
+	TaskID     string `gorm:"index;size:64" json:"taskId"`
+	StartedAt  int64  `json:"startedAt"`
+	FinishedAt int64  `json:"finishedAt"` // 0 = 尚未结束
+}

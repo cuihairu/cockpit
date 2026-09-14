@@ -130,6 +130,12 @@ func (p *StackProvider) Call(action string, params map[string]interface{}) (inte
 		return p.UpStack(stackParam(params))
 	case "down":
 		return p.DownStack(stackParam(params))
+	case "restart":
+		return p.RestartStack(stackParam(params))
+	case "pull":
+		return p.PullStack(stackParam(params))
+	case "info":
+		return p.InfoStack(), nil
 	case "logs":
 		return p.StackLogs(params)
 	case "task.get":
@@ -523,6 +529,77 @@ func (p *StackProvider) DownStack(name string) (map[string]interface{}, error) {
 	return p.launchTask(name, "down", func(task *stackTask) error {
 		return p.runCompose(task, dir, "down", "--remove-orphans")
 	})
+}
+
+// RestartStack 异步执行 compose restart（仅作用于已在运行的服务）
+func (p *StackProvider) RestartStack(name string) (map[string]interface{}, error) {
+	dir, err := p.stackDir(name)
+	if err != nil {
+		return nil, err
+	}
+	if findComposeFile(dir) == "" {
+		return nil, fmt.Errorf("stack %s not found", name)
+	}
+	return p.launchTask(name, "restart", func(task *stackTask) error {
+		return p.runCompose(task, dir, "restart")
+	})
+}
+
+// PullStack 异步执行 compose pull（拉取最新镜像，不重建容器）
+func (p *StackProvider) PullStack(name string) (map[string]interface{}, error) {
+	dir, err := p.stackDir(name)
+	if err != nil {
+		return nil, err
+	}
+	if findComposeFile(dir) == "" {
+		return nil, fmt.Errorf("stack %s not found", name)
+	}
+	return p.launchTask(name, "pull", func(task *stackTask) error {
+		return p.runCompose(task, dir, "pull")
+	})
+}
+
+// StackInfo agent 侧自检信息（M1.5）：stacks 目录状态 + compose CLI 版本
+type StackInfo struct {
+	Dir         string `json:"dir"`
+	DirWritable bool   `json:"dirWritable"`
+	DirError    string `json:"dirError,omitempty"`
+	// ComposeVersion docker compose 版本输出，探测失败为空
+	ComposeVersion string `json:"composeVersion,omitempty"`
+}
+
+// InfoStack 检查 stacks 目录可写性与 compose CLI 版本。
+// 低频调用（列表页自检提示），每次实时探测、不做缓存。
+func (p *StackProvider) InfoStack() *StackInfo {
+	info := &StackInfo{Dir: p.dir}
+	if err := os.MkdirAll(p.dir, 0o700); err != nil {
+		info.DirError = fmt.Sprintf("create dir: %v", err)
+		return info
+	}
+	probe, err := os.CreateTemp(p.dir, ".cockpit-probe-*")
+	if err != nil {
+		info.DirError = fmt.Sprintf("write probe: %v", err)
+		return info
+	}
+	probe.Close()
+	_ = os.Remove(probe.Name())
+	info.DirWritable = true
+
+	info.ComposeVersion = p.probeComposeVersion()
+	return info
+}
+
+// probeComposeVersion 返回 docker compose 版本字符串，失败返回空。
+// composeBin 形如 ["docker", "compose"]：executable 取首位，其余拼接
+// "compose version --short"。
+func (p *StackProvider) probeComposeVersion() string {
+	args := append([]string{}, p.composeBin[1:]...)
+	args = append(args, "version", "--short")
+	out, err := exec.Command(p.composeBin[0], args...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // RemoveStack 异步删除：先 down（失败则中止，保留目录），再删目录
