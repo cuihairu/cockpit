@@ -11,7 +11,7 @@ import (
 
 	"github.com/cuihairu/cockpit/internal/docker"
 	"github.com/cuihairu/cockpit/internal/protocol"
-	"github.com/docker/docker/api/types"
+	"github.com/moby/moby/client"
 )
 
 // ============ Mock DockerAPI ============
@@ -113,7 +113,9 @@ func (m *mockDockerAPI) Info() (*docker.SystemInfo, error) {
 	return m.sysInfo, nil
 }
 
-func (m *mockDockerAPI) Version() (types.Version, error) { return types.Version{}, nil }
+func (m *mockDockerAPI) Version() (client.ServerVersionResult, error) {
+	return client.ServerVersionResult{}, nil
+}
 func (m *mockDockerAPI) Close() error                    { return nil }
 
 func newMockDockerProvider(api docker.DockerAPI) *DockerProvider {

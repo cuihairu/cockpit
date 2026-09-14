@@ -6,12 +6,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/volume"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // DockerAPI abstracts Docker operations for testability
@@ -33,7 +28,7 @@ type DockerAPI interface {
 	RemoveVolume(name string, force bool) error
 	ListNetworks() ([]NetworkInfo, error)
 	Info() (*SystemInfo, error)
-	Version() (types.Version, error)
+	Version() (client.ServerVersionResult, error)
 	Close() error
 }
 
@@ -72,7 +67,7 @@ func NewClient(cfg Config) (*Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err = cli.Ping(ctx)
+	_, err = cli.Ping(ctx, client.PingOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("connect to docker daemon: %w", err)
 	}
@@ -103,13 +98,13 @@ type ContainerInfo struct {
 func (c *Client) ListContainers(all bool) ([]ContainerInfo, error) {
 	ctx := context.Background()
 
-	containers, err := c.cli.ContainerList(ctx, container.ListOptions{All: all})
+	containers, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: all})
 	if err != nil {
 		return nil, fmt.Errorf("list containers: %w", err)
 	}
 
-	result := make([]ContainerInfo, len(containers))
-	for i, cnt := range containers {
+	result := make([]ContainerInfo, len(containers.Items))
+	for i, cnt := range containers.Items {
 		name := ""
 		if len(cnt.Names) > 0 {
 			name = cnt.Names[0]
@@ -119,7 +114,7 @@ func (c *Client) ListContainers(all bool) ([]ContainerInfo, error) {
 			Name:    name,
 			Image:   cnt.Image,
 			ImageID: cnt.ImageID,
-			State:   cnt.State,
+			State:   string(cnt.State),
 			Status:  cnt.Status,
 			Labels:  cnt.Labels,
 			Created: cnt.Created,
@@ -133,41 +128,42 @@ func (c *Client) ListContainers(all bool) ([]ContainerInfo, error) {
 func (c *Client) GetContainer(id string) (*ContainerInfo, error) {
 	ctx := context.Background()
 
-	cnt, err := c.cli.ContainerInspect(ctx, id)
+	cnt, err := c.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("inspect container: %w", err)
 	}
+	ci := cnt.Container
 
 	// Parse created time
 	var created int64
-	if cnt.Created != "" {
-		if t, err := time.Parse(time.RFC3339Nano, cnt.Created); err == nil {
+	if ci.Created != "" {
+		if t, err := time.Parse(time.RFC3339Nano, ci.Created); err == nil {
 			created = t.Unix()
 		}
 	}
 
 	// Build status string
-	status := cnt.State.Status
-	if cnt.State.Running {
+	status := ci.State.Status
+	if ci.State.Running {
 		status = "running"
-	} else if cnt.State.Paused {
+	} else if ci.State.Paused {
 		status = "paused"
-	} else if cnt.State.Restarting {
+	} else if ci.State.Restarting {
 		status = "restarting"
-	} else if cnt.State.Dead {
+	} else if ci.State.Dead {
 		status = "dead"
 	} else {
 		status = "exited"
 	}
 
 	return &ContainerInfo{
-		ID:      cnt.ID,
-		Name:    cnt.Name,
-		Image:   cnt.Config.Image,
-		ImageID: cnt.Image,
-		State:   cnt.State.Status,
-		Status:  status,
-		Labels:  cnt.Config.Labels,
+		ID:      ci.ID,
+		Name:    ci.Name,
+		Image:   ci.Config.Image,
+		ImageID: ci.Image,
+		State:   string(ci.State.Status),
+		Status:  string(status),
+		Labels:  ci.Config.Labels,
 		Created: created,
 	}, nil
 }
@@ -175,7 +171,7 @@ func (c *Client) GetContainer(id string) (*ContainerInfo, error) {
 // StartContainer starts container
 func (c *Client) StartContainer(id string) error {
 	ctx := context.Background()
-	if err := c.cli.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
+	if _, err := c.cli.ContainerStart(ctx, id, client.ContainerStartOptions{}); err != nil {
 		return fmt.Errorf("start container: %w", err)
 	}
 	return nil
@@ -184,7 +180,7 @@ func (c *Client) StartContainer(id string) error {
 // StopContainer stops container
 func (c *Client) StopContainer(id string, timeout *int) error {
 	ctx := context.Background()
-	if err := c.cli.ContainerStop(ctx, id, container.StopOptions{Timeout: timeout}); err != nil {
+	if _, err := c.cli.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: timeout}); err != nil {
 		return fmt.Errorf("stop container: %w", err)
 	}
 	return nil
@@ -193,7 +189,7 @@ func (c *Client) StopContainer(id string, timeout *int) error {
 // RestartContainer restarts container
 func (c *Client) RestartContainer(id string, timeout *int) error {
 	ctx := context.Background()
-	if err := c.cli.ContainerRestart(ctx, id, container.StopOptions{Timeout: timeout}); err != nil {
+	if _, err := c.cli.ContainerRestart(ctx, id, client.ContainerRestartOptions{Timeout: timeout}); err != nil {
 		return fmt.Errorf("restart container: %w", err)
 	}
 	return nil
@@ -202,7 +198,7 @@ func (c *Client) RestartContainer(id string, timeout *int) error {
 // RemoveContainer removes container
 func (c *Client) RemoveContainer(id string, force, removeVolumes bool) error {
 	ctx := context.Background()
-	if err := c.cli.ContainerRemove(ctx, id, container.RemoveOptions{
+	if _, err := c.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{
 		Force:         force,
 		RemoveVolumes: removeVolumes,
 	}); err != nil {
@@ -214,7 +210,7 @@ func (c *Client) RemoveContainer(id string, force, removeVolumes bool) error {
 // PauseContainer pauses container
 func (c *Client) PauseContainer(id string) error {
 	ctx := context.Background()
-	if err := c.cli.ContainerPause(ctx, id); err != nil {
+	if _, err := c.cli.ContainerPause(ctx, id, client.ContainerPauseOptions{}); err != nil {
 		return fmt.Errorf("pause container: %w", err)
 	}
 	return nil
@@ -223,7 +219,7 @@ func (c *Client) PauseContainer(id string) error {
 // UnpauseContainer resumes container
 func (c *Client) UnpauseContainer(id string) error {
 	ctx := context.Background()
-	if err := c.cli.ContainerUnpause(ctx, id); err != nil {
+	if _, err := c.cli.ContainerUnpause(ctx, id, client.ContainerUnpauseOptions{}); err != nil {
 		return fmt.Errorf("unpause container: %w", err)
 	}
 	return nil
@@ -233,7 +229,7 @@ func (c *Client) UnpauseContainer(id string) error {
 func (c *Client) GetLogs(id string, tail, since string, follow, timestamps, stdout, stderr bool) (string, error) {
 	ctx := context.Background()
 
-	options := container.LogsOptions{
+	options := client.ContainerLogsOptions{
 		ShowStdout: stdout,
 		ShowStderr: stderr,
 		Follow:     follow,
@@ -262,7 +258,7 @@ func (c *Client) GetLogs(id string, tail, since string, follow, timestamps, stdo
 func (c *Client) GetContainerStats(id string) (map[string]interface{}, error) {
 	ctx := context.Background()
 
-	stats, err := c.cli.ContainerStats(ctx, id, false)
+	stats, err := c.cli.ContainerStats(ctx, id, client.ContainerStatsOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("get container stats: %w", err)
 	}
@@ -294,13 +290,13 @@ type ImageInfo struct {
 func (c *Client) ListImages(all bool) ([]ImageInfo, error) {
 	ctx := context.Background()
 
-	images, err := c.cli.ImageList(ctx, image.ListOptions{All: all})
+	images, err := c.cli.ImageList(ctx, client.ImageListOptions{All: all})
 	if err != nil {
 		return nil, fmt.Errorf("list images: %w", err)
 	}
 
-	result := make([]ImageInfo, len(images))
-	for i, img := range images {
+	result := make([]ImageInfo, len(images.Items))
+	for i, img := range images.Items {
 		result[i] = ImageInfo{
 			ID:       img.ID,
 			RepoTags: img.RepoTags,
@@ -316,7 +312,7 @@ func (c *Client) ListImages(all bool) ([]ImageInfo, error) {
 func (c *Client) RemoveImage(id string, force, pruneChildren bool) ([]string, error) {
 	ctx := context.Background()
 
-	resp, err := c.cli.ImageRemove(ctx, id, image.RemoveOptions{
+	resp, err := c.cli.ImageRemove(ctx, id, client.ImageRemoveOptions{
 		Force:         force,
 		PruneChildren: pruneChildren,
 	})
@@ -325,7 +321,7 @@ func (c *Client) RemoveImage(id string, force, pruneChildren bool) ([]string, er
 	}
 
 	var deleted []string
-	for _, r := range resp {
+	for _, r := range resp.Items {
 		if r.Untagged != "" {
 			deleted = append(deleted, r.Untagged)
 		}
@@ -341,7 +337,7 @@ func (c *Client) RemoveImage(id string, force, pruneChildren bool) ([]string, er
 func (c *Client) PullImage(ref string) (string, error) {
 	ctx := context.Background()
 
-	reader, err := c.cli.ImagePull(ctx, ref, image.PullOptions{})
+	reader, err := c.cli.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		return "", fmt.Errorf("pull image: %w", err)
 	}
@@ -379,13 +375,13 @@ type VolumeInfo struct {
 func (c *Client) ListVolumes() ([]VolumeInfo, error) {
 	ctx := context.Background()
 
-	volumes, err := c.cli.VolumeList(ctx, volume.ListOptions{})
+	volumes, err := c.cli.VolumeList(ctx, client.VolumeListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list volumes: %w", err)
 	}
 
-	result := make([]VolumeInfo, len(volumes.Volumes))
-	for i, vol := range volumes.Volumes {
+	result := make([]VolumeInfo, len(volumes.Items))
+	for i, vol := range volumes.Items {
 		labels := vol.Labels
 		if labels == nil {
 			labels = make(map[string]string)
@@ -404,7 +400,7 @@ func (c *Client) ListVolumes() ([]VolumeInfo, error) {
 // RemoveVolume removes volume
 func (c *Client) RemoveVolume(name string, force bool) error {
 	ctx := context.Background()
-	if err := c.cli.VolumeRemove(ctx, name, force); err != nil {
+	if _, err := c.cli.VolumeRemove(ctx, name, client.VolumeRemoveOptions{Force: force}); err != nil {
 		return fmt.Errorf("remove volume: %w", err)
 	}
 	return nil
@@ -423,13 +419,13 @@ type NetworkInfo struct {
 func (c *Client) ListNetworks() ([]NetworkInfo, error) {
 	ctx := context.Background()
 
-	networks, err := c.cli.NetworkList(ctx, network.ListOptions{})
+	networks, err := c.cli.NetworkList(ctx, client.NetworkListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list networks: %w", err)
 	}
 
-	result := make([]NetworkInfo, len(networks))
-	for i, net := range networks {
+	result := make([]NetworkInfo, len(networks.Items))
+	for i, net := range networks.Items {
 		result[i] = NetworkInfo{
 			ID:     net.ID,
 			Name:   net.Name,
@@ -462,10 +458,11 @@ type SystemInfo struct {
 func (c *Client) Info() (*SystemInfo, error) {
 	ctx := context.Background()
 
-	info, err := c.cli.Info(ctx)
+	result, err := c.cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("get info: %w", err)
 	}
+	info := result.Info
 
 	return &SystemInfo{
 		Containers:        info.Containers,
@@ -484,11 +481,11 @@ func (c *Client) Info() (*SystemInfo, error) {
 }
 
 // Version gets version information
-func (c *Client) Version() (types.Version, error) {
+func (c *Client) Version() (client.ServerVersionResult, error) {
 	ctx := context.Background()
-	ver, err := c.cli.ServerVersion(ctx)
+	ver, err := c.cli.ServerVersion(ctx, client.ServerVersionOptions{})
 	if err != nil {
-		return types.Version{}, fmt.Errorf("get version: %w", err)
+		return client.ServerVersionResult{}, fmt.Errorf("get version: %w", err)
 	}
 	return ver, nil
 }

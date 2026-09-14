@@ -8,13 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/system"
-	"github.com/docker/docker/api/types/volume"
-	dockerclient "github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/api/types/system"
+	"github.com/moby/moby/api/types/volume"
+	dockerclient "github.com/moby/moby/client"
 )
 
 // newTestClient creates a Client backed by an httptest server
@@ -98,13 +97,11 @@ func TestClientGetContainer(t *testing.T) {
 		if strings.Contains(r.URL.Path, "/containers/abc") {
 			running := true
 			json.NewEncoder(w).Encode(container.InspectResponse{
-				ContainerJSONBase: &container.ContainerJSONBase{
-					ID:      "abc",
-					Name:   "test-container",
-					Image:   "sha256:img123",
-					Created: "2024-01-15T10:30:00Z",
-					State:   &container.State{Status: "running", Running: running},
-				},
+				ID:      "abc",
+				Name:    "test-container",
+				Image:   "sha256:img123",
+				Created: "2024-01-15T10:30:00Z",
+				State:   &container.State{Status: "running", Running: running},
 				Config: &container.Config{
 					Image:   "nginx:latest",
 					Labels:  map[string]string{"env": "test"},
@@ -140,12 +137,10 @@ func TestClientGetContainerPaused(t *testing.T) {
 	paused := true
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(container.InspectResponse{
-			ContainerJSONBase: &container.ContainerJSONBase{
-				ID: "abc",
-				State: &container.State{
-					Status: "paused",
-					Paused: paused,
-				},
+			ID: "abc",
+			State: &container.State{
+				Status: "paused",
+				Paused: paused,
 			},
 			Config: &container.Config{Image: "test"},
 		})
@@ -164,12 +159,10 @@ func TestClientGetContainerDead(t *testing.T) {
 	dead := true
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(container.InspectResponse{
-			ContainerJSONBase: &container.ContainerJSONBase{
-				ID: "abc",
-				State: &container.State{
-					Status: "dead",
-					Dead:   dead,
-				},
+			ID: "abc",
+			State: &container.State{
+				Status: "dead",
+				Dead:   dead,
 			},
 			Config: &container.Config{Image: "test"},
 		})
@@ -188,12 +181,10 @@ func TestClientGetContainerRestarting(t *testing.T) {
 	restarting := true
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(container.InspectResponse{
-			ContainerJSONBase: &container.ContainerJSONBase{
-				ID: "abc",
-				State: &container.State{
-					Status:     "restarting",
-					Restarting: restarting,
-				},
+			ID: "abc",
+			State: &container.State{
+				Status:     "restarting",
+				Restarting: restarting,
 			},
 			Config: &container.Config{Image: "test"},
 		})
@@ -211,11 +202,9 @@ func TestClientGetContainerRestarting(t *testing.T) {
 func TestClientGetContainerExited(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(container.InspectResponse{
-			ContainerJSONBase: &container.ContainerJSONBase{
-				ID: "abc",
-				State: &container.State{
-					Status: "exited",
-				},
+			ID: "abc",
+			State: &container.State{
+				Status: "exited",
 			},
 			Config: &container.Config{Image: "test"},
 		})
@@ -458,7 +447,7 @@ func TestClientListVolumes(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/volumes") {
 			json.NewEncoder(w).Encode(volume.ListResponse{
-				Volumes: []*volume.Volume{
+				Volumes: []volume.Volume{
 					{
 						Name:       "vol1",
 						Driver:     "local",
@@ -498,7 +487,7 @@ func TestClientListVolumes(t *testing.T) {
 func TestClientListVolumesNilLabels(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(volume.ListResponse{
-			Volumes: []*volume.Volume{
+			Volumes: []volume.Volume{
 				{
 					Name:       "vol-nolabel",
 					Driver:     "local",
@@ -557,9 +546,9 @@ func TestClientRemoveVolumeError(t *testing.T) {
 func TestClientListNetworks(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/networks") {
-			json.NewEncoder(w).Encode([]network.Inspect{
-				{ID: "net1", Name: "bridge", Driver: "bridge"},
-				{ID: "net2", Name: "host", Driver: "host"},
+			json.NewEncoder(w).Encode([]network.Summary{
+				{Network: network.Network{ID: "net1", Name: "bridge", Driver: "bridge"}},
+				{Network: network.Network{ID: "net2", Name: "host", Driver: "host"}},
 			})
 			return
 		}
@@ -648,7 +637,7 @@ func TestClientInfoError(t *testing.T) {
 func TestClientVersion(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/version") {
-			json.NewEncoder(w).Encode(types.Version{
+			json.NewEncoder(w).Encode(dockerclient.ServerVersionResult{
 				Version:    "24.0.7",
 				APIVersion: "1.43",
 			})

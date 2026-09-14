@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types"
+	"github.com/moby/moby/client"
 )
 
 // mockDockerClient implements DockerAPI for testing
@@ -37,7 +37,7 @@ type mockDockerClient struct {
 	networksErr    error
 	sysInfo        *SystemInfo
 	sysInfoErr     error
-	versionResult  types.Version
+	versionResult  client.ServerVersionResult
 	versionErr     error
 	closeErr       error
 }
@@ -110,7 +110,7 @@ func (m *mockDockerClient) Info() (*SystemInfo, error) {
 	return m.sysInfo, m.sysInfoErr
 }
 
-func (m *mockDockerClient) Version() (types.Version, error) {
+func (m *mockDockerClient) Version() (client.ServerVersionResult, error) {
 	return m.versionResult, m.versionErr
 }
 
@@ -553,7 +553,7 @@ func TestMockInfo(t *testing.T) {
 
 func TestMockVersion(t *testing.T) {
 	mock := &mockDockerClient{
-		versionResult: types.Version{
+		versionResult: client.ServerVersionResult{
 			Version: "24.0.7",
 			APIVersion: "1.43",
 		},
