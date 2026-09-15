@@ -6,6 +6,7 @@ import {
 } from '@ant-design/icons'
 import { Button, Space, Tag, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { ProbeHeartbeatCell } from '@/components/HeartbeatBar/ProbeHeartbeatCell'
 import type { Certificate, ComputeInstance, Domain, Gateway, Service, Storage } from '@/types'
 
 // 计算实例列定义
@@ -225,6 +226,14 @@ export const serviceColumns: ColumnsType<Service> = [
     key: 'responseTimeMs',
     width: 100,
     render: (ms: number) => (ms ? `${ms}ms` : '-'),
+  },
+  {
+    title: '最近状态',
+    key: 'heartbeat',
+    width: 240,
+    render: (_: unknown, record: Service) => (
+      <ProbeHeartbeatCell resourceType="service" resourceId={record.id} />
+    ),
   },
   { title: '操作', key: 'actions', width: 120, render: () => commonActions },
 ]

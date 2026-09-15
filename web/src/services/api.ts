@@ -24,6 +24,7 @@ import type {
   StackInfo,
   StackDeployment,
   ProbeConfig,
+  ProbeResult,
   NotificationStatus,
   NotificationSendResult,
   BackupConfig,
@@ -398,16 +399,32 @@ class ApiService {
   }
 
   // ========== 拨测与通知（拨测增强） ==========
-  // 当前探测配置（间隔秒数与合法范围）
+  // 当前探测配置（间隔 + 失败阈值 + 告警阈值及其合法范围）
   async getProbeConfig(): Promise<ProbeConfig> {
     return this.client.get<unknown, ProbeConfig>('/probe/config')
   }
 
-  // 修改探测间隔（秒，30-3600），立即生效并持久化
-  async saveProbeConfig(intervalSeconds: number): Promise<ProbeConfig> {
+  // 全量保存拨测与告警阈值配置（M2/D14），立即生效并持久化
+  async saveProbeConfig(config: ProbeConfig): Promise<ProbeConfig> {
     return this.client.put<unknown, ProbeConfig>('/probe/config', {
-      interval_seconds: intervalSeconds,
+      interval_seconds: config.interval_seconds,
+      fail_threshold: config.fail_threshold,
+      disk_percent: config.disk_percent,
+      memory_percent: config.memory_percent,
+      cert_warn_days: config.cert_warn_days,
+      cert_info_days: config.cert_info_days,
     })
+  }
+
+  // 拨测历史：按目标取最近 N 条（心跳条数据源）
+  async getProbeHistory(
+    resourceType: string,
+    resourceId: string,
+    limit = 50,
+  ): Promise<{ results: ProbeResult[] }> {
+    return this.client.get<unknown, { results: ProbeResult[] }>(
+      `/probe/history?resource_type=${encodeURIComponent(resourceType)}&resource_id=${encodeURIComponent(resourceId)}&limit=${limit}`,
+    )
   }
 
   // 通知服务状态（渠道摘要 + 事件开关，不含凭据）

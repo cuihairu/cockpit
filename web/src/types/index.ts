@@ -438,8 +438,29 @@ export interface StackDeployment {
 // 拨测配置（探测间隔可配置）
 export interface ProbeConfig {
   interval_seconds: number
+  fail_threshold: number
+  disk_percent: number
+  memory_percent: number
+  cert_warn_days: number
+  cert_info_days: number
   min_interval_seconds: number
   max_interval_seconds: number
+  min_fail_threshold: number
+  max_fail_threshold: number
+  min_percent: number
+  max_percent: number
+}
+
+// 拨测历史记录（心跳条数据源，见 docs/guide/probe-enhance-design.md M2）
+export interface ProbeResult {
+  id: string
+  resourceType: string
+  resourceId: string
+  name: string
+  status: string // up / down / degraded / active / valid / expiring / expired / error
+  latencyMs: number
+  message: string
+  checkedAt: string
 }
 
 // 通知渠道摘要（不含 token/secret 凭据）

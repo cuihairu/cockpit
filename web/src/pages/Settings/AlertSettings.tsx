@@ -41,10 +41,19 @@ const channelColumns: ColumnsType<NotificationChannelSummary> = [
   { title: '目标', dataIndex: 'target', key: 'target', ellipsis: true },
 ]
 
-// 拨测与通知设置：探测间隔（服务端持久化、立即生效）+ 通知渠道状态 + 测试通知。
+// 拨测与通知设置：探测间隔与告警阈值（服务端持久化、立即生效）+ 通知渠道状态 + 测试通知。
 // 通知渠道（herald/ntfy/webhook/telegram）在服务端 config.yaml 配置，此处只读展示。
+interface ProbeConfigFormValues {
+  intervalSeconds: number
+  failThreshold: number
+  diskPercent: number
+  memoryPercent: number
+  certWarnDays: number
+  certInfoDays: number
+}
+
 export const AlertSettings: React.FC = () => {
-  const [form] = Form.useForm<{ intervalSeconds: number }>()
+  const [form] = Form.useForm<ProbeConfigFormValues>()
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResults, setTestResults] = useState<NotificationSendResult[] | null>(null)
@@ -61,17 +70,34 @@ export const AlertSettings: React.FC = () => {
   // 探测配置加载完成后回填表单
   useEffect(() => {
     if (probeConfig) {
-      form.setFieldValue('intervalSeconds', probeConfig.interval_seconds)
+      form.setFieldsValue({
+        intervalSeconds: probeConfig.interval_seconds,
+        failThreshold: probeConfig.fail_threshold,
+        diskPercent: probeConfig.disk_percent,
+        memoryPercent: probeConfig.memory_percent,
+        certWarnDays: probeConfig.cert_warn_days,
+        certInfoDays: probeConfig.cert_info_days,
+      })
     }
   }, [probeConfig, form])
 
-  const saveInterval = async (values: { intervalSeconds: number }) => {
+  const saveConfig = async (values: ProbeConfigFormValues) => {
     setSaving(true)
     try {
-      const updated = await api.saveProbeConfig(values.intervalSeconds)
-      message.success(`探测间隔已更新为 ${updated.interval_seconds} 秒，下一轮探测生效`)
+      const updated = await api.saveProbeConfig({
+        ...(probeConfig as NonNullable<typeof probeConfig>),
+        interval_seconds: values.intervalSeconds,
+        fail_threshold: values.failThreshold,
+        disk_percent: values.diskPercent,
+        memory_percent: values.memoryPercent,
+        cert_warn_days: values.certWarnDays,
+        cert_info_days: values.certInfoDays,
+      })
+      message.success(
+        `拨测配置已保存（间隔 ${updated.interval_seconds} 秒、失败阈值 ${updated.fail_threshold} 次），下一轮探测生效`,
+      )
     } catch (err) {
-      message.error(getApiErrorMessage(err, '保存探测间隔失败'))
+      message.error(getApiErrorMessage(err, '保存拨测配置失败'))
     } finally {
       setSaving(false)
     }
@@ -104,7 +130,7 @@ export const AlertSettings: React.FC = () => {
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={16}>
       <Card type="inner" title="拨测" loading={probeLoading}>
-        <Form form={form} layout="inline" onFinish={saveInterval}>
+        <Form form={form} layout="inline" onFinish={saveConfig}>
           <Form.Item label="探测间隔" required style={{ marginBottom: 8 }}>
             <Form.Item
               name="intervalSeconds"
@@ -129,14 +155,112 @@ export const AlertSettings: React.FC = () => {
               />
             </Form.Item>
           </Form.Item>
+          <Form.Item label="失败阈值" required style={{ marginBottom: 8 }}>
+            <Form.Item
+              name="failThreshold"
+              noStyle
+              rules={[
+                { required: true, message: '请输入失败阈值' },
+                {
+                  type: 'number',
+                  min: probeConfig?.min_fail_threshold ?? 1,
+                  max: probeConfig?.max_fail_threshold ?? 10,
+                  message: `范围 ${probeConfig?.min_fail_threshold ?? 1} - ${
+                    probeConfig?.max_fail_threshold ?? 10
+                  } 次`,
+                },
+              ]}
+            >
+              <InputNumber
+                min={probeConfig?.min_fail_threshold ?? 1}
+                max={probeConfig?.max_fail_threshold ?? 10}
+                style={{ width: 120 }}
+                addonAfter="次"
+              />
+            </Form.Item>
+          </Form.Item>
+          <Form.Item label="磁盘告警" required style={{ marginBottom: 8 }}>
+            <Form.Item
+              name="diskPercent"
+              noStyle
+              rules={[
+                { required: true, message: '请输入磁盘阈值' },
+                {
+                  type: 'number',
+                  min: probeConfig?.min_percent ?? 50,
+                  max: probeConfig?.max_percent ?? 99,
+                  message: `范围 ${probeConfig?.min_percent ?? 50} - ${probeConfig?.max_percent ?? 99}%`,
+                },
+              ]}
+            >
+              <InputNumber
+                min={probeConfig?.min_percent ?? 50}
+                max={probeConfig?.max_percent ?? 99}
+                style={{ width: 120 }}
+                addonAfter="%"
+              />
+            </Form.Item>
+          </Form.Item>
+          <Form.Item label="内存告警" required style={{ marginBottom: 8 }}>
+            <Form.Item
+              name="memoryPercent"
+              noStyle
+              rules={[
+                { required: true, message: '请输入内存阈值' },
+                {
+                  type: 'number',
+                  min: probeConfig?.min_percent ?? 50,
+                  max: probeConfig?.max_percent ?? 99,
+                  message: `范围 ${probeConfig?.min_percent ?? 50} - ${probeConfig?.max_percent ?? 99}%`,
+                },
+              ]}
+            >
+              <InputNumber
+                min={probeConfig?.min_percent ?? 50}
+                max={probeConfig?.max_percent ?? 99}
+                style={{ width: 120 }}
+                addonAfter="%"
+              />
+            </Form.Item>
+          </Form.Item>
+          <Form.Item label="证书警告" required style={{ marginBottom: 8 }}>
+            <Form.Item
+              name="certWarnDays"
+              noStyle
+              rules={[{ required: true, message: '请输入证书警告天数' }]}
+            >
+              <InputNumber min={1} max={90} style={{ width: 110 }} addonAfter="天内" />
+            </Form.Item>
+          </Form.Item>
+          <Form.Item label="证书提醒" required style={{ marginBottom: 8 }}>
+            <Form.Item
+              name="certInfoDays"
+              noStyle
+              rules={[
+                { required: true, message: '请输入证书提醒天数' },
+                {
+                  validator: (_, value) => {
+                    const warn = form.getFieldValue('certWarnDays')
+                    if (value && warn && value < warn) {
+                      return Promise.reject(new Error('提醒天数需不小于警告天数'))
+                    }
+                    return Promise.resolve()
+                  },
+                },
+              ]}
+            >
+              <InputNumber min={1} max={365} style={{ width: 110 }} addonAfter="天内" />
+            </Form.Item>
+          </Form.Item>
           <Form.Item style={{ marginBottom: 8 }}>
             <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={saving}>
               保存
             </Button>
           </Form.Item>
         </Form>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          服务/域名/证书的自动健康探测周期，保存后立即生效并持久化（默认 300 秒）。
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+          服务/域名/证书的自动健康探测周期（默认 300 秒）；连续失败「失败阈值」次判定宕机并发送
+          service.down 通知（默认 2 次）；磁盘/内存/证书阈值为告警扫描的触发线，保存后立即生效并持久化。
         </Typography.Text>
       </Card>
 
