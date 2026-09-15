@@ -136,7 +136,7 @@ const Dashboard = () => {
 
   return (
     <div className="dashboard-container">
-      <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ marginBottom: 24, display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <Title level={3} style={{ margin: 0 }}>总览</Title>
           <Text type="secondary">实时监控您的混合基础设施状态</Text>
@@ -148,7 +148,7 @@ const Dashboard = () => {
 
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         {(settings.showResourceCount ? resourceCards : resourceCards.slice(0, 4)).map((card, index) => (
-          <Col xs={24} sm={12} md={8} lg={4} key={index}>
+          <Col xs={12} sm={12} md={8} lg={4} key={index}>
             <div className={`stat-card ${card.color}`}>
               <div style={{ fontSize: 20, marginBottom: 8 }}>{card.icon}</div>
               <Statistic
@@ -184,6 +184,7 @@ const Dashboard = () => {
           rowKey="id"
           pagination={{ pageSize: 5 }}
           size="small"
+          scroll={{ x: 640 }}
         />
       </Card>
     </div>

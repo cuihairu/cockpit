@@ -1,7 +1,7 @@
 import { useEffect, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { App as AntdApp, Spin, theme as antdTheme } from 'antd'
+import { App as AntdApp, Grid, Spin, theme as antdTheme } from 'antd'
 import ProLayout, { ProLayoutProps } from '@ant-design/pro-layout'
 import { Button, Dropdown, Avatar, Space, Input, ConfigProvider } from 'antd'
 import {
@@ -178,6 +178,10 @@ const MainLayout = () => {
   const navigate = useNavigate()
   const { settings, resolvedTheme } = useSettingsContext()
   const { user, logout } = useUser()
+  // 窄屏（< 768px）：mix 的顶部菜单会溢出，强制切 side；
+  // side 布局下 ProLayout 自带窄屏 Drawer 抽屉菜单（见 mobile-design.md D3）
+  const screens = Grid.useBreakpoint()
+  const isMobile = !screens.md
 
   useEffect(() => {
     document.title = settings.siteName
@@ -225,7 +229,7 @@ const MainLayout = () => {
         target="_blank"
         style={{ color: resolvedTheme === 'dark' ? '#fff' : '#4E5969' }}
       >
-        文档
+        <span className="header-doc-text">文档</span>
       </Button>
       <NotificationDropdown />
       <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
@@ -253,7 +257,7 @@ const MainLayout = () => {
   return (
     <ProLayout
       fixSiderbar
-      layout={settings.compactMode ? 'side' : 'mix'}
+      layout={isMobile || settings.compactMode ? 'side' : 'mix'}
       theme={resolvedTheme}
       colorWeak={false}
       title={settings.siteName}

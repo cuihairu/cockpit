@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
-import { Row, Col, Select, Spin, Alert } from 'antd';
+import { Grid, Row, Col, Select, Spin, Alert } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useSettingsContext } from '@/contexts/useSettingsContext';
 import SystemInfoCard from '@/components/SystemInfoCard';
@@ -11,6 +11,9 @@ import { getSystemSnapshots, getSystemSnapshot, getMetricsHistory } from '@/serv
 const Monitor: React.FC = () => {
   const { settings } = useSettingsContext();
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
+  // 窄屏下拉撑满（固定 250px 在手机上与标题挤在一行，见 mobile-design.md D8）
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const snapshotsQuery = useQuery({
     queryKey: ['system-snapshots'],
     queryFn: getSystemSnapshots,
@@ -75,7 +78,7 @@ const Monitor: React.FC = () => {
       extra={[
         <Select
           key="agent-select"
-          style={{ width: 250, marginRight: 16 }}
+          style={{ width: isMobile ? '100%' : 250, marginRight: 16, minWidth: isMobile ? 0 : 250 }}
           placeholder="选择 Agent"
           value={effectiveAgentId}
           onChange={setSelectedAgentId}

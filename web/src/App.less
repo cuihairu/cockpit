@@ -467,7 +467,7 @@ body {
   }
 }
 
-// 响应式
+// 响应式（见 docs/guide/mobile-design.md）
 @media (max-width: 768px) {
   .ant-pro-top-nav-header {
     padding: 0 16px;
@@ -477,16 +477,38 @@ body {
     }
   }
 
-  .dashboard-container {
+  // header「文档」按钮只留图标（D4）
+  .header-doc-text {
+    display: none;
+  }
+
+  // Modal 兜底：默认 520px 在手机屏溢出（D5）
+  .ant-modal {
+    max-width: calc(100vw - 16px);
+    margin: 8px auto;
+  }
+
+  .dashboard-container,
+  .page-container {
+    padding: 12px;
+  }
+
+  .ant-card .ant-card-body {
     padding: 16px;
   }
 
+  // 表格密度收紧（列内容换行时行高别撑太大）
+  .ant-table .ant-table-thead > tr > th,
+  .ant-table .ant-table-tbody > tr > td {
+    padding: 8px;
+  }
+
   .stat-card {
-    min-height: 100px;
-    padding: 16px;
+    min-height: 88px;
+    padding: 12px;
 
     .ant-statistic-content-value {
-      font-size: 24px;
+      font-size: 22px;
     }
   }
 }
