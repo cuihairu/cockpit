@@ -744,7 +744,7 @@
 - **远控会话录制**：终端输出录制，补强远控审计（当前审计只有会话开始/结束）。→ 方案参考：Guacamole 会话录制、Teleport 会话粒度审计。
 - **DNS 管理**：Cloudflare API 集成，域名资源联动记录增删改。
 - **定时任务/Cron 管理**：Agent 侧 crontab 可视化与调度，支撑自动化运维。→ 可与 Komodo「自动化程序」编排理念结合。✅ 方案设计 + M1 完成（2026-09-15）：`docs/guide/cron-design.md`；Agent cron provider（crontab -l 读 / 临时文件 crontab <file> 写回，Commander 复用 nginx 抽象），cockpit 只管理自己名下任务对（`# cockpit:job {meta-json}` 注释行 + 命令行，停用渲染为注释行不丢失），写回 = 读全量 → 只替换 cockpit 段 → **写回前自检非 cockpit 行与旧内容逐行一致**（绝不误伤用户手写条目），provider 级 mutex 串行化读改写；cron 表达式双端同规则校验（5 字段范围 + `*/0` 步长拒绝 + @ 白名单）；`cron` capability（LookPath crontab）；server `/api/agents/{id}/cron/*` 4 端点纯转发不落库 + cron_apply/cron_delete 审计；Web `/cron` 页面（agent 选择/状态卡/任务列表含启停 Switch/常用表达式预设/外部条目只读折叠面板）。剩余：systemd timer 只读列表、多用户 crontab（-u）、下次触发时间预览（需完整 cron 解析器）。
-- **日志聚合查看**：Agent 推送容器/系统日志，WebUI 统一检索（可接 Loki/轻量自研）。
+- **日志聚合查看**：Agent 推送容器/系统日志，WebUI 统一检索（可接 Loki/轻量自研）。✅ M1 完成（2026-09-15）：`docs/guide/logs-design.md`；查询式 pull 路线（agent 不采集不存储，查询时实时执行 journalctl/docker logs，不落库），logs.status/sources/query 三个 RPC + `logs` capability（journalctl 或 docker 至少一个可用）、source 白名单正则 + 1MB 输出截断到行边界 + 30s 超时 + argv 直传不经 shell、grep 统一内存 contains 过滤（双端行为一致）、docker 停止容器有输出不当错误；server `/api/agents/{id}/logs/*` 纯转发 + 双端同规则校验（浏览类不记审计）；Workbench「日志」Tab（类型 Segmented 按可用性禁用 + 源 Select 联动 + tail/since/grep 过滤栏 + 深色等宽视图 ERROR 红/WARN 橙行着色 + grep 命中高亮 + 自动滚底 + 截断提示）。剩余（M2）：推送式采集与跨机检索、实时尾随（流式 RPC）、结构化解析。
 - **移动端适配**：当前 Ant Design 响应式基础可用但不保证，关键页面（Dashboard/Monitor）做移动端优化。
 - **防火墙管理**：iptables/nftables 规则可视化（仅在有明确需求时推进）。
 
