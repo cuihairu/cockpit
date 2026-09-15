@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/config"
@@ -265,4 +266,30 @@ func (g *Generator) CleanupOldAlerts(olderThan time.Duration) {
 	if err := g.db.DeleteOldAlerts(olderThan); err != nil {
 		log.Printf("Failed to cleanup old alerts: %v", err)
 	}
+}
+
+// DriftAlertMaxItems 漂移告警明细最多列出的对象数（超出截断提示）
+const DriftAlertMaxItems = 10
+
+// CheckDriftScan 漂移巡检结果入告警（M2/D16）：driftedNames 非空时每
+// agent 一条汇总告警，title 固定 → 同主机未读存在期间只报一次（真去重）；
+// 空列表（全部一致）无动作，不自动 resolve——用户处理后标已读，再次漂移
+// 会重新创建并通知。
+func (g *Generator) CheckDriftScan(agentID, hostname string, driftedNames []string) {
+	if len(driftedNames) == 0 {
+		return
+	}
+	title := "配置漂移：主机 " + hostname
+	detail := driftedNames
+	suffix := ""
+	if len(detail) > DriftAlertMaxItems {
+		detail = detail[:DriftAlertMaxItems]
+		suffix = fmt.Sprintf("（等共 %d 项）", len(driftedNames))
+	}
+	message := "以下对象与面板最后一次保存的内容不一致：\n" +
+		strings.Join(detail, "\n")
+	if suffix != "" {
+		message += "\n" + suffix
+	}
+	g.createAlertIfNotExists("warning", title, message, agentID, "agent")
 }

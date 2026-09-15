@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -14,6 +15,38 @@ import (
 //
 // server 纯转发不落库（D11）；浏览类操作不记审计；check 无用户输入参数，
 // 校验面为零；agent 侧错误原样透传。
+
+// handleDriftConfig 全局巡检配置：GET 返回当前间隔与范围；PUT 校验后写入
+// Setting（见 drift-design.md M2/D17）。路径全局（/api/drift/config），
+// 不挂在 /agents/{id} 下——巡检配置非 per-agent。
+func (s *Server) handleDriftConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"scan_interval_seconds": s.GetDriftScanInterval(),
+			"min":                   driftMinIntervalSeconds,
+			"max":                   driftMaxIntervalSeconds,
+			"default":               driftDefaultInterval,
+		})
+	case http.MethodPut:
+		var req struct {
+			ScanIntervalSeconds int `json:"scan_interval_seconds"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+		if err := s.SetDriftScanInterval(req.ScanIntervalSeconds); err != nil {
+			s.handleError(w, r, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"scan_interval_seconds": req.ScanIntervalSeconds,
+		})
+	default:
+		s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
 
 // handleAgentDriftAPI 分发 /api/agents/{id}/drift/{sub}
 // rest 是 "/agents/" 之后的部分（形如 "{agentID}/drift/check"）
