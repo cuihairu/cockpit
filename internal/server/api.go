@@ -39,6 +39,10 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleAgentsList(w, r)
 	case path == "/drift/config":
 		s.handleDriftConfig(w, r)
+	case path == "/recordings":
+		s.handleRecordings(w, r)
+	case strings.HasPrefix(path, "/recordings/"):
+		s.handleRecordings(w, r)
 	case strings.HasPrefix(path, "/agents/"):
 		agentID := strings.TrimPrefix(path, "/agents/")
 		// 远程文件管理 /agents/{id}/files/...（见 api_files.go）

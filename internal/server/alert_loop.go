@@ -7,10 +7,12 @@ import (
 	"github.com/cuihairu/cockpit/internal/alert"
 )
 
-// cleanupLoop 定期清理离线 Agent
+// cleanupLoop 定期清理离线 Agent 与过期终端录制
 func (s *Server) cleanupLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+
+	var lastRecordingCleanup time.Time
 
 	for {
 		select {
@@ -18,6 +20,11 @@ func (s *Server) cleanupLoop() {
 			removed := s.registry.CleanupOffline()
 			if len(removed) > 0 {
 				log.Printf("Cleaned up offline agents: %v", removed)
+			}
+			// 过期终端录制清理（小时节流，见 recording-design.md D6）
+			if time.Since(lastRecordingCleanup) > recordingCleanupInterval {
+				lastRecordingCleanup = time.Now()
+				s.cleanupExpiredRecordings()
 			}
 		case <-s.ctx.Done():
 			return

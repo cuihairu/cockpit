@@ -29,6 +29,7 @@ type TerminalSession struct {
 	ConnID     string
 	CreatedAt  time.Time
 	LastActive time.Time
+	recorder   *castRecorder // 输出流录制（recording-design.md；nil = 未开）
 	mu         sync.Mutex
 	done       chan struct{}
 }
@@ -120,6 +121,11 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 	terminalSessions[sessionID] = session
 	terminalByConn[connID] = session
 	terminalSessionsMu.Unlock()
+
+	// 输出流录制（开关默认开；失败仅记日志，不影响远控主链路）
+	if s.recordingEnabled() {
+		session.recorder = s.startRecording(session)
+	}
 
 	log.Printf("Terminal session created: %s for user %s", sessionID, ticket.Username)
 
@@ -280,6 +286,7 @@ func (s *Server) sendCloseToAgent(session *TerminalSession) {
 
 // closeTerminalSession 关闭终端会话
 func (s *Server) closeTerminalSession(session *TerminalSession) {
+	session.recorder.Close() // 幂等，与 HandleTerminalClose 双出口都可调
 	session.ClientWS.Close()
 	terminalSessionsMu.Lock()
 	delete(terminalSessions, session.ID)
@@ -308,6 +315,9 @@ func (s *Server) HandleTerminalData(connID string, data []byte) error {
 		return nil
 	}
 
+	// 录制输出流（agent → 浏览器方向的唯一出口）
+	session.recorder.WriteOutput(data)
+
 	return session.ClientWS.WriteJSON(map[string]interface{}{
 		"type": "data",
 		"data": string(data),
@@ -328,6 +338,7 @@ func (s *Server) HandleTerminalClose(connID string, reason string) {
 		return
 	}
 
+	session.recorder.Close() // agent 侧关闭路径也即时回填（不等 keepalive 兜底）
 	session.ClientWS.WriteJSON(map[string]interface{}{
 		"type":    "close",
 		"message": reason,

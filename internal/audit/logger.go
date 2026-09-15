@@ -78,6 +78,9 @@ const ResourceProxySite = "proxy_site"
 // ResourceCronJob 定时任务资源类型（见 docs/guide/cron-design.md）
 const ResourceCronJob = "cron_job"
 
+// ResourceRecording 会话录制资源类型（见 recording-design.md）
+const ResourceRecording = "recording"
+
 // Status 状态
 const (
 	StatusSuccess = "success"
