@@ -29,6 +29,7 @@ import type {
   LogsSources,
   LogsQuery,
   LogsQueryResult,
+  DriftCheckResult,
   NotificationStatus,
   NotificationSendResult,
   BackupConfig,
@@ -461,6 +462,14 @@ class ApiService {
     return this.client.post<unknown, LogsQueryResult>(
       `/agents/${encodeURIComponent(agentId)}/logs/query`,
       query,
+    )
+  }
+
+  // ========== 防漂移检测 ==========
+  // 全量比对：面板写路径基线 vs 磁盘当前内容（nginx/cron/stack）
+  async checkDrift(agentId: string): Promise<DriftCheckResult> {
+    return this.client.post<unknown, DriftCheckResult>(
+      `/agents/${encodeURIComponent(agentId)}/drift/check`,
     )
   }
 

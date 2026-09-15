@@ -17,6 +17,7 @@ import {
   CloudUploadOutlined,
   DeploymentUnitOutlined,
   ClockCircleOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
@@ -38,6 +39,7 @@ const Stacks = lazy(() => import('./pages/Stacks'))
 const Backups = lazy(() => import('./pages/Backups'))
 const Proxy = lazy(() => import('./pages/Proxy'))
 const Cron = lazy(() => import('./pages/Cron'))
+const Drift = lazy(() => import('./pages/Drift'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Profile = lazy(() => import('./pages/Profile'))
 const AuditLogs = lazy(() => import('./pages/AuditLogs'))
@@ -128,6 +130,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/cron',
       name: '定时任务',
       icon: <ClockCircleOutlined />,
+    },
+    {
+      path: '/drift',
+      name: '漂移检测',
+      icon: <SafetyCertificateOutlined />,
     },
     {
       path: '/monitor',
@@ -298,6 +305,7 @@ const MainLayout = () => {
             <Route path="/backups" element={<Backups />} />
             <Route path="/proxy" element={<Proxy />} />
             <Route path="/cron" element={<Cron />} />
+            <Route path="/drift" element={<Drift />} />
             <Route path="/monitor" element={<Monitor />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/audit-logs" element={<AuditLogs />} />

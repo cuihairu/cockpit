@@ -487,6 +487,20 @@ export interface LogsQueryResult {
   truncated: boolean
 }
 
+// 防漂移检测（见 docs/guide/drift-design.md）
+export interface DriftCheckItem {
+  kind: 'nginx' | 'cron' | 'stack'
+  name: string
+  status: 'ok' | 'drifted' | 'missing' | 'no_baseline' | 'error' | 'none'
+  baseline_sha: string
+  current_sha: string
+}
+
+export interface DriftCheckResult {
+  items: DriftCheckItem[]
+  checked_at: number
+}
+
 // 通知渠道摘要（不含 token/secret 凭据）
 export interface NotificationChannelSummary {
   channel: string // herald / ntfy / webhook / telegram
