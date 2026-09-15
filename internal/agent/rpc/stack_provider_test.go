@@ -603,14 +603,17 @@ func TestStackProviderConcurrentLimit(t *testing.T) {
 	if _, err := p.Call("up", map[string]interface{}{"name": "s5"}); err == nil || !strings.Contains(err.Error(), "too many") {
 		t.Errorf("5th concurrent task should be rejected, got %v", err)
 	}
-	// 等待全部结束，避免泄漏到其他测试
-	deadline := time.Now().Add(5 * time.Second)
+	// 等信号量清空（全部任务 goroutine 退出）再返回：persistLastTask
+	// 写盘发生在 release 之前，原「s5 可受理即返回」只等到一个槽位
+	// 释放，其余任务可能仍在写盘，与 TempDir 清理竞争（CI 慢机 flaky）
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := p.Call("up", map[string]interface{}{"name": "s5"}); err == nil {
+		if len(p.sem) == 0 {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	t.Fatal("stack tasks did not finish within deadline")
 }
 
 // 确保 pruneTasksLocked 不丢运行中的任务
