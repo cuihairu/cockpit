@@ -293,6 +293,14 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		})
 	}
 
+	// logs capability：journalctl 或 docker 至少一个可用（见 logs-design.md D3）
+	if rpc.LogsAvailable() {
+		capabilities = append(capabilities, protocol.Capability{
+			Type:    "logs",
+			Version: "1",
+		})
+	}
+
 	return capabilities
 }
 

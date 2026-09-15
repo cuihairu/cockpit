@@ -21,6 +21,7 @@ import (
 //   - PVEProvider：检测到 "pve-api" capability 且环境变量 PVE_TOKEN_ID / PVE_TOKEN_SECRET 同时存在时注册
 //   - OpenWrtProvider：检测到 "openwrt" capability 且 OPENWRT_HOST/OPENWRT_USER/OPENWRT_PASS 存在时注册
 //   - NginxProvider：检测到 "nginx-proxy" capability（nginx 可执行存在）时注册
+//   - LogsProvider：检测到 "logs" capability（journalctl/docker 至少一个存在）时注册
 //
 // 单个 Provider 初始化失败仅记录日志，不影响 Agent 基础心跳。
 func (a *Agent) setupProviders() {
@@ -57,6 +58,9 @@ func (a *Agent) setupProviders() {
 		case "cron":
 			// Crontab 任务管理（见 docs/guide/cron-design.md）
 			a.rpc.RegisterProvider(rpc.NewCronProvider(nil))
+		case "logs":
+			// 远程日志查询（见 docs/guide/logs-design.md）
+			a.rpc.RegisterProvider(rpc.NewLogsProvider(nil))
 		}
 	}
 }

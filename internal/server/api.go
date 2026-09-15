@@ -54,6 +54,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			s.handleAgentCronAPI(w, r, agentID)
 			return
 		}
+		// 远程日志查询 /agents/{id}/logs/...（见 api_logs.go）
+		if strings.Contains(agentID, "/logs/") {
+			s.handleAgentLogsAPI(w, r, agentID)
+			return
+		}
 		// Handle /agents/{id}/secret sub-path
 		if strings.HasSuffix(agentID, "/secret") {
 			s.handleAgentSecret(w, r, strings.TrimSuffix(agentID, "/secret"))
