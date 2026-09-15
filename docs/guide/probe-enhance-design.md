@@ -4,6 +4,9 @@
 > 每 5 分钟一轮硬编码；`internal/alert` 每小时基于库内状态生成告警；`internal/notification`
 > 仅支持 Herald 单渠道）。方案参考：Uptime Kuma（间隔 UI 可配、心跳式状态、恢复通知）、
 > Gatus（多渠道通知器抽象）。本文只做设计决策与接口定义。
+>
+> **2026-09-15 增补 M2**：状态历史心跳条 + 告警阈值配置化 + 重复告警去重，
+> 见「M2」章节（决策 D7 起）。原「不做」清单中对应三项移入 M2 落地。
 
 ## 现状与痛点
 
@@ -122,9 +125,9 @@ notification:
 ## 不做（后续项）
 
 - 通知渠道 UI 在线编辑（yaml + 环境变量已够个人场景；要做需先解决凭据加密存储）
-- 心跳条式状态历史 UI（Uptime Kuma 式；需 probe 结果历史表，独立立项）
-- `alert.Generator` 重复告警去重（`createAlertIfNotExists` 每次直接创建）——独立修复
-- 告警阈值（磁盘 80% / 内存 85% / 证书 7/30 天）配置化
+- ~~心跳条式状态历史 UI~~ → M2 落地（见下）
+- ~~`alert.Generator` 重复告警去重~~ → M2 落地（见下）
+- ~~告警阈值（磁盘 80% / 内存 85% / 证书 7/30 天）配置化~~ → M2 落地（见下）
 
 ## 分期落地
 
@@ -137,6 +140,95 @@ notification:
 - [x] server：`api_probe.go`（GET/PUT config + notification/status + notification/test）+ 路由注册 + 审计（`probe` / `notification` 资源类型）
 - [x] web：Settings「告警设置」Tab 重做为拨测与通知（间隔表单 + 渠道状态 + 测试通知 + 逐渠道结果）；删除三个从未生效的阈值假表单
 - [x] 测试：notification 四渠道 httptest（含白名单过滤、失败隔离、凭据不泄漏）、probe 动态间隔夹紧与边沿通知、server API 全分支、storage KV
+
+## M2 —— 状态历史心跳条 + 阈值配置化 + 告警去重（2026-09-15）
+
+> P1 拨测条目标注的三个遗留项一次清零：M1 重复告警「本次不修」、心跳条「独立立项」、
+> 阈值「做成真配置时再回来」。三者共享同一块地基（Setting KV + 既有 probe/alert
+> 结构），合并落地成本最低。
+
+### 现状缺口（M1 后）
+
+| 缺口 | 现状代码 | 后果 |
+|------|----------|------|
+| 无状态历史 | `RunAllChecks` 每轮 `UpdateServiceStatus` 覆盖，结果不落历史 | 服务什么时候开始坏、坏多久、延迟趋势全不可查 |
+| 阈值硬编码 | probe `serviceFailureThreshold = 2` const；alert `CheckDiskSpace(80)` / `CheckMemoryUsage(85)` / `CheckExpiringCertificates(30, 7)` | 阈值不合理只能改代码；M1 已删的假表单留下的空缺 |
+| 告警重复 | `createAlertIfNotExists` 注释自认「简化处理，直接创建」 | 服务持续宕机时每小时重复建 Alert + 重复发通知，告警列表被灌满 |
+
+### 关键决策
+
+| # | 决策 | 选择 | 理由 |
+|---|------|------|------|
+| D7 | 历史表 | 新表 `ProbeResult`（resource_type + resource_id + name + status + latency_ms + message + checked_at），复合索引 `(resource_type, resource_id, checked_at)` | 心跳条按目标取最近 N 条只走索引；name 冗余一份便于跨表展示（服务可能被删） |
+| D8 | 写入范围 | 三类目标（service/domain/certificate）全部落历史 | 表结构统一、成本一致；cert/domain 变化慢每天仅几条；心跳条 UI 只消费 service，其余留作历史查询 |
+| D9 | 写入方式 | `RunAllChecks` 汇总本轮全部结果后批量写入；写失败只记日志不阻断探测主流程 | 一轮几十条 SQLite 无压力；历史是增强功能，不能拖垮探测本体 |
+| D10 | 保留策略 | 常量保留 30 天；`RunAllChecks` 每轮检查距上次清理 ≥24h 则 `DeleteProbeResultsOlderThan` | 20 目标 × 5min ≈ 200 万条/年不清理会膨胀；24h 清一次把开销摊到忽略不计；服务被删后历史随保留期自然淘汰，不做级联删除 |
+| D11 | 历史 API | `GET /api/probe/history?resource_type=&resource_id=&limit=`（默认 50，上限 200，checked_at 倒序） | 只读、按目标过滤；复用 `probeAPIPrefix` 分发 |
+| D12 | 阈值配置 | 5 个键进 `Setting` 表：`probe.fail_threshold`(1-10, 默认 2)、`alert.disk_percent`(50-99, 默认 80)、`alert.memory_percent`(50-99, 默认 85)、`alert.cert_warn_days`(1-90, 默认 7)、`alert.cert_info_days`(1-365, 默认 30) | 一次把 M1 删掉的假表单阈值全部做成真的；KV 表先例（`probe.interval_seconds`）直接复用 |
+| D13 | 阈值生效 | probe 侧 `failThreshold atomic.Int64` + `SetFailThreshold`（与 interval 同模式）；alert 侧每轮 `CheckAllChecks` 开始时从 DB 读一次（小时级轮询，无缓存必要） | 探测循环内只碰原子值；alert 小时级读 3 个 KV 开销可忽略，免去 setter 同步 |
+| D14 | 配置 API | 扩容 `GET/PUT /api/probe/config`：响应体增加 5 个阈值字段，PUT 全量对象一次保存（逐字段校验落库 + 生效 + 一次审计） | `interval_seconds` 字段语义不变，向后兼容；UI 是一张卡片一次保存，拆两端点反而别扭 |
+| D15 | 告警去重 | `createAlertIfNotExists` 改为真去重：同 `(resource_type, resource_id, title)` 存在**未读**告警则跳过创建、跳过通知；storage 加 `HasUnreadAlert` | 未读即「尚未被用户知晓」；用户标已读后同一问题再现 → 新告警再通知，符合「已读=已处理，再现值得提醒」的直觉 |
+| D16 | 心跳条 UI | `HeartbeatBar` 组件：最近 30 轮色块（绿 up / 红 down / 灰无数据），Tooltip 显示时间 + 延迟 + 消息；挂在 Resources 页服务表格新列「最近状态」 | Uptime Kuma 标志性体验的最小实现；服务列表是状态最高频入口，详情弹层后续再加 |
+
+### 数据模型
+
+```go
+// storage.ProbeResult 拨测历史（每轮探测一条）
+type ProbeResult struct {
+    ID           string    `gorm:"primaryKey" json:"id"`
+    ResourceType string    `gorm:"index:idx_probe_target,priority:1" json:"resourceType"`
+    ResourceID   string    `gorm:"index:idx_probe_target,priority:2" json:"resourceId"`
+    Name         string    `json:"name"`
+    Status       string    `json:"status"`     // up / down / degraded
+    LatencyMs    int       `json:"latencyMs"`
+    Message      string    `json:"message"`
+    CheckedAt    time.Time `gorm:"index:idx_probe_target,priority:3" json:"checkedAt"`
+}
+```
+
+storage 新增：`CreateProbeResults([]ProbeResult)`（批量）、
+`ListProbeResults(resourceType, resourceID string, limit int)`（倒序取 N 条）、
+`DeleteProbeResultsOlderThan(cutoff)`、`HasUnreadAlert(resourceType, resourceID, title string)`。
+
+### probe/alert 改造
+
+- Runner：`failThreshold atomic.Int64`（默认 2，启动时读 Setting 覆盖）；
+  `trackServiceEdge` 改读原子值；每轮 `RunAllChecks` 末尾批量写历史 + 按需清理；
+- Generator：`CheckAllChecks` 开头 `loadThresholds()` 从 DB 读三个 alert 键（缺省回退
+  默认值），传给既有 `CheckDiskSpace/CheckMemoryUsage/CheckExpiringCertificates`
+  （签名已是参数化，只改调用处）；
+- `createAlertIfNotExists`：创建前 `HasUnreadAlert` 查重，命中即 return（不建 Alert、
+  不发通知）；全部 6 项检查自动受益（服务/agent/磁盘/内存/证书/域名）。
+
+### REST API 变更
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/probe/config` | `{interval_seconds, fail_threshold, disk_percent, memory_percent, cert_warn_days, cert_info_days, min/max...}` |
+| PUT  | `/api/probe/config` | 全量对象；逐字段范围校验 → SetInterval/SetFailThreshold + 落库 → 审计一次 |
+| GET  | `/api/probe/history` | `resource_type` + `resource_id` 必填，`limit` 默认 50 上限 200 |
+
+### Web UI
+
+- **Resources 服务表格**新列「最近状态」：`HeartbeatBar`（30 格）+ 当前状态色；
+  数据 `GET /history?resource_type=service&resource_id=...` per-row 拉取（表格行数
+  个位数到十位数，可接受）；Tooltip 逐格展示 `MM-DD HH:mm · 123ms · 消息`；
+- **Settings 拨测与通知卡片**：间隔输入旁新增阈值表单区（连续失败次数、磁盘 %、
+  内存 %、证书警告/提醒天数），一次保存 `PUT /config`。
+
+### M2 清单
+
+- [x] storage：`ProbeResult` 表 + AutoMigrate + `CreateProbeResults/ListProbeResults/
+      DeleteProbeResultsOlderThan` + `HasUnreadAlert`
+- [x] probe：failThreshold 原子化（Setting 读取 + SetFailThreshold）+ 每轮写历史 +
+      24h 保留清理
+- [x] alert：阈值从 Setting 读取（磁盘/内存/证书）+ `createAlertIfNotExists` 未读去重
+- [x] server：`/api/probe/config` 扩容（GET/PUT 全量阈值）+ `/api/probe/history` + 审计
+- [x] web：`HeartbeatBar` 组件 + Resources 服务列（ProbeHeartbeatCell per-row 拉取）+
+      Settings 阈值表单
+- [x] 测试：storage 历史 CRUD/去重查询、probe 阈值生效与历史写入/清理、alert 去重
+      （重复跳过+已读再现+阈值分档）、server config 扩容校验 + history 分支
+- [x] 文档收尾（本清单勾选）+ todo.md 同步
 
 ## 参考
 
