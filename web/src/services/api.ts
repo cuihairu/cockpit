@@ -36,6 +36,9 @@ import type {
   ProxySite,
   ProxySiteDetail,
   ProxyStatus,
+  CronJob,
+  CronJobsResult,
+  CronStatus,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -569,6 +572,31 @@ class ApiService {
   // 删除站点（reload 失败时 agent 自动恢复文件）
   async deleteProxySite(agentId: string, name: string): Promise<void> {
     await this.client.delete(`/agents/${encodeURIComponent(agentId)}/proxy/sites/${encodeURIComponent(name)}`)
+  }
+
+  // ============ 定时任务管理（Crontab） ============
+
+  // 概览：运行用户 + 条目计数
+  async getCronStatus(agentId: string): Promise<CronStatus> {
+    return this.client.get<unknown, CronStatus>(`/agents/${encodeURIComponent(agentId)}/cron/status`)
+  }
+
+  // cockpit 名下任务列表 + 外部条目原文（只读）
+  async getCronJobs(agentId: string): Promise<CronJobsResult> {
+    return this.client.get<unknown, CronJobsResult>(`/agents/${encodeURIComponent(agentId)}/cron/jobs`)
+  }
+
+  // 应用任务（写回时 agent 保证外部条目逐行不变）
+  async applyCronJob(agentId: string, job: CronJob): Promise<{ name: string }> {
+    return this.client.put<unknown, { name: string }>(
+      `/agents/${encodeURIComponent(agentId)}/cron/jobs/${encodeURIComponent(job.name)}`,
+      job,
+    )
+  }
+
+  // 删除任务
+  async deleteCronJob(agentId: string, name: string): Promise<void> {
+    await this.client.delete(`/agents/${encodeURIComponent(agentId)}/cron/jobs/${encodeURIComponent(name)}`)
   }
 }
 

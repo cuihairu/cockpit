@@ -16,6 +16,7 @@ import {
   RocketOutlined,
   CloudUploadOutlined,
   DeploymentUnitOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
@@ -36,6 +37,7 @@ const Docker = lazy(() => import('./pages/Docker'))
 const Stacks = lazy(() => import('./pages/Stacks'))
 const Backups = lazy(() => import('./pages/Backups'))
 const Proxy = lazy(() => import('./pages/Proxy'))
+const Cron = lazy(() => import('./pages/Cron'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Profile = lazy(() => import('./pages/Profile'))
 const AuditLogs = lazy(() => import('./pages/AuditLogs'))
@@ -121,6 +123,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/proxy',
       name: '反向代理',
       icon: <DeploymentUnitOutlined />,
+    },
+    {
+      path: '/cron',
+      name: '定时任务',
+      icon: <ClockCircleOutlined />,
     },
     {
       path: '/monitor',
@@ -290,6 +297,7 @@ const MainLayout = () => {
             <Route path="/stacks" element={<Stacks />} />
             <Route path="/backups" element={<Backups />} />
             <Route path="/proxy" element={<Proxy />} />
+            <Route path="/cron" element={<Cron />} />
             <Route path="/monitor" element={<Monitor />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/audit-logs" element={<AuditLogs />} />

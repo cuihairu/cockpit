@@ -578,3 +578,26 @@ export interface ProxySiteDetail {
   site: ProxySite
   content: string
 }
+
+// ============ 定时任务（Crontab 管理） ============
+
+// cron.status：概览
+export interface CronStatus {
+  user: string
+  cockpitCount: number
+  externalCount: number
+}
+
+// cockpit 名下的一个定时任务
+export interface CronJob {
+  name: string
+  schedule: string
+  command: string
+  enabled: boolean
+}
+
+// cron.jobs 返回：cockpit 任务列表 + 外部条目原文（只读）
+export interface CronJobsResult {
+  jobs: CronJob[]
+  external: string
+}
