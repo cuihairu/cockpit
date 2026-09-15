@@ -38,6 +38,9 @@ const (
 	ActionBackupRun        = "backup_run"
 	ActionBackupRestore    = "backup_restore"
 	ActionBackupDeleteFile = "backup_delete_file"
+	// 反向代理管理（见 docs/guide/proxy-design.md）
+	ActionProxyApply  = "proxy_apply"
+	ActionProxyDelete = "proxy_delete"
 )
 
 // ResourceStack Compose Stack 资源类型
@@ -65,6 +68,9 @@ const (
 
 // ResourceFile 远程文件资源类型
 const ResourceFile = "file"
+
+// ResourceProxySite 反代站点资源类型（见 docs/guide/proxy-design.md）
+const ResourceProxySite = "proxy_site"
 
 // Status 状态
 const (
