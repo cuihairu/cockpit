@@ -47,9 +47,25 @@ stack SaveCompose ────────┘  (JSON)  ←逐项对比→  vs �
 
 status 语义见 D5；`baseline_sha` / `current_sha` 空串表示对应侧不存在。
 
-## 不做（M2 及以后）
+## M2：定时巡检 + 漂移告警（2026-09-15）
 
-- 定时巡检 + 漂移告警通知（复用 alert 管道）；
+把 M1 的「按需检查」升级为「自动发现」：server 侧定时对在线且带 drift
+capability 的 agent 执行 drift.check，发现漂移即产生告警（复用 M2 拨测
+的告警去重与通知管道），agent 侧零变更。
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D13 | 巡检循环 | server 侧 `driftScanLoop`（ctx+ticker 同 alert_loop 模式），每分钟醒来对比「距上次扫描 ≥ 间隔」再扫；间隔可动态改，故用固定 1min ticker + 时间戳对比 | probe runner 的 maybePrune/lastPrune 同款；lastScan 仅循环 goroutine 访问无锁 |
+| D14 | 巡检目标 | `registry.ListByCapability("drift")` 全部在线 agent，逐个 `CallAgent(drift.check)`；失败记日志跳过下轮再试 | 单 agent 失败不影响其他；离线由既有 offline 告警覆盖 |
+| D15 | 告警条件 | items 含 `drifted` 或 `missing` → 每 agent 一条汇总告警；`error` 只记日志（可能是权限问题，告警会噪音）；`no_baseline` 不告警（存量对象）；全 ok 无动作 | 汇总到 agent 级控制告警风暴；title 固定 → 同主机未读存在期间只报一次（D15 去重语义：用户标已读后再次漂移会重新告警） |
+| D16 | 告警形态 | alert 包公开 `CheckDriftScan(agentID, hostname, driftedNames)`：非空则 `createAlertIfNotExists("warning", "配置漂移：主机 X", 明细列表, agentID, "agent")`；明细最多 10 行 + 截断提示 | 复用拨测 M2 的真去重（HasUnreadAlert）与非阻塞多渠道通知 |
+| D17 | 配置 | Setting 键 `drift.scan_interval_seconds`，[0, 86400]，0=关闭巡检，默认 1800（30 分钟）；REST `GET/PUT /api/agents/.../drift/config`？——不，配置是全局非 per-agent：`GET/PUT /api/drift/config` | 与 probe interval 同一 Setting 模式；每次醒来读 Setting 免缓存（loadThresholds 同款） |
+| D18 | Web | `/drift` 页面顶部加「自动巡检」设置行（开关 + 间隔分钟数，保存 PUT /api/drift/config）；巡检开启时页面提示自动发现可用 | 配置入口放使用场景里，不进全局 Settings |
+
+不落库：巡检结果不存储（告警即记录），/drift 页面保持实时手动检查语义。
+
+## 不做（后续版本）
+
 - `no_baseline` 对象的手动登记（「以当前为准」）；
 - nginx 非 cockpit 片段、外部 crontab 条目、docker 卷内容检测；
 - inventory 声明字段（hostname/IP/状态）与 agent 实报的一致性高亮；
@@ -68,6 +84,21 @@ status 语义见 D5；`baseline_sha` / `current_sha` 空串表示对应侧不存
 ✅ M1 完成（2026-09-15）：agent 8 测试 + server 3 测试全绿；基线挂钩验证覆盖
 「面板写入成功 → 基线登记」「校验失败 → 不登记」「外部条目变更 → 不算漂移」；
 cron 基线只对 cockpit 任务段 hash（外部 crontab 条目零接触）。
+
+## M2 清单
+
+- [x] alert：`CheckDriftScan`（汇总告警 + 真去重复用）+ 单测
+- [x] server：`drift_scan.go`（循环 + Setting 键 + interval 校验）+ config
+      GET/PUT 端点 + server.go 启动
+- [x] web：/drift 页面「自动巡检」设置行 + api/types
+- [x] 测试：告警创建/去重/全 ok 无动作、config 校验、扫描失败跳过
+- [x] 文档收尾（本清单勾选）+ todo.md 同步
+
+✅ M2 完成（2026-09-15）：alert 2 测试（创建/字段校验、未读去重、已读后重新
+告警、空列表 no-op、13 项截断 10 行 + 总数提示）+ server 5 测试（config 默认/
+合法含 0 写入/越界 400、扫描产告警 + 二轮去重、全 ok 与 error 态不告警、agent
+报错跳过不 panic、标题定位到主机名）全绿；巡检循环为固定 1min ticker +
+lastScan 对比（间隔动态改生效），启动等 90s 让 agent 先上线。
 
 ## 参考
 
