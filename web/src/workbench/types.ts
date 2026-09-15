@@ -1,6 +1,6 @@
 import type { RemoteProtocol } from '@/services/remote'
 
-export type WorkbenchTab = 'overview' | 'ssh' | 'rdp' | 'vnc'
+export type WorkbenchTab = 'overview' | 'ssh' | 'rdp' | 'vnc' | 'files'
 
 export type RemoteService = {
   protocol: RemoteProtocol

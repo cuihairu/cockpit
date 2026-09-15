@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Card, Col, Layout, Row, Space, Tabs, message } from 'antd'
+import { Button, Card, Col, Empty, Layout, Row, Space, Tabs, message } from 'antd'
 import {
   CodeOutlined,
   DesktopOutlined,
   EyeOutlined,
+  FolderOpenOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
 import { api } from '@/services/api'
+import FileBrowser from '@/components/FileBrowser'
 import TerminalModal from '@/components/TerminalModal'
 import DesktopModal from '@/components/DesktopModal'
 import VNCModal from '@/components/VNCModal'
@@ -19,6 +21,7 @@ import type { SessionConfig, WorkbenchTab } from '@/workbench/types'
 
 const protocolTabs: Array<{ key: WorkbenchTab; label: string; icon: React.ReactNode }> = [
   { key: 'overview', label: '概览', icon: <SettingOutlined /> },
+  { key: 'files', label: '文件', icon: <FolderOpenOutlined /> },
   { key: 'ssh', label: 'SSH', icon: <CodeOutlined /> },
   { key: 'rdp', label: 'RDP', icon: <DesktopOutlined /> },
   { key: 'vnc', label: 'VNC', icon: <EyeOutlined /> },
@@ -65,6 +68,7 @@ const Workbench = () => {
       return
     }
     if (protocol === 'overview') return
+    if (protocol === 'files') return // 文件浏览器内嵌于 Tab 内容
 
     const service = remoteServices.find((item) => item.protocol === protocol)
     if (!service) {
@@ -127,6 +131,15 @@ const Workbench = () => {
                   key: 'overview',
                   label: '概览',
                   children: <OverviewPanel agent={selectedAgent} />,
+                },
+                {
+                  key: 'files',
+                  label: '文件',
+                  children: selectedAgent ? (
+                    <FileBrowser agentId={selectedAgent.id} />
+                  ) : (
+                    <Empty description="暂无可用 Agent" />
+                  ),
                 },
                 {
                   key: 'ssh',

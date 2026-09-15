@@ -530,3 +530,21 @@ export interface BackupTask {
   finishedAt?: number
   log?: string
 }
+
+// Agent 远程文件条目（目录直属，不递归）
+export interface FileEntry {
+  name: string
+  size: number
+  mode: string // 八进制权限，如 "0644"
+  mtime: number
+  isDir: boolean
+  isSymlink: boolean
+  target: string // symlink 目标（仅 isSymlink 时有值）
+}
+
+// file.read 分块结果
+export interface FileReadResult {
+  data: string // base64
+  size: number
+  eof: boolean
+}

@@ -31,6 +31,8 @@ import type {
   BackupRun,
   BackupFile,
   BackupTask,
+  FileEntry,
+  FileReadResult,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -475,6 +477,58 @@ class ApiService {
   async downloadBackupFile(id: number, name: string): Promise<Blob> {
     const resp = await this.client.get(`/backups/configs/${id}/files/download`, {
       params: { name },
+      responseType: 'blob',
+    })
+    return resp as unknown as Blob
+  }
+
+  // ============ 远程文件管理（Workbench 文件 Tab） ============
+
+  // 列目录直属条目
+  async listFiles(agentId: string, dir: string): Promise<{ dir: string; entries: FileEntry[] }> {
+    return this.client.post<unknown, { dir: string; entries: FileEntry[] }>(
+      `/agents/${encodeURIComponent(agentId)}/files/list`,
+      { dir },
+    )
+  }
+
+  // 读一个分块（编辑器与下载分块拉取共用）
+  async readFileChunk(agentId: string, path: string, offset: number, length: number): Promise<FileReadResult> {
+    return this.client.post<unknown, FileReadResult>(
+      `/agents/${encodeURIComponent(agentId)}/files/read`,
+      { path, offset, length },
+    )
+  }
+
+  // 写文件：truncate=true 覆盖/新建（编辑保存、上传），false 追加
+  async writeFile(
+    agentId: string,
+    path: string,
+    data: string, // base64
+    truncate = true,
+  ): Promise<{ size: number }> {
+    return this.client.post<unknown, { size: number }>(
+      `/agents/${encodeURIComponent(agentId)}/files/write`,
+      { path, data, truncate },
+    )
+  }
+
+  async createRemoteDir(agentId: string, path: string): Promise<void> {
+    await this.client.post(`/agents/${encodeURIComponent(agentId)}/files/mkdir`, { path })
+  }
+
+  async deleteRemoteFile(agentId: string, path: string): Promise<void> {
+    await this.client.post(`/agents/${encodeURIComponent(agentId)}/files/delete`, { path })
+  }
+
+  async renameRemoteFile(agentId: string, path: string, name: string): Promise<void> {
+    await this.client.post(`/agents/${encodeURIComponent(agentId)}/files/rename`, { path, name })
+  }
+
+  // 下载远程文件（流式 blob；大小不限，server 分块拉取不落盘）
+  async downloadRemoteFile(agentId: string, path: string): Promise<Blob> {
+    const resp = await this.client.get(`/agents/${encodeURIComponent(agentId)}/files/download`, {
+      params: { path },
       responseType: 'blob',
     })
     return resp as unknown as Blob
