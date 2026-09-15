@@ -31,6 +31,7 @@ import type {
   LogsQueryResult,
   DriftCheckResult,
   DriftScanConfig,
+  TerminalRecording,
   NotificationStatus,
   NotificationSendResult,
   BackupConfig,
@@ -481,6 +482,35 @@ class ApiService {
 
   async putDriftConfig(scanIntervalSeconds: number): Promise<void> {
     await this.client.put('/drift/config', { scan_interval_seconds: scanIntervalSeconds })
+  }
+
+  // ========== 会话录制 ==========
+  // 录制列表（倒序；进行中的也在列）
+  async getRecordings(): Promise<TerminalRecording[]> {
+    const resp = await this.client.get<unknown, { data: TerminalRecording[] }>('/recordings')
+    return resp.data ?? []
+  }
+
+  // 取 .cast 内容（回放数据源，同下载）
+  async getRecordingCast(sessionId: string): Promise<string> {
+    const resp = await this.client.get(`/recordings/${encodeURIComponent(sessionId)}/cast`, {
+      responseType: 'text',
+      transformResponse: [(data: string) => data],
+    })
+    return resp as unknown as string
+  }
+
+  // 下载录制文件（blob，带 JWT）
+  async downloadRecording(sessionId: string): Promise<Blob> {
+    const resp = await this.client.get(`/recordings/${encodeURIComponent(sessionId)}/cast`, {
+      responseType: 'blob',
+    })
+    return resp as unknown as Blob
+  }
+
+  // 删除录制（文件+元数据）
+  async deleteRecording(sessionId: string): Promise<void> {
+    await this.client.delete(`/recordings/${encodeURIComponent(sessionId)}`)
   }
 
   // ========== 备份管理 ==========

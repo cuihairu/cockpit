@@ -509,6 +509,20 @@ export interface DriftScanConfig {
   default: number
 }
 
+// 会话录制元数据（内容在 server 侧 .cast 文件，见 recording-design.md）
+export interface TerminalRecording {
+  id: number
+  sessionId: string
+  username: string
+  agentId: string
+  host: string
+  port: number
+  protocol: string
+  startedAt: string
+  durationMs: number // 0 = 进行中
+  bytes: number
+}
+
 // 通知渠道摘要（不含 token/secret 凭据）
 export interface NotificationChannelSummary {
   channel: string // herald / ntfy / webhook / telegram

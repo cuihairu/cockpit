@@ -18,6 +18,7 @@ import {
   DeploymentUnitOutlined,
   ClockCircleOutlined,
   SafetyCertificateOutlined,
+  VideoCameraOutlined,
 } from '@ant-design/icons'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
@@ -40,6 +41,7 @@ const Backups = lazy(() => import('./pages/Backups'))
 const Proxy = lazy(() => import('./pages/Proxy'))
 const Cron = lazy(() => import('./pages/Cron'))
 const Drift = lazy(() => import('./pages/Drift'))
+const Recordings = lazy(() => import('./pages/Recordings'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Profile = lazy(() => import('./pages/Profile'))
 const AuditLogs = lazy(() => import('./pages/AuditLogs'))
@@ -140,6 +142,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/monitor',
       name: '系统监控',
       icon: <DashboardOutlined />,
+    },
+    {
+      path: '/recordings',
+      name: '会话录制',
+      icon: <VideoCameraOutlined />,
     },
     {
       path: '/settings',
@@ -306,6 +313,7 @@ const MainLayout = () => {
             <Route path="/proxy" element={<Proxy />} />
             <Route path="/cron" element={<Cron />} />
             <Route path="/drift" element={<Drift />} />
+            <Route path="/recordings" element={<Recordings />} />
             <Route path="/monitor" element={<Monitor />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/audit-logs" element={<AuditLogs />} />
