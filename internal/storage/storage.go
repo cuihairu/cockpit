@@ -16,6 +16,13 @@ import (
 // ErrNotFound 记录不存在错误
 var ErrNotFound = errors.New("record not found")
 
+// VacuumInto 在线备份数据库到目标文件（紧凑完整副本，SQLite 3.27+）。
+// 目标文件必须不存在；产物可直接改名替换回来恢复（见
+// docs/guide/server-backup-design.md）。
+func (d *DB) VacuumInto(path string) error {
+	return d.db.Exec("VACUUM INTO ?", path).Error
+}
+
 // DB 数据库封装
 type DB struct {
 	db *gorm.DB

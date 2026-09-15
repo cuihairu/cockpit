@@ -81,6 +81,9 @@ const ResourceCronJob = "cron_job"
 // ResourceRecording 会话录制资源类型（见 recording-design.md）
 const ResourceRecording = "recording"
 
+// ResourceServerBackup server 自身数据库备份资源类型（见 server-backup-design.md）
+const ResourceServerBackup = "server_backup"
+
 // Status 状态
 const (
 	StatusSuccess = "success"

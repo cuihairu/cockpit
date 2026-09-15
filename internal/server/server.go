@@ -182,6 +182,8 @@ func (s *Server) Start() error {
 	go s.metricsCleanupLoop()
 	// 启动备份调度循环
 	s.startBackupLoop()
+	// 启动 server 自身数据库备份循环（见 server-backup-design.md）
+	go s.serverBackupLoop()
 
 	return server.ListenAndServe()
 }
