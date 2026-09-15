@@ -54,6 +54,9 @@ func (a *Agent) setupProviders() {
 		case "nginx-proxy":
 			// Nginx 反代管理（见 docs/guide/proxy-design.md）
 			a.rpc.RegisterProvider(rpc.NewNginxProvider(rpc.NginxConfig{}))
+		case "cron":
+			// Crontab 任务管理（见 docs/guide/cron-design.md）
+			a.rpc.RegisterProvider(rpc.NewCronProvider(nil))
 		}
 	}
 }

@@ -285,6 +285,14 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		})
 	}
 
+	// cron capability：探测 crontab 命令（见 cron-design.md D7）
+	if rpc.DetectCron() {
+		capabilities = append(capabilities, protocol.Capability{
+			Type:    "cron",
+			Version: "1",
+		})
+	}
+
 	return capabilities
 }
 
