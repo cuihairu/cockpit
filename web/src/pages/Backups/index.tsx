@@ -37,6 +37,7 @@ import dayjs from 'dayjs'
 import { api } from '@/services/api'
 import type { BackupConfig, BackupConfigInput, BackupFile, BackupRun, BackupTask } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import ServerBackupCard from './ServerBackupCard'
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
@@ -707,6 +708,7 @@ const Backups = () => {
           </>
         )}
       </Modal>
+      <ServerBackupCard />
     </Space>
   )
 }

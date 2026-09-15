@@ -32,6 +32,8 @@ import type {
   DriftCheckResult,
   DriftScanConfig,
   TerminalRecording,
+  ServerBackupFile,
+  ServerBackupConfig,
   NotificationStatus,
   NotificationSendResult,
   BackupConfig,
@@ -511,6 +513,38 @@ class ApiService {
   // 删除录制（文件+元数据）
   async deleteRecording(sessionId: string): Promise<void> {
     await this.client.delete(`/recordings/${encodeURIComponent(sessionId)}`)
+  }
+
+  // ========== Server 自身数据库备份 ==========
+  // 备份文件列表（目录扫描）
+  async getServerBackups(): Promise<ServerBackupFile[]> {
+    const resp = await this.client.get<unknown, { data: ServerBackupFile[] }>('/server-backups')
+    return resp.data ?? []
+  }
+
+  async getServerBackupConfig(): Promise<ServerBackupConfig> {
+    return this.client.get<unknown, ServerBackupConfig>('/server-backups/config')
+  }
+
+  async putServerBackupConfig(input: { interval_hours?: number; retention_days?: number }): Promise<void> {
+    await this.client.put('/server-backups/config', input)
+  }
+
+  // 立即备份，返回产物文件名
+  async runServerBackup(): Promise<{ name: string }> {
+    return this.client.post<unknown, { name: string }>('/server-backups/run')
+  }
+
+  async downloadServerBackup(name: string): Promise<Blob> {
+    const resp = await this.client.get(
+      `/server-backups/${encodeURIComponent(name)}/download`,
+      { responseType: 'blob' },
+    )
+    return resp as unknown as Blob
+  }
+
+  async deleteServerBackup(name: string): Promise<void> {
+    await this.client.delete(`/server-backups/${encodeURIComponent(name)}`)
   }
 
   // ========== 备份管理 ==========

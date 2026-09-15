@@ -523,6 +523,20 @@ export interface TerminalRecording {
   bytes: number
 }
 
+// Server 自身数据库备份（VACUUM INTO 产物，目录即事实源，见 server-backup-design.md）
+export interface ServerBackupFile {
+  name: string
+  size: number
+  modTime: string
+}
+
+export interface ServerBackupConfig {
+  interval_hours: number
+  retention_days: number
+  max_interval_hours: number
+  max_retention_days: number
+}
+
 // 通知渠道摘要（不含 token/secret 凭据）
 export interface NotificationChannelSummary {
   channel: string // herald / ntfy / webhook / telegram
