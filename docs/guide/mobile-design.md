@@ -28,7 +28,7 @@ UI 只保证桌面可用：
 | D3 | 布局切换 | `layout = isMobile \|\| compactMode ? 'side' : 'mix'`——mix 的顶部菜单窄屏溢出，强制切 side；side 布局下 ProLayout 内建窄屏 Drawer（hamburger 抽屉菜单） | mix 的 header 菜单无溢出收纳机制；side + 抽屉是移动端标准形态 |
 | D4 | Header 精简 | 搜索框已有 media 隐藏；「文档」按钮 < 768 只留图标（文字 span 加 class 隐藏）；用户名保留 | header 在窄屏只承担 logo + 通知 + 用户 |
 | D5 | Modal 兜底 | 全局 CSS：`.ant-modal { max-width: calc(100vw - 16px) }` | 一行兜底所有现存与未来 Modal，不逐个改组件 |
-| D6 | 表格策略 | AntD 无 `scroll.x` 时列内容自动换行不溢出（可接受兜底）；仅 Dashboard Agent 表（5 列）显式加 `scroll={{ x: 640 }}` | 全站补 scroll.x 是 M2 量级；M1 只修最挤的关键表 |
+| D6 | 表格策略 | AntD 无 `scroll.x` 时列内容自动换行不溢出（可接受兜底）；仅 Dashboard Agent 表（5 列）显式加 <span v-pre>`scroll={{ x: 640 }}`</span>（行内代码无 v-pre，JSX 花括号须手动包裹防 Vue 插值解析） | 全站补 scroll.x 是 M2 量级；M1 只修最挤的关键表 |
 | D7 | Dashboard | 统计卡 `xs` 24 → 12（窄屏 2 列）；页头标题行 `flex-wrap`（刷新按钮不掉出视口） | 卡片是小号统计数字，2 列是手机标准密度 |
 | D8 | Monitor | Agent 下拉固定 250px → 窄屏 `width: '100%'`；PageContainer extra 自身会 wrap | 其余栅格（图表 xs=24 lg=12、SystemInfoCard）已响应式 |
 | D9 | 间距密度 | 窄屏 `page-container`/`dashboard-container` padding 12px、card body 16px | 手机上 24px 边距浪费屏宽 |
@@ -54,7 +54,7 @@ UI 只保证桌面可用：
 溢出 → side + ProLayout 内建抽屉）；768px media 块扩充 Modal
 `max-width: calc(100vw - 16px)` 兜底、文档按钮只留图标、容器/卡片
 间距收紧、表格 cell padding 8px；Dashboard 统计卡 xs=12（窄屏 2 列）
-+ Agent 表 `scroll={{ x: 640 }}` + 页头 flex-wrap；Monitor Agent
++ Agent 表 <span v-pre>`scroll={{ x: 640 }}`</span> + 页头 flex-wrap；Monitor Agent
 下拉窄屏 100% 宽。Go 侧零改动。真机验收留给使用者（本环境无浏览器）。
 
 ## 参考
