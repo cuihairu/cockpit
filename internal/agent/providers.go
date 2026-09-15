@@ -20,6 +20,7 @@ import (
 //   - StackProvider：跟随 docker-api capability，另需 linux/darwin + docker compose CLI 可用
 //   - PVEProvider：检测到 "pve-api" capability 且环境变量 PVE_TOKEN_ID / PVE_TOKEN_SECRET 同时存在时注册
 //   - OpenWrtProvider：检测到 "openwrt" capability 且 OPENWRT_HOST/OPENWRT_USER/OPENWRT_PASS 存在时注册
+//   - NginxProvider：检测到 "nginx-proxy" capability（nginx 可执行存在）时注册
 //
 // 单个 Provider 初始化失败仅记录日志，不影响 Agent 基础心跳。
 func (a *Agent) setupProviders() {
@@ -50,6 +51,9 @@ func (a *Agent) setupProviders() {
 			a.registerPVEProvider(cap)
 		case "openwrt":
 			a.registerOpenWrtProvider(cap)
+		case "nginx-proxy":
+			// Nginx 反代管理（见 docs/guide/proxy-design.md）
+			a.rpc.RegisterProvider(rpc.NewNginxProvider(rpc.NginxConfig{}))
 		}
 	}
 }

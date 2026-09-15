@@ -276,6 +276,15 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		},
 	})
 
+	// nginx-proxy capability：探测 nginx 可执行与版本（见 proxy-design.md D8）
+	if version, ok := rpc.DetectNginx(); ok {
+		capabilities = append(capabilities, protocol.Capability{
+			Type:     "nginx-proxy",
+			Version:  "1",
+			Metadata: map[string]interface{}{"version": version},
+		})
+	}
+
 	return capabilities
 }
 
