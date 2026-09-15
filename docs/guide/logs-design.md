@@ -39,7 +39,7 @@ M1 是查询式查看器（pull 型）：每次查询由 agent 实时执行 jour
 | D7 | RPC 方法 | `logs.status` / `logs.sources` / `logs.query` 三方法 | 最小闭环：可用性、源枚举、查询 |
 | D8 | REST 挂载 | `/api/agents/{id}/logs/*`，复用 serveAPI `/agents/` 分发模式 | 按 agent 作用域；纯转发不落库（与 cron D9 同理） |
 | D9 | 审计 | 查询类操作不记审计（浏览性质，与文件浏览同纪律） | M1 无变更类操作；若未来加「日志下载/导出」再补 |
-| D10 | 源枚举实现 | systemd：`systemctl list-units --type=service --no-legend --plain` 取 unit 名；docker：`docker ps --format '{{.Names}}'` | 只列**运行中**对象（查询的是活日志）；`--all` 扩展按需后补 |
+| D10 | 源枚举实现 | systemd：`systemctl list-units --type=service --no-legend --plain` 取 unit 名；docker：<span v-pre>`docker ps --format '{{.Names}}'`</span>（行内代码无 v-pre，Go template 花括号须手动包裹防 Vue 插值解析） | 只列**运行中**对象（查询的是活日志）；`--all` 扩展按需后补 |
 
 ## Agent 侧设计
 
