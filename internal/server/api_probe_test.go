@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -257,9 +258,11 @@ func TestNotificationTestRequiresEnabledService(t *testing.T) {
 
 func TestNotificationTestDispatches(t *testing.T) {
 	db := testServerDB(t)
-	var hits int
+	// dispatch 并发扇出到各渠道，hits 必须原子（非原子 ++ 在多核下丢增，
+	// 曾致 CI 偶发 hits=1）
+	var hits atomic.Int64
 	capSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits++
+		hits.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer capSrv.Close()
@@ -292,7 +295,7 @@ func TestNotificationTestDispatches(t *testing.T) {
 			t.Errorf("channel %s failed: %s", r.Channel, r.Error)
 		}
 	}
-	if hits != 2 {
-		t.Errorf("hits = %d, want 2 (herald + webhook)", hits)
+	if hits.Load() != 2 {
+		t.Errorf("hits = %d, want 2 (herald + webhook)", hits.Load())
 	}
 }
