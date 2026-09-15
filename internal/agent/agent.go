@@ -301,6 +301,18 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		})
 	}
 
+	// drift capability：nginx-proxy / cron / docker-api（stack）任一存在，
+	// 有可挂钩的管理写路径漂移检测才有意义（见 drift-design.md D9）
+	for _, c := range capabilities {
+		if c.Type == "nginx-proxy" || c.Type == "cron" || c.Type == "docker-api" {
+			capabilities = append(capabilities, protocol.Capability{
+				Type:    "drift",
+				Version: "1",
+			})
+			break
+		}
+	}
+
 	return capabilities
 }
 

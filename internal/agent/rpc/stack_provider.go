@@ -58,11 +58,11 @@ func ComposeAvailable() bool {
 
 // StackConfig Stack Provider 配置
 type StackConfig struct {
-	Dir        string            // stacks 根目录，默认 /var/lib/cockpit/stacks
-	Docker     docker.DockerAPI  // 用于按 compose label 过滤容器状态
-	ComposeBin []string          // compose 命令，默认 ["docker", "compose"]；测试可注入
-	Now        func() time.Time  // 可注入时钟
-	NewID      func() string     // 可注入任务 ID 生成器
+	Dir        string           // stacks 根目录，默认 /var/lib/cockpit/stacks
+	Docker     docker.DockerAPI // 用于按 compose label 过滤容器状态
+	ComposeBin []string         // compose 命令，默认 ["docker", "compose"]；测试可注入
+	Now        func() time.Time // 可注入时钟
+	NewID      func() string    // 可注入任务 ID 生成器
 }
 
 // StackProvider Compose Stack Provider
@@ -72,12 +72,16 @@ type StackProvider struct {
 	composeBin []string
 	now        func() time.Time
 	newID      func() string
+	baseline   BaselineRecorder // 漂移基线挂钩（见 drift-design.md D7），nil 不记录
 
 	mu         sync.Mutex
 	tasks      map[string]*stackTask
 	stackLocks map[string]*sync.Mutex
 	sem        chan struct{}
 }
+
+// SetBaseline 注入漂移基线挂钩（providers.go 接线用）
+func (p *StackProvider) SetBaseline(b BaselineRecorder) { p.baseline = b }
 
 func NewStackProvider(cfg StackConfig) *StackProvider {
 	dir := cfg.Dir
@@ -462,10 +466,16 @@ func (p *StackProvider) SaveStackFile(params map[string]interface{}) (map[string
 	if err := os.Rename(tmp, filepath.Join(dir, "compose.yml")); err != nil {
 		return nil, fmt.Errorf("save compose file: %w", err)
 	}
+	if p.baseline != nil {
+		p.baseline.Record("stack", name+"/compose.yml", []byte(compose))
+	}
 
 	if envPtr != nil {
 		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(*envPtr), 0o600); err != nil {
 			return nil, fmt.Errorf("save .env file: %w", err)
+		}
+		if p.baseline != nil {
+			p.baseline.Record("stack", name+"/.env", []byte(*envPtr))
 		}
 	}
 
@@ -619,6 +629,10 @@ func (p *StackProvider) RemoveStack(name string) (map[string]interface{}, error)
 		}
 		if err := os.RemoveAll(dir); err != nil {
 			return fmt.Errorf("remove stack dir: %w", err)
+		}
+		if p.baseline != nil {
+			p.baseline.Forget("stack", name+"/compose.yml")
+			p.baseline.Forget("stack", name+"/.env")
 		}
 		return nil
 	})

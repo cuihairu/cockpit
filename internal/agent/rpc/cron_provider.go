@@ -126,9 +126,13 @@ func validateCronExpr(expr string) error {
 
 // CronProvider Crontab 管理 Provider
 type CronProvider struct {
-	mu  sync.Mutex // 读改写临界区串行化（D6）
-	run Commander
+	mu       sync.Mutex // 读改写临界区串行化（D6）
+	run      Commander
+	baseline BaselineRecorder // 漂移基线挂钩（见 drift-design.md D7），nil 不记录
 }
+
+// SetBaseline 注入漂移基线挂钩（providers.go 接线用）
+func (p *CronProvider) SetBaseline(b BaselineRecorder) { p.baseline = b }
 
 func NewCronProvider(run Commander) *CronProvider {
 	if run == nil {
@@ -239,6 +243,12 @@ func (p *CronProvider) ApplyJob(job *CronJob) (interface{}, error) {
 	if err := p.writeCrontab(old, newContent); err != nil {
 		return nil, err
 	}
+	// 基线只对 cockpit 任务段 hash（外部条目变更不算漂移，D2）
+	if p.baseline != nil {
+		_, jobs, _ := splitCockpit(newContent)
+		encoded, _ := json.Marshal(jobs)
+		p.baseline.Record("cron", "cockpit", encoded)
+	}
 	return map[string]interface{}{"name": job.Name}, nil
 }
 
@@ -260,6 +270,11 @@ func (p *CronProvider) DeleteJob(name string) (interface{}, error) {
 	}
 	if err := p.writeCrontab(old, newContent); err != nil {
 		return nil, err
+	}
+	if p.baseline != nil {
+		_, jobs, _ := splitCockpit(newContent)
+		encoded, _ := json.Marshal(jobs)
+		p.baseline.Record("cron", "cockpit", encoded)
 	}
 	return map[string]interface{}{}, nil
 }

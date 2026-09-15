@@ -22,12 +22,17 @@ import (
 //   - OpenWrtProvider：检测到 "openwrt" capability 且 OPENWRT_HOST/OPENWRT_USER/OPENWRT_PASS 存在时注册
 //   - NginxProvider：检测到 "nginx-proxy" capability（nginx 可执行存在）时注册
 //   - LogsProvider：检测到 "logs" capability（journalctl/docker 至少一个存在）时注册
+//   - DriftProvider：检测到 "drift" capability（nginx/cron/stack 任一存在）时注册，
+//     并向三者注入同一个基线挂钩
 //
 // 单个 Provider 初始化失败仅记录日志，不影响 Agent 基础心跳。
 func (a *Agent) setupProviders() {
 	if a.rpc == nil {
 		return
 	}
+
+	// 漂移基线存储：nginx/cron/stack 写路径挂钩共用一个实例（见 drift-design.md）
+	baseline := rpc.NewDriftBaseline("")
 
 	// 1. SystemProvider 始终注册
 	a.rpc.RegisterProvider(rpc.NewSystemProvider())
@@ -47,22 +52,44 @@ func (a *Agent) setupProviders() {
 		switch cap.Type {
 		case "docker-api":
 			a.registerDockerProvider(cap)
-			a.registerStackProvider(cap)
+			a.registerStackProvider(cap, baseline)
 		case "pve-api":
 			a.registerPVEProvider(cap)
 		case "openwrt":
 			a.registerOpenWrtProvider(cap)
 		case "nginx-proxy":
 			// Nginx 反代管理（见 docs/guide/proxy-design.md）
-			a.rpc.RegisterProvider(rpc.NewNginxProvider(rpc.NginxConfig{}))
+			np := rpc.NewNginxProvider(rpc.NginxConfig{})
+			np.SetBaseline(baseline)
+			a.rpc.RegisterProvider(np)
 		case "cron":
 			// Crontab 任务管理（见 docs/guide/cron-design.md）
-			a.rpc.RegisterProvider(rpc.NewCronProvider(nil))
+			cp := rpc.NewCronProvider(nil)
+			cp.SetBaseline(baseline)
+			a.rpc.RegisterProvider(cp)
 		case "logs":
 			// 远程日志查询（见 docs/guide/logs-design.md）
 			a.rpc.RegisterProvider(rpc.NewLogsProvider(nil))
+		case "drift":
+			// 防漂移检测（见 docs/guide/drift-design.md）；cron 段检查
+			// 需要 crontab 命令，复用 cron capability 探测结果
+			dp := rpc.NewDriftProvider(baseline, rpc.DriftConfig{})
+			if a.hasCapability("cron") {
+				dp.SetCronRunner()
+			}
+			a.rpc.RegisterProvider(dp)
 		}
 	}
+}
+
+// hasCapability 是否检测到指定能力
+func (a *Agent) hasCapability(t string) bool {
+	for _, c := range a.capabilities {
+		if c.Type == t {
+			return true
+		}
+	}
+	return false
 }
 
 // registerDockerProvider 注册 Docker Provider
@@ -91,7 +118,7 @@ func (a *Agent) registerDockerProvider(cap protocol.Capability) {
 // docker compose CLI 可用 + Docker daemon 可连。任一不满足则跳过，
 // 不影响容器管理（方案见 docs/guide/stack-deploy-design.md）。
 // stacks 根目录可用 COCKPIT_STACKS_DIR 覆盖，默认 /var/lib/cockpit/stacks。
-func (a *Agent) registerStackProvider(cap protocol.Capability) {
+func (a *Agent) registerStackProvider(cap protocol.Capability, baseline rpc.BaselineRecorder) {
 	host := cap.Endpoint
 	if host == "" {
 		host = os.Getenv("DOCKER_HOST")
@@ -115,10 +142,12 @@ func (a *Agent) registerStackProvider(cap protocol.Capability) {
 		return
 	}
 
-	a.rpc.RegisterProvider(rpc.NewStackProvider(rpc.StackConfig{
+	sp := rpc.NewStackProvider(rpc.StackConfig{
 		Dir:    os.Getenv("COCKPIT_STACKS_DIR"),
 		Docker: dockerClient,
-	}))
+	})
+	sp.SetBaseline(baseline)
+	a.rpc.RegisterProvider(sp)
 }
 
 // registerPVEProvider 注册 PVE Provider

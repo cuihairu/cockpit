@@ -104,9 +104,13 @@ type NginxConfig struct {
 
 // NginxProvider Nginx 反代管理 Provider
 type NginxProvider struct {
-	confDir string
-	run     Commander
+	confDir  string
+	run      Commander
+	baseline BaselineRecorder // 漂移基线挂钩（见 drift-design.md D7），nil 不记录
 }
+
+// SetBaseline 注入漂移基线挂钩（providers.go 接线用）
+func (p *NginxProvider) SetBaseline(b BaselineRecorder) { p.baseline = b }
 
 func NewNginxProvider(cfg NginxConfig) *NginxProvider {
 	confDir := cfg.ConfDir
@@ -252,7 +256,8 @@ func (p *NginxProvider) ApplySite(site *ProxySite) (interface{}, error) {
 	if b, err := os.ReadFile(path); err == nil {
 		previous = b
 	}
-	if err := os.WriteFile(path, []byte(renderSite(site)), 0o644); err != nil {
+	written := []byte(renderSite(site))
+	if err := os.WriteFile(path, written, 0o644); err != nil {
 		return nil, fmt.Errorf("write config: %w", err)
 	}
 	if err := p.reload(); err != nil {
@@ -264,6 +269,10 @@ func (p *NginxProvider) ApplySite(site *ProxySite) (interface{}, error) {
 		}
 		_ = p.reload() // 回滚后尽力恢复线上状态；失败也不再遮掩原错误
 		return nil, fmt.Errorf("reload failed (config rolled back): %w", err)
+	}
+	// 写入并 reload 成功后登记基线（基线 = 线上实际生效的内容，D8）
+	if p.baseline != nil {
+		p.baseline.Record("nginx", site.Name, written)
 	}
 	return map[string]interface{}{"name": site.Name, "file": filepath.Base(path)}, nil
 }
@@ -285,6 +294,9 @@ func (p *NginxProvider) DeleteSite(name string) (interface{}, error) {
 		_ = os.WriteFile(path, previous, 0o644)
 		_ = p.reload()
 		return nil, fmt.Errorf("reload failed (site restored): %w", err)
+	}
+	if p.baseline != nil {
+		p.baseline.Forget("nginx", name)
 	}
 	return map[string]interface{}{}, nil
 }

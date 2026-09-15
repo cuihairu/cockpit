@@ -59,6 +59,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			s.handleAgentLogsAPI(w, r, agentID)
 			return
 		}
+		// 防漂移检测 /agents/{id}/drift/...（见 api_drift.go）
+		if strings.Contains(agentID, "/drift/") {
+			s.handleAgentDriftAPI(w, r, agentID)
+			return
+		}
 		// Handle /agents/{id}/secret sub-path
 		if strings.HasSuffix(agentID, "/secret") {
 			s.handleAgentSecret(w, r, strings.TrimSuffix(agentID, "/secret"))
