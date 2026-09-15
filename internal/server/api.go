@@ -49,6 +49,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			s.handleAgentProxyAPI(w, r, agentID)
 			return
 		}
+		// 定时任务管理 /agents/{id}/cron/...（见 api_cron.go）
+		if strings.Contains(agentID, "/cron/") {
+			s.handleAgentCronAPI(w, r, agentID)
+			return
+		}
 		// Handle /agents/{id}/secret sub-path
 		if strings.HasSuffix(agentID, "/secret") {
 			s.handleAgentSecret(w, r, strings.TrimSuffix(agentID, "/secret"))

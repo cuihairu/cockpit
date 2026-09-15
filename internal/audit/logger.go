@@ -9,29 +9,29 @@ import (
 
 // Action 操作类型
 const (
-	ActionLogin    = "login"
-	ActionLogout   = "logout"
-	ActionCreate   = "create"
-	ActionUpdate   = "update"
-	ActionDelete   = "delete"
-	ActionView     = "view"
-	ActionExport   = "export"
-	ActionImport   = "import"
-	ActionStart    = "start"
-	ActionStop     = "stop"
-	ActionRestart  = "restart"
-	ActionTOTPEnable = "totp_enable"
+	ActionLogin       = "login"
+	ActionLogout      = "logout"
+	ActionCreate      = "create"
+	ActionUpdate      = "update"
+	ActionDelete      = "delete"
+	ActionView        = "view"
+	ActionExport      = "export"
+	ActionImport      = "import"
+	ActionStart       = "start"
+	ActionStop        = "stop"
+	ActionRestart     = "restart"
+	ActionTOTPEnable  = "totp_enable"
 	ActionTOTPDisable = "totp_disable"
-	ActionTOTPVerify = "totp_verify"
+	ActionTOTPVerify  = "totp_verify"
 	// ActionRemoteStart / ActionRemoteEnd 远控会话开始/结束
 	ActionRemoteStart = "remote_start"
 	ActionRemoteEnd   = "remote_end"
 	// Compose Stack 部署（见 docs/guide/stack-deploy-design.md）
-	ActionStackCreate = "stack_create"
-	ActionStackUpdate = "stack_update"
-	ActionStackUp     = "stack_up"
-	ActionStackDown   = "stack_down"
-	ActionStackRemove = "stack_remove"
+	ActionStackCreate  = "stack_create"
+	ActionStackUpdate  = "stack_update"
+	ActionStackUp      = "stack_up"
+	ActionStackDown    = "stack_down"
+	ActionStackRemove  = "stack_remove"
 	ActionStackRestart = "stack_restart"
 	ActionStackPull    = "stack_pull"
 	// 备份管理（见 docs/guide/backup-design.md）
@@ -41,6 +41,9 @@ const (
 	// 反向代理管理（见 docs/guide/proxy-design.md）
 	ActionProxyApply  = "proxy_apply"
 	ActionProxyDelete = "proxy_delete"
+	// 定时任务管理（见 docs/guide/cron-design.md）
+	ActionCronApply  = "cron_apply"
+	ActionCronDelete = "cron_delete"
 )
 
 // ResourceStack Compose Stack 资源类型
@@ -71,6 +74,9 @@ const ResourceFile = "file"
 
 // ResourceProxySite 反代站点资源类型（见 docs/guide/proxy-design.md）
 const ResourceProxySite = "proxy_site"
+
+// ResourceCronJob 定时任务资源类型（见 docs/guide/cron-design.md）
+const ResourceCronJob = "cron_job"
 
 // Status 状态
 const (
