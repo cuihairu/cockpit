@@ -18,6 +18,7 @@ import {
   DeploymentUnitOutlined,
   ClockCircleOutlined,
   SafetyCertificateOutlined,
+  GlobalOutlined,
   VideoCameraOutlined,
 } from '@ant-design/icons'
 import Login from './pages/Login'
@@ -41,6 +42,7 @@ const Backups = lazy(() => import('./pages/Backups'))
 const Proxy = lazy(() => import('./pages/Proxy'))
 const Cron = lazy(() => import('./pages/Cron'))
 const Drift = lazy(() => import('./pages/Drift'))
+const DNS = lazy(() => import('./pages/DNS'))
 const Recordings = lazy(() => import('./pages/Recordings'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Profile = lazy(() => import('./pages/Profile'))
@@ -137,6 +139,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/drift',
       name: '漂移检测',
       icon: <SafetyCertificateOutlined />,
+    },
+    {
+      path: '/dns',
+      name: 'DNS 管理',
+      icon: <GlobalOutlined />,
     },
     {
       path: '/monitor',
@@ -313,6 +320,7 @@ const MainLayout = () => {
             <Route path="/proxy" element={<Proxy />} />
             <Route path="/cron" element={<Cron />} />
             <Route path="/drift" element={<Drift />} />
+            <Route path="/dns" element={<DNS />} />
             <Route path="/recordings" element={<Recordings />} />
             <Route path="/monitor" element={<Monitor />} />
             <Route path="/settings" element={<Settings />} />

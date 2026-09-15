@@ -696,3 +696,47 @@ export interface CronJobsResult {
   jobs: CronJob[]
   external: string
 }
+
+// ========== DNS 管理（Cloudflare，见 dns-design.md） ==========
+
+// DNS 配置探测（只返回布尔，不含 token）
+export interface DNSStatus {
+  configured: boolean
+  provider: string
+}
+
+// DNS 托管区（in_cmdb = 是否已登记在「资源 → 域名」）
+export interface DNSZone {
+  id: string
+  name: string
+  status: string
+  name_servers: string[]
+  in_cmdb: boolean
+}
+
+// DNS 记录
+export interface DNSRecord {
+  id: string
+  type: string
+  name: string
+  content: string
+  ttl: number
+  proxied: boolean
+  locked: boolean
+}
+
+// 创建/更新入参
+export interface DNSRecordInput {
+  type: string
+  name: string
+  content: string
+  ttl: number
+  proxied: boolean
+}
+
+// 记录分页结果
+export interface DNSRecordsPage {
+  records: DNSRecord[]
+  page: number
+  total_pages: number
+}

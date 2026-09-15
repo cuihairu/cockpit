@@ -34,6 +34,11 @@ import type {
   TerminalRecording,
   ServerBackupFile,
   ServerBackupConfig,
+  DNSStatus,
+  DNSZone,
+  DNSRecord,
+  DNSRecordInput,
+  DNSRecordsPage,
   NotificationStatus,
   NotificationSendResult,
   BackupConfig,
@@ -545,6 +550,48 @@ class ApiService {
 
   async deleteServerBackup(name: string): Promise<void> {
     await this.client.delete(`/server-backups/${encodeURIComponent(name)}`)
+  }
+
+  // ========== DNS 管理（Cloudflare） ==========
+  // 配置探测（未配置 token 时业务端点统一 503）
+  async getDNSStatus(): Promise<DNSStatus> {
+    return this.client.get<unknown, DNSStatus>('/dns/status')
+  }
+
+  async getDNSZones(): Promise<DNSZone[]> {
+    const resp = await this.client.get<unknown, { data: DNSZone[] }>('/dns/zones')
+    return resp.data ?? []
+  }
+
+  async getDNSRecords(zoneID: string, type?: string, page?: number): Promise<DNSRecordsPage> {
+    const params: Record<string, string> = {}
+    if (type) params.type = type
+    if (page) params.page = String(page)
+    const resp = await this.client.get<unknown, { data: DNSRecordsPage }>(
+      `/dns/zones/${encodeURIComponent(zoneID)}/records`,
+      { params },
+    )
+    return resp.data
+  }
+
+  async createDNSRecord(zoneID: string, input: DNSRecordInput): Promise<DNSRecord> {
+    return this.client.post<unknown, DNSRecord>(
+      `/dns/zones/${encodeURIComponent(zoneID)}/records`,
+      input,
+    )
+  }
+
+  async updateDNSRecord(zoneID: string, recordID: string, input: DNSRecordInput): Promise<DNSRecord> {
+    return this.client.put<unknown, DNSRecord>(
+      `/dns/zones/${encodeURIComponent(zoneID)}/records/${encodeURIComponent(recordID)}`,
+      input,
+    )
+  }
+
+  async deleteDNSRecord(zoneID: string, recordID: string): Promise<void> {
+    await this.client.delete(
+      `/dns/zones/${encodeURIComponent(zoneID)}/records/${encodeURIComponent(recordID)}`,
+    )
   }
 
   // ========== 备份管理 ==========
