@@ -30,6 +30,7 @@ import type {
   LogsQuery,
   LogsQueryResult,
   DriftCheckResult,
+  DriftScanConfig,
   NotificationStatus,
   NotificationSendResult,
   BackupConfig,
@@ -471,6 +472,15 @@ class ApiService {
     return this.client.post<unknown, DriftCheckResult>(
       `/agents/${encodeURIComponent(agentId)}/drift/check`,
     )
+  }
+
+  // 巡检配置：server 定时扫描全部主机并产生漂移告警（0 = 关闭）
+  async getDriftConfig(): Promise<DriftScanConfig> {
+    return this.client.get<unknown, DriftScanConfig>('/drift/config')
+  }
+
+  async putDriftConfig(scanIntervalSeconds: number): Promise<void> {
+    await this.client.put('/drift/config', { scan_interval_seconds: scanIntervalSeconds })
   }
 
   // ========== 备份管理 ==========

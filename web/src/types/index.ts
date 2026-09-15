@@ -501,6 +501,14 @@ export interface DriftCheckResult {
   checked_at: number
 }
 
+// 巡检配置（server 定时 drift.check + 漂移告警；0 = 关闭）
+export interface DriftScanConfig {
+  scan_interval_seconds: number
+  min: number
+  max: number
+  default: number
+}
+
 // 通知渠道摘要（不含 token/secret 凭据）
 export interface NotificationChannelSummary {
   channel: string // herald / ntfy / webhook / telegram
