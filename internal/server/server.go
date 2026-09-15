@@ -17,6 +17,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/config"
+	"github.com/cuihairu/cockpit/internal/dns"
 	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/probe"
 	"github.com/cuihairu/cockpit/internal/protocol"
@@ -40,6 +41,7 @@ type Server struct {
 	ticketMgr      *TicketManager
 	inventorySync  *inventorysync.Manager
 	probeRunner    *probe.Runner
+	dns            dns.Provider
 	cfg            *config.Config
 	upgrader       websocket.Upgrader
 
@@ -157,6 +159,12 @@ func (s *Server) Start() error {
 
 	// 启动自动健康探测（5 分钟间隔）
 	s.startProbeRunner()
+
+	// DNS 管理 client（token 未配置时为 nil，API 统一 503 引导）
+	s.dns = dns.NewCloudflare(s.cfg.DNS.Cloudflare.APIToken)
+	if s.dns != nil {
+		log.Print("DNS provider enabled: cloudflare")
+	}
 
 	// 注册所有路由
 	s.registerRoutes(mux)

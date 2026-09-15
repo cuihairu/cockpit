@@ -84,6 +84,9 @@ const ResourceRecording = "recording"
 // ResourceServerBackup server 自身数据库备份资源类型（见 server-backup-design.md）
 const ResourceServerBackup = "server_backup"
 
+// ResourceDNSRecord DNS 记录资源类型（见 dns-design.md）
+const ResourceDNSRecord = "dns_record"
+
 // Status 状态
 const (
 	StatusSuccess = "success"

@@ -18,6 +18,18 @@ type Config struct {
 	Agent         *AgentConfig         `yaml:"agent"`
 	Inventory     *InventoryConfig     `yaml:"inventory,omitempty"`
 	RemoteControl *RemoteControlConfig `yaml:"remote_control,omitempty"`
+	DNS           *DNSConfig           `yaml:"dns,omitempty"`
+}
+
+// DNSConfig DNS 管理配置（M1：Cloudflare）
+type DNSConfig struct {
+	Cloudflare *CloudflareDNSConfig `yaml:"cloudflare,omitempty"`
+}
+
+// CloudflareDNSConfig Cloudflare API token（建议用 env CLOUDFLARE_API_TOKEN
+// 注入，secret 不落 yaml）
+type CloudflareDNSConfig struct {
+	APIToken string `yaml:"api_token,omitempty"`
 }
 
 // RemoteControlConfig 远程控制（Terminal/Desktop/VNC）相关配置
@@ -230,5 +242,16 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.RemoteControl == nil {
 		cfg.RemoteControl = &RemoteControlConfig{}
+	}
+
+	if cfg.DNS == nil {
+		cfg.DNS = &DNSConfig{}
+	}
+	if cfg.DNS.Cloudflare == nil {
+		cfg.DNS.Cloudflare = &CloudflareDNSConfig{}
+	}
+	// env CLOUDFLARE_API_TOKEN 优先于 yaml（secret 不落文件的惯例）
+	if v := os.Getenv("CLOUDFLARE_API_TOKEN"); v != "" {
+		cfg.DNS.Cloudflare.APIToken = v
 	}
 }

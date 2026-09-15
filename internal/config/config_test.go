@@ -250,3 +250,23 @@ remote_control:
 		t.Fatalf("policy.AllowedPorts = %#v, want [22 3389]", policy.AllowedPorts)
 	}
 }
+
+func TestDNSCloudflareEnvOverride(t *testing.T) {
+	// yaml 里的 token 应被 env 覆盖
+	t.Setenv("CLOUDFLARE_API_TOKEN", "env-token")
+	cfg := Normalize(&Config{DNS: &DNSConfig{Cloudflare: &CloudflareDNSConfig{APIToken: "yaml-token"}}})
+	if cfg.DNS.Cloudflare.APIToken != "env-token" {
+		t.Fatalf("APIToken = %q, want env-token", cfg.DNS.Cloudflare.APIToken)
+	}
+	// env 未设置时保留 yaml 值
+	t.Setenv("CLOUDFLARE_API_TOKEN", "")
+	cfg = Normalize(&Config{DNS: &DNSConfig{Cloudflare: &CloudflareDNSConfig{APIToken: "yaml-token"}}})
+	if cfg.DNS.Cloudflare.APIToken != "yaml-token" {
+		t.Fatalf("APIToken = %q, want yaml-token", cfg.DNS.Cloudflare.APIToken)
+	}
+	// 完全未配置时子结构补齐为空（不 panic）
+	cfg = Normalize(&Config{})
+	if cfg.DNS == nil || cfg.DNS.Cloudflare == nil || cfg.DNS.Cloudflare.APIToken != "" {
+		t.Fatalf("default DNS config = %+v", cfg.DNS)
+	}
+}

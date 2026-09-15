@@ -45,6 +45,8 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleRecordings(w, r)
 	case path == "/server-backups" || strings.HasPrefix(path, "/server-backups/"):
 		s.handleServerBackups(w, r)
+	case path == "/dns" || strings.HasPrefix(path, "/dns/"):
+		s.handleDNS(w, r)
 	case strings.HasPrefix(path, "/agents/"):
 		agentID := strings.TrimPrefix(path, "/agents/")
 		// 远程文件管理 /agents/{id}/files/...（见 api_files.go）
