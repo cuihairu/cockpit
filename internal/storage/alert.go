@@ -102,3 +102,23 @@ func (d *DB) GetUnreadCount() (int64, error) {
 	err := d.db.Model(&Alert{}).Where("read = ?", false).Count(&count).Error
 	return count, err
 }
+
+// HasUnreadAlert 判断同资源同标题的未读告警是否已存在（告警去重，见
+// docs/guide/probe-enhance-design.md M2 / D15）。未读即「尚未被用户知晓」；
+// 已读后同一问题再现会产生新告警并再次通知。
+func (d *DB) HasUnreadAlert(resourceType, resourceID, title string) (bool, error) {
+	var count int64
+	q := d.db.Model(&Alert{}).Where("read = ? AND title = ?", false, title)
+	if resourceType == "" {
+		q = q.Where("resource_type IS NULL OR resource_type = ''")
+	} else {
+		q = q.Where("resource_type = ?", resourceType)
+	}
+	if resourceID == "" {
+		q = q.Where("resource_id IS NULL OR resource_id = ''")
+	} else {
+		q = q.Where("resource_id = ?", resourceID)
+	}
+	err := q.Count(&count).Error
+	return count > 0, err
+}

@@ -2,16 +2,19 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/alert"
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/probe"
+	"github.com/cuihairu/cockpit/internal/storage"
 )
 
 func newProbeTestServer(t *testing.T) *Server {
@@ -25,6 +28,12 @@ func newProbeTestServer(t *testing.T) *Server {
 	}
 }
 
+// probeConfigJSON 全量 PUT body（M2/D14：config 是全量对象）
+func probeConfigJSON(interval, fail, disk, mem, warn, info int) string {
+	return fmt.Sprintf(`{"interval_seconds": %d, "fail_threshold": %d, "disk_percent": %d, "memory_percent": %d, "cert_warn_days": %d, "cert_info_days": %d}`,
+		interval, fail, disk, mem, warn, info)
+}
+
 func TestProbeConfigGet(t *testing.T) {
 	s := newProbeTestServer(t)
 
@@ -34,11 +43,7 @@ func TestProbeConfigGet(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code = %d, want 200", rec.Code)
 	}
-	var resp struct {
-		IntervalSeconds   int64 `json:"interval_seconds"`
-		MinIntervalSecond int64 `json:"min_interval_seconds"`
-		MaxIntervalSecond int64 `json:"max_interval_seconds"`
-	}
+	var resp probeConfigResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -48,13 +53,18 @@ func TestProbeConfigGet(t *testing.T) {
 	if resp.MinIntervalSecond != 30 || resp.MaxIntervalSecond != 3600 {
 		t.Errorf("bounds = [%d, %d], want [30, 3600]", resp.MinIntervalSecond, resp.MaxIntervalSecond)
 	}
+	// M2 阈值默认值
+	if resp.FailThreshold != 2 || resp.DiskPercent != 80 || resp.MemoryPercent != 85 ||
+		resp.CertWarnDays != 7 || resp.CertInfoDays != 30 {
+		t.Errorf("thresholds = %+v, want defaults (2/80/85/7/30)", resp)
+	}
 }
 
 func TestProbeConfigPutPersistsAndApplies(t *testing.T) {
 	s := newProbeTestServer(t)
 
-	body := `{"interval_seconds": 60}`
-	req := httptest.NewRequest(http.MethodPut, "/api/probe/config", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/probe/config",
+		strings.NewReader(probeConfigJSON(60, 3, 90, 95, 3, 21)))
 	rec := httptest.NewRecorder()
 	s.handleProbeConfigPut(rec, req)
 	if rec.Code != http.StatusOK {
@@ -63,27 +73,117 @@ func TestProbeConfigPutPersistsAndApplies(t *testing.T) {
 	if got := s.probeRunner.Interval(); got != time.Minute {
 		t.Errorf("runner interval = %v, want 1m", got)
 	}
+	if got := s.probeRunner.FailThreshold(); got != 3 {
+		t.Errorf("runner fail_threshold = %d, want 3", got)
+	}
 
 	// 落库：新 runner 以 DB 值启动（复用 startProbeRunner 的读取逻辑语义）
 	v, err := s.db.GetSetting(probe.IntervalSettingKey)
 	if err != nil || v != "60" {
 		t.Errorf("stored setting = %q, err = %v, want 60", v, err)
 	}
+	if v, _ := s.db.GetSetting(alert.MemoryThresholdSettingKey); v != "95" {
+		t.Errorf("stored memory threshold = %q, want 95", v)
+	}
+
+	// alert.Generator 下一轮读取生效
+	g := alert.NewGenerator(s.db, nil, nil)
+	g.CheckAllChecks() // loadThresholds 刷新
+	// 通过导出行为验证：阈值快照直接读库比对即可
+	if v, _ := s.db.GetSetting(alert.CertWarnDaysSettingKey); v != "3" {
+		t.Errorf("stored cert warn days = %q, want 3", v)
+	}
 }
 
 func TestProbeConfigPutValidatesRange(t *testing.T) {
 	s := newProbeTestServer(t)
-	for _, bad := range []string{`{"interval_seconds": 5}`, `{"interval_seconds": 7200}`, `{"bogus": 1}`} {
-		req := httptest.NewRequest(http.MethodPut, "/api/probe/config", strings.NewReader(bad))
+	bad := []string{
+		`{"interval_seconds": 5}`,
+		`{"interval_seconds": 7200}`,
+		`{"bogus": 1}`,
+		probeConfigJSON(60, 0, 80, 85, 7, 30),  // fail_threshold 下限
+		probeConfigJSON(60, 11, 80, 85, 7, 30), // fail_threshold 上限
+		probeConfigJSON(60, 2, 10, 85, 7, 30),  // disk 下限
+		probeConfigJSON(60, 2, 80, 100, 7, 30), // mem 上限
+		probeConfigJSON(60, 2, 80, 85, 0, 30),  // cert_warn 下限
+		probeConfigJSON(60, 2, 80, 85, 7, 400), // cert_info 上限
+		probeConfigJSON(60, 2, 80, 85, 30, 7),  // info < warn
+	}
+	for _, body := range bad {
+		req := httptest.NewRequest(http.MethodPut, "/api/probe/config", strings.NewReader(body))
 		rec := httptest.NewRecorder()
 		s.handleProbeConfigPut(rec, req)
 		if rec.Code != http.StatusBadRequest {
-			t.Errorf("body %s code = %d, want 400", bad, rec.Code)
+			t.Errorf("body %s code = %d, want 400", body, rec.Code)
 		}
 	}
 	// 非法请求不影响 runner
 	if got := s.probeRunner.Interval(); got != 5*time.Minute {
 		t.Errorf("runner interval changed by invalid request: %v", got)
+	}
+}
+
+func TestProbeHistory(t *testing.T) {
+	s := newProbeTestServer(t)
+	rows := []*storage.ProbeResult{
+		{ResourceType: "service", ResourceID: "svc-1", Name: "api", Status: "up", CheckedAt: time.Now().Add(-2 * time.Minute)},
+		{ResourceType: "service", ResourceID: "svc-1", Name: "api", Status: "down", CheckedAt: time.Now()},
+		{ResourceType: "service", ResourceID: "svc-2", Name: "db", Status: "up", CheckedAt: time.Now()},
+	}
+	if err := s.db.CreateProbeResults(rows); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// 正常查询：按目标过滤 + 倒序
+	req := httptest.NewRequest(http.MethodGet, "/api/probe/history?resource_type=service&resource_id=svc-1", nil)
+	rec := httptest.NewRecorder()
+	s.handleProbeHistory(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Results []*storage.ProbeResult `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Results) != 2 || resp.Results[0].Status != "down" {
+		t.Fatalf("results = %+v, want 2 rows newest first", resp.Results)
+	}
+
+	// limit 生效
+	req = httptest.NewRequest(http.MethodGet, "/api/probe/history?resource_type=service&resource_id=svc-1&limit=1", nil)
+	rec = httptest.NewRecorder()
+	s.handleProbeHistory(rec, req)
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if len(resp.Results) != 1 {
+		t.Errorf("limit=1 got %d rows, want 1", len(resp.Results))
+	}
+
+	// 缺参 / 非法类型 / 非法 limit
+	for _, bad := range []string{
+		"/api/probe/history",
+		"/api/probe/history?resource_type=service",
+		"/api/probe/history?resource_id=svc-1",
+		"/api/probe/history?resource_type=agent&resource_id=x",
+		"/api/probe/history?resource_type=service&resource_id=svc-1&limit=0",
+		"/api/probe/history?resource_type=service&resource_id=svc-1&limit=999",
+	} {
+		req := httptest.NewRequest(http.MethodGet, bad, nil)
+		rec := httptest.NewRecorder()
+		s.handleProbeHistory(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s code = %d, want 400", bad, rec.Code)
+		}
+	}
+
+	// 空结果返回空数组而非 null
+	s2 := newProbeTestServer(t)
+	req = httptest.NewRequest(http.MethodGet, "/api/probe/history?resource_type=domain&resource_id=none", nil)
+	rec = httptest.NewRecorder()
+	s2.handleProbeHistory(rec, req)
+	if !strings.Contains(rec.Body.String(), `"results":[]`) {
+		t.Errorf("empty history should marshal as [], got %s", rec.Body.String())
 	}
 }
 

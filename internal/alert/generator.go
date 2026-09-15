@@ -3,6 +3,7 @@ package alert
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/config"
@@ -10,11 +11,41 @@ import (
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
+// 告警阈值 Setting 键（见 docs/guide/probe-enhance-design.md M2 / D12）
+const (
+	DiskThresholdSettingKey   = "alert.disk_percent"
+	MemoryThresholdSettingKey = "alert.memory_percent"
+	CertWarnDaysSettingKey    = "alert.cert_warn_days"
+	CertInfoDaysSettingKey    = "alert.cert_info_days"
+)
+
+// 阈值边界与默认值（API 层校验同规则）
+const (
+	MinPercentThreshold    = 50
+	MaxPercentThreshold    = 99
+	DefaultDiskThreshold   = 80
+	DefaultMemoryThreshold = 85
+
+	MinCertWarnDays     = 1
+	MaxCertWarnDays     = 90
+	DefaultCertWarnDays = 7
+
+	MinCertInfoDays     = 1
+	MaxCertInfoDays     = 365
+	DefaultCertInfoDays = 30
+)
+
 // Generator 警告生成器
 type Generator struct {
 	db              *storage.DB
 	notifier        *notification.Service
 	notificationCfg *config.NotificationConfig
+	// 阈值（M2 可配置）：CheckAllChecks 每轮从 Setting 表刷新，
+	// 单测直接调用单项 Check 时用初始默认值
+	diskThreshold int
+	memThreshold  int
+	certWarnDays  int
+	certInfoDays  int
 }
 
 // NewGenerator 创建警告生成器
@@ -23,17 +54,40 @@ func NewGenerator(db *storage.DB, notifier *notification.Service, notifCfg *conf
 		db:              db,
 		notifier:        notifier,
 		notificationCfg: notifCfg,
+		diskThreshold:   DefaultDiskThreshold,
+		memThreshold:    DefaultMemoryThreshold,
+		certWarnDays:    DefaultCertWarnDays,
+		certInfoDays:    DefaultCertInfoDays,
 	}
 }
 
 // CheckAllChecks 检查所有警告条件
 func (g *Generator) CheckAllChecks() {
+	g.loadThresholds()
 	g.CheckExpiringCertificates()
 	g.CheckDownServices()
 	g.CheckOfflineAgents()
 	g.CheckExpiredDomains()
-	g.CheckDiskSpace(80)   // 80% 磁盘使用率阈值
-	g.CheckMemoryUsage(85) // 85% 内存使用率阈值
+	g.CheckDiskSpace(g.diskThreshold)
+	g.CheckMemoryUsage(g.memThreshold)
+}
+
+// loadThresholds 从 Setting 表读取告警阈值（M2/D13：小时级轮询每轮读一次，
+// 无缓存必要）；未配置或非法时保持当前值
+func (g *Generator) loadThresholds() {
+	applyInt := func(key string, minV, maxV int, dst *int) {
+		v, err := g.db.GetSetting(key)
+		if err != nil || v == "" {
+			return
+		}
+		if n, convErr := strconv.Atoi(v); convErr == nil && n >= minV && n <= maxV {
+			*dst = n
+		}
+	}
+	applyInt(DiskThresholdSettingKey, MinPercentThreshold, MaxPercentThreshold, &g.diskThreshold)
+	applyInt(MemoryThresholdSettingKey, MinPercentThreshold, MaxPercentThreshold, &g.memThreshold)
+	applyInt(CertWarnDaysSettingKey, MinCertWarnDays, MaxCertWarnDays, &g.certWarnDays)
+	applyInt(CertInfoDaysSettingKey, MinCertInfoDays, MaxCertInfoDays, &g.certInfoDays)
 }
 
 // CheckExpiringCertificates 检查即将过期的证书
@@ -61,13 +115,13 @@ func (g *Generator) CheckExpiringCertificates() {
 			alertType = "error"
 			title = "证书已过期"
 			shouldAlert = true
-		case daysUntilExpiry <= 7:
+		case daysUntilExpiry <= g.certWarnDays:
 			alertType = "error"
-			title = "证书即将过期（7天内）"
+			title = fmt.Sprintf("证书即将过期（%d天内）", g.certWarnDays)
 			shouldAlert = true
-		case daysUntilExpiry <= 30:
+		case daysUntilExpiry <= g.certInfoDays:
 			alertType = "warning"
-			title = "证书即将过期（30天内）"
+			title = fmt.Sprintf("证书即将过期（%d天内）", g.certInfoDays)
 			shouldAlert = true
 		}
 
@@ -175,10 +229,18 @@ func (g *Generator) CheckMemoryUsage(thresholdPercent int) {
 	}
 }
 
-// createAlertIfNotExists 如果不存在则创建警告
+// createAlertIfNotExists 同资源同标题不存在未读告警时才创建（M2/D15 真去重）。
+// 轮询期间问题持续存在只产生一条告警、只通知一次；用户标已读后同一问题
+// 再现会重新创建并通知（已读=已知晓，再现值得提醒）。查重失败按无重复
+// 处理，宁多勿漏。
 func (g *Generator) createAlertIfNotExists(alertType, title, message, resourceID, resourceType string) {
-	// 检查是否已存在相同类型的未读警告
-	// 这里简化处理，直接创建
+	exists, err := g.db.HasUnreadAlert(resourceType, resourceID, title)
+	if err != nil {
+		log.Printf("Failed to check existing alerts: %v", err)
+	} else if exists {
+		return
+	}
+
 	alert := &storage.Alert{
 		Type:         alertType,
 		Title:        title,
@@ -190,9 +252,11 @@ func (g *Generator) createAlertIfNotExists(alertType, title, message, resourceID
 
 	if err := g.db.CreateAlert(alert); err != nil {
 		log.Printf("Failed to create alert: %v", err)
+		return
 	}
 
-	// 发送外部通知（非阻塞，多渠道扇出；事件白名单在 Service 内过滤）
+	// 发送外部通知（非阻塞，多渠道扇出；事件白名单在 Service 内过滤）。
+	// 仅在真正创建新告警时通知，去重命中的轮次保持安静。
 	g.notifier.SendAlertNonBlocking(alert)
 }
 

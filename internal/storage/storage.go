@@ -24,7 +24,7 @@ type DB struct {
 
 // Config 数据库配置
 type Config struct {
-	Path   string        // 数据库文件路径
+	Path     string          // 数据库文件路径
 	LogLevel logger.LogLevel // 日志级别
 }
 
@@ -108,6 +108,7 @@ func (d *DB) migrate() error {
 		&Setting{},
 		&BackupConfig{},
 		&BackupRun{},
+		&ProbeResult{},
 	)
 }
 
@@ -370,9 +371,9 @@ func (d *DB) UpsertService(service *Service) error {
 // UpdateServiceStatus 更新服务探测状态
 func (d *DB) UpdateServiceStatus(id, status string, responseTimeMs int, lastCheck time.Time) error {
 	return d.db.Model(&Service{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"status":          status,
+		"status":           status,
 		"response_time_ms": responseTimeMs,
-		"last_check":      lastCheck,
+		"last_check":       lastCheck,
 	}).Error
 }
 

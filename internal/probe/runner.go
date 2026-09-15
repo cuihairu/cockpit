@@ -24,11 +24,24 @@ const (
 	DefaultInterval    = 5 * time.Minute
 )
 
+// 探测失败阈值边界：连续失败多少次判定 down（过滤瞬时抖动）
+const (
+	MinFailThreshold     = 1
+	MaxFailThreshold     = 10
+	DefaultFailThreshold = 2
+)
+
 // IntervalSettingKey 探测间隔在 storage.Setting 表中的键
 const IntervalSettingKey = "probe.interval_seconds"
 
-// serviceFailureThreshold 连续失败多少次才判定 down 并通知（过滤瞬时抖动）
-const serviceFailureThreshold = 2
+// FailThresholdSettingKey 连续失败判定阈值在 storage.Setting 表中的键
+const FailThresholdSettingKey = "probe.fail_threshold"
+
+// probeHistoryRetention 拨测历史保留期；probeHistoryPruneInterval 清理频率
+const (
+	probeHistoryRetention     = 30 * 24 * time.Hour
+	probeHistoryPruneInterval = 24 * time.Hour
+)
 
 // ProbeResult 单次探测结果
 type ProbeResult struct {
@@ -67,12 +80,16 @@ type Runner struct {
 	// intervalSeconds 探测间隔（秒）。atomic 读写：API 线程 SetInterval，
 	// 探测循环 time.After(Interval()) 每轮重读，间隔变化下一轮生效。
 	intervalSeconds atomic.Int64
-	notifier        *notification.Service
+	// failThreshold 连续失败判定 down 的次数，同 interval 的 atomic 模式
+	failThreshold atomic.Int64
+	notifier      *notification.Service
 	// serviceStates 服务边沿状态；仅在探测循环 goroutine 内访问，无需加锁
 	serviceStates map[string]*serviceState
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
+	// lastPrune 上次历史清理时间；仅在探测循环 goroutine 内访问
+	lastPrune time.Time
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 // NewRunner 创建探测运行器
@@ -91,6 +108,7 @@ func NewRunner(db *storage.DB, interval time.Duration, notifier *notification.Se
 		cancel:        cancel,
 	}
 	r.intervalSeconds.Store(int64(interval / time.Second))
+	r.failThreshold.Store(DefaultFailThreshold)
 	return r
 }
 
@@ -117,6 +135,43 @@ func (r *Runner) SetInterval(d time.Duration) {
 		secs = MaxIntervalSeconds
 	}
 	r.intervalSeconds.Store(secs)
+}
+
+// FailThreshold 当前连续失败判定阈值
+func (r *Runner) FailThreshold() int {
+	n := r.failThreshold.Load()
+	if n < MinFailThreshold || n > MaxFailThreshold {
+		return DefaultFailThreshold
+	}
+	return int(n)
+}
+
+// SetFailThreshold 动态调整失败判定阈值（下一轮探测生效）；
+// 超出 [Min, Max] 边界的值被夹紧，调用方（API 层）已先行校验。
+func (r *Runner) SetFailThreshold(n int) {
+	if n < MinFailThreshold {
+		n = MinFailThreshold
+	}
+	if n > MaxFailThreshold {
+		n = MaxFailThreshold
+	}
+	r.failThreshold.Store(int64(n))
+}
+
+// LoadFailThreshold 从 Setting 表读取持久化的失败阈值（启动时调用一次）。
+// 与 SetFailThreshold 的夹紧语义不同：存储值仅在合法范围内才应用，
+// 越界/非法值忽略并保持当前值。
+func (r *Runner) LoadFailThreshold() {
+	if r.db == nil {
+		return
+	}
+	v, err := r.db.GetSetting(FailThresholdSettingKey)
+	if err != nil || v == "" {
+		return
+	}
+	if n, convErr := strconv.Atoi(v); convErr == nil && n >= MinFailThreshold && n <= MaxFailThreshold {
+		r.failThreshold.Store(int64(n))
+	}
 }
 
 // Start 启动定期探测循环
@@ -200,6 +255,10 @@ func (r *Runner) RunAllChecks() *ProbeResults {
 
 	results.Duration = time.Since(start)
 
+	// 历史落库 + 按需清理保留期外记录（失败只记日志，不阻断探测主流程）
+	r.recordHistory(results.Results)
+	r.maybePruneHistory()
+
 	// 如果探测了资源，打印摘要日志
 	total := results.Domains + results.Services + results.Certificates
 	if total > 0 {
@@ -210,6 +269,43 @@ func (r *Runner) RunAllChecks() *ProbeResults {
 	}
 
 	return results
+}
+
+// recordHistory 一轮探测结果批量写入历史表（D8/D9：三类目标全记，失败不阻断）
+func (r *Runner) recordHistory(results []ProbeResult) {
+	if r.db == nil || len(results) == 0 {
+		return
+	}
+	rows := make([]*storage.ProbeResult, 0, len(results))
+	for _, res := range results {
+		rows = append(rows, &storage.ProbeResult{
+			ResourceType: res.ResourceType,
+			ResourceID:   res.ResourceID,
+			Name:         res.Name,
+			Status:       res.Status,
+			LatencyMs:    int(res.LatencyMs),
+			Message:      res.Message,
+			CheckedAt:    res.CheckedAt,
+		})
+	}
+	if err := r.db.CreateProbeResults(rows); err != nil {
+		log.Printf("[probe] Failed to record history: %v", err)
+	}
+}
+
+// maybePruneHistory 距上次清理超过 24h 时清一次保留期外历史（D10）；
+// 仅探测循环内调用，lastPrune 无需加锁
+func (r *Runner) maybePruneHistory() {
+	if r.db == nil || time.Since(r.lastPrune) < probeHistoryPruneInterval {
+		return
+	}
+	r.lastPrune = time.Now()
+	cutoff := time.Now().Add(-probeHistoryRetention)
+	if n, err := r.db.DeleteProbeResultsOlderThan(cutoff); err != nil {
+		log.Printf("[probe] History prune failed: %v", err)
+	} else if n > 0 {
+		log.Printf("[probe] Pruned %d probe history rows older than %s", n, cutoff.Format("2006-01-02"))
+	}
 }
 
 // checkDomains 探测所有域名
@@ -305,7 +401,7 @@ func (r *Runner) checkServices() []ProbeResult {
 }
 
 // trackServiceEdge 服务状态边沿检测与即时通知。
-// 连续 serviceFailureThreshold 次失败才判定 down（过滤瞬时抖动），
+// 连续 FailThreshold() 次失败才判定 down（过滤瞬时抖动），
 // 通知发出后不再重复；恢复（探测成功）时发 service.up 恢复通知。
 // 事件是否真正投递由 notification.Service 按 cfg.Events 白名单过滤。
 func (r *Runner) trackServiceEdge(res ProbeResult) {
@@ -318,7 +414,8 @@ func (r *Runner) trackServiceEdge(res ProbeResult) {
 
 	if res.Error != "" || res.Status == "down" {
 		st.failCount++
-		if st.failCount == serviceFailureThreshold && !st.notified {
+		// >= 而非 ==：阈值运行中被调小后仍能触发
+		if st.failCount >= r.FailThreshold() && !st.notified {
 			st.notified = true
 			r.notifyService(res, notification.ServiceDown,
 				fmt.Sprintf("服务 %s 连续 %d 次探测失败：%s", res.Name, st.failCount, res.Message))

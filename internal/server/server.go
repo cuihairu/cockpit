@@ -335,6 +335,7 @@ func (s *Server) startProbeRunner() {
 		}
 	}
 	s.probeRunner = probe.NewRunner(s.db, interval, s.notifier)
+	s.probeRunner.LoadFailThreshold()
 	s.probeRunner.Start()
 	log.Printf("Probe runner started (interval: %s)", interval)
 }
