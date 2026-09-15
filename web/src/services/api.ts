@@ -33,6 +33,9 @@ import type {
   BackupTask,
   FileEntry,
   FileReadResult,
+  ProxySite,
+  ProxySiteDetail,
+  ProxyStatus,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -532,6 +535,40 @@ class ApiService {
       responseType: 'blob',
     })
     return resp as unknown as Blob
+  }
+
+  // ============ 反向代理管理（Nginx 站点下发） ============
+
+  // nginx 安装状态概览
+  async getProxyStatus(agentId: string): Promise<ProxyStatus> {
+    return this.client.get<unknown, ProxyStatus>(`/agents/${encodeURIComponent(agentId)}/proxy/status`)
+  }
+
+  // 列 cockpit 名下站点
+  async getProxySites(agentId: string): Promise<{ sites: ProxySite[] }> {
+    return this.client.get<unknown, { sites: ProxySite[] }>(
+      `/agents/${encodeURIComponent(agentId)}/proxy/sites`,
+    )
+  }
+
+  // 查看站点与渲染后的配置全文
+  async getProxySite(agentId: string, name: string): Promise<ProxySiteDetail> {
+    return this.client.get<unknown, ProxySiteDetail>(
+      `/agents/${encodeURIComponent(agentId)}/proxy/sites/${encodeURIComponent(name)}`,
+    )
+  }
+
+  // 应用站点（nginx -t → 写 → reload；失败时错误信息带 nginx -t stderr 摘要）
+  async applyProxySite(agentId: string, site: ProxySite): Promise<{ name: string; file: string }> {
+    return this.client.put<unknown, { name: string; file: string }>(
+      `/agents/${encodeURIComponent(agentId)}/proxy/sites/${encodeURIComponent(site.name)}`,
+      site,
+    )
+  }
+
+  // 删除站点（reload 失败时 agent 自动恢复文件）
+  async deleteProxySite(agentId: string, name: string): Promise<void> {
+    await this.client.delete(`/agents/${encodeURIComponent(agentId)}/proxy/sites/${encodeURIComponent(name)}`)
   }
 }
 

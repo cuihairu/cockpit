@@ -548,3 +548,33 @@ export interface FileReadResult {
   size: number
   eof: boolean
 }
+
+// ============ 反向代理（Nginx 站点管理） ============
+
+// proxy.status：nginx 安装状态概览
+export interface ProxyStatus {
+  installed: boolean
+  version: string
+  confDir: string
+  siteCount: number
+  reloadMode: 'systemctl' | 'signal'
+}
+
+// 一个反代站点的声明（与 agent 侧 ProxySite 同构）
+export interface ProxySite {
+  name: string
+  serverNames: string[]
+  upstream: string
+  scheme: 'http' | 'https'
+  tlsCert?: string
+  tlsKey?: string
+  websocket?: boolean
+  extra?: string
+}
+
+// proxy.site.get：站点元数据 + 渲染后的配置全文
+export interface ProxySiteDetail {
+  name: string
+  site: ProxySite
+  content: string
+}
