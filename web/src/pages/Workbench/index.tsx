@@ -5,6 +5,7 @@ import {
   CodeOutlined,
   DesktopOutlined,
   EyeOutlined,
+  FileTextOutlined,
   FolderOpenOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
@@ -15,6 +16,7 @@ import DesktopModal from '@/components/DesktopModal'
 import VNCModal from '@/components/VNCModal'
 import AgentSidebar from '@/workbench/AgentSidebar'
 import ConnectionPanel from '@/workbench/ConnectionPanel'
+import LogsPanel from '@/workbench/LogsPanel'
 import OverviewPanel from '@/workbench/OverviewPanel'
 import { getRemoteServices } from '@/workbench/services'
 import type { SessionConfig, WorkbenchTab } from '@/workbench/types'
@@ -22,6 +24,7 @@ import type { SessionConfig, WorkbenchTab } from '@/workbench/types'
 const protocolTabs: Array<{ key: WorkbenchTab; label: string; icon: React.ReactNode }> = [
   { key: 'overview', label: '概览', icon: <SettingOutlined /> },
   { key: 'files', label: '文件', icon: <FolderOpenOutlined /> },
+  { key: 'logs', label: '日志', icon: <FileTextOutlined /> },
   { key: 'ssh', label: 'SSH', icon: <CodeOutlined /> },
   { key: 'rdp', label: 'RDP', icon: <DesktopOutlined /> },
   { key: 'vnc', label: 'VNC', icon: <EyeOutlined /> },
@@ -68,7 +71,7 @@ const Workbench = () => {
       return
     }
     if (protocol === 'overview') return
-    if (protocol === 'files') return // 文件浏览器内嵌于 Tab 内容
+    if (protocol === 'files' || protocol === 'logs') return // 内嵌于 Tab 内容
 
     const service = remoteServices.find((item) => item.protocol === protocol)
     if (!service) {
@@ -137,6 +140,15 @@ const Workbench = () => {
                   label: '文件',
                   children: selectedAgent ? (
                     <FileBrowser agentId={selectedAgent.id} />
+                  ) : (
+                    <Empty description="暂无可用 Agent" />
+                  ),
+                },
+                {
+                  key: 'logs',
+                  label: '日志',
+                  children: selectedAgent ? (
+                    <LogsPanel agentId={selectedAgent.id} />
                   ) : (
                     <Empty description="暂无可用 Agent" />
                   ),

@@ -25,6 +25,10 @@ import type {
   StackDeployment,
   ProbeConfig,
   ProbeResult,
+  LogsStatus,
+  LogsSources,
+  LogsQuery,
+  LogsQueryResult,
   NotificationStatus,
   NotificationSendResult,
   BackupConfig,
@@ -435,6 +439,29 @@ class ApiService {
   // 向全部启用渠道发送测试通知，返回逐渠道结果
   async testNotification(): Promise<{ results: NotificationSendResult[] }> {
     return this.client.post<unknown, { results: NotificationSendResult[] }>('/notification/test')
+  }
+
+  // ========== 远程日志查询（日志查看） ==========
+  // 两类日志源可用性（journalctl / docker）
+  async getLogsStatus(agentId: string): Promise<LogsStatus> {
+    return this.client.get<unknown, LogsStatus>(
+      `/agents/${encodeURIComponent(agentId)}/logs/status`,
+    )
+  }
+
+  // 运行中的 systemd 服务与 docker 容器
+  async getLogsSources(agentId: string): Promise<LogsSources> {
+    return this.client.get<unknown, LogsSources>(
+      `/agents/${encodeURIComponent(agentId)}/logs/sources`,
+    )
+  }
+
+  // 查询日志（tail / since_minutes / grep 过滤在 agent 侧完成）
+  async queryLogs(agentId: string, query: LogsQuery): Promise<LogsQueryResult> {
+    return this.client.post<unknown, LogsQueryResult>(
+      `/agents/${encodeURIComponent(agentId)}/logs/query`,
+      query,
+    )
   }
 
   // ========== 备份管理 ==========

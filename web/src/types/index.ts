@@ -463,6 +463,30 @@ export interface ProbeResult {
   checkedAt: string
 }
 
+// 远程日志查询（见 docs/guide/logs-design.md）
+export interface LogsStatus {
+  journalctl: boolean
+  docker: boolean
+}
+
+export interface LogsSources {
+  systemd: string[]
+  docker: string[]
+}
+
+export interface LogsQuery {
+  type: 'systemd' | 'docker'
+  source: string
+  tail: number
+  since_minutes: number
+  grep: string
+}
+
+export interface LogsQueryResult {
+  lines: string
+  truncated: boolean
+}
+
 // 通知渠道摘要（不含 token/secret 凭据）
 export interface NotificationChannelSummary {
   channel: string // herald / ntfy / webhook / telegram
