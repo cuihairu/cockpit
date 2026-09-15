@@ -736,7 +736,7 @@
 - **拨测增强**：探测间隔可配置（当前硬编码 5 分钟）、通知渠道集成（ntfy/webhook/Telegram，告警框架已有）、心跳条式状态历史 UI。→ 方案参考：Uptime Kuma；Cockpit 差异化优势是 probe 天然联动 inventory 资源 + 经 Agent 所在网络分布式探测。✅ M1 完成（2026-09-14）：探测间隔 UI 可配（30-3600s，DB 持久化 + 立即生效）、多渠道通知（herald/ntfy/webhook/telegram，config.yaml 配置）、服务宕机/恢复即时通知（连续 2 次失败防抖）、测试通知按钮；方案与遗留项见 `docs/guide/probe-enhance-design.md`。剩余：心跳条式状态历史 UI（需探测结果历史表）、告警阈值配置化、alert.Generator 重复告警去重。
 - **备份管理**：数据库/配置/卷的快照与恢复，定时备份策略 + 异地保留。这是个人云数据安全的核心缺口。✅ 方案设计 + M1 完成（2026-09-14）：`docs/guide/backup-design.md`；Agent 本地 tar.gz 打包（复用 stack 异步任务模型，路径穿越防护 + 符号链接不跟随）+ retention 自动清理、server 每分钟调度（daily@HH:mm / every:Nh / manual，停机补跑一次）+ 运行历史 + 失败 backup.failed 通知、REST `/api/backups` + 审计、Web `/backups` 页面（配置 CRUD/立即运行/历史/文件浏览删除）。✅ M1.5 完成（2026-09-14）：恢复 restore（独立目录解包绝不覆盖 + Zip Slip 防护 + 双确认：UI 输入备份名 + API confirm_name 校验 + 审计）、备份文件下载（分块 RPC backup.read base64 经 server 流转发，server 不落盘，256KB 分块 + 15 分钟总超时）、Web 文件行下载/恢复 + 恢复 Modal 任务日志轮询。剩余：真实 Docker 测试机验收、S3/rclone 异地、server 自身 SQLite 备份（VACUUM INTO）、数据库热备钩子。
 - **反向代理/路由管理**：Nginx/Caddy/Traefik 配置可视化与下发，把「网关」资源从记录升级为可管理对象。
-- **文件管理器**：通过 Agent 远程文件浏览/上传/下载（Workbench 目前只有终端和桌面），支撑配置编辑与日志文件查看。→ 可同时参考 Guacamole 的远控文件传输通道设计。
+- **文件管理器**：通过 Agent 远程文件浏览/上传/下载（Workbench 目前只有终端和桌面），支撑配置编辑与日志文件查看。→ 可同时参考 Guacamole 的远控文件传输通道设计。✅ 方案设计 + M1 完成（2026-09-15）：`docs/guide/file-manager-design.md`；Agent file provider（list/read/write/mkdir/delete/rename，分块 base64 RPC 与 backup.read 同构，全平台注册）、双端路径校验 + symlink 拒绝（不跟随，删除只删链接本身）、追加模式要求文件已存在（防分块上传碎片）、server `/api/agents/{id}/files/*` 转发 + 下载流式转发（server 不落盘）+ 变更类操作审计（file_write/mkdir/delete/rename）、Workbench「文件」Tab（面包屑/手输跳转/编辑 ≤1MB/上传 ≤10MB/下载不限大小/目录删除输入名字确认）。剩余：断点续传大文件上传、文本搜索、chmod/chown、图片预览。
 
 ### P2 — 远期（生态扩展）
 
