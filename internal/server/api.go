@@ -39,6 +39,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleAgentsList(w, r)
 	case strings.HasPrefix(path, "/agents/"):
 		agentID := strings.TrimPrefix(path, "/agents/")
+		// 远程文件管理 /agents/{id}/files/...（见 api_files.go）
+		if strings.Contains(agentID, "/files/") {
+			s.handleAgentFilesAPI(w, r, agentID)
+			return
+		}
 		// Handle /agents/{id}/secret sub-path
 		if strings.HasSuffix(agentID, "/secret") {
 			s.handleAgentSecret(w, r, strings.TrimSuffix(agentID, "/secret"))

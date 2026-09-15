@@ -36,6 +36,10 @@ func (a *Agent) setupProviders() {
 		a.rpc.RegisterProvider(rpc.NewBackupProvider(rpc.BackupConfig{}))
 	}
 
+	// 1.6 File Provider：远程文件管理，Go 标准库实现全平台可用，
+	// 无条件注册（与 detectCapabilities 追加 file capability 的条件一致）
+	a.rpc.RegisterProvider(rpc.NewFileProvider())
+
 	// 2. 按检测到的能力注册
 	for _, cap := range a.capabilities {
 		switch cap.Type {

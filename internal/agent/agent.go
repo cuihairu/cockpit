@@ -266,6 +266,16 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		})
 	}
 
+	// file capability：远程文件管理，标准库实现全平台可用，无需 detector
+	capabilities = append(capabilities, protocol.Capability{
+		Type:    "file",
+		Version: "1",
+		Metadata: map[string]interface{}{
+			"maxReadChunk":  rpc.FileReadChunkLimit(),
+			"maxWriteChunk": rpc.FileWriteChunkLimit(),
+		},
+	})
+
 	return capabilities
 }
 

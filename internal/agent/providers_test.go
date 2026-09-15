@@ -264,7 +264,7 @@ func TestSetupProviders_UnknownCapabilityIgnored(t *testing.T) {
 // baseTypes 平台相关的无条件注册类型，测试期望以它为基础：
 // system 始终注册；backup 仅 Linux 注册（与 setupProviders 的注册条件一致）。
 func baseTypes(extra ...string) []string {
-	want := []string{"system"}
+	want := []string{"system", "file"}
 	if runtime.GOOS == "linux" {
 		want = append(want, "backup")
 	}

@@ -55,6 +55,17 @@ const ResourceProbe = "probe"
 // ResourceNotification 通知渠道资源类型
 const ResourceNotification = "notification"
 
+// 文件管理动作（只记变更类操作，浏览/读/下载不记）
+const (
+	ActionFileWrite  = "file_write"
+	ActionFileMkdir  = "file_mkdir"
+	ActionFileDelete = "file_delete"
+	ActionFileRename = "file_rename"
+)
+
+// ResourceFile 远程文件资源类型
+const ResourceFile = "file"
+
 // Status 状态
 const (
 	StatusSuccess = "success"
