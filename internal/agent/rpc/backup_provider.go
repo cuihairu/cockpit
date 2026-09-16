@@ -177,6 +177,8 @@ func (p *BackupProvider) RunBackup(params map[string]interface{}) (interface{}, 
 		defer lock.Unlock()
 
 		file, size, err := p.pack(task, name, sources, destDir, retention)
+		// 终态字段在锁内更新：GetTask 轮询（server 侧）会并发读取
+		p.mu.Lock()
 		task.FinishedAt = p.now()
 		task.File = file
 		task.Size = size
@@ -187,6 +189,7 @@ func (p *BackupProvider) RunBackup(params map[string]interface{}) (interface{}, 
 		} else {
 			task.Status = backupTaskSuccess
 		}
+		p.mu.Unlock()
 	}()
 
 	return map[string]interface{}{"taskId": task.ID, "status": "started"}, nil
@@ -198,11 +201,13 @@ func (p *BackupProvider) GetTask(taskID string) (map[string]interface{}, error) 
 		return nil, fmt.Errorf("taskId required")
 	}
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	task, ok := p.tasks[taskID]
-	p.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("task not found: %s", taskID)
 	}
+	// 任务字段在锁内读取：执行协程会并发写终态（cappedBuffer 自持锁
+	// 只保护日志缓冲本身）
 	return map[string]interface{}{
 		"taskId":     task.ID,
 		"action":     task.Action,
@@ -330,8 +335,10 @@ func (p *BackupProvider) RunRestore(params map[string]interface{}) (interface{},
 		defer func() { <-p.sem }()
 		defer lock.Unlock()
 
-		task.Size = info.Size()
 		err := p.unpack(task, dir, name, destDir)
+		// 终态字段在锁内更新：GetTask 轮询会并发读取
+		p.mu.Lock()
+		task.Size = info.Size()
 		task.FinishedAt = p.now()
 		task.File = name
 		if err != nil {
@@ -341,6 +348,7 @@ func (p *BackupProvider) RunRestore(params map[string]interface{}) (interface{},
 		} else {
 			task.Status = backupTaskSuccess
 		}
+		p.mu.Unlock()
 	}()
 
 	return map[string]interface{}{"taskId": task.ID, "status": "started"}, nil

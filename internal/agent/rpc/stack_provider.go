@@ -212,13 +212,17 @@ type stackLastTask struct {
 	FinishedAt int64  `json:"finishedAt"`
 }
 
-// cappedBuffer 只保留最后 limit 字节的环形缓冲
+// cappedBuffer 只保留最后 limit 字节的环形缓冲。Write/String 会被不同
+// 协程并发调用（任务执行协程写日志、GetTask 轮询读），内部自持锁。
 type cappedBuffer struct {
+	mu    sync.Mutex
 	limit int
 	buf   []byte
 }
 
 func (b *cappedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.buf = append(b.buf, p...)
 	if len(b.buf) > b.limit {
 		b.buf = b.buf[len(b.buf)-b.limit:]
@@ -227,6 +231,8 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *cappedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return string(b.buf)
 }
 
@@ -670,6 +676,8 @@ func (p *StackProvider) launchTask(stack, action string, run func(*stackTask) er
 		defer lock.Unlock()
 
 		err := run(task)
+		// 终态字段在锁内更新：GetTask 轮询会并发读取
+		p.mu.Lock()
 		task.FinishedAt = p.now()
 		if err != nil {
 			task.Status = stackTaskFailed
@@ -677,6 +685,7 @@ func (p *StackProvider) launchTask(stack, action string, run func(*stackTask) er
 		} else {
 			task.Status = stackTaskSuccess
 		}
+		p.mu.Unlock()
 		p.persistLastTask(stack, task)
 	}()
 
@@ -721,11 +730,13 @@ func (p *StackProvider) GetTask(taskID string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("taskId required")
 	}
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	task, ok := p.tasks[taskID]
-	p.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("task not found: %s", taskID)
 	}
+	// 任务字段在锁内读取：执行协程会并发写终态（cappedBuffer 自持锁
+	// 只保护日志缓冲本身）
 	return map[string]interface{}{
 		"id":         task.ID,
 		"stack":      task.Stack,
