@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 
@@ -19,14 +20,16 @@ var defaultConfigPaths = []string{
 	"/etc/cockpit/config.yaml",
 }
 
-func loadConfig(configPath string) *config.Config {
+// loadConfig 按显式路径加载；否则按默认路径探测；都缺失时返回默认配置。
+// （不使用 log.Fatal，交由调用方决定退出方式——可测。）
+func loadConfig(configPath string, stdout io.Writer) (*config.Config, error) {
 	if configPath != "" {
 		cfg, err := config.Load(configPath)
 		if err != nil {
-			log.Fatalf("Failed to load config: %v", err)
+			return nil, err
 		}
 		log.Printf("Loaded config: %s", configPath)
-		return cfg
+		return cfg, nil
 	}
 
 	for _, path := range defaultConfigPaths {
@@ -37,170 +40,186 @@ func loadConfig(configPath string) *config.Config {
 				continue
 			}
 			log.Printf("Loaded config: %s", path)
-			return cfg
+			return cfg, nil
 		}
 	}
 
-	log.Println("No config found, using defaults")
-	return config.LoadOrDefault("")
+	fmt.Fprintln(stdout, "No config found, using defaults")
+	return config.LoadOrDefault(""), nil
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		handleServerDefault()
-		return
+	os.Exit(run(os.Args, os.Stdout))
+}
+
+// run 命令分发，返回进程退出码（main 只做薄壳，逻辑全在此可测）
+func run(args []string, stdout io.Writer) int {
+	if len(args) < 2 {
+		return runServerDefault(args[1:], stdout)
 	}
 
-	command := os.Args[1]
+	command := args[1]
 
 	switch command {
 	case "server":
-		handleServer()
+		return runServer(args[2:], stdout)
 	case "agent":
-		handleAgent()
+		return runAgent(args[2:], stdout)
 	case "init":
-		handleInit()
+		return runInit(args[2:], stdout)
 	case "sync":
-		handleSync()
+		return runSync(args[2:], stdout)
 	case "status":
-		handleStatus()
+		return runStatus(args[2:], stdout)
 	case "version", "-v", "--version":
-		printVersion()
+		printVersion(stdout)
+		return 0
 	default:
-		if os.Args[1][0] == '-' {
-			handleServerDefault()
-			return
+		if args[1][0] == '-' {
+			return runServerDefault(args[1:], stdout)
 		}
-		fmt.Printf("Unknown command: %s\n\n", command)
-		printUsage()
-		os.Exit(1)
+		fmt.Fprintf(stdout, "Unknown command: %s\n\n", command)
+		printUsage(stdout)
+		return 1
 	}
 }
 
-func handleServerDefault() {
-	configPath := flag.String("config", "", "Config file path")
-	showVersion := flag.Bool("version", false, "Show version")
-	flag.Parse()
+// runServerDefault 无命令/直接跟 flag：按 server 启动（兼容旧用法 `cockpit -config x`）
+func runServerDefault(args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("cockpit", flag.ExitOnError)
+	configPath := fs.String("config", "", "Config file path")
+	showVersion := fs.Bool("version", false, "Show version")
+	fs.Parse(args)
 
 	if *showVersion {
-		printVersion()
-		os.Exit(0)
+		printVersion(stdout)
+		return 0
 	}
 
-	cfg := loadConfig(*configPath)
+	return startServer(*configPath, stdout)
+}
+
+// startServer 加载配置并启动 server（阻塞直到出错）
+func startServer(configPath string, stdout io.Writer) int {
+	cfg, err := loadConfig(configPath, stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		return 1
+	}
 	s := server.NewServer(cfg)
 
 	if err := s.Start(); err != nil {
-		log.Fatalf("Server error: %v", err)
+		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+		return 1
 	}
+	return 0
 }
 
-func printUsage() {
-	fmt.Println("Cockpit - Personal Hybrid Infrastructure Console")
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Println("  cockpit [command] [options]")
-	fmt.Println()
-	fmt.Println("Commands:")
-	fmt.Println("  init       Initialize configuration and directories")
-	fmt.Println("  server     Start Cockpit Server")
-	fmt.Println("  agent      Start Cockpit Agent")
-	fmt.Println("  sync       Sync inventory to database")
-	fmt.Println("  status     Show status")
-	fmt.Println("  version    Show version")
-	fmt.Println()
-	fmt.Println("Server options:")
-	fmt.Println("  -config string       Config file path (default \"./config/cockpit.yaml\")")
-	fmt.Println("  -version             Show version")
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, "Cockpit - Personal Hybrid Infrastructure Console")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  cockpit [command] [options]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  init       Initialize configuration and directories")
+	fmt.Fprintln(w, "  server     Start Cockpit Server")
+	fmt.Fprintln(w, "  agent      Start Cockpit Agent")
+	fmt.Fprintln(w, "  sync       Sync inventory to database")
+	fmt.Fprintln(w, "  status     Show status")
+	fmt.Fprintln(w, "  version    Show version")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Server options:")
+	fmt.Fprintln(w, "  -config string       Config file path (default \"./config/cockpit.yaml\")")
+	fmt.Fprintln(w, "  -version             Show version")
 }
 
-func printVersion() {
-	fmt.Printf("Cockpit v%s\n", Version)
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "Cockpit v%s\n", Version)
 }
 
-func handleServer() {
-	cmd := flag.NewFlagSet("server", flag.ExitOnError)
-	configPath := cmd.String("config", "", "Config file path")
-	help := cmd.Bool("h", false, "Show help")
+// runServer `cockpit server [-config path]`
+func runServer(args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("server", flag.ExitOnError)
+	configPath := fs.String("config", "", "Config file path")
+	help := fs.Bool("h", false, "Show help")
 
-	cmd.Parse(os.Args[2:])
+	fs.Parse(args)
 
 	if *help {
-		fmt.Println("Start Cockpit Server")
-		fmt.Println()
-		cmd.PrintDefaults()
-		fmt.Println()
-		fmt.Println("Examples:")
-		fmt.Println("  cockpit server")
-		fmt.Println("  cockpit server -config /path/to/config.yaml")
-		os.Exit(0)
+		fmt.Fprintln(stdout, "Start Cockpit Server")
+		fmt.Fprintln(stdout)
+		fs.PrintDefaults()
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Examples:")
+		fmt.Fprintln(stdout, "  cockpit server")
+		fmt.Fprintln(stdout, "  cockpit server -config /path/to/config.yaml")
+		return 0
 	}
 
-	cfg := loadConfig(*configPath)
-	s := server.NewServer(cfg)
-
-	if err := s.Start(); err != nil {
-		log.Fatalf("Server error: %v", err)
-	}
+	return startServer(*configPath, stdout)
 }
 
-func handleAgent() {
-	cmd := flag.NewFlagSet("agent", flag.ExitOnError)
+// runAgent `cockpit agent [start] [-server ws://...]`（与 cockpit-agent start 共用 cli.AgentStartCmd）
+func runAgent(args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	startCmd := &cli.AgentStartCmd{}
-	startCmd.Bind(cmd)
-	help := cmd.Bool("h", false, "Show help")
+	startCmd.Bind(fs)
+	help := fs.Bool("h", false, "Show help")
 
-	args := os.Args[2:]
 	if len(args) > 0 && args[0] == "start" {
 		args = args[1:]
 	}
 
-	cmd.Parse(args)
+	fs.Parse(args)
 
 	if *help {
-		fmt.Println("Start Cockpit Agent")
-		fmt.Println()
-		cmd.PrintDefaults()
-		fmt.Println()
-		fmt.Println("Examples:")
-		fmt.Println("  cockpit agent -server ws://localhost:9000/ws")
-		fmt.Println("  cockpit agent -server wss://example.com:9000/ws -region home -zone dc-a")
-		fmt.Println("  cockpit agent start -server ws://localhost:9000/ws")
-		fmt.Println()
-		fmt.Println("Compatibility:")
-		fmt.Println("  cockpit-agent start ... remains supported")
-		os.Exit(0)
+		fmt.Fprintln(stdout, "Start Cockpit Agent")
+		fmt.Fprintln(stdout)
+		fs.PrintDefaults()
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Examples:")
+		fmt.Fprintln(stdout, "  cockpit agent -server ws://localhost:9000/ws")
+		fmt.Fprintln(stdout, "  cockpit agent -server wss://example.com:9000/ws -region home -zone dc-a")
+		fmt.Fprintln(stdout, "  cockpit agent start -server ws://localhost:9000/ws")
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Compatibility:")
+		fmt.Fprintln(stdout, "  cockpit-agent start ... remains supported")
+		return 0
 	}
 
 	if err := startCmd.Validate(); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		cmd.PrintDefaults()
-		os.Exit(1)
+		fmt.Fprintf(stdout, "Error: %v\n", err)
+		fs.PrintDefaults()
+		return 1
 	}
 
 	if err := startCmd.Run(); err != nil {
-		log.Fatalf("%v", err)
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
 	}
+	return 0
 }
 
-func handleInit() {
-	cmd := flag.NewFlagSet("init", flag.ExitOnError)
-	dir := cmd.String("dir", "", "Target directory (default: current)")
-	configPath := cmd.String("config", "", "Config file path")
-	example := cmd.Bool("example", false, "Create example inventory")
-	help := cmd.Bool("h", false, "Show help")
+// runInit `cockpit init [-dir path] [-config path] [-example]`
+func runInit(args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	dir := fs.String("dir", "", "Target directory (default: current)")
+	configPath := fs.String("config", "", "Config file path")
+	example := fs.Bool("example", false, "Create example inventory")
+	help := fs.Bool("h", false, "Show help")
 
-	cmd.Parse(os.Args[2:])
+	fs.Parse(args)
 
 	if *help {
-		fmt.Println("Initialize Cockpit configuration")
-		fmt.Println()
-		cmd.PrintDefaults()
-		fmt.Println()
-		fmt.Println("Examples:")
-		fmt.Println("  cockpit init")
-		fmt.Println("  cockpit init -dir /path/to/project -example")
-		os.Exit(0)
+		fmt.Fprintln(stdout, "Initialize Cockpit configuration")
+		fmt.Fprintln(stdout)
+		fs.PrintDefaults()
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Examples:")
+		fmt.Fprintln(stdout, "  cockpit init")
+		fmt.Fprintln(stdout, "  cockpit init -dir /path/to/project -example")
+		return 0
 	}
 
 	initCmd := &cli.InitCmd{
@@ -210,28 +229,31 @@ func handleInit() {
 	}
 
 	if err := initCmd.Run(); err != nil {
-		log.Fatalf("Init failed: %v", err)
+		fmt.Fprintf(os.Stderr, "Init failed: %v\n", err)
+		return 1
 	}
+	return 0
 }
 
-func handleSync() {
-	cmd := flag.NewFlagSet("sync", flag.ExitOnError)
-	configPath := cmd.String("config", "", "Config file path")
-	inventoryPath := cmd.String("inventory", "", "Inventory file path")
-	dbPath := cmd.String("db", "", "Database path (overrides config)")
-	help := cmd.Bool("h", false, "Show help")
+// runSync `cockpit sync [-config path] [-inventory path] [-db path]`
+func runSync(args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("sync", flag.ExitOnError)
+	configPath := fs.String("config", "", "Config file path")
+	inventoryPath := fs.String("inventory", "", "Inventory file path")
+	dbPath := fs.String("db", "", "Database path (overrides config)")
+	help := fs.Bool("h", false, "Show help")
 
-	cmd.Parse(os.Args[2:])
+	fs.Parse(args)
 
 	if *help {
-		fmt.Println("Sync inventory to database")
-		fmt.Println()
-		cmd.PrintDefaults()
-		fmt.Println()
-		fmt.Println("Examples:")
-		fmt.Println("  cockpit sync -config config/cockpit.yaml -inventory inventory/example.yaml")
-		fmt.Println("  cockpit sync -inventory inventory/example.yaml -db /path/to/cockpit.db")
-		os.Exit(0)
+		fmt.Fprintln(stdout, "Sync inventory to database")
+		fmt.Fprintln(stdout)
+		fs.PrintDefaults()
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Examples:")
+		fmt.Fprintln(stdout, "  cockpit sync -config config/cockpit.yaml -inventory inventory/example.yaml")
+		fmt.Fprintln(stdout, "  cockpit sync -inventory inventory/example.yaml -db /path/to/cockpit.db")
+		return 0
 	}
 
 	syncCmd := &cli.SyncCmd{
@@ -241,26 +263,29 @@ func handleSync() {
 	}
 
 	if err := syncCmd.Run(); err != nil {
-		log.Fatalf("Sync failed: %v", err)
+		fmt.Fprintf(os.Stderr, "Sync failed: %v\n", err)
+		return 1
 	}
+	return 0
 }
 
-func handleStatus() {
-	cmd := flag.NewFlagSet("status", flag.ExitOnError)
-	dbPath := cmd.String("db", "", "Database file path")
-	help := cmd.Bool("h", false, "Show help")
+// runStatus `cockpit status [-db path]`
+func runStatus(args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	dbPath := fs.String("db", "", "Database file path")
+	help := fs.Bool("h", false, "Show help")
 
-	cmd.Parse(os.Args[2:])
+	fs.Parse(args)
 
 	if *help {
-		fmt.Println("Show Cockpit status")
-		fmt.Println()
-		cmd.PrintDefaults()
-		fmt.Println()
-		fmt.Println("Examples:")
-		fmt.Println("  cockpit status")
-		fmt.Println("  cockpit status -db /path/to/cockpit.db")
-		os.Exit(0)
+		fmt.Fprintln(stdout, "Show Cockpit status")
+		fmt.Fprintln(stdout)
+		fs.PrintDefaults()
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Examples:")
+		fmt.Fprintln(stdout, "  cockpit status")
+		fmt.Fprintln(stdout, "  cockpit status -db /path/to/cockpit.db")
+		return 0
 	}
 
 	statusCmd := &cli.StatusCmd{
@@ -268,6 +293,8 @@ func handleStatus() {
 	}
 
 	if err := statusCmd.Run(); err != nil {
-		log.Fatalf("Status query failed: %v", err)
+		fmt.Fprintf(os.Stderr, "Status query failed: %v\n", err)
+		return 1
 	}
+	return 0
 }
