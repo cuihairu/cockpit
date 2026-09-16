@@ -13,6 +13,14 @@ func init() {
 	Register(&OpenWrtDetector{})
 }
 
+// 探测路径做成包级变量仅为测试可注入（cov_* 测试指向临时文件），
+// 默认值即生产取值。
+var (
+	openwrtReleasePath = "/etc/openwrt_release"
+	ubusBinPath        = "/bin/ubus"
+	opkgBinPath        = "/bin/opkg"
+)
+
 // OpenWrtDetector OpenWrt 检测器
 type OpenWrtDetector struct{}
 
@@ -29,12 +37,12 @@ func (d *OpenWrtDetector) Priority() int {
 // Detect 检测 OpenWrt 环境
 func (d *OpenWrtDetector) Detect() (*protocol.Capability, error) {
 	// 1. 检查 /etc/openwrt_release
-	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
+	if _, err := os.Stat(openwrtReleasePath); err == nil {
 		return d.readOpenWrtRelease()
 	}
 
 	// 2. 检查 ubus 工具
-	if _, err := os.Stat("/bin/ubus"); err == nil {
+	if _, err := os.Stat(ubusBinPath); err == nil {
 		return &protocol.Capability{
 			Type: "openwrt",
 			Metadata: map[string]any{
@@ -44,7 +52,7 @@ func (d *OpenWrtDetector) Detect() (*protocol.Capability, error) {
 	}
 
 	// 3. 检查 opkg 包管理器
-	if _, err := os.Stat("/bin/opkg"); err == nil {
+	if _, err := os.Stat(opkgBinPath); err == nil {
 		return &protocol.Capability{
 			Type: "openwrt",
 			Metadata: map[string]any{
@@ -58,7 +66,7 @@ func (d *OpenWrtDetector) Detect() (*protocol.Capability, error) {
 
 // readOpenWrtRelease 读取 OpenWrt 版本信息
 func (d *OpenWrtDetector) readOpenWrtRelease() (*protocol.Capability, error) {
-	data, err := os.ReadFile("/etc/openwrt_release")
+	data, err := os.ReadFile(openwrtReleasePath)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +91,7 @@ func (d *OpenWrtDetector) readOpenWrtRelease() (*protocol.Capability, error) {
 // GetSystemInfo 获取 OpenWrt 系统信息
 func GetSystemInfo() (map[string]any, error) {
 	// 使用 ubus 获取系统信息
-	cmd := exec.Command("/bin/ubus", "call", "system", "info")
+	cmd := exec.Command(ubusBinPath, "call", "system", "info")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err

@@ -15,6 +15,13 @@ func init() {
 	Register(&NetworkDetector{})
 }
 
+// 探测路径做成包级变量仅为测试可注入（cov_* 测试指向临时文件/目录），
+// 默认值即生产取值。
+var (
+	wireguardProcPath = "/proc/net/wireguard"
+	sysClassNetPath   = "/sys/class/net"
+)
+
 // NetworkDetector 网络监控检测器
 type NetworkDetector struct{}
 
@@ -71,13 +78,13 @@ func (d *NetworkDetector) hasWireGuard() bool {
 	}
 
 	// 检查 WireGuard 设备
-	wgPath := "/proc/net/wireguard"
+	wgPath := wireguardProcPath
 	if _, err := os.Stat(wgPath); err == nil {
 		return true
 	}
 
 	// 检查 /sys/class/net 下的 wg* 接口
-	netPath := "/sys/class/net"
+	netPath := sysClassNetPath
 	entries, _ := os.ReadDir(netPath)
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), "wg") {
@@ -93,7 +100,7 @@ func (d *NetworkDetector) getWireGuardInterfaces() []string {
 	var interfaces []string
 
 	// 从 /proc/net/wireguard 读取
-	if data, err := os.ReadFile("/proc/net/wireguard"); err == nil {
+	if data, err := os.ReadFile(wireguardProcPath); err == nil {
 		lines := bytes.Split(data, []byte("\n"))
 		for _, line := range lines {
 			if len(line) > 0 && line[0] != '#' && line[0] != '\t' {
@@ -104,7 +111,7 @@ func (d *NetworkDetector) getWireGuardInterfaces() []string {
 
 	// 从 /sys/class/net 扫描
 	if len(interfaces) == 0 {
-		entries, _ := os.ReadDir("/sys/class/net")
+		entries, _ := os.ReadDir(sysClassNetPath)
 		for _, entry := range entries {
 			if strings.HasPrefix(entry.Name(), "wg") {
 				interfaces = append(interfaces, entry.Name())
@@ -217,7 +224,7 @@ func (d *NetworkDetector) hasRouteInfo() bool {
 func GetNetworkInterfaces() ([]map[string]any, error) {
 	var interfaces []map[string]any
 
-	entries, err := os.ReadDir("/sys/class/net")
+	entries, err := os.ReadDir(sysClassNetPath)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +241,7 @@ func GetNetworkInterfaces() ([]map[string]any, error) {
 		info["name"] = iface
 
 		// 获取 MAC 地址
-		addrPath := filepath.Join("/sys/class/net", iface, "address")
+		addrPath := filepath.Join(sysClassNetPath, iface, "address")
 		if addr, err := os.ReadFile(addrPath); err == nil {
 			info["mac"] = strings.TrimSpace(string(addr))
 		}

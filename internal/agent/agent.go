@@ -48,6 +48,14 @@ type Agent struct {
 	config *Config
 }
 
+// Agent 时序参数。做成包级变量仅为测试可注入（cov_* 测试缩短等待），
+// 默认值即生产取值，行为不变。
+var (
+	heartbeatInterval   = 30 * time.Second
+	reconnectDelay      = 5 * time.Second
+	reconnectRetryDelay = 10 * time.Second
+)
+
 // Config Agent 配置
 type Config struct {
 	ServerURL string                 `json:"server_url"`
@@ -408,7 +416,7 @@ func (a *Agent) detectLocation() protocol.Location {
 
 // heartbeatLoop 心跳循环
 func (a *Agent) heartbeatLoop() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
 	for {
@@ -552,7 +560,7 @@ func (a *Agent) reconnect() {
 	a.closeCurrentConn()
 
 	// 等待后重连
-	time.Sleep(5 * time.Second)
+	time.Sleep(reconnectDelay)
 
 	for {
 		select {
@@ -563,14 +571,14 @@ func (a *Agent) reconnect() {
 
 		if err := a.connect(); err != nil {
 			log.Printf("Reconnect failed: %v", err)
-			time.Sleep(10 * time.Second)
+			time.Sleep(reconnectRetryDelay)
 			continue
 		}
 
 		if err := a.register(); err != nil {
 			log.Printf("Re-register failed: %v", err)
 			a.closeCurrentConn()
-			time.Sleep(10 * time.Second)
+			time.Sleep(reconnectRetryDelay)
 			continue
 		}
 

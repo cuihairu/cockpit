@@ -13,6 +13,13 @@ func init() {
 	Register(&DockerDetector{})
 }
 
+// dockerSocketCandidates 常见 socket 路径。做成包级变量仅为测试可注入
+// （cov_* 测试指向临时 socket），默认值即生产取值。
+var dockerSocketCandidates = []string{
+	"/var/run/docker.sock",
+	"/run/docker.sock",
+}
+
 // DockerDetector Docker API 检测器
 type DockerDetector struct{}
 
@@ -41,11 +48,7 @@ func (d *DockerDetector) Detect() (*protocol.Capability, error) {
 	}
 
 	// 2. 尝试常见 socket 路径
-	candidates := []string{
-		"/var/run/docker.sock",
-		"/run/docker.sock",
-	}
-	for _, path := range candidates {
+	for _, path := range dockerSocketCandidates {
 		if d.testSocket(path) {
 			return &protocol.Capability{
 				Type:     "docker-api",

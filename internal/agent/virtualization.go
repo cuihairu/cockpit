@@ -47,6 +47,19 @@ var (
 	virtOnce       sync.Once
 )
 
+// 探测路径与外部依赖做成包级变量仅为测试可注入（cov_* 测试指向临时文件），
+// 默认值即生产取值，行为不变。
+var (
+	sysProductNamePath    = "/sys/class/dmi/id/product_name"
+	sysHypervisorTypePath = "/sys/hypervisor/type"
+	procCpuInfoPath       = "/proc/cpuinfo"
+	proc1CgroupPath       = "/proc/1/cgroup"
+	dockerEnvPath         = "/.dockerenv"
+
+	// hostVirtualization gopsutil 探测函数，测试可替换
+	hostVirtualization = host.Virtualization
+)
+
 // DetectVirtualization 检测虚拟化信息（带缓存）
 func DetectVirtualization() *VirtualizationInfo {
 	virtOnce.Do(func() {
@@ -63,7 +76,7 @@ func detectVirtualizationImpl() *VirtualizationInfo {
 	}
 
 	// 首先尝试使用 gopsutil
-	if virtType, role, err := host.Virtualization(); err == nil {
+	if virtType, role, err := hostVirtualization(); err == nil {
 		if virtType != "" {
 			info.Type = VirtualizationType(virtType)
 			info.Role = SystemRole(role)
@@ -91,7 +104,7 @@ func detectVirtualizationManual() *VirtualizationInfo {
 	}
 
 	// 检测 /sys/class/dmi/id/product_name
-	if productName, err := readSysFile("/sys/class/dmi/id/product_name"); err == nil {
+	if productName, err := readSysFile(sysProductNamePath); err == nil {
 		productName = strings.ToLower(productName)
 		if strings.Contains(productName, "vmware") {
 			info.Type = VirtTypeVMware
@@ -146,7 +159,7 @@ func detectVirtualizationManual() *VirtualizationInfo {
 	}
 
 	// 检测 /sys/hypervisor/type (Xen)
-	if hypervisorType, err := readSysFile("/sys/hypervisor/type"); err == nil {
+	if hypervisorType, err := readSysFile(sysHypervisorTypePath); err == nil {
 		info.Type = VirtTypeXen
 		info.Role = RoleGuest
 		info.Platform = hypervisorType
@@ -167,12 +180,12 @@ func detectVirtualizationManual() *VirtualizationInfo {
 // isContainer 检测是否在容器中运行
 func isContainer() bool {
 	// 检测 /.dockerenv
-	if _, err := os.Stat("/.dockerenv"); err == nil {
+	if _, err := os.Stat(dockerEnvPath); err == nil {
 		return true
 	}
 
 	// 检测 /proc/1/cgroup
-	if cgroup, err := readSysFile("/proc/1/cgroup"); err == nil {
+	if cgroup, err := readSysFile(proc1CgroupPath); err == nil {
 		cgroup = strings.ToLower(cgroup)
 		if strings.Contains(cgroup, "docker") || strings.Contains(cgroup, "lxc") || strings.Contains(cgroup, "kubepods") {
 			return true
@@ -185,7 +198,7 @@ func isContainer() bool {
 // detectContainerType 检测容器类型
 func detectContainerType() VirtualizationType {
 	// 检测 /proc/1/cgroup
-	if cgroup, err := readSysFile("/proc/1/cgroup"); err == nil {
+	if cgroup, err := readSysFile(proc1CgroupPath); err == nil {
 		cgroup = strings.ToLower(cgroup)
 		if strings.Contains(cgroup, "docker") || strings.Contains(cgroup, "containerd") {
 			return VirtTypeDocker
@@ -212,7 +225,7 @@ func readSysFile(path string) (string, error) {
 
 // readProcCpuInfo 读取 /proc/cpuinfo
 func readProcCpuInfo() (string, error) {
-	file, err := os.Open("/proc/cpuinfo")
+	file, err := os.Open(procCpuInfoPath)
 	if err != nil {
 		return "", err
 	}
@@ -233,8 +246,10 @@ func readProcCpuInfo() (string, error) {
 	return modelName, scanner.Err()
 }
 
-// runCommand 执行命令（简单实现，仅用于检测）
-func runCommand(name string, args ...string) (string, error) {
+// runCommand 执行命令（简单实现，仅用于检测）。
+// 声明为变量仅为测试可注入（cov_* 测试模拟 systemd-detect-virt 输出），
+// 默认实现与原行为一致。
+var runCommand = func(name string, args ...string) (string, error) {
 	// 简化实现，实际可以调用 exec.Command
 	// 这里返回空，让 gopsutil 和其他检测方法优先
 	return "", os.ErrNotExist

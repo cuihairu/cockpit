@@ -13,6 +13,14 @@ func init() {
 	Register(&HardwareDetector{})
 }
 
+// 探测路径做成包级变量仅为测试可注入（cov_* 测试指向临时目录），
+// 默认值即生产取值。
+var (
+	thermalSysPath = "/sys/class/thermal"
+	usbDevPath     = "/dev/usb"
+	sysBlockPath   = "/sys/block"
+)
+
 // HardwareDetector 硬件监控检测器
 type HardwareDetector struct{}
 
@@ -69,8 +77,7 @@ func (d *HardwareDetector) hasSmartctl() bool {
 // hasTempSensors 检测温度传感器
 func (d *HardwareDetector) hasTempSensors() bool {
 	// 检查 /sys/class/thermal
-	thermalPath := "/sys/class/thermal"
-	if entries, err := os.ReadDir(thermalPath); err == nil {
+	if entries, err := os.ReadDir(thermalSysPath); err == nil {
 		for _, entry := range entries {
 			if strings.HasPrefix(entry.Name(), "thermal_zone") {
 				return true
@@ -103,9 +110,8 @@ func (d *HardwareDetector) hasUPS() bool {
 	}
 
 	// 检查 /dev/usb 设备
-	usbPath := "/dev/usb"
-	if _, err := os.Stat(usbPath); err == nil {
-		entries, _ := os.ReadDir(usbPath)
+	if _, err := os.Stat(usbDevPath); err == nil {
+		entries, _ := os.ReadDir(usbDevPath)
 		for _, entry := range entries {
 			if strings.Contains(entry.Name(), "hiddev") ||
 			   strings.Contains(entry.Name(), "ups") {
@@ -122,8 +128,7 @@ func GetDisks() ([]string, error) {
 	var disks []string
 
 	// 扫描 /sys/block
-	blockPath := "/sys/block"
-	entries, err := os.ReadDir(blockPath)
+	entries, err := os.ReadDir(sysBlockPath)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +141,7 @@ func GetDisks() ([]string, error) {
 		}
 
 		// 检查是否是物理设备
-		devicePath := filepath.Join(blockPath, entry.Name())
+		devicePath := filepath.Join(sysBlockPath, entry.Name())
 		if _, err := os.Stat(filepath.Join(devicePath, "device")); err == nil {
 			disks = append(disks, "/dev/"+entry.Name())
 		}

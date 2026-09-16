@@ -14,6 +14,14 @@ func init() {
 	Register(&PVEDetector{})
 }
 
+// pveDefaultEndpoints 无 PVE_URL 时的候选地址。做成包级变量仅为测试
+// 可注入（cov_* 测试指向 httptest 服务），默认值即生产取值。
+var pveDefaultEndpoints = []string{
+	"https://127.0.0.1:8006",
+	"https://192.168.1.10:8006",
+	"https://192.168.0.10:8006",
+}
+
 // PVEDetector PVE API 检测器
 type PVEDetector struct{}
 
@@ -33,12 +41,7 @@ func (d *PVEDetector) Detect() (*protocol.Capability, error) {
 	url := os.Getenv("PVE_URL")
 	if url == "" {
 		// 尝试常见内网地址
-		candidates := []string{
-			"https://127.0.0.1:8006",
-			"https://192.168.1.10:8006",
-			"https://192.168.0.10:8006",
-		}
-		for _, candidate := range candidates {
+		for _, candidate := range pveDefaultEndpoints {
 			if d.testAPI(candidate) {
 				return &protocol.Capability{
 					Type:     "pve-api",
