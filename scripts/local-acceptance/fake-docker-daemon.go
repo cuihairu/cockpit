@@ -1,3 +1,5 @@
+//go:build acceptance
+
 // fake-docker-daemon 在 unix socket 上模拟 Docker Engine API 的最小子集，
 // 供 Cockpit Compose Stack 本地验收使用（scripts/local-acceptance/README.md）。
 //

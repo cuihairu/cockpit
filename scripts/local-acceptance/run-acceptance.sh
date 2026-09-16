@@ -82,7 +82,7 @@ mkdir -p "$WORK/bin" "$WORK/state" "$WORK/stacks"
 cp "$HERE/fake-docker" "$WORK/bin/docker"
 chmod +x "$WORK/bin/docker"
 FAKE_DOCKER_SOCK="$WORK/docker.sock" FAKE_COMPOSE_STATE_DIR="$WORK/state" \
-  go run "$HERE/fake-docker-daemon.go" >"$WORK/daemon.log" 2>&1 &
+  go run -tags acceptance "$HERE/fake-docker-daemon.go" >"$WORK/daemon.log" 2>&1 &
 DAEMON_PID=$!
 retry 10 bash -c "[ -S '$WORK/docker.sock' ]" || { fail "fake daemon socket"; exit 1; }
 pass "fake engine on $WORK/docker.sock"
