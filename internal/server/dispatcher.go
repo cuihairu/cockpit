@@ -45,10 +45,8 @@ func (s *Server) handleHeartbeat(agent *Agent, msg *protocol.Message) {
 	})
 	resp.ID = msg.ID // 关联请求ID
 
-	select {
-	case agent.Send <- resp:
-	default:
-		log.Printf("Agent %s send channel full", agent.ID)
+	if err := agent.SendMessage(resp); err != nil {
+		log.Printf("Agent %s heartbeat ack: %v", agent.ID, err)
 	}
 }
 

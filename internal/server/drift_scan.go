@@ -24,7 +24,10 @@ const (
 	driftMinIntervalSeconds = 0
 	driftMaxIntervalSeconds = 86400
 	driftDefaultInterval    = 1800
+)
 
+// 巡检循环节奏。包级变量仅为测试可注入，默认值即生产取值。
+var (
 	driftScanTick      = time.Minute      // 醒来对比间隔的节奏
 	driftScanStartWait = 90 * time.Second // 启动后等 agent 上线再首扫
 )

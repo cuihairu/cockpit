@@ -237,11 +237,13 @@ var stackTrackingActions = map[string]string{
 	audit.ActionStackRemove:  "remove",
 }
 
-// stackTaskTrackInterval 后台跟踪任务终态的轮询间隔
-const stackTaskTrackInterval = 2 * time.Second
-
-// stackTaskTrackTimeout 跟踪超时：超过后标记 failed（防止 goroutine 无限轮询）
-const stackTaskTrackTimeout = 15 * time.Minute
+// stackTaskTrackInterval 后台跟踪任务终态的轮询间隔；
+// stackTaskTrackTimeout 跟踪超时：超过后标记 failed（防止 goroutine 无限轮询）。
+// 包级变量仅为测试可注入，默认值即生产取值。
+var (
+	stackTaskTrackInterval = 2 * time.Second
+	stackTaskTrackTimeout  = 15 * time.Minute
+)
 
 // startStackDeployment 写入 running 历史记录并启动后台终态跟踪
 func (s *Server) startStackDeployment(agentID, stackName, auditAction, taskID string) {

@@ -7,6 +7,14 @@ package probe
 // 以及 Start 循环的完整周期（首轮 10s + 按间隔重复）。
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	cryptorand "crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -173,5 +181,73 @@ func TestCovStartRunsChecksPeriodically(t *testing.T) {
 			t.Fatalf("Start loop did not run twice in time (rounds=%d)", rounds)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// ============ probeCertificate 状态三分支（本地 TLS + 自签证书） ============
+
+// covStartTLS 起一个本地 TLS 服务，证书 NotAfter 由参数控制
+func covStartTLS(t *testing.T, notAfter time.Time) int {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "127.0.0.1"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     notAfter,
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(cryptorand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: priv}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.(*tls.Conn).Handshake()
+			conn.Close()
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func TestCovProbeCertificateStatuses(t *testing.T) {
+	savePort := probeCertPort
+	t.Cleanup(func() { probeCertPort = savePort })
+	r := NewRunner(nil, 0, nil)
+
+	cases := []struct {
+		name     string
+		notAfter time.Time
+		want     string
+	}{
+		{"valid", time.Now().Add(90 * 24 * time.Hour), "valid"},
+		{"expiring", time.Now().Add(10 * 24 * time.Hour), "expiring"},
+		{"expired", time.Now().Add(-time.Hour), "expired"},
+	}
+	for _, tc := range cases {
+		probeCertPort = covStartTLS(t, tc.notAfter)
+		c := &storage.Certificate{ID: "c-" + tc.name, DomainName: "127.0.0.1"}
+		pr := r.probeCertificate(c)
+		if pr.Status != tc.want {
+			t.Errorf("%s: status = %q (msg %q), want %q", tc.name, pr.Status, pr.Message, tc.want)
+		}
+		if c.ExpiresAt.IsZero() {
+			t.Errorf("%s: ExpiresAt should be updated from NotAfter", tc.name)
+		}
 	}
 }

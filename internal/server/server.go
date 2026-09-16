@@ -27,6 +27,13 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// CallAgent 超时参数。包级变量仅为测试可注入（cov_* 测试缩短等待），
+// 默认值即生产取值，行为不变。
+var (
+	callAgentSendTimeout = 5 * time.Second
+	callAgentTimeout     = 30 * time.Second
+)
+
 // Server WebSocket 服务器
 type Server struct {
 	addr           string
@@ -48,6 +55,10 @@ type Server struct {
 	mu     sync.RWMutex
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// backupTrackWG 跟踪在途的备份任务跟踪 goroutine（测试注入
+	// backupTrackInterval 前等待其退出，保证恢复默认值不构成数据竞争）
+	backupTrackWG sync.WaitGroup
 }
 
 // NewServer 创建新服务器
@@ -380,17 +391,16 @@ func (s *Server) CallAgent(agentID, method string, params map[string]interface{}
 	})
 	req.ID = msgID
 
-	select {
-	case agent.Send <- req:
-	case <-time.After(5 * time.Second):
-		return nil, fmt.Errorf("send timeout")
+	// 发送请求（与 agent.Close 并发安全；通道满时重试至超时）
+	if err := agent.SendWithTimeout(req, callAgentSendTimeout); err != nil {
+		return nil, err
 	}
 
 	// 等待响应
 	select {
 	case resp := <-respCh:
 		return resp, nil
-	case <-time.After(30 * time.Second):
+	case <-time.After(callAgentTimeout):
 		return nil, fmt.Errorf("response timeout")
 	}
 }

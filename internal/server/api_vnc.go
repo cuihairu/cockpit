@@ -173,9 +173,12 @@ func (s *Server) vncSendLoop(session *VNCSession) {
 	}
 }
 
+// vncKeepalive 间隔。包级变量仅为测试可注入，默认值即生产取值。
+var vncKeepaliveInterval = 30 * time.Second
+
 // vncKeepaliveLoop 超时管理
 func (s *Server) vncKeepaliveLoop(session *VNCSession) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(vncKeepaliveInterval)
 	defer ticker.Stop()
 
 	for {

@@ -23,7 +23,10 @@ type Agent struct {
 	Send           chan *protocol.Message
 	mu             sync.RWMutex
 	closed         atomic.Bool
-	LastSeen       time.Time
+	// sendMu 保护 Send 通道的 close 与入队互斥，消除并发发送的
+	// send-on-closed-channel panic（旧实现靠 recover 兜底，仍算数据竞争）
+	sendMu   sync.Mutex
+	LastSeen time.Time
 }
 
 // NewAgent 创建新的 Agent 实例
@@ -106,6 +109,9 @@ func (a *Agent) IsOnline(timeout time.Duration) bool {
 
 // Close 关闭连接
 func (a *Agent) Close() {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+
 	if a.closed.CompareAndSwap(false, true) {
 		close(a.Send)
 	}
@@ -120,22 +126,54 @@ func (a *Agent) AgentID() string {
 	return a.ID
 }
 
-//SendMessage 发送消息给 Agent
-func (a *Agent) SendMessage(msg *protocol.Message) error {
+// trySendLocked 尝试入队一条消息（须持有 sendMu）。
+// 返回是否入队成功、通道是否已关闭。
+func (a *Agent) trySendLocked(msg *protocol.Message) (queued, closed bool) {
 	if a.closed.Load() {
-		return fmt.Errorf("agent %s is closed", a.ID)
+		return false, true
 	}
-
-	defer func() {
-		if recover() != nil {
-			// channel closed concurrently
-		}
-	}()
-
 	select {
 	case a.Send <- msg:
+		return true, false
+	default:
+		return false, false
+	}
+}
+
+//SendMessage 发送消息给 Agent
+func (a *Agent) SendMessage(msg *protocol.Message) error {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+
+	queued, closed := a.trySendLocked(msg)
+	switch {
+	case queued:
 		return nil
+	case closed:
+		return fmt.Errorf("agent %s is closed", a.ID)
 	default:
 		return fmt.Errorf("agent %s send channel full", a.ID)
+	}
+}
+
+// SendWithTimeout 在 timeout 内持续尝试入队（通道满时短间隔重试）。
+// 与 Close 并发安全；用于 RPC 请求等允许等待的发送方。
+func (a *Agent) SendWithTimeout(msg *protocol.Message, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		a.sendMu.Lock()
+		queued, closed := a.trySendLocked(msg)
+		a.sendMu.Unlock()
+
+		if queued {
+			return nil
+		}
+		if closed {
+			return fmt.Errorf("agent %s is closed", a.ID)
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("agent %s send timeout", a.ID)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

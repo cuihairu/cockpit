@@ -648,3 +648,44 @@ func TestCovStackAccessors(t *testing.T) {
 		t.Error("stackInt64 failed")
 	}
 }
+
+// ============ trackStackTask 超时终态（注入短轮询/超时） ============
+
+func TestCovStackTaskTrackTimeout(t *testing.T) {
+	saveI, saveT := stackTaskTrackInterval, stackTaskTrackTimeout
+	stackTaskTrackInterval, stackTaskTrackTimeout = 30*time.Millisecond, 120*time.Millisecond
+	t.Cleanup(func() { stackTaskTrackInterval, stackTaskTrackTimeout = saveI, saveT })
+
+	s := covNewServer(t)
+	// 任务永远 running → 跟踪超时后回填 failed
+	covFakeAgent(t, s, "a1", covDockerCaps, func(method string, params map[string]interface{}) map[string]interface{} {
+		return covOKPayload(map[string]interface{}{"status": "running"})
+	})
+	rec := &storage.StackDeployment{
+		AgentID: "a1", StackName: "web", Action: "up", Status: "running",
+		TaskID: "task-timeout", StartedAt: time.Now().Unix(),
+	}
+	if err := s.db.CreateStackDeployment(rec); err != nil {
+		t.Fatal(err)
+	}
+	s.trackStackTask("a1", "task-timeout", rec.ID) // 同步等待超时路径跑完
+
+	list, err := s.db.ListStackDeployments("a1", "web", 10)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("history = %+v, %v", list, err)
+	}
+	if list[0].Status != "failed" {
+		t.Errorf("timeout status = %q, want failed", list[0].Status)
+	}
+	if list[0].FinishedAt == 0 {
+		t.Error("timeout should backfill finishedAt")
+	}
+}
+
+// handleAgentStacks：agent 不存在 → CallAgent 返回 ErrAgentNotFound → 404
+func TestCovAgentStacksMissingAgent(t *testing.T) {
+	s := covNewServer(t)
+	rec := covRec()
+	s.handleAgentStacks(rec, covReq(http.MethodGet, "/api/stacks/agents/ghost", nil), "ghost")
+	covWantCode(t, "agent stacks missing agent", rec, http.StatusNotFound)
+}

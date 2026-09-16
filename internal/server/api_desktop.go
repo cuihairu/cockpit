@@ -254,9 +254,12 @@ func (s *Server) desktopSendLoop(session *DesktopSession) {
 	}
 }
 
+// desktopKeepalive 间隔。包级变量仅为测试可注入，默认值即生产取值。
+var desktopKeepaliveInterval = 30 * time.Second
+
 // desktopKeepaliveLoop 超时管理与保活
 func (s *Server) desktopKeepaliveLoop(session *DesktopSession) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(desktopKeepaliveInterval)
 	defer ticker.Stop()
 
 	for {

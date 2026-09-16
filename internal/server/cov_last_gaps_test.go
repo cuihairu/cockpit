@@ -3,7 +3,7 @@ package server
 // cov_last_gaps_test.go 最后一轮：只读数据库目录触发"读成功写失败"分支、
 // TOTP 无用户上下文、录制 finish 失败、备份名时间戳解析失败、
 // handleProxyData 转发失败日志、desktop/vnc 非常规关闭码、
-// 以及 30s 周期的 keepalive / cleanupLoop tick（非 -short 才跑）。
+// 以及 30s 周期的 keepalive / cleanupLoop tick（注入短间隔后 -short 也跑）。
 
 import (
 	"context"
@@ -403,10 +403,37 @@ func covDrain(conn *websocket.Conn) {
 	}
 }
 
-func TestCovSlowKeepaliveAndCleanupTicks(t *testing.T) {
-	if testing.Short() {
-		t.Skip("30s keepalive/ticker branches skipped in -short mode")
+// covShortIntervals 把 30s/5s 周期与超时注入为毫秒级（须在会话/循环启动前
+// 调用，ticker/After 创建时即取短值），测试结束恢复生产默认值。
+func covShortIntervals(t *testing.T) {
+	t.Helper()
+	injected := []struct {
+		ptr   *time.Duration
+		short time.Duration
+		prod  time.Duration
+	}{
+		{&cleanupLoopInterval, 200 * time.Millisecond, 30 * time.Second},
+		{&desktopKeepaliveInterval, 200 * time.Millisecond, 30 * time.Second},
+		{&terminalKeepaliveInterval, 200 * time.Millisecond, 30 * time.Second},
+		{&vncKeepaliveInterval, 200 * time.Millisecond, 30 * time.Second},
+		{&callAgentSendTimeout, 100 * time.Millisecond, 5 * time.Second},
+		{&callAgentTimeout, 300 * time.Millisecond, 30 * time.Second},
 	}
+	for _, s := range injected {
+		*s.ptr = s.short
+	}
+	t.Cleanup(func() {
+		for _, s := range injected {
+			*s.ptr = s.prod
+		}
+	})
+}
+
+func TestCovSlowKeepaliveAndCleanupTicks(t *testing.T) {
+	// 30s 周期分支：注入短间隔后无需跳过 -short（会话/循环启动前注入，
+	// ticker 创建即取短值；defer 恢复默认生产值）
+	covShortIntervals(t)
+
 	defer covClearSessions()
 	s := covRemoteSetup(t)
 	tAgent := covRegisterBareAgent(t, s, "agent-ka-t")

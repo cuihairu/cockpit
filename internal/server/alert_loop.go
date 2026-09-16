@@ -8,8 +8,11 @@ import (
 )
 
 // cleanupLoop 定期清理离线 Agent 与过期终端录制
+// cleanupLoop 间隔。包级变量仅为测试可注入，默认值即生产取值。
+var cleanupLoopInterval = 30 * time.Second
+
 func (s *Server) cleanupLoop() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(cleanupLoopInterval)
 	defer ticker.Stop()
 
 	var lastRecordingCleanup time.Time
@@ -33,19 +36,29 @@ func (s *Server) cleanupLoop() {
 }
 
 // alertCheckLoop 定期检查并生成警告
+// 各间隔/延迟。包级变量仅为测试可注入，默认值即生产取值。
+var (
+	alertCheckStartDelay = 5 * time.Second // 等待服务完全启动
+	alertCheckInterval   = time.Hour       // 每小时检查一次
+	alertCleanupInterval = 24 * time.Hour  // 每天清理旧警告
+)
+
 func (s *Server) alertCheckLoop() {
-	// 启动时立即执行一次
+	// 启动时立即执行一次（延迟先读到局部量：该 goroutine 不再读包级变量，
+	// 测试注入/恢复与之并发安全；ctx 取消时不再补跑）
+	delay := alertCheckStartDelay
 	go func() {
-		time.Sleep(5 * time.Second) // 等待服务完全启动
-		s.runAlertChecks()
+		select {
+		case <-time.After(delay):
+			s.runAlertChecks()
+		case <-s.ctx.Done():
+		}
 	}()
 
-	// 每小时检查一次
-	ticker := time.NewTicker(1 * time.Hour)
+	ticker := time.NewTicker(alertCheckInterval)
 	defer ticker.Stop()
 
-	// 每天凌晨2点清理旧警告
-	cleanupTicker := time.NewTicker(24 * time.Hour)
+	cleanupTicker := time.NewTicker(alertCleanupInterval)
 	defer cleanupTicker.Stop()
 
 	for {
@@ -75,18 +88,26 @@ func (s *Server) cleanupOldAlerts() {
 }
 
 // metricsCleanupLoop 清理旧的系统指标
+var (
+	metricsCleanupInterval = 24 * time.Hour // 每天凌晨3点清理
+	// metricsCleanupFirstWait 计算距下次凌晨 3 点的等待时长。
+	// 包级变量仅为测试可注入，默认值即生产取值。
+	metricsCleanupFirstWait = func() time.Duration {
+		now := time.Now()
+		nextCleanup := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, now.Location())
+		if nextCleanup.Before(now) {
+			nextCleanup = nextCleanup.Add(24 * time.Hour)
+		}
+		return time.Until(nextCleanup)
+	}
+)
+
 func (s *Server) metricsCleanupLoop() {
-	// 每天凌晨3点清理
-	ticker := time.NewTicker(24 * time.Hour)
+	ticker := time.NewTicker(metricsCleanupInterval)
 	defer ticker.Stop()
 
 	// 启动时先等待到下次清理时间
-	now := time.Now()
-	nextCleanup := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, now.Location())
-	if nextCleanup.Before(now) {
-		nextCleanup = nextCleanup.Add(24 * time.Hour)
-	}
-	time.Sleep(time.Until(nextCleanup))
+	time.Sleep(metricsCleanupFirstWait())
 
 	for {
 		// 清理30天前的数据

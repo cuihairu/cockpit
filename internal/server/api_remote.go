@@ -238,9 +238,12 @@ func (s *Server) terminalSendLoop(session *TerminalSession) {
 	}
 }
 
+// terminalKeepalive 间隔。包级变量仅为测试可注入，默认值即生产取值。
+var terminalKeepaliveInterval = 30 * time.Second
+
 // terminalKeepaliveLoop 超时管理
 func (s *Server) terminalKeepaliveLoop(session *TerminalSession) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(terminalKeepaliveInterval)
 	defer ticker.Stop()
 
 	for {

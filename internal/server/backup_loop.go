@@ -224,13 +224,20 @@ func (s *Server) startBackupRun(cfg *storage.BackupConfig, trigger string) (uint
 
 	log.Printf("Backup dispatched: config=%d name=%s agent=%s task=%s trigger=%s",
 		cfg.ID, cfg.Name, cfg.AgentID, taskID, trigger)
-	go s.trackBackupTask(cfg.ID, cfg.AgentID, taskID, run.ID)
+	s.backupTrackWG.Add(1)
+	go func() {
+		defer s.backupTrackWG.Done()
+		s.trackBackupTask(cfg.ID, cfg.AgentID, taskID, run.ID)
+	}()
 	return run.ID, nil
 }
 
 // trackBackupTask 轮询 agent 任务状态直到终态/超时/server 关闭，回填历史并通知
 func (s *Server) trackBackupTask(configID uint, agentID, taskID string, runID uint) {
 	deadline := time.Now().Add(backupTrackTimeout)
+	// 轮询间隔启动时读到局部量：后台 goroutine 不再反复读包级变量，
+	// 测试注入/恢复默认值与之并发安全（退出由 backupTrackWG 可观测）
+	poll := backupTrackInterval
 	status := "failed"
 	var file string
 	var size int64
@@ -241,7 +248,7 @@ func (s *Server) trackBackupTask(configID uint, agentID, taskID string, runID ui
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-time.After(backupTrackInterval):
+		case <-time.After(poll):
 		}
 
 		st, f, sz, e, done := s.pollBackupTask(agentID, taskID)

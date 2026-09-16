@@ -28,10 +28,12 @@ const (
 	serverBackupDefaultRetentionDays = 7
 	serverBackupMaxRetentionDays     = 365
 
-	serverBackupTick = time.Hour // 醒来对比间隔的节奏
 	// 文件名严格模式：cockpit-YYYYMMDD-HHMMSS.db（D7，防穿越/任意删除）
 	serverBackupNameRe = `^cockpit-\d{8}-\d{6}\.db$`
 )
+
+// serverBackupLoop 醒来节奏。包级变量仅为测试可注入，默认值即生产取值。
+var serverBackupTick = time.Hour
 
 // serverBackupIntervalHours 备份间隔；0=关闭；非法回默认
 func (s *Server) serverBackupIntervalHours() int {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -497,11 +498,19 @@ func TestCovAgentCloseAndSendMessage(t *testing.T) {
 		t.Error("SendMessage with full channel should fail")
 	}
 
-	// channel 已关闭但 closed 标记未置位 → select panic 被 recover
-	raced := NewAgent("agent-raced", nil)
-	close(raced.Send)
-	if err := raced.SendMessage(protocol.NewMessage(protocol.MessageTypePing, nil)); err != nil {
-		t.Errorf("SendMessage after recover should return nil, got %v", err)
+	// 并发 Close + SendMessage：sendMu 互斥下不再出现 send-on-closed-channel
+	// panic（旧实现靠 recover 兜底，仍是数据竞争）
+	var wg sync.WaitGroup
+	wg.Add(2)
+	concurrent := NewAgent("agent-concurrent", nil)
+	go func() { defer wg.Done(); concurrent.Close() }()
+	go func() {
+		defer wg.Done()
+		_ = concurrent.SendMessage(protocol.NewMessage(protocol.MessageTypePing, nil))
+	}()
+	wg.Wait()
+	if err := concurrent.SendMessage(protocol.NewMessage(protocol.MessageTypePing, nil)); err == nil {
+		t.Error("SendMessage after Close should fail")
 	}
 }
 
@@ -547,9 +556,8 @@ func TestCovCallAgentAndSendHelpers(t *testing.T) {
 }
 
 func TestCovCallAgentSendTimeout(t *testing.T) {
-	if testing.Short() {
-		t.Skip("5s send-timeout path skipped in -short")
-	}
+	// 注入短超时后 -short 也能跑（生产默认 5s）
+	covShortIntervals(t)
 	s := covNewServer(t)
 	covStuckAgent(t, s, "agent-stuck") // Send 塞满 → 发送超时
 	if _, err := s.CallAgent("agent-stuck", "x", nil); err == nil || !strings.Contains(err.Error(), "send timeout") {

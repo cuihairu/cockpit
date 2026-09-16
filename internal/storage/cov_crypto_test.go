@@ -98,9 +98,14 @@ func TestCovDecryptTamperedCiphertext(t *testing.T) {
 		t.Fatalf("Encrypt() error = %v", err)
 	}
 
-	// 翻转最后一个字符，破坏 GCM 认证标签
+	// 替换首个字符为另一个合法 base64 字符：密文首字节（nonce）变化 →
+	// GCM 认证失败（翻转末字符会命中 '=' 填充，只测到 base64 解码错误）
 	tampered := []byte(encrypted)
-	tampered[len(tampered)-1] ^= 0x01
+	if tampered[0] == 'A' {
+		tampered[0] = 'B'
+	} else {
+		tampered[0] = 'A'
+	}
 	if _, err := Decrypt(string(tampered)); err == nil {
 		t.Error("Decrypt() should fail for tampered ciphertext")
 	}

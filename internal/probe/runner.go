@@ -523,6 +523,9 @@ func (r *Runner) checkCertificates() []ProbeResult {
 	return results
 }
 
+// probeCertPort 证书探测端口。包级变量仅为测试可注入，默认值即生产取值。
+var probeCertPort = 443
+
 // probeCertificate 探测单个证书
 func (r *Runner) probeCertificate(c *storage.Certificate) ProbeResult {
 	pr := ProbeResult{
@@ -532,7 +535,7 @@ func (r *Runner) probeCertificate(c *storage.Certificate) ProbeResult {
 		CheckedAt:    time.Now(),
 	}
 
-	info, err := r.certMonitor.CheckDomain(c.DomainName, 443)
+	info, err := r.certMonitor.CheckDomain(c.DomainName, probeCertPort)
 	if err != nil {
 		pr.Status = "error"
 		pr.Error = err.Error()

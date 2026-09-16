@@ -2,8 +2,8 @@ package server
 
 // cov_loops_test.go 覆盖后台循环（alert_loop / backup_loop / drift_scan /
 // server_backup / ticket cleanup）与 recording.go 的内部函数。循环体统一用
-// ctx 取消退出或直测单轮函数；等真实周期（1h ticker / 30s keepalive / 睡到
-// 凌晨 3 点等）的分支见最终报告的不可达清单。
+// ctx 取消退出或直测单轮函数；真实周期（1h ticker / 睡到凌晨 3 点等）的
+// 分支通过注入短间隔的包级变量覆盖（默认值即生产取值，见各 var 注释）。
 
 import (
 	"context"
@@ -52,20 +52,21 @@ func TestCovAlertLoopsExitOnCancel(t *testing.T) {
 
 	exited1 := covSpawnLoop(func() { s.cleanupLoop() })
 	exited2 := covSpawnLoop(func() { s.alertCheckLoop() })
-	// metricsCleanupLoop 先睡到凌晨 3 点，ctx 取消不能唤醒 sleep——只验证它
-	// 能启动并挂起（覆盖 ticker/时间计算语句），不等待退出
+	// metricsCleanupLoop 注入零初始等待后可被 ctx 取消唤醒，验证完整退出
+	// （join 后再恢复默认值，避免泄漏 goroutine 与后续测试写入构成竞争）
+	saveWait, saveTick := metricsCleanupFirstWait, metricsCleanupInterval
+	metricsCleanupFirstWait = func() time.Duration { return 0 }
+	metricsCleanupInterval = 50 * time.Millisecond
+	t.Cleanup(func() { metricsCleanupFirstWait, metricsCleanupInterval = saveWait, saveTick })
 	exited3 := covSpawnLoop(func() { s.metricsCleanupLoop() })
+	_ = saveWait() // 生产闭包体（3 点时间计算）直接调用一次保覆盖
 
 	time.Sleep(100 * time.Millisecond) // 让循环都进入 select
 	s.cancel()                          // covNewServer 的 cleanup 也会 cancel（幂等）
 
 	covWaitExit(t, "cleanupLoop", exited1)
 	covWaitExit(t, "alertCheckLoop", exited2)
-	select {
-	case <-exited3:
-		// 若恰好在 3 点附近跑测试会自然退出
-	default:
-	}
+	covWaitExit(t, "metricsCleanupLoop", exited3)
 }
 
 // covSpawnLoop 在 goroutine 里跑 fn，返回退出信号
@@ -108,9 +109,15 @@ func TestCovStartBackupLoopAndRecover(t *testing.T) {
 	}
 
 	exited := covSpawnLoop(s.startBackupLoop)
+	// 恢复先回填 run 再回填 config（两步非原子）：两个条件都纳入轮询，
+	// 避免在两步之间读到中间态
 	covWaitGone(t, "orphan run recovered", func() bool {
 		got, err := s.db.GetBackupRun(run.ID)
-		return err == nil && got.Status == "failed" && got.Error == "server restarted during backup"
+		if err != nil || got.Status != "failed" || got.Error != "server restarted during backup" {
+			return false
+		}
+		gotCfg, err := s.db.GetBackupConfig(cfg.ID)
+		return err == nil && gotCfg.LastStatus == "failed"
 	})
 	gotCfg, err := s.db.GetBackupConfig(cfg.ID)
 	if err != nil {
@@ -232,6 +239,8 @@ func TestCovStartBackupRunDispatchFailureAndSuccess(t *testing.T) {
 		got, err := s2.db.GetBackupConfig(cfg2.ID)
 		return err == nil && got.LastStatus == "success"
 	})
+	// join 后台跟踪器：其读取 backupTrackInterval 须与 cleanup 恢复默认值有序
+	s2.backupTrackWG.Wait()
 
 	// trackBackupTask 的 ctx 取消分支：成功下发后立即 cancel
 	s3 := covLoopServer(t)
@@ -249,6 +258,8 @@ func TestCovStartBackupRunDispatchFailureAndSuccess(t *testing.T) {
 		t.Fatalf("startBackupRun: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond) // 让 trackBackupTask 至少跑一轮
+	s3.cancel()                       // 显式取消并 join：恢复默认值前跟踪器已退出
+	s3.backupTrackWG.Wait()
 }
 
 func TestCovTrackBackupTaskFailedNotify(t *testing.T) {
@@ -268,7 +279,11 @@ func TestCovTrackBackupTaskFailedNotify(t *testing.T) {
 	if err := s.db.CreateBackupRun(run); err != nil {
 		t.Fatal(err)
 	}
-	go s.trackBackupTask(cfg.ID, "agent-f", "task-x", run.ID)
+	s.backupTrackWG.Add(1)
+	go func() {
+		defer s.backupTrackWG.Done()
+		s.trackBackupTask(cfg.ID, "agent-f", "task-x", run.ID)
+	}()
 	covWaitGone(t, "backup run failed", func() bool {
 		got, err := s.db.GetBackupRun(run.ID)
 		if err != nil || got.Status != "failed" || got.Error != "disk full" {
@@ -277,6 +292,7 @@ func TestCovTrackBackupTaskFailedNotify(t *testing.T) {
 		gotCfg, err := s.db.GetBackupConfig(cfg.ID)
 		return err == nil && gotCfg.LastStatus == "failed"
 	})
+	s.backupTrackWG.Wait() // join 后再由 cleanup 恢复默认值，保证无竞争
 }
 
 func TestCovPollBackupTaskBranches(t *testing.T) {
@@ -413,8 +429,15 @@ func TestCovDriftScan(t *testing.T) {
 		}
 	}
 
-	// driftScanLoop：先睡 90s，只验证可启动（goroutine 挂着，进程退出回收）
-	go s.driftScanLoop()
+	// driftScanLoop：注入短节奏后完整跑 tick 循环并 join 退出（泄漏的
+	// goroutine 读注入变量会与后续测试的写入构成数据竞争）
+	saveTick, saveWait := driftScanTick, driftScanStartWait
+	driftScanTick, driftScanStartWait = 40*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { driftScanTick, driftScanStartWait = saveTick, saveWait })
+	exited := covSpawnLoop(s.driftScanLoop)
+	time.Sleep(150 * time.Millisecond) // 首扫 tick 已发生（默认间隔 1800s，不会重复扫）
+	s.cancel()
+	covWaitExit(t, "driftScanLoop", exited)
 
 	// scanDriftOnce：无 drift agent → 直接返回
 	s.scanDriftOnce()
@@ -694,4 +717,131 @@ func TestCovShutdownNilGuards(t *testing.T) {
 	s := covLoopServer(t) // inventorySync/probeRunner/proxyMgr 全为 nil
 	s.Shutdown()          // 覆盖 nil 分支 + db.Close
 	_ = context.Background
+}
+
+// ============ 循环 tick 分支（注入短节奏，覆盖真实周期下的分支） ============
+
+// TestCovAlertLoopTicks alertCheckLoop 的两个 ticker 分支（runAlertChecks /
+// cleanupOldAlerts）与启动即查的短延迟路径
+func TestCovAlertLoopTicks(t *testing.T) {
+	saveDelay, saveInterval, saveCleanup := alertCheckStartDelay, alertCheckInterval, alertCleanupInterval
+	alertCheckStartDelay, alertCheckInterval, alertCleanupInterval =
+		time.Millisecond, 30*time.Millisecond, 30*time.Millisecond
+	t.Cleanup(func() {
+		alertCheckStartDelay, alertCheckInterval, alertCleanupInterval = saveDelay, saveInterval, saveCleanup
+	})
+
+	s := covLoopServer(t)
+	exited := covSpawnLoop(s.alertCheckLoop)
+	time.Sleep(300 * time.Millisecond) // 两个 ticker 各至少触发一次
+	s.cancel()
+	covWaitExit(t, "alertCheckLoop", exited)
+}
+
+// TestCovMetricsCleanupLoopBody metricsCleanupLoop 的清理与 select 分支
+// （注入零初始等待 + 短周期；关库后走 CleanupOldMetrics 失败分支）
+func TestCovMetricsCleanupLoopBody(t *testing.T) {
+	saveWait, saveTick := metricsCleanupFirstWait, metricsCleanupInterval
+	metricsCleanupFirstWait = func() time.Duration { return 0 }
+	metricsCleanupInterval = 40 * time.Millisecond
+	t.Cleanup(func() { metricsCleanupFirstWait, metricsCleanupInterval = saveWait, saveTick })
+
+	s := covLoopServer(t)
+	exited := covSpawnLoop(s.metricsCleanupLoop)
+	time.Sleep(150 * time.Millisecond) // 成功清理若干轮 + ticker 继续
+	covCloseDB(t, s)
+	time.Sleep(150 * time.Millisecond) // db 已关 → 清理失败分支
+	s.cancel()
+	covWaitExit(t, "metricsCleanupLoop", exited)
+}
+
+// TestCovDriftScanLoopTicks driftScanLoop 全部分支：首扫、间隔未到跳过、
+// 关闭巡检跳过、ctx 取消退出
+func TestCovDriftScanLoopTicks(t *testing.T) {
+	saveTick, saveWait := driftScanTick, driftScanStartWait
+	driftScanTick, driftScanStartWait = 40*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { driftScanTick, driftScanStartWait = saveTick, saveWait })
+
+	s := covLoopServer(t)
+	scans := make(chan struct{}, 16)
+	covFakeAgent(t, s, "agent-dloop", []string{"drift"}, func(method string, params map[string]interface{}) map[string]interface{} {
+		select {
+		case scans <- struct{}{}:
+		default:
+		}
+		return covOKPayload(map[string]interface{}{"items": []interface{}{}})
+	})
+
+	exited := covSpawnLoop(s.driftScanLoop)
+	<-scans // 首扫（lastScan 为零 → scanDriftOnce）
+
+	// 默认间隔 1800s：后续 tick 走"间隔未到"continue；置 0 后走"关闭"continue
+	if err := s.SetDriftScanInterval(0); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := len(scans); n != 0 {
+		t.Errorf("extra scans = %d, want 0 (间隔未到/关闭分支不应再扫)", n)
+	}
+	s.cancel()
+	covWaitExit(t, "driftScanLoop", exited)
+}
+
+// TestCovServerBackupLoopTicks serverBackupLoop 全部分支：关闭跳过、间隔未到
+// 跳过、真实备份成功 + cleanup、关库后 VacuumInto 失败
+func TestCovServerBackupLoopTicks(t *testing.T) {
+	saveTick := serverBackupTick
+	serverBackupTick = 30 * time.Millisecond
+	t.Cleanup(func() { serverBackupTick = saveTick })
+
+	s := covLoopServer(t)
+	dir := s.serverBackupDir()
+	if err := os.MkdirAll(dir, 0755); err != nil { // 目录由 runServerBackup 懒创建，种子文件需要先建
+		t.Fatal(err)
+	}
+
+	// 1) interval=0 → 关闭分支（不产生任何文件）
+	_ = s.db.SetSetting(ServerBackupIntervalSettingKey, "0")
+	exited := covSpawnLoop(s.serverBackupLoop)
+	time.Sleep(120 * time.Millisecond)
+	if list, _ := s.listServerBackups(); len(list) != 0 {
+		t.Fatalf("disabled backup should create nothing: %+v", list)
+	}
+
+	// 2) 文件名时间戳即当前 → 间隔未到分支
+	fresh := "cockpit-" + time.Now().Add(-2*time.Second).Format("20060102-150405") + ".db"
+	if err := os.WriteFile(filepath.Join(dir, fresh), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.db.SetSetting(ServerBackupIntervalSettingKey, "24")
+	time.Sleep(150 * time.Millisecond)
+	if list, _ := s.listServerBackups(); len(list) != 1 {
+		t.Fatalf("fresh backup should suppress new ones: %+v", list)
+	}
+
+	// 3) 唯一备份 25h 前 → 真实备份成功 + cleanup 分支
+	old := "cockpit-" + time.Now().Add(-25*time.Hour).Format("20060102-150405") + ".db"
+	os.Remove(filepath.Join(dir, fresh))
+	if err := os.WriteFile(filepath.Join(dir, old), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	covWaitGone(t, "new backup after expired", func() bool {
+		list, _ := s.listServerBackups()
+		return len(list) == 2
+	})
+
+	// 4) 关库 → 删掉新鲜备份再等一轮：latest 过期但 VacuumInto 失败（无新文件）
+	covCloseDB(t, s)
+	list, _ := s.listServerBackups()
+	for _, f := range list {
+		if f.Name != old {
+			os.Remove(filepath.Join(dir, f.Name))
+		}
+	}
+	time.Sleep(150 * time.Millisecond)
+	if list, _ := s.listServerBackups(); len(list) != 1 {
+		t.Fatalf("closed-db backup should fail silently: %+v", list)
+	}
+	s.cancel()
+	covWaitExit(t, "serverBackupLoop", exited)
 }
