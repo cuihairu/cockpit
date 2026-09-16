@@ -77,8 +77,8 @@ dist/
 .vscode/
 
 # Go binaries
-cockpit
-cockpit-agent
+/cockpit
+/cockpit-agent
 *.exe
 
 # Database
