@@ -249,28 +249,23 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 需要认证的 API 路由
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		// 登录相关接口不需要认证
+		// 登录相关接口不需要认证；TOTP 设置路由需认证（曾因置于
+		// /api/auth/ 前缀守卫 return 之后而不可达，现并入同一 switch）
 		if strings.HasPrefix(r.URL.Path, "/api/auth/") {
-			if r.URL.Path == "/api/auth/login" {
+			switch r.URL.Path {
+			case "/api/auth/login":
 				s.handleLoginWithAudit(w, r)
-			} else if r.URL.Path == "/api/auth/refresh" {
+			case "/api/auth/refresh":
 				s.authService().HandleRefresh(w, r)
-			} else if r.URL.Path == "/api/auth/totp/verify" {
+			case "/api/auth/totp/verify":
 				s.handleTOTPVerify(w, r)
+			case "/api/auth/totp/generate":
+				s.authService().Middleware(s.handleTOTPGenerate)(w, r)
+			case "/api/auth/totp/enable":
+				s.authService().Middleware(s.handleTOTPEnable)(w, r)
+			case "/api/auth/totp/disable":
+				s.authService().Middleware(s.handleTOTPDisable)(w, r)
 			}
-			return
-		}
-		// TOTP 设置路由需要认证
-		if r.URL.Path == "/api/auth/totp/generate" {
-			s.authService().Middleware(s.handleTOTPGenerate)(w, r)
-			return
-		}
-		if r.URL.Path == "/api/auth/totp/enable" {
-			s.authService().Middleware(s.handleTOTPEnable)(w, r)
-			return
-		}
-		if r.URL.Path == "/api/auth/totp/disable" {
-			s.authService().Middleware(s.handleTOTPDisable)(w, r)
 			return
 		}
 		// 其他 API 需要认证

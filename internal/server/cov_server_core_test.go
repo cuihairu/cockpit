@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/probe"
 )
@@ -289,7 +290,15 @@ func TestCovRegisterRoutesDispatch(t *testing.T) {
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
-	token, err := s.authService().GenerateToken("1", "covuser", "admin")
+	// TOTP generate 按 userID 查库，先落一个真实用户并用其真实 ID 签 token
+	if err := auth.InitAdmin(s.db, "covuser", "cov-password-123"); err != nil {
+		t.Fatal(err)
+	}
+	u, err := s.db.GetUserByUsername("covuser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.authService().GenerateToken(u.ID, "covuser", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,15 +323,15 @@ func TestCovRegisterRoutesDispatch(t *testing.T) {
 		strings.NewReader("{bad")), http.StatusBadRequest)
 	covWantCode(t, "auth unknown passthrough", do(http.MethodGet, "/api/auth/unknown", "", nil), http.StatusOK)
 
-	// 疑似产品 bug：/api/auth/ 前缀分支对任意 auth 路径提前 return，
-	// server.go 中 totp/generate|enable|disable 的路由判断不可达，
-	// 这三个端点实际返回 200 空响应（未到 TOTP handler）。按实际行为断言。
+	// TOTP 设置三路由已并入 /api/auth/ 前缀守卫的 switch（原实现置于
+	// 提前 return 之后不可达）：无 token 401；带 token 抵达 handler
+	// （enable/disable 空请求体 → handler 的 400 参数校验）
 	for _, p := range []string{"/api/auth/totp/generate", "/api/auth/totp/enable", "/api/auth/totp/disable"} {
-		rec := do(http.MethodPost, p, "", nil)
-		if rec.Code != http.StatusOK || rec.Body.Len() != 0 {
-			t.Errorf("%s = %d %q, want empty 200 (dead route)", p, rec.Code, rec.Body.String())
-		}
+		covWantCode(t, "no token "+p, do(http.MethodPost, p, "", nil), http.StatusUnauthorized)
 	}
+	covWantCode(t, "with token generate", do(http.MethodPost, "/api/auth/totp/generate", token, nil), http.StatusOK)
+	covWantCode(t, "with token enable", do(http.MethodPost, "/api/auth/totp/enable", token, nil), http.StatusBadRequest)
+	covWantCode(t, "with token disable", do(http.MethodPost, "/api/auth/totp/disable", token, nil), http.StatusBadRequest)
 
 	// /api/ 认证分发
 	covWantCode(t, "api status", do(http.MethodGet, "/api/status", token, nil), http.StatusOK)
