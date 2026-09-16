@@ -13,6 +13,10 @@ import (
 	"github.com/cuihairu/cockpit/internal/protocol"
 )
 
+// connCleanupInterval 空闲连接清理周期。包级变量仅为测试可注入，
+// 默认值即生产取值
+var connCleanupInterval = 30 * time.Second
+
 // Manager 远程连接管理器
 type Manager struct {
 	connections map[string]*Connection // connID -> Connection
@@ -211,7 +215,7 @@ func (c *Connection) Close() error {
 
 // cleanupLoop 清理空闲连接
 func (m *Manager) cleanupLoop() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(connCleanupInterval)
 	defer ticker.Stop()
 
 	for {

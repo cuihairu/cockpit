@@ -20,13 +20,17 @@ import (
 // agent，并跟踪任务终态回填 BackupRun（见 docs/guide/backup-design.md D3）。
 
 const (
-	backupCheckInterval = time.Minute
-	backupTrackTimeout  = 30 * time.Minute // 大目录打包可能很久
-	backupMaxRetention  = 365
-	backupMaxIntervalH  = 168 // every:Nh 上限一周
+	backupMaxRetention = 365
+	backupMaxIntervalH = 168 // every:Nh 上限一周
 )
 
 var (
+	// backupCheckInterval 调度扫描周期；包级变量仅为测试可注入，
+	// 默认值即生产取值
+	backupCheckInterval = time.Minute
+	// backupTrackTimeout 任务跟踪总时限（大目录打包可能很久）；
+	// 包级变量仅为测试可注入，默认值即生产取值
+	backupTrackTimeout = 30 * time.Minute
 	// backupTrackInterval 任务终态轮询间隔；var 便于测试缩短等待
 	backupTrackInterval = 5 * time.Second
 	// backupNameRe 备份名约束（与 agent 侧一致）

@@ -18,24 +18,31 @@ var usingDefaultKey = false
 const defaultKeyPrefix = "change-this-totp-encryption-key"
 
 func init() {
-	key := os.Getenv("TOTP_ENCRYPTION_KEY")
+	usingDefaultKey = applyEncryptionKey(os.Getenv("TOTP_ENCRYPTION_KEY"))
+}
+
+// applyEncryptionKey 依密钥派生全局 AES 密钥，返回是否落入默认/弱密钥。
+// 从 init 拆出仅为测试可注入各分支，init 行为不变。
+func applyEncryptionKey(key string) bool {
+	weak := false
 	if key == "" {
 		// 开发环境默认密钥
 		// ⚠️ 警告：生产环境必须设置 TOTP_ENCRYPTION_KEY 环境变量！
 		// 使用默认密钥会导致所有实例使用相同密钥，严重破坏安全性。
 		key = "change-this-totp-encryption-key-in-prod!"
-		usingDefaultKey = true
+		weak = true
 	} else {
 		// 检查是否使用默认密钥或弱密钥
 		if len(key) < 32 {
-			usingDefaultKey = true
+			weak = true
 		}
 		if strings.HasPrefix(key, defaultKeyPrefix) {
-			usingDefaultKey = true
+			weak = true
 		}
 	}
 	hash := sha256.Sum256([]byte(key))
 	encryptionKey = hash[:]
+	return weak
 }
 
 // IsUsingDefaultKey 检查是否正在使用默认密钥

@@ -14,15 +14,24 @@ import (
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
+var (
+	// proxyAgentConnTimeout 等待 agent 建立目标连接的超时。包级变量仅为
+	// 测试可注入，默认值即生产取值
+	proxyAgentConnTimeout = 30 * time.Second
+	// proxyCleanupInterval 空闲连接清理周期。包级变量仅为测试可注入，
+	// 默认值即生产取值
+	proxyCleanupInterval = 30 * time.Second
+)
+
 // Manager 代理管理器
 type Manager struct {
-	server   ServerInterface       // Server 接口，用于发送消息给 Agent
-	db       *storage.DB           // 数据库
-	proxies  map[string]*Proxy     // proxyID -> Proxy
-	mu       sync.RWMutex
-	ctx      context.Context
-	cancel   context.CancelFunc
-	running  atomic.Bool
+	server  ServerInterface   // Server 接口，用于发送消息给 Agent
+	db      *storage.DB       // 数据库
+	proxies map[string]*Proxy // proxyID -> Proxy
+	mu      sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	running atomic.Bool
 }
 
 // ServerInterface Server 接口，用于代理管理器与 Server 通信
@@ -39,13 +48,13 @@ type AgentConn interface {
 
 // Proxy 代理实例
 type Proxy struct {
-	config    *storage.Proxy
-	listener  net.Listener
-	conns     map[string]*ProxyConn // connID -> ProxyConn
-	connSeq   atomic.Uint64
-	mu        sync.RWMutex
-	ctx       context.Context
-	cancel    context.CancelFunc
+	config   *storage.Proxy
+	listener net.Listener
+	conns    map[string]*ProxyConn // connID -> ProxyConn
+	connSeq  atomic.Uint64
+	mu       sync.RWMutex
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 // ProxyConn 代理连接
@@ -137,7 +146,7 @@ func (m *Manager) StartProxy(config *storage.Proxy) error {
 	proxy.cancel = cancel
 
 	// 启动监听
-	addr := fmt.Sprintf("127.0.0.1:%d", config.RemotePort)  // 默认绑定本地，防止公网暴露
+	addr := fmt.Sprintf("127.0.0.1:%d", config.RemotePort) // 默认绑定本地，防止公网暴露
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		cancel()
@@ -248,7 +257,7 @@ func (m *Manager) handleConnection(proxy *Proxy, clientConn net.Conn) {
 	// 设置连接超时
 	go func() {
 		select {
-		case <-time.After(30 * time.Second):
+		case <-time.After(proxyAgentConnTimeout):
 			if !proxyConn.closed.Load() {
 				log.Printf("Connection %s timeout waiting for agent", connID)
 				proxyConn.Close()
@@ -371,20 +380,20 @@ func (m *Manager) GetProxyStatus(proxyID string) (map[string]interface{}, error)
 	conns := make([]map[string]interface{}, 0, len(proxy.conns))
 	for _, conn := range proxy.conns {
 		conns = append(conns, map[string]interface{}{
-			"id":        conn.ID,
-			"remote":    conn.Conn.RemoteAddr().String(),
-			"created":   conn.Created,
-			"lastRead":  conn.LastRead,
-			"closed":    conn.closed.Load(),
+			"id":       conn.ID,
+			"remote":   conn.Conn.RemoteAddr().String(),
+			"created":  conn.Created,
+			"lastRead": conn.LastRead,
+			"closed":   conn.closed.Load(),
 		})
 	}
 
 	return map[string]interface{}{
-		"id":         proxy.config.ID,
-		"name":       proxy.config.Name,
-		"status":     "running",
+		"id":          proxy.config.ID,
+		"name":        proxy.config.Name,
+		"status":      "running",
 		"connections": conns,
-		"connCount":  len(conns),
+		"connCount":   len(conns),
 	}, nil
 }
 
@@ -423,7 +432,7 @@ func (m *Manager) GetAllStatus() []map[string]interface{} {
 
 // cleanupLoop 清理过期连接
 func (m *Manager) cleanupLoop() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(proxyCleanupInterval)
 	defer ticker.Stop()
 
 	for {
