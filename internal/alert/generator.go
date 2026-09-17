@@ -324,3 +324,11 @@ func (g *Generator) CheckDiskHealth(agentID, hostname string, hasFailed bool, is
 	}
 	g.createAlertIfNotExists(level, title, message, agentID, "agent")
 }
+
+// CheckDDNS DDNS 巡检失败告警（见 ddns-design.md D8）：title 按记录名
+// 真去重——记录名未处理期间同一失败只提醒一次；恢复不告警（静默自愈）。
+func (g *Generator) CheckDDNS(recordName, reason string) {
+	title := "DDNS 失败：" + recordName
+	message := "动态域名解析检查失败，域名可能已指向过期 IP：\n" + reason
+	g.createAlertIfNotExists("warning", title, message, recordName, "ddns")
+}
