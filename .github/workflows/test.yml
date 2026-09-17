@@ -47,6 +47,9 @@ jobs:
           fi
           echo "Coverage ${coverage}% meets threshold"
 
+      - name: Run tests with race detector
+        run: go test -race -short ./... -timeout 900s
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
