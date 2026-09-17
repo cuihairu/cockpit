@@ -141,7 +141,7 @@ func (a *Agent) Stop() {
 func (a *Agent) connect() error {
 	log.Printf("Connecting to %s...", a.serverURL)
 
-	dialer := websocket.DefaultDialer
+	dialer := *websocket.DefaultDialer // 值拷贝，严禁修改全局单例（并发 Dial 数据竞态）
 	dialer.HandshakeTimeout = 10 * time.Second
 
 	conn, _, err := dialer.Dial(a.serverURL, nil)
