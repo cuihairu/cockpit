@@ -676,7 +676,9 @@ func (p *StackProvider) launchTask(stack, action string, run func(*stackTask) er
 		defer lock.Unlock()
 
 		err := run(task)
-		// 终态字段在锁内更新：GetTask 轮询会并发读取
+		// 终态字段在锁内更新：GetTask 轮询会并发读取。
+		// last-task.json 也在锁内落盘：保证轮询观察到终态时文件已写完，
+		// 否则 GetTask 返回 failed 后立刻读文件会看到旧内容/不存在。
 		p.mu.Lock()
 		task.FinishedAt = p.now()
 		if err != nil {
@@ -685,8 +687,8 @@ func (p *StackProvider) launchTask(stack, action string, run func(*stackTask) er
 		} else {
 			task.Status = stackTaskSuccess
 		}
-		p.mu.Unlock()
 		p.persistLastTask(stack, task)
+		p.mu.Unlock()
 	}()
 
 	return map[string]interface{}{"taskId": task.ID, "status": "started"}, nil

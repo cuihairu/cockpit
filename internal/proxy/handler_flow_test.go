@@ -316,7 +316,7 @@ func TestManagerClientDataFlow(t *testing.T) {
 	var newMsg *protocol.Message
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, msg := range agent.messages {
+		for _, msg := range agent.snapshotMessages() {
 			if msg.Type == protocol.MessageTypeProxyNew {
 				newMsg = msg
 			}
@@ -341,7 +341,7 @@ func TestManagerClientDataFlow(t *testing.T) {
 	foundData := false
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && !foundData {
-		for _, msg := range agent.messages {
+		for _, msg := range agent.snapshotMessages() {
 			if msg.Type == protocol.MessageTypeProxyData {
 				foundData = true
 			}

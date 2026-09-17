@@ -91,6 +91,16 @@ func (m *mockAgentConn) SendMessage(msg *protocol.Message) error {
 	return nil
 }
 
+// snapshotMessages 返回已记录消息的快照。SendToAgent/SendMessage 会在
+// 其他协程（acceptConnections 等）并发追加，测试轮询读取必须走锁。
+func (m *mockAgentConn) snapshotMessages() []*protocol.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*protocol.Message, len(m.messages))
+	copy(out, m.messages)
+	return out
+}
+
 func (m *mockAgentConn) AgentID() string {
 	return m.agentID
 }
