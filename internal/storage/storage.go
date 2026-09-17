@@ -117,6 +117,7 @@ func (d *DB) migrate() error {
 		&BackupRun{},
 		&ProbeResult{},
 		&TerminalRecording{},
+		&DDNSConfig{},
 	)
 }
 
