@@ -57,6 +57,10 @@ import type {
   CronStatus,
   SmartScanConfig,
   SmartStatus,
+  DDNSConfig,
+  DDNSConfigInput,
+  DDNSCheckResult,
+  DDNSScanConfig,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -797,6 +801,37 @@ class ApiService {
 
   async putSmartConfig(scanIntervalSeconds: number): Promise<void> {
     await this.client.put('/smart/config', { scan_interval_seconds: scanIntervalSeconds })
+  }
+
+  // ========== DDNS（动态域名解析，见 ddns-design.md） ==========
+
+  async getDDNSConfigs(): Promise<DDNSConfig[]> {
+    return this.client.get<unknown, DDNSConfig[]>('/ddns')
+  }
+
+  async createDDNSConfig(input: DDNSConfigInput): Promise<DDNSConfig> {
+    return this.client.post<unknown, DDNSConfig>('/ddns', input)
+  }
+
+  async updateDDNSConfig(id: number, input: DDNSConfigInput): Promise<DDNSConfig> {
+    return this.client.put<unknown, DDNSConfig>(`/ddns/${id}`, input)
+  }
+
+  async deleteDDNSConfig(id: number): Promise<void> {
+    await this.client.delete(`/ddns/${id}`)
+  }
+
+  // 立即检查单条（不等巡检周期）
+  async checkDDNSConfig(id: number): Promise<DDNSCheckResult> {
+    return this.client.post<unknown, DDNSCheckResult>(`/ddns/${id}/check`)
+  }
+
+  async getDDNSScanConfig(): Promise<DDNSScanConfig> {
+    return this.client.get<unknown, DDNSScanConfig>('/ddns/config')
+  }
+
+  async putDDNSScanConfig(scanIntervalSeconds: number): Promise<void> {
+    await this.client.put('/ddns/config', { scan_interval_seconds: scanIntervalSeconds })
   }
 }
 

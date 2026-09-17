@@ -13,6 +13,7 @@ import {
   Space,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
   message,
@@ -22,9 +23,11 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { DNSRecord, DNSRecordInput, DNSZone } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import DDNSPanel from './DDNSPanel'
 
-// DNS 管理：Cloudflare 记录增删改查（server 直连 API v4，不落库；
-// 见 docs/guide/dns-design.md）。zone 下拉联动记录表。
+// DNS 管理：Tab1 记录管理（Cloudflare 记录增删改查，server 直连 API v4，
+// 不落库，见 docs/guide/dns-design.md）+ Tab2 DDNS 动态域名（ddns-design.md）。
+// 未配置 token 时两 Tab 共用同一张引导卡片。
 
 // 与 server 端 dns.AllowedTypes 同规则（双端校验，D8）
 const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA']
@@ -42,7 +45,8 @@ interface RecordFormValues {
 
 const emptyForm: RecordFormValues = { type: 'A', name: '', content: '', ttl: null, proxied: false }
 
-const DNS = () => {
+// Tab1：记录管理（原 DNS 页主体；仅在 token 已配置时渲染）
+const RecordsPanel = () => {
   const [zoneId, setZoneId] = useState('')
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined)
   const [page, setPage] = useState(1)
@@ -51,15 +55,9 @@ const DNS = () => {
   const [form] = Form.useForm<RecordFormValues>()
   const queryClient = useQueryClient()
 
-  const { data: status } = useQuery({
-    queryKey: ['dns-status'],
-    queryFn: () => api.getDNSStatus(),
-  })
-
   const { data: zones = [], isLoading: zonesLoading } = useQuery({
     queryKey: ['dns-zones'],
     queryFn: () => api.getDNSZones(),
-    enabled: !!status?.configured,
   })
 
   const zone: DNSZone | undefined = useMemo(
@@ -70,7 +68,7 @@ const DNS = () => {
   const { data: recordsPage, isLoading: recordsLoading } = useQuery({
     queryKey: ['dns-records', zoneId, typeFilter, page],
     queryFn: () => api.getDNSRecords(zoneId, typeFilter, page),
-    enabled: !!status?.configured && !!zoneId,
+    enabled: !!zoneId,
   })
 
   const invalidateRecords = () =>
@@ -94,7 +92,7 @@ const DNS = () => {
       setModalOpen(false)
       invalidateRecords()
     },
-    onError: (err) => message.error(getApiErrorMessage(err)),
+    onError: (err) => message.error(getApiErrorMessage(err, '操作失败')),
   })
 
   const deleteMutation = useMutation({
@@ -103,7 +101,7 @@ const DNS = () => {
       message.success('记录已删除')
       invalidateRecords()
     },
-    onError: (err) => message.error(getApiErrorMessage(err)),
+    onError: (err) => message.error(getApiErrorMessage(err, '操作失败')),
   })
 
   const openCreate = () => {
@@ -166,26 +164,6 @@ const DNS = () => {
 
   // hooks 必须先于条件 return（Form.useWatch 拿当前类型控制 proxied 开关）
   const selectedType = Form.useWatch('type', form)
-
-  // 未配置 token：引导而非报错堆叠
-  if (status && !status.configured) {
-    return (
-      <Card>
-        <Alert
-          type="info"
-          showIcon
-          message="DNS 服务商未配置"
-          description={
-            <Typography.Paragraph style={{ marginBottom: 0 }}>
-              在 config.yaml 设置 <Typography.Text code>dns.cloudflare.api_token</Typography.Text>
-              ，或用环境变量 <Typography.Text code>CLOUDFLARE_API_TOKEN</Typography.Text> 注入
-              （推荐，secret 不落文件）后重启 server。token 只需要 Zone.DNS 编辑权限。
-            </Typography.Paragraph>
-          }
-        />
-      </Card>
-    )
-  }
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -299,6 +277,43 @@ const DNS = () => {
         </Form>
       </Modal>
     </Space>
+  )
+}
+
+const DNS = () => {
+  const { data: status } = useQuery({
+    queryKey: ['dns-status'],
+    queryFn: () => api.getDNSStatus(),
+  })
+
+  // 未配置 token：引导而非报错堆叠（两个 Tab 都依赖 Cloudflare）
+  if (status && !status.configured) {
+    return (
+      <Card>
+        <Alert
+          type="info"
+          showIcon
+          message="DNS 服务商未配置"
+          description={
+            <Typography.Paragraph style={{ marginBottom: 0 }}>
+              在 config.yaml 设置 <Typography.Text code>dns.cloudflare.api_token</Typography.Text>
+              ，或用环境变量 <Typography.Text code>CLOUDFLARE_API_TOKEN</Typography.Text> 注入
+              （推荐，secret 不落文件）后重启 server。token 只需要 Zone.DNS 编辑权限。
+            </Typography.Paragraph>
+          }
+        />
+      </Card>
+    )
+  }
+
+  return (
+    <Tabs
+      defaultActiveKey="records"
+      items={[
+        { key: 'records', label: '记录管理', children: <RecordsPanel /> },
+        { key: 'ddns', label: 'DDNS', children: <DDNSPanel /> },
+      ]}
+    />
   )
 }
 

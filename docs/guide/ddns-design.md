@@ -26,6 +26,7 @@
 - **D10 REST**（全部 `/api/ddns` 前缀）：
   - `GET /api/ddns` 配置列表；`POST /api/ddns` 创建；`PUT /api/ddns/{id}` 更新；`DELETE /api/ddns/{id}` 删除（用户操作，记审计）
   - `POST /api/ddns/{id}/check` 立即同步检查单条（不等巡检周期），返回检查结果
+  - `GET/PUT /api/ddns/config` 全局巡检间隔（与 `/api/drift/config`、`/api/smart/config` 同构；0 = 关闭）
   - 创建/更新校验：Type ∈ {A, AAAA}、RecordName 非空且过 `dns.ValidateInput` 同规则、AgentID 非空。zone 下拉复用已有 `GET /api/dns/zones`。
 - **D11 前端**：DNS 页改 Tabs——「记录管理」（现有内容）+「DDNS」。DDNS Tab：配置表（记录名/类型/绑定主机/当前 IP/状态徽标/最后检查时间）+ 新建/编辑 Modal（agent 下拉在线优先、zone 下拉、记录名、类型、启用 Switch）+ 立即检查按钮 + 巡检间隔设置（与 smart/drift 页同模式）。
 - **D12 安全**：探测到的 IP 必须过 `net.ParseIP` + 地址族匹配才进表、进 DNS；RecordName 复用 `dns.ValidateInput` 校验面；token 不出 server（D1 推论）。

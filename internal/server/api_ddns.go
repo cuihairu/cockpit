@@ -27,6 +27,9 @@ import (
 func (s *Server) handleDDNS(w http.ResponseWriter, r *http.Request) {
 	sub := strings.Trim(strings.TrimPrefix(r.URL.Path, "/ddns"), "/")
 	switch {
+	case sub == "config":
+		// GET/PUT 全局巡检间隔（与 /api/drift/config、/api/smart/config 同构）
+		s.handleDDNSConfigAPI(w, r)
 	case sub == "":
 		switch r.Method {
 		case http.MethodGet:
@@ -209,4 +212,35 @@ func (s *Server) handleDDNSCheck(w http.ResponseWriter, r *http.Request, idStr s
 		"status":  cfg.LastStatus,
 		"error":   cfg.LastError,
 	})
+}
+
+// handleDDNSConfigAPI 全局巡检配置：GET 返回当前间隔与范围；
+// PUT 校验后写入 Setting（0 = 关闭）
+func (s *Server) handleDDNSConfigAPI(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"scan_interval_seconds": s.GetDDNSScanInterval(),
+			"min":                   ddnsMinIntervalSeconds,
+			"max":                   ddnsMaxIntervalSeconds,
+			"default":               ddnsDefaultInterval,
+		})
+	case http.MethodPut:
+		var req struct {
+			ScanIntervalSeconds int `json:"scan_interval_seconds"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+		if err := s.SetDDNSScanInterval(req.ScanIntervalSeconds); err != nil {
+			s.handleError(w, r, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"scan_interval_seconds": req.ScanIntervalSeconds,
+		})
+	default:
+		s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
