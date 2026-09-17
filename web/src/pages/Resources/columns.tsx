@@ -148,6 +148,14 @@ export const domainColumns: ColumnsType<Domain> = [
     width: 120,
     render: (date: string) => (date ? new Date(date).toLocaleDateString() : '-'),
   },
+  {
+    title: '最近状态',
+    key: 'heartbeat',
+    width: 240,
+    render: (_: unknown, record: Domain) => (
+      <ProbeHeartbeatCell resourceType="domain" resourceId={record.id} />
+    ),
+  },
   { title: '操作', key: 'actions', width: 120, render: () => commonActions },
 ]
 
@@ -183,6 +191,14 @@ export const certificateColumns: ColumnsType<Certificate> = [
     width: 100,
     render: (autoRenew: boolean) => (
       <Tag color={autoRenew ? 'success' : 'default'}>{autoRenew ? '是' : '否'}</Tag>
+    ),
+  },
+  {
+    title: '最近状态',
+    key: 'heartbeat',
+    width: 240,
+    render: (_: unknown, record: Certificate) => (
+      <ProbeHeartbeatCell resourceType="certificate" resourceId={record.id} />
     ),
   },
   { title: '操作', key: 'actions', width: 120, render: () => commonActions },
