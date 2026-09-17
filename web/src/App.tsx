@@ -7,6 +7,7 @@ import { Button, Dropdown, Avatar, Space, Input, ConfigProvider } from 'antd'
 import {
   DashboardOutlined,
   ApiOutlined,
+  ClusterOutlined,
   SettingOutlined,
   UserOutlined,
   LogoutOutlined,
@@ -41,6 +42,7 @@ const Stacks = lazy(() => import('./pages/Stacks'))
 const Backups = lazy(() => import('./pages/Backups'))
 const Proxy = lazy(() => import('./pages/Proxy'))
 const Cron = lazy(() => import('./pages/Cron'))
+const Network = lazy(() => import('./pages/Network'))
 const Drift = lazy(() => import('./pages/Drift'))
 const DNS = lazy(() => import('./pages/DNS'))
 const Recordings = lazy(() => import('./pages/Recordings'))
@@ -134,6 +136,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/cron',
       name: '定时任务',
       icon: <ClockCircleOutlined />,
+    },
+    {
+      path: '/network',
+      name: '组网观测',
+      icon: <ClusterOutlined />,
     },
     {
       path: '/drift',
@@ -323,6 +330,7 @@ const MainLayout = () => {
             <Route path="/backups" element={<Backups />} />
             <Route path="/proxy" element={<Proxy />} />
             <Route path="/cron" element={<Cron />} />
+            <Route path="/network" element={<Network />} />
             <Route path="/drift" element={<Drift />} />
             <Route path="/dns" element={<DNS />} />
             <Route path="/recordings" element={<Recordings />} />

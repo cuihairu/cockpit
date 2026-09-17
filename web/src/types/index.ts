@@ -697,6 +697,58 @@ export interface CronJobsResult {
   external: string
 }
 
+// ========== Overlay 组网观测（见 overlay-design.md） ==========
+
+// 组网对端节点（工具间字段取可用子集）
+export interface OverlayPeer {
+  id: string
+  name?: string
+  virtualIps?: string[]
+  version?: string
+  latencyMs?: number
+  online: boolean
+  endpoint?: string
+  relay?: string
+  role?: string
+  lastHandshake?: string
+}
+
+// 本机加入的网络（ZeroTier/Tailscale）
+export interface OverlayNetwork {
+  id: string
+  name?: string
+  status?: string
+  type?: string
+  dev?: string
+  online?: boolean
+  ips?: string[]
+}
+
+// WireGuard 接口
+export interface OverlayWGInterface {
+  name: string
+  listenPort?: string
+  peerCount: number
+  peers: OverlayPeer[]
+}
+
+// 单个组网工具的观测快照
+export interface OverlayTool {
+  tool: 'zerotier' | 'tailscale' | 'wireguard' | 'frp'
+  status: 'ok' | 'degraded' | 'error' | 'unavailable'
+  version?: string
+  error?: string
+  networks?: OverlayNetwork[]
+  peers?: OverlayPeer[]
+  interfaces?: OverlayWGInterface[]
+  extra?: Record<string, unknown>
+}
+
+// overlay.status 返回
+export interface OverlayStatus {
+  tools: OverlayTool[]
+}
+
 // ========== DNS 管理（Cloudflare，见 dns-design.md） ==========
 
 // DNS 配置探测（只返回布尔，不含 token）

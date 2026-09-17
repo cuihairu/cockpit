@@ -53,6 +53,7 @@ import type {
   ProxyStatus,
   CronJob,
   CronJobsResult,
+  OverlayStatus,
   CronStatus,
 } from '@/types'
 import { logger } from '@/utils/logger'
@@ -771,6 +772,13 @@ class ApiService {
   // 删除任务
   async deleteCronJob(agentId: string, name: string): Promise<void> {
     await this.client.delete(`/agents/${encodeURIComponent(agentId)}/cron/jobs/${encodeURIComponent(name)}`)
+  }
+
+  // ============ Overlay 组网观测 ============
+
+  // 组网工具快照（ZeroTier/Tailscale/WireGuard/frp，只读纯转发）
+  async getOverlayStatus(agentId: string): Promise<OverlayStatus> {
+    return this.client.get<unknown, OverlayStatus>(`/agents/${encodeURIComponent(agentId)}/overlay/status`)
   }
 }
 
