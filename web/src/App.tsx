@@ -8,6 +8,7 @@ import {
   DashboardOutlined,
   ApiOutlined,
   ClusterOutlined,
+  HddOutlined,
   SettingOutlined,
   UserOutlined,
   LogoutOutlined,
@@ -43,6 +44,7 @@ const Backups = lazy(() => import('./pages/Backups'))
 const Proxy = lazy(() => import('./pages/Proxy'))
 const Cron = lazy(() => import('./pages/Cron'))
 const Network = lazy(() => import('./pages/Network'))
+const Disk = lazy(() => import('./pages/Disk'))
 const Drift = lazy(() => import('./pages/Drift'))
 const DNS = lazy(() => import('./pages/DNS'))
 const Recordings = lazy(() => import('./pages/Recordings'))
@@ -141,6 +143,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/network',
       name: '组网观测',
       icon: <ClusterOutlined />,
+    },
+    {
+      path: '/disk',
+      name: '磁盘健康',
+      icon: <HddOutlined />,
     },
     {
       path: '/drift',
@@ -331,6 +338,7 @@ const MainLayout = () => {
             <Route path="/proxy" element={<Proxy />} />
             <Route path="/cron" element={<Cron />} />
             <Route path="/network" element={<Network />} />
+            <Route path="/disk" element={<Disk />} />
             <Route path="/drift" element={<Drift />} />
             <Route path="/dns" element={<DNS />} />
             <Route path="/recordings" element={<Recordings />} />

@@ -55,6 +55,8 @@ import type {
   CronJobsResult,
   OverlayStatus,
   CronStatus,
+  SmartScanConfig,
+  SmartStatus,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -779,6 +781,22 @@ class ApiService {
   // 组网工具快照（ZeroTier/Tailscale/WireGuard/frp，只读纯转发）
   async getOverlayStatus(agentId: string): Promise<OverlayStatus> {
     return this.client.get<unknown, OverlayStatus>(`/agents/${encodeURIComponent(agentId)}/overlay/status`)
+  }
+
+  // ========== 磁盘健康（SMART，见 disk-health-design.md） ==========
+
+  // 单机磁盘健康快照（纯转发，浏览类不记审计）
+  async getSmartStatus(agentId: string): Promise<SmartStatus> {
+    return this.client.get<unknown, SmartStatus>(`/agents/${encodeURIComponent(agentId)}/smart/status`)
+  }
+
+  // 巡检配置：server 定时扫描全部主机并产生磁盘告警（0 = 关闭）
+  async getSmartConfig(): Promise<SmartScanConfig> {
+    return this.client.get<unknown, SmartScanConfig>('/smart/config')
+  }
+
+  async putSmartConfig(scanIntervalSeconds: number): Promise<void> {
+    await this.client.put('/smart/config', { scan_interval_seconds: scanIntervalSeconds })
   }
 }
 
