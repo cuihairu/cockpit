@@ -321,6 +321,13 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		}
 	}
 
+	// ddns capability：公网出口 IP 探测，标准库出站 HTTP 实现全平台
+	// 可用，无需 detector（与 file capability 同则，见 ddns-design.md D4）
+	capabilities = append(capabilities, protocol.Capability{
+		Type:    "ddns",
+		Version: "1",
+	})
+
 	return capabilities
 }
 

@@ -85,6 +85,9 @@ func (a *Agent) setupProviders() {
 			// SMART 磁盘健康观测（见 docs/guide/disk-health-design.md）；
 			// 无 smartctl 的主机 provider 返回 available=false，不报错
 			a.rpc.RegisterProvider(rpc.NewSmartProvider(nil))
+		case "ddns":
+			// 公网出口 IP 探测（见 docs/guide/ddns-design.md D4）
+			a.rpc.RegisterProvider(rpc.NewDDNSProvider(nil))
 		}
 	}
 }
