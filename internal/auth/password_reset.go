@@ -30,9 +30,13 @@ type ResetTokenData struct {
 	ExpiresAt time.Time
 }
 
-// 重置令牌存储（生产环境应使用 Redis）
-var resetTokenStore = make(map[string]*ResetTokenData)
-var resetTokenStoreMutex = make(map[string]*time.Time)
+// 重置令牌存储（生产环境应使用 Redis）。
+// GenerateResetToken 会起后台清理协程，且 HTTP handler 并发调用，
+// 所有读写必须持 resetTokenMu。
+var (
+	resetTokenMu    sync.Mutex
+	resetTokenStore = make(map[string]*ResetTokenData)
+)
 
 // emailConfig 全局邮件配置
 var emailConfig *config.EmailConfig
@@ -71,8 +75,9 @@ func GenerateResetToken(userID, email string) (string, string, error) {
 		Code:      code,
 		ExpiresAt: time.Now().Add(30 * time.Minute),
 	}
+	resetTokenMu.Lock()
 	resetTokenStore[token] = data
-	resetTokenStoreMutex[token] = &data.ExpiresAt
+	resetTokenMu.Unlock()
 
 	// 清理过期令牌
 	go cleanupExpiredTokens()
@@ -82,6 +87,9 @@ func GenerateResetToken(userID, email string) (string, string, error) {
 
 // ValidateResetToken 验证重置令牌
 func ValidateResetToken(token string) (*ResetTokenData, error) {
+	resetTokenMu.Lock()
+	defer resetTokenMu.Unlock()
+
 	data, exists := resetTokenStore[token]
 	if !exists {
 		return nil, ErrResetTokenInvalid
@@ -89,7 +97,6 @@ func ValidateResetToken(token string) (*ResetTokenData, error) {
 
 	if time.Now().After(data.ExpiresAt) {
 		delete(resetTokenStore, token)
-		delete(resetTokenStoreMutex, token)
 		return nil, ErrResetTokenInvalid
 	}
 
@@ -112,6 +119,9 @@ func ValidateResetCode(token, code string) (*ResetTokenData, error) {
 
 // ConsumeResetToken 消费重置令牌（验证后删除）
 func ConsumeResetToken(token string) bool {
+	resetTokenMu.Lock()
+	defer resetTokenMu.Unlock()
+
 	data, exists := resetTokenStore[token]
 	if !exists {
 		return false
@@ -119,22 +129,23 @@ func ConsumeResetToken(token string) bool {
 
 	if time.Now().After(data.ExpiresAt) {
 		delete(resetTokenStore, token)
-		delete(resetTokenStoreMutex, token)
 		return false
 	}
 
 	delete(resetTokenStore, token)
-	delete(resetTokenStoreMutex, token)
 	_ = data
 	return true
 }
 
 // cleanupExpiredTokens 清理过期令牌
 func cleanupExpiredTokens() {
-	for token, expiry := range resetTokenStoreMutex {
-		if expiry != nil && time.Now().After(*expiry) {
+	now := time.Now()
+
+	resetTokenMu.Lock()
+	defer resetTokenMu.Unlock()
+	for token, data := range resetTokenStore {
+		if now.After(data.ExpiresAt) {
 			delete(resetTokenStore, token)
-			delete(resetTokenStoreMutex, token)
 		}
 	}
 }

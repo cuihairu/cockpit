@@ -32,10 +32,30 @@ func TestGenerateVerificationCodeUniqueness(t *testing.T) {
 	}
 }
 
+// resetStore 清空令牌存储。GenerateResetToken 会起后台清理协程，
+// 上一测试的 goroutine 可能存活到下一测试，访问必须持锁。
+func resetStore() {
+	resetTokenMu.Lock()
+	defer resetTokenMu.Unlock()
+	resetTokenStore = make(map[string]*ResetTokenData)
+}
+
+func seedResetToken(token string, data *ResetTokenData) {
+	resetTokenMu.Lock()
+	defer resetTokenMu.Unlock()
+	resetTokenStore[token] = data
+}
+
+func storedResetTokenExists(token string) bool {
+	resetTokenMu.Lock()
+	defer resetTokenMu.Unlock()
+	_, ok := resetTokenStore[token]
+	return ok
+}
+
 func TestGenerateResetToken(t *testing.T) {
 	// Clear store
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	token, code, err := GenerateResetToken("user-1", "test@example.com")
 	if err != nil {
@@ -53,8 +73,7 @@ func TestGenerateResetToken(t *testing.T) {
 }
 
 func TestValidateResetToken(t *testing.T) {
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	token, _, _ := GenerateResetToken("user-1", "test@example.com")
 
@@ -71,8 +90,7 @@ func TestValidateResetToken(t *testing.T) {
 }
 
 func TestValidateResetTokenNotFound(t *testing.T) {
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	_, err := ValidateResetToken("nonexistent")
 	if err != ErrResetTokenInvalid {
@@ -81,18 +99,16 @@ func TestValidateResetTokenNotFound(t *testing.T) {
 }
 
 func TestValidateResetTokenExpired(t *testing.T) {
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	// Manually insert expired token
 	expired := time.Now().Add(-1 * time.Hour)
-	resetTokenStore["expired-token"] = &ResetTokenData{
+	seedResetToken("expired-token", &ResetTokenData{
 		UserID:    "user-1",
 		Email:     "test@example.com",
 		Code:      "123456",
 		ExpiresAt: expired,
-	}
-	resetTokenStoreMutex["expired-token"] = &expired
+	})
 
 	_, err := ValidateResetToken("expired-token")
 	if err != ErrResetTokenInvalid {
@@ -101,8 +117,7 @@ func TestValidateResetTokenExpired(t *testing.T) {
 }
 
 func TestValidateResetCode(t *testing.T) {
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	token, code, _ := GenerateResetToken("user-1", "test@example.com")
 
@@ -116,8 +131,7 @@ func TestValidateResetCode(t *testing.T) {
 }
 
 func TestValidateResetCodeWrongCode(t *testing.T) {
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	token, _, _ := GenerateResetToken("user-1", "test@example.com")
 
@@ -128,8 +142,7 @@ func TestValidateResetCodeWrongCode(t *testing.T) {
 }
 
 func TestValidateResetCodeInvalidToken(t *testing.T) {
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	_, err := ValidateResetCode("bad-token", "123456")
 	if err != ErrResetTokenInvalid {
@@ -138,8 +151,7 @@ func TestValidateResetCodeInvalidToken(t *testing.T) {
 }
 
 func TestConsumeResetToken(t *testing.T) {
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	token, _, _ := GenerateResetToken("user-1", "test@example.com")
 
@@ -153,15 +165,13 @@ func TestConsumeResetToken(t *testing.T) {
 }
 
 func TestConsumeResetTokenExpired(t *testing.T) {
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	expired := time.Now().Add(-1 * time.Hour)
-	resetTokenStore["expired"] = &ResetTokenData{
+	seedResetToken("expired", &ResetTokenData{
 		UserID:    "user-1",
 		ExpiresAt: expired,
-	}
-	resetTokenStoreMutex["expired"] = &expired
+	})
 
 	if ConsumeResetToken("expired") {
 		t.Error("ConsumeResetToken() should return false for expired token")
@@ -169,8 +179,7 @@ func TestConsumeResetTokenExpired(t *testing.T) {
 }
 
 func TestConsumeResetTokenNotFound(t *testing.T) {
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	if ConsumeResetToken("nonexistent") {
 		t.Error("ConsumeResetToken() should return false for nonexistent token")
@@ -178,23 +187,20 @@ func TestConsumeResetTokenNotFound(t *testing.T) {
 }
 
 func TestCleanupExpiredTokens(t *testing.T) {
-	resetTokenStore = make(map[string]*ResetTokenData)
-	resetTokenStoreMutex = make(map[string]*time.Time)
+	resetStore()
 
 	expired := time.Now().Add(-1 * time.Hour)
 	future := time.Now().Add(1 * time.Hour)
 
-	resetTokenStore["expired"] = &ResetTokenData{ExpiresAt: expired}
-	resetTokenStoreMutex["expired"] = &expired
-	resetTokenStore["valid"] = &ResetTokenData{ExpiresAt: future}
-	resetTokenStoreMutex["valid"] = &future
+	seedResetToken("expired", &ResetTokenData{ExpiresAt: expired})
+	seedResetToken("valid", &ResetTokenData{ExpiresAt: future})
 
 	cleanupExpiredTokens()
 
-	if _, exists := resetTokenStore["expired"]; exists {
+	if storedResetTokenExists("expired") {
 		t.Error("expired token should be cleaned up")
 	}
-	if _, exists := resetTokenStore["valid"]; !exists {
+	if !storedResetTokenExists("valid") {
 		t.Error("valid token should remain")
 	}
 }
