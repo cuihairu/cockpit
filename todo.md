@@ -720,6 +720,19 @@
 
 收口后进入路线图 P1，首选「应用部署（Compose Stack）」，其次「拨测增强」。与同类项目的完整对比分析见 `docs/guide/reference-projects.md`。
 
+## 数据竞态收口（2026-09-17）
+
+覆盖率推至 98.6% 后主线转向 `go test -race` 收口，本轮修复三处数据竞态：
+
+1. ✅ `internal/proxy`：测试 mock 的 `messages` 切片被后台协程持锁追加、测试裸读（dbe1e8b0）。
+2. ✅ `internal/auth`：密码重置令牌全局 map **生产代码无锁**——HTTP handler 并发读写 + `GenerateResetToken` 起后台清理协程遍历删除；加 `resetTokenMu`，顺带删除名字像锁实为冗余映射的 `resetTokenStoreMutex`（a849ada8）。
+3. ✅ `internal/agent`：`connect()` 直接写全局单例 `websocket.DefaultDialer.HandshakeTimeout`，与并发 Dial 构成竞态；改为值拷贝（d9f28dcc）。
+
+配套：
+
+- ✅ CI `test.yml` 新增 `go test -race -short ./...` 兜底步骤（此前只有普通 `go test`，这类竞态 CI 抓不到）。
+- ✅ 全仓 `-race -short` 终验通过。
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
