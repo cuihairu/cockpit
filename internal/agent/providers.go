@@ -78,6 +78,9 @@ func (a *Agent) setupProviders() {
 				dp.SetCronRunner()
 			}
 			a.rpc.RegisterProvider(dp)
+		case "overlay":
+			// 组网工具观测（见 docs/guide/overlay-design.md）
+			a.rpc.RegisterProvider(rpc.NewOverlayProvider(nil))
 		}
 	}
 }

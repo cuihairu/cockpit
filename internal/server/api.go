@@ -74,6 +74,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			s.handleAgentDriftAPI(w, r, agentID)
 			return
 		}
+		// 组网工具观测 /agents/{id}/overlay/...（见 api_overlay.go）
+		if strings.Contains(agentID, "/overlay/") {
+			s.handleAgentOverlayAPI(w, r, agentID)
+			return
+		}
 		// Handle /agents/{id}/secret sub-path
 		if strings.HasSuffix(agentID, "/secret") {
 			s.handleAgentSecret(w, r, strings.TrimSuffix(agentID, "/secret"))
