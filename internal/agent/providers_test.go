@@ -252,13 +252,22 @@ func TestSetupProviders_MultipleCapabilities(t *testing.T) {
 func TestSetupProviders_UnknownCapabilityIgnored(t *testing.T) {
 	a := NewAgent(Config{ServerURL: "ws://test"})
 	a.capabilities = []protocol.Capability{
-		{Type: "hardware-monitor"},
 		{Type: "network-monitor"},
 		{Type: "unknown-future-cap"},
 	}
 	a.setupProviders()
 
 	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes())
+}
+
+func TestSetupProviders_HardwareMonitorRegistersSmart(t *testing.T) {
+	// SMART 磁盘健康观测挂在 hardware-monitor capability 下
+	// （见 docs/guide/disk-health-design.md D1）
+	a := NewAgent(Config{ServerURL: "ws://test"})
+	a.capabilities = []protocol.Capability{{Type: "hardware-monitor"}}
+	a.setupProviders()
+
+	assertRegistered(t, a.rpc.RegisteredTypes(), baseTypes("hardware-monitor"))
 }
 
 // baseTypes 平台相关的无条件注册类型，测试期望以它为基础：
