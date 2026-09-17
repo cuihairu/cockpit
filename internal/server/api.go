@@ -39,6 +39,8 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleAgentsList(w, r)
 	case path == "/drift/config":
 		s.handleDriftConfig(w, r)
+	case path == "/smart/config":
+		s.handleSmartConfig(w, r)
 	case path == "/recordings":
 		s.handleRecordings(w, r)
 	case strings.HasPrefix(path, "/recordings/"):
@@ -77,6 +79,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		// 组网工具观测 /agents/{id}/overlay/...（见 api_overlay.go）
 		if strings.Contains(agentID, "/overlay/") {
 			s.handleAgentOverlayAPI(w, r, agentID)
+			return
+		}
+		// SMART 磁盘健康 /agents/{id}/smart/...（见 api_smart.go）
+		if strings.Contains(agentID, "/smart/") {
+			s.handleAgentSmartAPI(w, r, agentID)
 			return
 		}
 		// Handle /agents/{id}/secret sub-path

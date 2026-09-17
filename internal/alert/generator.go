@@ -293,3 +293,34 @@ func (g *Generator) CheckDriftScan(agentID, hostname string, driftedNames []stri
 	}
 	g.createAlertIfNotExists("warning", title, message, agentID, "agent")
 }
+
+// DiskAlertMaxItems 磁盘告警明细最多列出的盘数（超出截断提示）
+const DiskAlertMaxItems = 10
+
+// CheckDiskHealth 磁盘健康巡检结果入告警（见 disk-health-design.md D9）：
+// 每 agent 一条汇总告警，title 按级别分两种 → 同级未读期间真去重，
+// 而 warning（扇区异常）升级为 error（盘 FAILED）时因 title 不同可叠加，
+// 属合理的新事件。unknown 盘（权限/不支持）由调用方过滤，不入告警。
+func (g *Generator) CheckDiskHealth(agentID, hostname string, hasFailed bool, issues []string) {
+	if len(issues) == 0 {
+		return
+	}
+	title := "磁盘健康提醒：主机 " + hostname
+	level := "warning"
+	if hasFailed {
+		title = "磁盘健康告警：主机 " + hostname
+		level = "error"
+	}
+	detail := issues
+	suffix := ""
+	if len(detail) > DiskAlertMaxItems {
+		detail = detail[:DiskAlertMaxItems]
+		suffix = fmt.Sprintf("（等共 %d 块）", len(issues))
+	}
+	message := "以下磁盘健康指标异常，建议尽快备份数据：\n" +
+		strings.Join(detail, "\n")
+	if suffix != "" {
+		message += "\n" + suffix
+	}
+	g.createAlertIfNotExists(level, title, message, agentID, "agent")
+}
