@@ -49,7 +49,9 @@ func (f *fakeDNSProvider) UpdateRecord(ctx context.Context, zoneID, recordID str
 	return &dns.Record{ID: recordID, Type: input.Type, Name: input.Name, Content: input.Content}, nil
 }
 
-func (f *fakeDNSProvider) DeleteRecord(ctx context.Context, zoneID, recordID string) error { return nil }
+func (f *fakeDNSProvider) DeleteRecord(ctx context.Context, zoneID, recordID string) error {
+	return nil
+}
 
 // withFakeDDNSAgent 注册带 ddns capability 的假 agent，应答 ddns.ip。
 // IPv4/IPv6 用指针承载：调用方改值即改变后续应答（无需重复注册）。
