@@ -808,6 +808,13 @@ class ApiService {
     )
   }
 
+  // systemctl daemon-reload：刷新 systemd manager 配置（D12，仅 systemd 后端）
+  async serviceDaemonReload(agentId: string): Promise<{ reloaded: boolean }> {
+    return this.client.post<unknown, { reloaded: boolean }>(
+      `/agents/${encodeURIComponent(agentId)}/services/daemon-reload`,
+    )
+  }
+
   // ============ Overlay 组网观测 ============
 
   // 组网工具快照（ZeroTier/Tailscale/WireGuard/frp，只读纯转发）

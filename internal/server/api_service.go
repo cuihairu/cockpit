@@ -16,6 +16,7 @@ import (
 //
 //	GET  /api/agents/{id}/services/status          概览（浏览，不审计）
 //	GET  /api/agents/{id}/services                 服务列表（浏览，不审计）
+//	POST /api/agents/{id}/services/daemon-reload   刷新 manager 配置（审计 service_action，D12）
 //	POST /api/agents/{id}/services/{unit}/{action} 执行动作（审计 service_action）
 //
 // server 纯转发不落库（cron D9 同款纪律）：systemd 为唯一事实源。unit 名与
@@ -80,6 +81,10 @@ func (s *Server) handleAgentServiceAPI(w http.ResponseWriter, r *http.Request, r
 		s.forwardServiceRPC(w, r, agentID, "service.status", nil, "", "")
 	case sub == "" && r.Method == http.MethodGet:
 		s.forwardServiceRPC(w, r, agentID, "service.list", nil, "", "")
+	case sub == "daemon-reload" && r.Method == http.MethodPost:
+		// systemd manager 配置刷新（D12）：全局操作不针对 unit，sub 只有一段，
+		// 在两段 unit/action 解析之前特判（unit 动作路由恒两段，无歧义）
+		s.forwardServiceRPC(w, r, agentID, "service.daemon-reload", nil, "daemon-reload", "daemon-reload")
 	case sub != "" && r.Method == http.MethodPost:
 		parts := strings.Split(sub, "/")
 		if len(parts) != 2 {

@@ -79,6 +79,8 @@ func (p *ServiceProvider) Call(action string, params map[string]interface{}) (in
 		return p.List()
 	case "action":
 		return p.DoAction(paramString(params, "name"), paramString(params, "action"))
+	case "daemon-reload":
+		return p.DaemonReload()
 	default:
 		return nil, fmt.Errorf("unknown service action: %s", action)
 	}
@@ -168,6 +170,18 @@ func (p *ServiceProvider) DoAction(name, action string) (interface{}, error) {
 		return nil, fmt.Errorf("systemctl %s %s: %s", action, name, commandErrSummary(stderr, err))
 	}
 	return map[string]interface{}{"name": name, "action": action}, nil
+}
+
+// DaemonReload 刷新 systemd manager 配置（systemctl daemon-reload，D12）：
+// unit 文件变更后执行；全局操作不针对 unit，与 DoAction 分开
+func (p *ServiceProvider) DaemonReload() (interface{}, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), serviceActionTimeout)
+	defer cancel()
+	_, stderr, err := p.run(ctx, "systemctl", "daemon-reload")
+	if err != nil {
+		return nil, fmt.Errorf("systemctl daemon-reload: %s", commandErrSummary(stderr, err))
+	}
+	return map[string]interface{}{"reloaded": true}, nil
 }
 
 // ============ 内部：systemctl 输出解析 ============

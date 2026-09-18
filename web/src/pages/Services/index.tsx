@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Badge, Button, Card, Descriptions, Drawer, Empty, Input, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
-import { FileTextOutlined, PoweroffOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Alert, Badge, Button, Card, Descriptions, Drawer, Empty, Input, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { FileTextOutlined, PoweroffOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { ServiceActionName, ServiceUnit } from '@/types'
@@ -116,6 +116,22 @@ const Services = () => {
     if (!selectedAgent) return
     setActingUnit(unit)
     actionMut.mutate({ unit, action })
+  }
+
+  // systemctl daemon-reload：刷新 manager 配置（D12，unit 文件变更后执行）
+  const [reloading, setReloading] = useState(false)
+  const daemonReload = async () => {
+    if (!selectedAgent) return
+    setReloading(true)
+    try {
+      await api.serviceDaemonReload(selectedAgent)
+      message.success('systemd 配置已重新加载')
+      refresh()
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '重载配置失败'))
+    } finally {
+      setReloading(false)
+    }
   }
 
   const columns: ColumnsType<ServiceUnit> = [
@@ -302,6 +318,18 @@ const Services = () => {
               showSearch
               optionFilterProp="label"
             />
+            {isSystemd && selectedAgent && (
+              <Popconfirm
+                title="重新加载 systemd 配置"
+                description="unit 文件有变更（手编/装卸包）后执行；不影响正在运行的服务"
+                okText="重载"
+                onConfirm={() => void daemonReload()}
+              >
+                <Button icon={<SyncOutlined />} loading={reloading}>
+                  重载配置
+                </Button>
+              </Popconfirm>
+            )}
             <Button icon={<ReloadOutlined />} disabled={!selectedAgent} onClick={refresh} />
           </Space>
         }

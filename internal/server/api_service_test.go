@@ -166,6 +166,43 @@ func TestServiceAgentOfflineAndRouting(t *testing.T) {
 	}
 }
 
+func TestServiceDaemonReload(t *testing.T) {
+	s := newBackupTestServer(t)
+	var gotMethod string
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotMethod = method
+		return map[string]interface{}{"reloaded": true}, ""
+	})
+
+	// POST 转发 service.daemon-reload + 记审计（D12）
+	rec := httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, serviceReq(http.MethodPost, "a1", "daemon-reload"), "a1/services/daemon-reload")
+	if rec.Code != http.StatusOK || gotMethod != "service.daemon-reload" {
+		t.Fatalf("daemon-reload: code=%d method=%s", rec.Code, gotMethod)
+	}
+	logs, _, _ := s.db.GetAuditLogs(0, 10, nil)
+	if len(logs) != 1 || logs[0].Action != "service_action" || logs[0].ResourceID != "daemon-reload" {
+		t.Fatalf("audit logs = %+v", logs)
+	}
+
+	// 非 POST / 其余子路径不受特判影响
+	rec = httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, serviceReq(http.MethodGet, "a1", "daemon-reload"), "a1/services/daemon-reload")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET daemon-reload: code = %d, want 404", rec.Code)
+	}
+	// 带后缀的 unit 动作仍走两段路由
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotMethod = method
+		return map[string]interface{}{}, ""
+	})
+	rec = httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, serviceReq(http.MethodPost, "a2", "nginx.service/restart"), "a2/services/nginx.service/restart")
+	if rec.Code != http.StatusOK || gotMethod != "service.action" {
+		t.Errorf("unit action: code=%d method=%s", rec.Code, gotMethod)
+	}
+}
+
 func TestValidateServiceAction(t *testing.T) {
 	// systemd unit 名：字母数字与 @ . _ + - 且 .service 结尾
 	for _, name := range []string{"nginx.service", "user@1000.service", "openvpn@server.service", "my-app.service"} {

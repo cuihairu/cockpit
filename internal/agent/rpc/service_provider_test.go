@@ -44,6 +44,15 @@ func (m *mockSystemctl) run(_ context.Context, name string, args ...string) ([]b
 			return nil, []byte("Failed to " + args[0] + " " + args[1] + ": Unit is masked"), m.actionErr
 		}
 		return nil, nil, nil
+	case "daemon-reload":
+		if len(args) != 1 {
+			return nil, nil, fmt.Errorf("daemon-reload takes no unit argument: %v", args)
+		}
+		m.actions = append(m.actions, args[0])
+		if m.actionErr != nil {
+			return nil, []byte("Failed to reload daemon: " + m.actionErr.Error()), m.actionErr
+		}
+		return nil, nil, nil
 	}
 	return nil, nil, fmt.Errorf("unexpected systemctl subcommand: %v", args)
 }
@@ -183,6 +192,39 @@ func TestServiceActionTimeoutArgv(t *testing.T) {
 	}
 	if len(m.actions) != 1 || m.actions[0] != "enable my@template@1.service" {
 		t.Errorf("actions = %v", m.actions)
+	}
+}
+
+func TestServiceDaemonReload(t *testing.T) {
+	// D12：daemon-reload argv 直调 systemctl，无 unit 参数
+	m := &mockSystemctl{unitsOut: sampleUnitsOut, filesOut: sampleFilesOut}
+	p := NewServiceProvider(m.run)
+
+	res, err := p.DaemonReload()
+	if err != nil {
+		t.Fatalf("DaemonReload: %v", err)
+	}
+	if res.(map[string]interface{})["reloaded"] != true {
+		t.Errorf("res = %+v", res)
+	}
+	if len(m.actions) != 1 || m.actions[0] != "daemon-reload" {
+		t.Errorf("actions = %v", m.actions)
+	}
+
+	// RPC 分发走 Call("daemon-reload") 同路径
+	m2 := &mockSystemctl{unitsOut: sampleUnitsOut, filesOut: sampleFilesOut}
+	p2 := NewServiceProvider(m2.run)
+	if _, err := p2.Call("daemon-reload", nil); err != nil {
+		t.Fatalf("Call(daemon-reload): %v", err)
+	}
+	if len(m2.actions) != 1 {
+		t.Errorf("actions = %v", m2.actions)
+	}
+
+	// 失败透传 stderr 摘要
+	m.actionErr = fmt.Errorf("exit status 1")
+	if _, err := p.DaemonReload(); err == nil || !strings.Contains(err.Error(), "daemon-reload") {
+		t.Errorf("error not passed through: %v", err)
 	}
 }
 
