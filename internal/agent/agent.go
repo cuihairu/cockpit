@@ -414,8 +414,15 @@ func (a *Agent) register() error {
 
 	log.Printf("Registered as agent: %s at %s/%s", a.agentID, a.location.Region, a.location.Zone)
 
-	// 等待响应
-	resp, err := a.codec.ReadMessage(a.conn)
+	// 等待响应（锁内快照 conn：Stop/reconnect 可并发把它置 nil，
+	// 裸读会把 nil 传进 ReadMessage 导致空指针 panic——CI race 实测）
+	a.mu.RLock()
+	conn := a.conn
+	a.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("agent not connected")
+	}
+	resp, err := a.codec.ReadMessage(conn)
 	if err != nil {
 		return err
 	}
