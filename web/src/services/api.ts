@@ -30,6 +30,7 @@ import type {
   LogsQuery,
   LogsQueryResult,
   DriftCheckResult,
+  DriftDiffResult,
   DriftScanConfig,
   TerminalRecording,
   ServerBackupFile,
@@ -514,6 +515,14 @@ class ApiService {
   async checkDrift(agentId: string): Promise<DriftCheckResult> {
     return this.client.post<unknown, DriftCheckResult>(
       `/agents/${encodeURIComponent(agentId)}/drift/check`,
+    )
+  }
+
+  // 漂移 diff：单对象两侧全文（基线原文 vs 磁盘当前；M3）
+  async driftDiff(agentId: string, kind: string, name: string): Promise<DriftDiffResult> {
+    return this.client.post<unknown, DriftDiffResult>(
+      `/agents/${encodeURIComponent(agentId)}/drift/diff`,
+      { kind, name },
     )
   }
 

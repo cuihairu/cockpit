@@ -501,6 +501,13 @@ export interface DriftCheckResult {
   checked_at: number
 }
 
+// 漂移 diff：单对象两侧全文（cron 侧为美化后 JSON；见 drift-design.md M3）
+export interface DriftDiffResult {
+  expected: string
+  current: string
+  baseline_updated_at: number
+}
+
 // 巡检配置（server 定时 drift.check + 漂移告警；0 = 关闭）
 export interface DriftScanConfig {
   scan_interval_seconds: number

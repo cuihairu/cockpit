@@ -14,26 +14,16 @@ import {
   Typography,
   message,
 } from 'antd'
-import { SafetyCertificateOutlined } from '@ant-design/icons'
+import { DiffOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { DriftCheckItem, DriftCheckResult } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import DiffModal from './DiffModal'
+import { KIND_COLOR, KIND_LABEL } from './shared'
 
 // 防漂移检测：面板写路径基线（nginx/cron/stack 最后一次成功保存的内容）
 // vs 磁盘当前内容，按需检查（见 docs/guide/drift-design.md）。
-
-const KIND_LABEL: Record<DriftCheckItem['kind'], string> = {
-  nginx: '反代站点',
-  cron: '定时任务',
-  stack: '应用部署',
-}
-
-const KIND_COLOR: Record<DriftCheckItem['kind'], string> = {
-  nginx: 'green',
-  cron: 'blue',
-  stack: 'purple',
-}
 
 // 状态呈现：ok 之外都是需要注意的形态
 const STATUS_META: Record<DriftCheckItem['status'], { label: string; color: string; hint: string } | null> = {
@@ -56,6 +46,8 @@ const Drift = () => {
   // 巡检编辑态：用户改动才落这里，未编辑时从已保存配置派生（免 setState-in-render）
   const [scanEdit, setScanEdit] = useState<{ on?: boolean; minutes?: number } | null>(null)
   const [savingScan, setSavingScan] = useState(false)
+  // diff 视图（M3）：当前打开差异 Modal 的 drifted 条目
+  const [diffTarget, setDiffTarget] = useState<DriftCheckItem | null>(null)
 
   const { data: agents = [] } = useQuery({
     queryKey: ['drift-agents'],
@@ -152,6 +144,17 @@ const Drift = () => {
       width: 110,
       render: shortSha,
     },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 90,
+      render: (_: unknown, it: DriftCheckItem) =>
+        it.status === 'drifted' ? (
+          <Button size="small" icon={<DiffOutlined />} onClick={() => setDiffTarget(it)}>
+            差异
+          </Button>
+        ) : null,
+    },
   ]
 
   return (
@@ -240,6 +243,8 @@ const Drift = () => {
           </Typography.Text>
         </>
       )}
+
+      <DiffModal agentId={agentId} target={diffTarget} onClose={() => setDiffTarget(null)} />
     </Card>
   )
 }
