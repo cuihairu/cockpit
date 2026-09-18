@@ -53,6 +53,9 @@ import type {
   ProxyStatus,
   CronJob,
   CronJobsResult,
+  ServiceActionName,
+  ServiceListResult,
+  ServiceStatus,
   OverlayStatus,
   CronStatus,
   SmartScanConfig,
@@ -782,6 +785,25 @@ class ApiService {
   // 删除任务
   async deleteCronJob(agentId: string, name: string): Promise<void> {
     await this.client.delete(`/agents/${encodeURIComponent(agentId)}/cron/jobs/${encodeURIComponent(name)}`)
+  }
+
+  // ============ systemd 服务管理（见 docs/guide/service-design.md） ============
+
+  // 概览：systemd 整体状态 + 服务计数
+  async getServiceStatus(agentId: string): Promise<ServiceStatus> {
+    return this.client.get<unknown, ServiceStatus>(`/agents/${encodeURIComponent(agentId)}/services/status`)
+  }
+
+  // 服务列表（运行态 + 自启态合并）
+  async getAgentServices(agentId: string): Promise<ServiceListResult> {
+    return this.client.get<unknown, ServiceListResult>(`/agents/${encodeURIComponent(agentId)}/services`)
+  }
+
+  // 执行 systemctl 动作（start/stop/restart/reload/enable/disable）
+  async serviceAction(agentId: string, unit: string, action: ServiceActionName): Promise<{ name: string; action: string }> {
+    return this.client.post<unknown, { name: string; action: string }>(
+      `/agents/${encodeURIComponent(agentId)}/services/${encodeURIComponent(unit)}/${action}`,
+    )
   }
 
   // ============ Overlay 组网观测 ============

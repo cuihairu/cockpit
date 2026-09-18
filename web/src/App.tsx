@@ -19,6 +19,7 @@ import {
   CloudUploadOutlined,
   DeploymentUnitOutlined,
   ClockCircleOutlined,
+  ThunderboltOutlined,
   SafetyCertificateOutlined,
   GlobalOutlined,
   VideoCameraOutlined,
@@ -43,6 +44,7 @@ const Stacks = lazy(() => import('./pages/Stacks'))
 const Backups = lazy(() => import('./pages/Backups'))
 const Proxy = lazy(() => import('./pages/Proxy'))
 const Cron = lazy(() => import('./pages/Cron'))
+const Services = lazy(() => import('./pages/Services'))
 const Network = lazy(() => import('./pages/Network'))
 const Disk = lazy(() => import('./pages/Disk'))
 const Drift = lazy(() => import('./pages/Drift'))
@@ -143,6 +145,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/cron',
       name: '定时任务',
       icon: <ClockCircleOutlined />,
+    },
+    {
+      path: '/services',
+      name: '服务管理',
+      icon: <ThunderboltOutlined />,
     },
     {
       path: '/network',
@@ -342,6 +349,7 @@ const MainLayout = () => {
             <Route path="/backups" element={<Backups />} />
             <Route path="/proxy" element={<Proxy />} />
             <Route path="/cron" element={<Cron />} />
+            <Route path="/services" element={<Services />} />
             <Route path="/network" element={<Network />} />
             <Route path="/disk" element={<Disk />} />
             <Route path="/drift" element={<Drift />} />
