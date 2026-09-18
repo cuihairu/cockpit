@@ -419,3 +419,33 @@ RPC 而不塞进 service.action：
   Popconfirm 确认后调用，成功刷新列表与状态卡（unitFileState 可能已变）
 - **测试**：agent mock 断言 `systemctl daemon-reload` argv 直调；server
   转发 + 审计恰好一条、GET/其他方法拒绝、两段 unit 路由不受影响
+
+### D13 unit 文件查看与编辑（M2 扩）
+
+手调 unit（改 restart 策略 / 资源限制 / 依赖）是服务管理的常规操作。
+观测用 `systemctl cat`（有效视图 = 主文件 + drop-in 合并），写入语义
+**对齐 `systemctl edit --full`**：
+
+- **读**（`service.unitfile`，params `{name}`）：
+  - `systemctl show -p FragmentPath -p DropInPaths --value <name>` 拿真实路径
+  - `systemctl cat <name>` 有效全文（含 drop-in 内容）
+  - 返回 `{name, fragmentPath, dropInPaths, content}`；unit 未安装（无
+    FragmentPath）报错
+- **写**（`service.unitsave`，params `{name, content}`）：
+  - 路径**不收用户参数**——只收 unit 名，写哪由 FragmentPath 决定，路径
+    穿越无从谈起（unit 名白名单本就无 `/`）
+  - FragmentPath 不在 `/etc/systemd/system/` 下（包管文件，升级会被覆盖）：
+    先 `cp 原文件 → /etc/systemd/system/<name>`（/etc 优先级更高，systemd
+    官方覆盖机制，即 `edit --full` 行为）再写入
+  - 临时文件同目录 + `rename` 原子落盘，0644；content 上限 256KB
+  - **自动 `systemctl daemon-reload`**（捆绑执行，改动即生效），返回
+    `{name, path, reloaded: true}`
+- **server**：`GET/PUT /api/agents/{id}/services/{unit}/file`——两段路由
+  复用（GET/PUT 与 unit 动作的 POST 方法不重叠，无歧义）；GET 浏览不审计，
+  PUT 记 service_action（details.action=unitfile-save）；content 大小
+  server 侧同限 256KB
+- **web**：操作列「文件」按钮（isSystemd）→ Modal 等宽编辑器（展示
+  systemctl cat 有效全文，说明写语义），保存后刷新列表
+- **测试**：agent 注入 Commander 控制 FragmentPath 指向 t.TempDir 真实
+  读写断言（含 /usr/lib → /etc 复制分支、原子写、坏名拒绝）；server
+  路由/审计/大小限制；web tsc + build
