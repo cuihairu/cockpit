@@ -1,8 +1,9 @@
 # NAS 系统对接设计
 
-> 状态：M1 设计定稿。统一快照模型 + 多 Provider 架构：M1 通用 Linux NAS
-> （agent 本地命令观测，零凭据零配置）打通全链路；M2 群晖 DSM / TrueNAS /
-> OpenMediaVault 网络 API provider（agent 内网访问，OpenWrt/PVE 同款）。
+> 状态：M1 + M2-DSM 设计定稿。统一快照模型 + 多 Provider 架构：M1 通用 Linux
+> NAS（agent 本地命令观测，零凭据零配置）打通全链路；M2 群晖 DSM / TrueNAS /
+> OpenMediaVault 网络 API provider（agent 内网访问，OpenWrt/PVE 同款），DSM
+> 已实现，TrueNAS/OMV 排队。
 
 ## D1 目标与统一模型
 
@@ -21,13 +22,14 @@ type NasSnapshot struct {
 }
 
 type NasPool struct {
-    Name     string // md0, tank, vg0, volume_1 ...
-    Kind     string // mdadm | zfs | lvm | btrfs | vendor
-    State    string // healthy | degraded | resync | failed | unknown
+    Name     string   // md0, tank, vg0, volume_1 ...
+    Kind     string   // mdadm | zfs | lvm | btrfs | dsm（厂商池以来源标识）
+    State    string   // healthy | degraded | resync | failed | unknown
     TotalGB  float64
-    UsedGB   float64 // ZFS/btrfs 可得；拿不到留 0
+    UsedGB   float64  // ZFS/btrfs 可得；拿不到留 0
     Devices  []string
-    Detail   string  // 原始状态行（resync 进度等）
+    Detail   string   // 原始状态行（resync 进度等）
+    Host     string   // 来源设备：本地观测为空，网络 NAS 填 target 名（M2）
 }
 
 type NasMount struct {
@@ -36,6 +38,7 @@ type NasMount struct {
     FsType    string
     TotalGB   float64
     UsedGB    float64
+    Host      string  // 同上
 }
 
 type NasShare struct {
@@ -44,6 +47,7 @@ type NasShare struct {
     Path     string
     Comment  string
     Hosts    string // NFS 导出范围（如 192.168.1.0/24）
+    Host     string // 同上
 }
 ```
 
@@ -55,18 +59,32 @@ type NasShare struct {
 
 | Provider | 路线 | 数据源 | 里程碑 |
 |---|---|---|---|
-| linux | agent 本地命令 | /proc/mdstat、zpool、vgs、btrfs、df、testparm、exportfs | **M1** |
-| dsm | agent→DSM HTTP API | SYNO.API 系列接口，Session 登录 | M2 |
-| truenas | agent→TrueNAS REST/WebSocket | /api/v2.0 pool/dataset/sharing | M2 |
-| omv | agent→OMV JSON-RPC | Login + Rpc | M2 |
+| linux | agent 本地命令 | /proc/mdstat、zpool、vgs、btrfs、df、testparm、exportfs | **M1** ✅ |
+| dsm | agent→DSM HTTP API | SYNO.API 系列接口，Session 登录 | **M2** ✅ |
+| truenas | agent→TrueNAS REST/WebSocket | /api/v2.0 pool/dataset/sharing | M2 排队 |
+| omv | agent→OMV JSON-RPC | Login + Rpc | M2 排队 |
+
+一个 agent 可观测多台网络 NAS（targets 数组），快照合并返回：来源设备标在
+每条记录的 `Host` 字段（本地观测为空，前端主机列显示 `agent · 设备`），
+`Source` 用逗号 join 参与源（`linux,dsm`）；单 target 失败只 log 降级不拖垮
+快照（与单数据源失败同纪律）。
 
 M2 网络 API 型的共同纪律（OpenWrt/PVE provider 同款）：
 
 - agent 在内网主动发起 HTTP（agent 本就主动外连 server，内网横向访问成立）
-- 凭据从 agent 环境变量 `COCKPIT_NAS_TARGETS`（JSON 数组：name/type/addr/
-  username/password/insecureTls）读取，**凭据不落库、不进 config.yaml、
-  绝不出现在快照/日志/审计**
-- 自签证书默认 InsecureTLS（家用 NAS 常态），目标项可关
+- 凭据从 agent 环境变量 `COCKPIT_NAS_TARGETS`（JSON 数组）读取，
+  **凭据不落库、不进 config.yaml、绝不出现在快照/日志/审计/错误消息**：
+
+  ```json
+  [
+    {"name":"home-dsm","type":"dsm","addr":"https://192.168.1.10:5001",
+     "username":"cockpit","password":"***","insecureTls":true}
+  ]
+  ```
+
+  - `type` 不是已实现类型（现仅 `dsm`）的条目直接忽略
+  - 解析失败/缺字段（name/addr/username/password）的条目丢弃并 log，不致命
+- 自签证书默认 InsecureTLS（家用 NAS 常态），目标项可关（`insecureTls: false`）
 - 快照映射到同一 NasSnapshot，Source 标来源
 
 ## D3 M1：linux provider 数据源（每源独立降级，单源失败不拖垮快照）
@@ -88,6 +106,40 @@ M2 网络 API 型的共同纪律（OpenWrt/PVE provider 同款）：
   available=false，巡检与前端跳过不报错（smart available=false 同款）
 - 命令超时：单命令 5s，整次 RPC 30s 上限；argv 直调不经 shell，**只读命令白名单**，
   无参数注入面
+
+## D3b M2：DSM provider（群晖）
+
+DSM 6/7 通用 webapi 入口（`{addr}/webapi/entry.cgi`，全部 GET + query 参数，
+`url.Values` 编码——密码含 `&=` 等特殊字符安全），单请求 5s 超时、尊重整体
+30s ctx：
+
+| 步骤 | API | 要点 |
+|---|---|---|
+| 登录 | `SYNO.API.Auth` v6 `login` | `account/passwd/session=StorageManager/format=sid` → `data.sid`；建议为 cockpit 建专用账号且不开 2FA（OTP 账号登录直接失败） |
+| 池+卷 | `SYNO.Storage.CGI.Storage` v2 `load_info` | `pools[]`（id/status/devices/total_size/used_size）+ `volumes[]`（volume/status/fs_type/total_size/used_size/pool_id） |
+| 共享 | `SYNO.FileStation.List` v2 `list_share` | `shares[]`（name/path）；DSM 共享文件夹协议粒度拿不到（SMB/NFS 权限在 per-share 内部 API），统一标 `smb` |
+| 登出 | `SYNO.API.Auth` v6 `logout` | best-effort defer，失败不影响快照 |
+
+后续请求统一带 `_sid`。字段映射：
+
+- pools：status `Normal→healthy`、`Degrade→degraded`、`Crash(ing)→failed`、
+  `Resync(ing)/Migrat(ing)→resync`、其余→unknown；`Kind="dsm"`；
+  devices 原样、字节→GB
+- volumes → Mounts（DSM 卷本质是挂载点，容量告警语义直接复用）：
+  Device=pool_id、MountPath=/volume1、FsType=fs_type、字节→GB
+- shares → Shares：Protocol=`smb`、Hosts 留空（NFS 规则在内部 API，不取）
+
+错误纪律：
+
+- 登录失败/HTTP 非 200/`success:false` → 该 target 降级（log 一条，含
+  target 名与 DSM error code，**不含账号密码**）；DSM code 407 = 连续失败
+  IP ban，log 特别标注提醒（不自动退避，巡检间隔本身 ≥5min 足够稀疏）
+- target addr 必须带协议（`https://` 或 `http://`），缺协议条目丢弃
+- 快照映射每条记录 `Host=target.Name`；凭据永不进快照
+
+capability 语义不变：`DetectNas()` 仍只看本地工具（targets 是运行期配置，
+配了 target 的 agent 天然有观测价值，但 capability 影响的是「这台 agent 有
+NAS 可看」，保持探测可复现——无本地工具也无 target 的 agent 不注册）。
 
 ## D4 capability 与注册
 
@@ -116,6 +168,8 @@ PUT  /api/nas/config               保存（巡检配置类不记审计，smart/
   - 挂载点使用率 ≥ `nas.usage_warn_percent`（默认 80，50-99）→ warning，
     title 含挂载路径；单一挂载点恢复后自愈清错（复用告警去重语义）
   - available=false 与 unknown 态不告警（观测缺失≠故障，smart D9 同则）
+  - 记录 `Host` 非空（网络 NAS）时告警 title 的「主机」位显示设备名
+    （`存储池故障：volume_1（主机 home-dsm）`），去重天然隔离不同设备
 
 ## D6 Web /nas 页
 
@@ -145,6 +199,13 @@ PUT  /api/nas/config               保存（巡检配置类不记审计，smart/
   df -kP 样例（伪 FS 过滤断言）、testparm 共享段解析、exportfs 解析；
   单源失败不影响其余（注入一源报错）；全源缺失 → available=false；
   无注入面校验（命令名单固定断言）
+- **agent DSM**（rpc/nas_dsm_test.go）：`httptest` 起**假 DSM**
+  （handler 按 api/method 应答 entry.cgi JSON 样例）+ `t.Setenv`
+  注入 `COCKPIT_NAS_TARGETS`——登录→load_info→list_share→登出全流程、
+  池状态映射（Normal/Degrade/Crash/Resync）、字节→GB、volumes→Mounts、
+  shares→smb、快照记录 Host=target 名、**快照与错误消息不含密码**；
+  登录失败该 target 降级其余不受影响；targets JSON 非法/缺字段/条目
+  丢弃；type 未实现的条目忽略
 - **server**（api_nas_test.go + nas_scan_test.go）：转发 + config 校验
   （interval 0/300/86400 合法、299/86401 拒绝；阈值 50-99）；巡检告警——
   degraded 池告警 warning、failed 池 error、超阈值挂载点告警、恢复不再重复、
