@@ -526,6 +526,14 @@ class ApiService {
     )
   }
 
+  // 手动登记基线「以当前为准」（M4）：no_baseline 纳入检测 / drifted 确认手改
+  async driftRecord(agentId: string, kind: string, name: string): Promise<void> {
+    await this.client.post(`/agents/${encodeURIComponent(agentId)}/drift/record`, {
+      kind,
+      name,
+    })
+  }
+
   // 巡检配置：server 定时扫描全部主机并产生漂移告警（0 = 关闭）
   async getDriftConfig(): Promise<DriftScanConfig> {
     return this.client.get<unknown, DriftScanConfig>('/drift/config')

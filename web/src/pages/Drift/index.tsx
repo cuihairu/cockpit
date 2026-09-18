@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   InputNumber,
+  Popconfirm,
   Select,
   Space,
   Switch,
@@ -14,7 +15,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { DiffOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { CheckOutlined, DiffOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { DriftCheckItem, DriftCheckResult } from '@/types'
@@ -108,6 +109,18 @@ const Drift = () => {
   const items = (result?.items ?? []).filter((it) => it.status !== 'none')
   const driftedCount = items.filter((it) => it.status === 'drifted' || it.status === 'missing' || it.status === 'error').length
 
+  // 手动登记基线「以当前为准」（M4）：no_baseline 纳入检测 / drifted 确认
+  // 手改为新标准；成功后自动重查刷新清单
+  const recordCurrent = async (it: DriftCheckItem) => {
+    try {
+      await api.driftRecord(agentId, it.kind, it.name)
+      message.success(`已登记：${it.name}，之后的漂移检测以当前内容为标准`)
+      await runCheck()
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '登记失败'))
+    }
+  }
+
   const columns: ColumnsType<DriftCheckItem> = [
     {
       title: '类型',
@@ -147,13 +160,29 @@ const Drift = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 90,
-      render: (_: unknown, it: DriftCheckItem) =>
-        it.status === 'drifted' ? (
-          <Button size="small" icon={<DiffOutlined />} onClick={() => setDiffTarget(it)}>
-            差异
-          </Button>
-        ) : null,
+      width: 220,
+      render: (_: unknown, it: DriftCheckItem) => (
+        <Space size={4}>
+          {it.status === 'drifted' && (
+            <Button size="small" icon={<DiffOutlined />} onClick={() => setDiffTarget(it)}>
+              差异
+            </Button>
+          )}
+          {(it.status === 'drifted' || it.status === 'no_baseline') && (
+            <Popconfirm
+              title={it.status === 'drifted' ? '以当前磁盘内容为新基线？' : '将当前内容登记为基线？'}
+              description="之后的漂移检测将以当前磁盘内容为标准。"
+              okText="确认登记"
+              cancelText="取消"
+              onConfirm={() => void recordCurrent(it)}
+            >
+              <Button size="small" icon={<CheckOutlined />}>
+                {it.status === 'drifted' ? '以当前为准' : '登记'}
+              </Button>
+            </Popconfirm>
+          )}
+        </Space>
+      ),
     },
   ]
 
@@ -239,7 +268,7 @@ const Drift = () => {
           />
           <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
             基线 = 各管理页（反向代理/定时任务/应用部署）最后一次通过面板成功保存的内容；
-            「未登记」对象保存一次即自动纳入检测。
+            「未登记」对象可通过面板保存一次，或直接「登记」以当前磁盘内容为准。
           </Typography.Text>
         </>
       )}
