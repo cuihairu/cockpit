@@ -49,8 +49,9 @@ const Services = () => {
 
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => api.getAgents() })
 
-  // 只有带 service capability（systemd 或 Windows SCM）的 agent 可选；
-  // backend 决定 Windows 特有处理（无 reload、无系统状态概念）
+  // 只有带 service capability（systemd / Windows SCM / macOS launchd）的
+  // agent 可选；backend 决定后端特有处理——仅 systemd 有 reload 与全局
+  // 系统状态概念（D9.6/D10.5）
   const agentOptions = useMemo(
     () =>
       (agents ?? []).map((a) => {
@@ -66,7 +67,9 @@ const Services = () => {
       }),
     [agents],
   )
-  const isWindows = agentOptions.find((o) => o.value === selectedAgent)?.backend === 'windows-scm'
+  const selectedBackend = agentOptions.find((o) => o.value === selectedAgent)?.backend
+  const isSystemd = selectedBackend === 'systemd'
+  const isWindows = selectedBackend === 'windows-scm'
 
   const statusKey = ['service-status', selectedAgent]
   const listKey = ['service-list', selectedAgent]
@@ -190,8 +193,8 @@ const Services = () => {
                 <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'restart')}>
                   重启
                 </Button>
-                {/* SCM 无 reload 语义（windows-scm 后端不支持，D9.3） */}
-                {!isWindows && (
+                {/* launchd/SCM 无 reload 语义（仅 systemd 后端支持） */}
+                {isSystemd && (
                   <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'reload')}>
                     重载
                   </Button>
@@ -285,8 +288,8 @@ const Services = () => {
                 size="small"
                 column={{ xs: 1, sm: 4 }}
                 items={[
-                  // SCM 无 systemd 全局状态概念，Windows 主机不显示系统状态项
-                  ...(!isWindows
+                  // launchd/SCM 无全局状态概念，非 systemd 主机不显示该项
+                  ...(isSystemd
                     ? [
                         {
                           key: 'state',
@@ -312,7 +315,9 @@ const Services = () => {
               message={
                 isWindows
                   ? '所有启停/自启操作直接作用于 Windows 服务控制管理器并记入审计日志；不支持重载操作。'
-                  : '所有启停/自启操作直接作用于 systemd 并记入审计日志；failed 服务失败状态会在系统状态中体现（degraded）。'
+                  : isSystemd
+                    ? '所有启停/自启操作直接作用于 systemd 并记入审计日志；failed 服务失败状态会在系统状态中体现（degraded）。'
+                    : '所有启停/自启操作直接作用于 launchd 并记入审计日志；停止为卸载服务（plist 保留，可再次启动），不支持重载操作。'
               }
             />
             {actionError && (
