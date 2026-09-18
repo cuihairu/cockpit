@@ -768,6 +768,8 @@
 
 - **防火墙管理**：iptables/nftables 规则可视化（仅在有明确需求时推进）。
 
+- **NAS 系统对接**：存储池/挂载/共享观测与异常告警。✅ 方案设计 + M1 完成（2026-09-18）：`docs/guide/nas-design.md`（决策 D1-D9）；**多 Provider 统一快照架构**（NasSnapshot = available/source/pools/mounts/shares，M1 linux 源 + M2 dsm/truenas/omv 网络 API 预留——agent 内网 HTTP，凭据 `COCKPIT_NAS_TARGETS` 环境变量 JSON 不落库）；Agent nas provider 纯读不写：mdadm（/proc/mdstat，[U_] 缺 U→degraded、resync 进度行）、ZFS（zpool list -H -p）、LVM（vgs）、df（真实块设备 ≥1GB、bind mount 去重）、SMB（testparm -s）/NFS（exportfs -v）；单数据源失败只降级该段不整体报错，`nas` capability = mdstat 存在或任一工具可用；server nasScanLoop（smart 同构：`nas.scan_interval_seconds` 300-86400 默认 1800、0=关闭；`nas.usage_warn_percent` 50-99 默认 80）消费 nas.status——池 failed→error/degraded/resync→warning 告警（unknown 观测缺失不告警）、挂载超阈值→warning，createAlertIfNotExists 真去重、恢复=不再新增（静默自愈），不落库（NAS 本机为唯一事实源）；`GET /api/agents/{id}/nas/status` 纯转发 + `GET/PUT /api/nas/config`（巡检配置类不记审计）；Web `/nas` 页「存储池」（跨 agent 池/挂载/共享总览，异常置顶告警条、挂载超阈值红高亮、按主机 Collapse 三段详情、巡检设置行）。剩余：真实环境验收（mdadm 降级演练、ZFS/SMB/NFS 主机实测）；M2：dsm/truenas/omv provider。
+
 ## 暂不建议做的事
 
 - 暂不引入 Kubernetes 风格 CRD 全量模型，除非先明确 v2 inventory 迁移方案。
