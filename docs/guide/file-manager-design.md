@@ -171,9 +171,36 @@
 
 **测试**：纯 web 改动——`pnpm build`（tsc 零错误）+ 既有 Go 测试零回归。
 
+## M3：分块上传 / 断点续传（2026-09-18）
+
+上传从「≤10MB 单次 write」升级为「任意 ≤2GB 分块流式」：`file.write` 的
+append 通道（M1 D5 预留）正式启用，agent 零改动。
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D15 | 分块协议 | web 循环调既有 `files/write`（server 端点零改动，单块预检 1MB 原样）：单块 1MB（agent `fileWriteChunkLimit` 满额）；首块 `truncate=true` 建文件/清空旧内容，后续块 `truncate=false`（O_APPEND——agent 已有「append 目标必须存在」防碎片）；每块成功后校验返回 `size === 已传字节数`（agent 返回写入后总大小），不一致即终止（防交错/错位产出损坏文件） | 首块建文件的协议是 agent 既有设计（append 目标必须存在）；size 校验是顺序写入的自证 |
+| D16 | 断点续传（会话内） | 块写入失败自动重试 ≤3 次：重试前 `files/list` 探测目标文件当前 size——等于已传字节数 → 从断点 append 续传；为 0/不存在 → 从头（首块重建）；其他值（并发写入）→ 终止报错。跨浏览器刷新不续传（v1，上传多为一次性动作） | 服务器文件 size 即续传游标，无需服务端会话状态；并发写检测保护用户不覆盖他人改动 |
+| D17 | 大小分流 | ≤10MB 保持单块快速路径（一次 write，体验不变）；>10MB 走分块，上限 2GB（更大引导 scp/终端——base64 经 WebSocket RPC 的合理边界） | 小文件零开销，大文件解锁；上限值与下载「不限」对称（拉流便宜推流贵） |
+| D18 | 审计分流 | server write 审计只记 `truncate=true`（新写入会话：编辑保存/分块首块/覆盖上传各一条）；`truncate=false`（分块续块）不记——否则 500MB 上传产生 500 条 file_write 刷屏，且续块无独立语义 | 会话级审计由首块代表；append 通道目前仅分块上传使用；终端等价 root 能力本就在审计面之外（D1 语义） |
+| D19 | Web 交互 | 工具栏上传入口不变；>10MB 文件上传中在工具栏显示进度（`Progress` + 已传/总量）与「取消」；取消 = 中止后续块 + 删除半成品（`files/delete`，失败静默）+ 提示；上传完成刷新列表 | 进度就地可见；半成品不留垃圾；取消后重新上传首块 truncate 清空，语义自洽 |
+
+### Server 侧
+
+- `forwardFileRPC` write 分支：审计条件加 `truncate`（仅首块/覆盖写记
+  `file_write`），其余逻辑不动。
+
+### Web 侧
+
+- `UPLOAD_MAX_BYTES` 语义改为单块路径阈值；新增分块上限 2GB；
+- `uploadFiles` 分块循环（`File.slice` → base64 → write），进度/取消用
+  token 递增（与图片预览同款）+ 半成品清理；失败探测续传（D16）。
+
+**测试**：server——truncate=true 审计、truncate=false 不审计；web——tsc +
+build；agent 零改动零回归。
+
 ## 不做（后续项）
 
-- 断点续传/分块上传大文件（>10MB）：`file.write` append 通道已留好，UI 后补；
+- 跨刷新断点续传（服务端上传会话状态）；
 - 目录大小统计/回收站；
 - chmod/chown/权限编辑：风险与 UI 复杂度都高，等真实需求；
 - 二进制 hex 预览：编辑器/图片预览先覆盖文本与图片主场景。
