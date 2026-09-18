@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Badge,
@@ -24,6 +24,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   PlusOutlined,
+  SendOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
@@ -78,6 +79,9 @@ interface AcmeFormValues {
   caDirectory: 'staging' | 'production'
   autoRenew: boolean
   renewBeforeDays: number
+  deployAgentId?: string
+  deployCertPath?: string
+  deployKeyPath?: string
 }
 
 const formatUnix = (unix: number) => (unix ? new Date(unix * 1000).toLocaleString() : '—')
@@ -97,10 +101,26 @@ const Acme = () => {
   const [scanEdit, setScanEdit] = useState<{ on?: boolean; minutes?: number } | null>(null)
   const [savingScan, setSavingScan] = useState(false)
   const [issuingId, setIssuingId] = useState<number | null>(null)
+  const [deployingId, setDeployingId] = useState<number | null>(null)
 
   const { data: certs = [], isLoading } = useQuery({ queryKey: ['acme-certs'], queryFn: () => api.getAcmeCerts() })
   const { data: scanCfg } = useQuery({ queryKey: ['acme-scan-config'], queryFn: () => api.getAcmeScanConfig() })
   const { data: account } = useQuery({ queryKey: ['acme-account'], queryFn: () => api.getAcmeAccount() })
+  const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => api.getAgents() })
+
+  // 部署目标候选：在线 agent；有 Nginx 的标注（主要用途是反代站点引用）
+  const deployAgentOptions = useMemo(
+    () =>
+      (agents ?? []).map((a) => {
+        const hasNginx = (a.capabilities ?? []).some((c) => c.type === 'nginx-proxy')
+        return {
+          value: a.id,
+          disabled: a.status === 'offline',
+          label: `${a.hostname || a.id}${hasNginx ? '（Nginx）' : ''}${a.status === 'offline' ? '（离线）' : ''}`,
+        }
+      }),
+    [agents],
+  )
 
   const savedInterval = scanCfg?.scan_interval_seconds ?? 0
   const scanOn = scanEdit?.on ?? savedInterval > 0
@@ -145,6 +165,16 @@ const Acme = () => {
     onError: (err) => message.error(getApiErrorMessage(err, '删除失败')),
   })
 
+  // 手动立即部署（D14）
+  const deployMut = useMutation({
+    mutationFn: (id: number) => api.deployAcmeCert(id),
+    onSuccess: (res) => {
+      void invalidate()
+      message.success(`已部署到 ${res.deployAgentId}`)
+    },
+    onError: (err) => message.error(getApiErrorMessage(err, '部署失败')),
+  })
+
   const download = async (cert: AcmeCertView, part: 'cert' | 'issuer' | 'key') => {
     try {
       const body = await api.downloadAcmeCert(cert.id, part)
@@ -174,6 +204,9 @@ const Acme = () => {
       caDirectory: cert.caDirectory,
       autoRenew: cert.autoRenew,
       renewBeforeDays: cert.renewBeforeDays,
+      deployAgentId: cert.deployAgentId || undefined,
+      deployCertPath: cert.deployCertPath || undefined,
+      deployKeyPath: cert.deployKeyPath || undefined,
     })
     setModalOpen(true)
   }
@@ -190,6 +223,9 @@ const Acme = () => {
       caDirectory: values.caDirectory,
       autoRenew: values.autoRenew,
       renewBeforeDays: values.renewBeforeDays,
+      deployAgentId: values.deployAgentId,
+      deployCertPath: values.deployCertPath,
+      deployKeyPath: values.deployKeyPath,
     }
     try {
       if (editing) {
@@ -245,6 +281,26 @@ const Acme = () => {
       width: 90,
       render: (v: AcmeCertView['caDirectory']) =>
         v === 'production' ? <Tag color="green">正式</Tag> : <Tooltip title="Let's Encrypt staging：测试用假证书，不触生产限频"><Tag color="orange">测试</Tag></Tooltip>,
+    },
+    {
+      title: '部署',
+      width: 140,
+      render: (_, r: AcmeCertView) => {
+        // D14：绑定 agent 后签发/续期自动推送，nginx 站点以绝对路径引用
+        if (!r.deployAgentId) return <Typography.Text type="secondary">—</Typography.Text>
+        if (r.lastDeployError) {
+          return (
+            <Tooltip title={`部署失败（${formatUnix(r.lastDeployAt)}）：${r.lastDeployError}`}>
+              <Tag color="red">失败</Tag>
+            </Tooltip>
+          )
+        }
+        return (
+          <Tooltip title={`${r.deployAgentId}：${r.deployCertPath}`}>
+            <Tag color="green">{r.lastDeployAt ? new Date(r.lastDeployAt * 1000).toLocaleDateString() : '待推送'}</Tag>
+          </Tooltip>
+        )
+      },
     },
     {
       title: '到期',
@@ -314,6 +370,24 @@ const Acme = () => {
                 私钥
               </Button>
             </Space.Compact>
+          )}
+          {r.deployAgentId && r.status === 'issued' && (
+            <Tooltip title={`立即部署到 ${r.deployAgentId}`}>
+              <Button
+                size="small"
+                type="text"
+                icon={<SendOutlined />}
+                loading={deployingId === r.id}
+                onClick={async () => {
+                  setDeployingId(r.id)
+                  try {
+                    await deployMut.mutateAsync(r.id)
+                  } finally {
+                    setDeployingId(null)
+                  }
+                }}
+              />
+            </Tooltip>
           )}
           <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
           <Popconfirm title="删除该签发配置？（仅删本地记录，不吊销 CA 侧证书）" onConfirm={() => deleteMut.mutate(r.id)}>
@@ -423,6 +497,49 @@ const Acme = () => {
           </Form.Item>
           <Form.Item name="renewBeforeDays" label="提前续期（天）" rules={[{ required: true }]}>
             <InputNumber min={7} max={90} style={{ width: 200 }} />
+          </Form.Item>
+          <Form.Item
+            name="deployAgentId"
+            label="自动部署目标（可选）"
+            extra="签发/续期成功后自动把证书推送到该 agent，供反向代理站点以绝对路径引用"
+          >
+            <Select options={deployAgentOptions} allowClear placeholder="不部署" />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(a, b) => a.deployAgentId !== b.deployAgentId}>
+            {({ getFieldValue }) =>
+              getFieldValue('deployAgentId') ? (
+                <>
+                  <Form.Item
+                    name="deployCertPath"
+                    label="证书路径（agent 上）"
+                    rules={[{ required: true, message: '填写 agent 上的绝对路径' }]}
+                  >
+                    <Input placeholder="/etc/cockpit/certs/example.com.crt.pem" />
+                  </Form.Item>
+                  <Form.Item
+                    name="deployKeyPath"
+                    label="私钥路径（agent 上，落盘权限 0600）"
+                    rules={[{ required: true, message: '填写 agent 上的绝对路径' }]}
+                  >
+                    <Input placeholder="/etc/cockpit/certs/example.com.key.pem" />
+                  </Form.Item>
+                  <Button
+                    size="small"
+                    style={{ marginBottom: 16 }}
+                    onClick={() => {
+                      const primary = (getFieldValue('domains') ?? [])[0] ?? 'example.com'
+                      const name = String(primary).replace('*.', '')
+                      form.setFieldsValue({
+                        deployCertPath: `/etc/cockpit/certs/${name}.crt.pem`,
+                        deployKeyPath: `/etc/cockpit/certs/${name}.key.pem`,
+                      })
+                    }}
+                  >
+                    按主域名填默认路径
+                  </Button>
+                </>
+              ) : null
+            }
           </Form.Item>
         </Form>
       </Modal>

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/config"
+	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
@@ -563,5 +565,166 @@ func TestAcmeConfigDNSField(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "DNSPod token not configured") {
 		t.Errorf("503 body = %s, want DNSPod hint", rec.Body.String())
+	}
+}
+
+// TestAcmeDeployValidation 部署目标校验（D14）：三字段要么全空，
+// 要么 agentID + 两绝对路径齐全
+func TestAcmeDeployValidation(t *testing.T) {
+	s, _ := newAcmeTestServer(t)
+	cases := []struct {
+		name string
+		body string
+		ok   bool
+	}{
+		{"no deploy fields", `{"domains":["a.example.com"],"autoRenew":true}`, true},
+		{"full target", `{"domains":["a.example.com"],"deployAgentId":"a1","deployCertPath":"/c.pem","deployKeyPath":"/k.pem"}`, true},
+		{"missing agent", `{"domains":["a.example.com"],"deployCertPath":"/c.pem","deployKeyPath":"/k.pem"}`, false},
+		{"relative path", `{"domains":["a.example.com"],"deployAgentId":"a1","deployCertPath":"c.pem","deployKeyPath":"/k.pem"}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs", strings.NewReader(tc.body)))
+			if tc.ok && rec.Code != http.StatusOK {
+				t.Fatalf("code = %d body = %s", rec.Code, rec.Body.String())
+			}
+			if !tc.ok && rec.Code != http.StatusBadRequest {
+				t.Fatalf("code = %d, want 400", rec.Code)
+			}
+		})
+	}
+}
+
+// TestAcmeDeployAPI 手动部署端点（D14）：未绑定 400 / agent 离线 503 /
+// 成功两次 RPC 往返（cert 0644、key 0600、truncate 覆盖）+ 状态回写 + 审计
+func TestAcmeDeployAPI(t *testing.T) {
+	s, _ := newAcmeTestServer(t)
+	cert := mkAcmeCert(t, s, func(c *storage.AcmeCert) {
+		c.Status = "issued"
+		c.CertificatePEM = "CERT-PEM"
+		c.PrivateKeyPEM = "KEY-PEM"
+		c.DeployAgentID = "a1"
+		c.DeployCertPath = "/etc/cockpit/certs/home.example.com.crt.pem"
+		c.DeployKeyPath = "/etc/cockpit/certs/home.example.com.key.pem"
+	})
+	idPath := "/acme/certs/" + strconv.Itoa(int(cert.ID)) + "/deploy"
+
+	// 未绑定 → 400
+	cert2 := mkAcmeCert(t, s, nil)
+	rec := httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost,
+		"/acme/certs/"+strconv.Itoa(int(cert2.ID))+"/deploy", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("no target: code = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	// agent 离线 → 503
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, idPath, nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("agent offline: code = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	// 成功：两次 file.write 往返，参数逐项断言
+	agent := NewAgent("a1", nil)
+	if err := s.registry.Register(agent); err != nil {
+		t.Fatalf("register agent: %v", err)
+	}
+	go func() {
+		want := []struct {
+			path string
+			mode float64
+			data string
+		}{
+			{cert.DeployCertPath, 0o644, "CERT-PEM"},
+			{cert.DeployKeyPath, 0o600, "KEY-PEM"},
+		}
+		for i, w := range want {
+			reqMsg := <-agent.Send
+			params := reqMsg.Payload["params"].(map[string]interface{})
+			if params["path"] != w.path {
+				t.Errorf("write[%d] path = %v, want %s", i, params["path"], w.path)
+			}
+			if params["mode"] != w.mode {
+				t.Errorf("write[%d] mode = %v, want %v", i, params["mode"], w.mode)
+			}
+			if params["truncate"] != true {
+				t.Errorf("write[%d] truncate = %v, want true", i, params["truncate"])
+			}
+			if data, err := base64.StdEncoding.DecodeString(params["data"].(string)); err != nil || string(data) != w.data {
+				t.Errorf("write[%d] data = %q (%v), want %q", i, data, err, w.data)
+			}
+			resp := protocol.NewMessage(protocol.MessageTypeRPCResponse, map[string]interface{}{
+				"status": "success",
+				"data":   map[string]interface{}{"size": 10.0},
+			})
+			resp.ID = reqMsg.ID
+			s.handleRPCResponse(resp)
+		}
+	}()
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, idPath, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("deploy: code = %d body = %s", rec.Code, rec.Body.String())
+	}
+	got, _ := s.db.GetAcmeCert(cert.ID)
+	if got.LastDeployAt == 0 || got.LastDeployError != "" {
+		t.Fatalf("after deploy = lastDeployAt %d err %q", got.LastDeployAt, got.LastDeployError)
+	}
+	// 响应视图无 PEM
+	if strings.Contains(rec.Body.String(), "CERT-PEM") {
+		t.Error("deploy response must not contain PEM")
+	}
+	// 审计 acme_deploy
+	logs, _, _ := s.db.GetAuditLogs(0, 10, nil)
+	found := false
+	for _, l := range logs {
+		if l.Action == "acme_deploy" && l.ResourceID == cert.PrimaryDomain {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("audit acme_deploy missing")
+	}
+}
+
+// TestAcmeIssueAutoDeploy 签发成功后自动推送（D14）：绑定 + agent 在线
+// 时 issue 200 且部署状态回写成功；巡检续期共用 runACMEIssue 同路径
+func TestAcmeIssueAutoDeploy(t *testing.T) {
+	s, _ := newAcmeTestServer(t)
+	agent := NewAgent("a1", nil)
+	if err := s.registry.Register(agent); err != nil {
+		t.Fatalf("register agent: %v", err)
+	}
+	cert := mkAcmeCert(t, s, func(c *storage.AcmeCert) {
+		c.DeployAgentID = "a1"
+		c.DeployCertPath = "/etc/cockpit/certs/home.example.com.crt.pem"
+		c.DeployKeyPath = "/etc/cockpit/certs/home.example.com.key.pem"
+	})
+	go func() {
+		for i := 0; i < 2; i++ {
+			reqMsg := <-agent.Send
+			if m := reqMsg.Payload["method"]; m != "file.write" {
+				t.Errorf("write[%d] method = %v, want file.write", i, m)
+			}
+			resp := protocol.NewMessage(protocol.MessageTypeRPCResponse, map[string]interface{}{
+				"status": "success",
+				"data":   map[string]interface{}{"size": 10.0},
+			})
+			resp.ID = reqMsg.ID
+			s.handleRPCResponse(resp)
+		}
+	}()
+	rec := httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost,
+		"/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("issue: code = %d body = %s", rec.Code, rec.Body.String())
+	}
+	got, _ := s.db.GetAcmeCert(cert.ID)
+	if got.Status != "issued" || got.LastDeployAt == 0 || got.LastDeployError != "" {
+		t.Fatalf("after issue+deploy = status %s lastDeployAt %d err %q",
+			got.Status, got.LastDeployAt, got.LastDeployError)
 	}
 }

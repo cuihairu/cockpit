@@ -380,9 +380,9 @@ const Proxy = () => {
                 name="tlsCert"
                 label="证书路径"
                 rules={[{ required: true, message: 'https 需要证书绝对路径' }]}
-                extra="证书文件可先经工作台 - 文件上传到主机"
+                extra="可经工作台 - 文件上传，或在「证书签发」页配置自动部署（默认推送到 /etc/cockpit/certs/，续期自动更新）"
               >
-                <Input placeholder="/etc/ssl/certs/site.pem" />
+                <Input placeholder="/etc/cockpit/certs/site.crt.pem" />
               </Form.Item>
               <Form.Item
                 name="tlsKey"

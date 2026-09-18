@@ -932,6 +932,12 @@ export interface AcmeCertView {
   lastStatus: 'never' | 'ok' | 'failed'
   lastError: string
   checkedAt: number
+  // 部署目标与状态（D14）
+  deployAgentId: string
+  deployCertPath: string
+  deployKeyPath: string
+  lastDeployAt: number
+  lastDeployError: string
   createdAt: string
   updatedAt: string
 }
@@ -942,6 +948,9 @@ export interface AcmeCertInput {
   caDirectory: 'staging' | 'production'
   autoRenew: boolean
   renewBeforeDays: number
+  deployAgentId?: string
+  deployCertPath?: string
+  deployKeyPath?: string
 }
 
 // ACME 账户信息

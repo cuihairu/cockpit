@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -304,5 +305,70 @@ func TestFileRejectsUnsafePaths(t *testing.T) {
 	}
 	if _, err := callFile(t, p, "delete", map[string]interface{}{"path": strings.Repeat("a/", 50) + ".."}); err == nil {
 		t.Error("relative deep traversal should be rejected")
+	}
+}
+
+// TestFileWriteMode mode 白名单（ACME 部署写私钥 0600，D14）：
+// 缺省/0 = 0644 既有行为，0600/0644 显式放行，其他值拒绝
+func TestFileWriteMode(t *testing.T) {
+	p := newFileTestProvider()
+	dir := t.TempDir()
+
+	// 缺省 = 0644（既有行为不变）
+	def := filepath.Join(dir, "d.txt")
+	if _, err := callFile(t, p, "write", map[string]interface{}{
+		"path": def, "data": base64.StdEncoding.EncodeToString([]byte("x")), "truncate": true,
+	}); err != nil {
+		t.Fatalf("default write: %v", err)
+	}
+	if fi, err := os.Stat(def); err != nil || fi.Mode().Perm() != 0o644 {
+		t.Fatalf("default perm = %v, want 0644", fi.Mode().Perm())
+	}
+
+	// 0600 与 0644 显式放行
+	for _, mode := range []float64{0o600, 0o644} {
+		path := filepath.Join(dir, fmt.Sprintf("m%o.txt", int(mode)))
+		if _, err := callFile(t, p, "write", map[string]interface{}{
+			"path": path, "data": base64.StdEncoding.EncodeToString([]byte("x")), "truncate": true, "mode": mode,
+		}); err != nil {
+			t.Fatalf("mode %o: %v", int(mode), err)
+		}
+		if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != os.FileMode(mode) {
+			t.Fatalf("mode %o perm = %v", int(mode), fi.Mode().Perm())
+		}
+	}
+
+	// 覆盖写也落准权限（先 0644 再以 0600 覆盖）
+	over := filepath.Join(dir, "over.txt")
+	for _, mode := range []float64{0o644, 0o600} {
+		if _, err := callFile(t, p, "write", map[string]interface{}{
+			"path": over, "data": base64.StdEncoding.EncodeToString([]byte("x")), "truncate": true, "mode": mode,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fi, err := os.Stat(over); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("after overwrite perm = %v, want 0600", fi.Mode().Perm())
+	}
+
+	// 白名单外拒绝
+	for _, bad := range []interface{}{0o777, 0o400, "600"} {
+		_, err := callFile(t, p, "write", map[string]interface{}{
+			"path": filepath.Join(dir, "bad.txt"), "data": base64.StdEncoding.EncodeToString([]byte("x")), "truncate": true, "mode": bad,
+		})
+		if err == nil {
+			t.Fatalf("mode %v should be rejected", bad)
+		}
+	}
+
+	// mode=0 与缺省等价
+	zero := filepath.Join(dir, "z.txt")
+	if _, err := callFile(t, p, "write", map[string]interface{}{
+		"path": zero, "data": base64.StdEncoding.EncodeToString([]byte("x")), "truncate": true, "mode": float64(0),
+	}); err != nil {
+		t.Fatalf("mode 0: %v", err)
+	}
+	if fi, err := os.Stat(zero); err != nil || fi.Mode().Perm() != 0o644 {
+		t.Fatalf("mode 0 perm = %v, want 0644", fi.Mode().Perm())
 	}
 }

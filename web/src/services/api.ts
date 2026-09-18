@@ -936,6 +936,11 @@ class ApiService {
     return this.client.get<unknown, AcmeAccount>('/acme/account')
   }
 
+  // 立即部署到绑定 agent（D14）
+  async deployAcmeCert(id: number): Promise<AcmeCertView> {
+    return this.client.post<unknown, AcmeCertView>(`/acme/certs/${id}/deploy`)
+  }
+
   async putAcmeAccount(email: string): Promise<void> {
     await this.client.put('/acme/account', { email })
   }

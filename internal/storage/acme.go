@@ -37,8 +37,17 @@ type AcmeCert struct {
 	LastStatus      string    `gorm:"size:16" json:"lastStatus"` // never / ok / failed
 	LastError       string    `gorm:"size:512" json:"lastError"`
 	CheckedAt       int64     `json:"checkedAt"` // 最近一次巡检看到它的时间，0=从未
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+
+	// 部署目标（D14，一对一；空 AgentID = 未绑定）：签发成功后把 PEM
+	// 经 file.write 推到 agent，nginx 站点以绝对路径引用
+	DeployAgentID   string `gorm:"size:100;index" json:"deployAgentId"`
+	DeployCertPath  string `gorm:"size:255" json:"deployCertPath"`
+	DeployKeyPath   string `gorm:"size:255" json:"deployKeyPath"`
+	LastDeployAt    int64  `json:"lastDeployAt"`             // 最近一次部署尝试（含失败）Unix 秒，0=从未
+	LastDeployError string `gorm:"size:512" json:"lastDeployError"` // 空 = 最近一次部署成功
+
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 var ErrAcmeAccountNotFound = errors.New("acme account not found")

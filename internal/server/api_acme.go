@@ -1,7 +1,10 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -12,6 +15,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/config"
+	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
@@ -22,6 +26,7 @@ import (
 //	PUT    /api/acme/certs/{id}                 更新（审计 acme_update）
 //	DELETE /api/acme/certs/{id}                 删除（审计 acme_delete；不吊销）
 //	POST   /api/acme/certs/{id}/issue           立即签发/重签（审计 acme_issue）
+//	POST   /api/acme/certs/{id}/deploy          立即部署到绑定 agent（审计 acme_deploy，D14）
 //	GET    /api/acme/certs/{id}/download?part=  下载 PEM（part=key 强制记审计）
 //	GET    /api/acme/account                    账户信息（email/注册状态）
 //	PUT    /api/acme/account                    设置 email（审计 acme_update）
@@ -58,6 +63,9 @@ func (s *Server) handleAcmeCertSub(w http.ResponseWriter, r *http.Request, rest 
 	case strings.HasSuffix(rest, "/issue"):
 		idStr := strings.TrimSuffix(rest, "/issue")
 		s.handleAcmeIssue(w, r, idStr)
+	case strings.HasSuffix(rest, "/deploy"):
+		idStr := strings.TrimSuffix(rest, "/deploy")
+		s.handleAcmeDeploy(w, r, idStr)
 	case strings.HasSuffix(rest, "/download"):
 		idStr := strings.TrimSuffix(rest, "/download")
 		s.handleAcmeDownload(w, r, idStr)
@@ -84,6 +92,10 @@ type acmeCertInput struct {
 	CADirectory     string   `json:"caDirectory"`
 	AutoRenew       bool     `json:"autoRenew"`
 	RenewBeforeDays *int     `json:"renewBeforeDays"` // 指针：缺省（nil）用默认 30，显式 0 视为非法
+	// 部署目标（D14）：全空 = 未绑定；否则 agentID + 两绝对路径必填
+	DeployAgentID  string `json:"deployAgentId,omitempty"`
+	DeployCertPath string `json:"deployCertPath,omitempty"`
+	DeployKeyPath  string `json:"deployKeyPath,omitempty"`
 }
 
 var acmeDomainRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}$`)
@@ -136,6 +148,21 @@ func validateAcmeInput(in acmeCertInput) ([]string, string, int, error) {
 	return domains, ca, days, nil
 }
 
+// validateAcmeDeploy 校验部署目标三字段（D14）：全空 = 未绑定；
+// 否则 agentID 必填且两路径为绝对路径（与 file 通道同语义）
+func validateAcmeDeploy(in acmeCertInput) error {
+	if in.DeployAgentID == "" && in.DeployCertPath == "" && in.DeployKeyPath == "" {
+		return nil
+	}
+	if in.DeployAgentID == "" {
+		return errString("deployAgentId is required when deploy paths are set")
+	}
+	if !strings.HasPrefix(in.DeployCertPath, "/") || !strings.HasPrefix(in.DeployKeyPath, "/") {
+		return errString("deploy paths must be absolute")
+	}
+	return nil
+}
+
 // acmeCertView 响应视图（白名单字段；三段 PEM 绝不出响应，D9）
 type acmeCertView struct {
 	ID              uint      `json:"id"`
@@ -151,8 +178,15 @@ type acmeCertView struct {
 	LastStatus      string    `json:"lastStatus"`
 	LastError       string    `json:"lastError"`
 	CheckedAt       int64     `json:"checkedAt"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	// 部署目标与状态（D14）
+	DeployAgentID   string `json:"deployAgentId"`
+	DeployCertPath  string `json:"deployCertPath"`
+	DeployKeyPath   string `json:"deployKeyPath"`
+	LastDeployAt    int64  `json:"lastDeployAt"`
+	LastDeployError string `json:"lastDeployError"`
+
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func toAcmeCertView(c *storage.AcmeCert) acmeCertView {
@@ -170,6 +204,11 @@ func toAcmeCertView(c *storage.AcmeCert) acmeCertView {
 		LastStatus:      c.LastStatus,
 		LastError:       c.LastError,
 		CheckedAt:       c.CheckedAt,
+		DeployAgentID:   c.DeployAgentID,
+		DeployCertPath:  c.DeployCertPath,
+		DeployKeyPath:   c.DeployKeyPath,
+		LastDeployAt:    c.LastDeployAt,
+		LastDeployError: c.LastDeployError,
 		CreatedAt:       c.CreatedAt,
 		UpdatedAt:       c.UpdatedAt,
 	}
@@ -209,6 +248,10 @@ func (s *Server) handleAcmeCreate(w http.ResponseWriter, r *http.Request) {
 		s.handleError(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := validateAcmeDeploy(in); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
 	cert := &storage.AcmeCert{
 		Domains:         domains,
 		PrimaryDomain:   domains[0],
@@ -217,6 +260,9 @@ func (s *Server) handleAcmeCreate(w http.ResponseWriter, r *http.Request) {
 		RenewBeforeDays: days,
 		AutoRenew:       in.AutoRenew,
 		LastStatus:      "never",
+		DeployAgentID:   in.DeployAgentID,
+		DeployCertPath:  in.DeployCertPath,
+		DeployKeyPath:   in.DeployKeyPath,
 	}
 	if err := s.db.CreateAcmeCert(cert); err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "failed to create ACME certificate config")
@@ -242,6 +288,10 @@ func (s *Server) handleAcmeUpdate(w http.ResponseWriter, r *http.Request, id uin
 		s.handleError(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := validateAcmeDeploy(in); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
 	// 域名/CA 变更后旧产物不再对应，重置为待签发
 	if !equalDomains(cert.Domains, domains) || cert.CADirectory != ca {
 		cert.Status = "pending"
@@ -255,6 +305,9 @@ func (s *Server) handleAcmeUpdate(w http.ResponseWriter, r *http.Request, id uin
 	cert.CADirectory = ca
 	cert.RenewBeforeDays = days
 	cert.AutoRenew = in.AutoRenew
+	cert.DeployAgentID = in.DeployAgentID
+	cert.DeployCertPath = in.DeployCertPath
+	cert.DeployKeyPath = in.DeployKeyPath
 	if err := s.db.UpdateAcmeCert(cert); err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "failed to update ACME certificate config")
 		return
@@ -329,6 +382,101 @@ func (s *Server) handleAcmeIssue(w http.ResponseWriter, r *http.Request, idStr s
 	s.auditAcme(r, "acme_issue", cert.PrimaryDomain, map[string]interface{}{
 		"caDirectory": cert.CADirectory,
 		"domains":     cert.Domains,
+	})
+	s.writeJSON(w, http.StatusOK, toAcmeCertView(cert))
+}
+
+// deployAcmeCert 把已签发 PEM 推送到绑定的 agent（D14）：两次 file.write
+// （cert 0644 / key 0600，truncate 覆盖写），回写部署状态。返回的 error
+// 由手动部署端点透传；签发后的自动触发侧只记录 LastDeployError。
+func (s *Server) deployAcmeCert(cert *storage.AcmeCert) error {
+	fail := func(err error) error {
+		cert.LastDeployAt = time.Now().Unix()
+		cert.LastDeployError = err.Error()
+		_ = s.db.UpdateAcmeCert(cert)
+		return err
+	}
+	if cert.DeployAgentID == "" {
+		return errString("certificate has no deploy target")
+	}
+	if cert.CertificatePEM == "" || cert.PrivateKeyPEM == "" {
+		return errString("certificate not issued yet")
+	}
+	write := func(path, data string, mode float64) error {
+		resp, err := s.CallAgent(cert.DeployAgentID, "file.write", map[string]interface{}{
+			"path":     path,
+			"data":     base64.StdEncoding.EncodeToString([]byte(data)),
+			"truncate": true,
+			"mode":     mode,
+		})
+		if err != nil {
+			return fmt.Errorf("file.write %s: %w", path, err)
+		}
+		rpcResp, err := protocol.DecodeRPCResponse(resp)
+		if err != nil || rpcResp.Status == "error" {
+			return fmt.Errorf("file.write %s rejected by agent", path)
+		}
+		return nil
+	}
+	if err := write(cert.DeployCertPath, cert.CertificatePEM, 0o644); err != nil {
+		return fail(err)
+	}
+	if err := write(cert.DeployKeyPath, cert.PrivateKeyPEM, 0o600); err != nil {
+		return fail(err)
+	}
+	cert.LastDeployAt = time.Now().Unix()
+	cert.LastDeployError = ""
+	if err := s.db.UpdateAcmeCert(cert); err != nil {
+		return err
+	}
+	return nil
+}
+
+// maybeDeployAcmeCert 签发成功后的自动部署触发（D14）：绑定才推；
+// 失败只记 LastDeployError（web 红标可见），不回滚签发状态、不产告警
+// ——巡检场景避免告警风暴。
+func (s *Server) maybeDeployAcmeCert(cert *storage.AcmeCert) {
+	if cert.DeployAgentID == "" {
+		return
+	}
+	if err := s.deployAcmeCert(cert); err != nil {
+		log.Printf("ACME auto deploy for %s to %s failed: %v", cert.PrimaryDomain, cert.DeployAgentID, err)
+	}
+}
+
+// handleAcmeDeploy 手动立即部署（D14）：未绑定 400、agent 离线 503，
+// 成功审计 acme_deploy（details 含 agentID 与路径，不含 PEM）
+func (s *Server) handleAcmeDeploy(w http.ResponseWriter, r *http.Request, idStr string) {
+	if r.Method != http.MethodPost {
+		s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
+		return
+	}
+	cert, err := s.db.GetAcmeCert(uint(id))
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "ACME certificate not found")
+		return
+	}
+	if cert.DeployAgentID == "" {
+		s.handleError(w, r, http.StatusBadRequest, "certificate has no deploy target")
+		return
+	}
+	if _, ok := s.registry.Get(cert.DeployAgentID); !ok {
+		s.handleError(w, r, http.StatusServiceUnavailable, "deploy agent not online")
+		return
+	}
+	if err := s.deployAcmeCert(cert); err != nil {
+		s.handleError(w, r, http.StatusBadGateway, err.Error())
+		return
+	}
+	s.auditAcme(r, "acme_deploy", cert.PrimaryDomain, map[string]interface{}{
+		"agentId":  cert.DeployAgentID,
+		"certPath": cert.DeployCertPath,
+		"keyPath":  cert.DeployKeyPath,
 	})
 	s.writeJSON(w, http.StatusOK, toAcmeCertView(cert))
 }

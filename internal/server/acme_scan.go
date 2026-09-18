@@ -157,6 +157,7 @@ func (s *Server) runACMEIssue(cert *storage.AcmeCert, generator *alert.Generator
 		return res, err
 	}
 	s.upsertAcmeCertObservation(cert)
+	s.maybeDeployAcmeCert(cert) // 绑定了部署目标则推送（D14，失败不回滚签发状态）
 	return res, nil
 }
 

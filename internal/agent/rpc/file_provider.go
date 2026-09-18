@@ -209,15 +209,40 @@ func (p *FileProvider) Write(params map[string]interface{}) (interface{}, error)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create parent dir: %w", err)
 	}
+	// mode 可选：0/缺省 = 0644（既有行为）；白名单只放私钥 0600 与常规 0644，
+	// 防误设 0777 之类（ACME 部署用它写私钥，见 acme-design.md D14）
+	perm := os.FileMode(0o644)
+	explicit := false
+	if raw, ok := params["mode"]; ok && raw != nil && raw != float64(0) {
+		mode, ok := raw.(float64)
+		if !ok {
+			return nil, fmt.Errorf("mode must be a number")
+		}
+		switch os.FileMode(mode) {
+		case 0o600, 0o644:
+			perm = os.FileMode(mode)
+			explicit = mode == 0o600
+		default:
+			return nil, fmt.Errorf("mode must be 0600 or 0644")
+		}
+	}
 	flags := os.O_CREATE | os.O_WRONLY
 	if truncate {
 		flags |= os.O_TRUNC
 	} else {
 		flags |= os.O_APPEND
 	}
-	f, err := os.OpenFile(path, flags, 0o644)
+	f, err := os.OpenFile(path, flags, perm)
 	if err != nil {
 		return nil, fmt.Errorf("open: %w", err)
+	}
+	// 已存在文件的权限不受 OpenFile perm 影响：显式 0600（私钥部署覆盖写）
+	// 需要补 chmod 落准；缺省路径不 chmod，保持既有行为（设备文件等特殊目标）
+	if explicit {
+		if err := f.Chmod(perm); err != nil {
+			f.Close()
+			return nil, fmt.Errorf("chmod: %w", err)
+		}
 	}
 	defer f.Close()
 	if _, err := f.Write(data); err != nil {
