@@ -1,7 +1,8 @@
-# systemd 服务管理设计
+# 服务管理设计（systemd + Windows SCM）
 
-> 状态：M1 设计定稿。Agent 侧 provider 复用 Commander 抽象直调 systemctl；
-> server 纯转发不落库（systemd 为唯一事实源）；Web /services 页照 cron 页模式。
+> 状态：M1 设计定稿（systemd）；M2 追加 Windows SCM 后端（D9），capability
+> 统一为 `service`。Agent 侧按平台后端各一个 provider；server 纯转发不落库
+> （systemd / SCM 为各自事实源）；Web /services 页照 cron 页模式。
 
 ## D1 目标与范围
 
@@ -16,7 +17,7 @@
 - journal 日志查看（logs provider 已覆盖 journalctl 查询）
 - timer / socket / mount 等 unit 类型（只做 `.service`）
 - mask / unmask、unit 文件编辑、daemon-reload（M2 候选）
-- 非 systemd 平台（OpenRC / runit / macOS launchd）
+- 非 systemd 平台：macOS launchd（M3 候选，见 D9 范围说明）；OpenRC / runit 不做
 
 定位：NAS 场景前置能力——服务启停与自启管理是主机运维的基本盘，模式与 cron 页同构，交付确定性高。
 
@@ -154,3 +155,145 @@ POST /api/agents/{id}/services/{unit}/{action}   → service.action（审计 ser
 - [ ] web tsc + build 通过
 - [ ] 真实环境（systemd 主机）：列表含未加载 unit、restart/enable 实测、
       非 root agent 报错透传（列入 todo.md）
+
+## D9 跨平台统一：Windows SCM 后端（M2）
+
+### D9.1 动机与统一模型
+
+Windows 的服务控制管理器（SCM）与 systemd 语义高度同构：服务有运行态与
+自启态，支持启停与自启切换。两者存在最小公共集，观测模型直接复用
+`ServiceUnit`，不新增 DTO：
+
+| ServiceUnit 字段 | systemd | Windows SCM |
+|---|---|---|
+| Name | `nginx.service` | SCM 服务名（如 `wuauserv`，无后缀） |
+| Description | unit 描述 | DisplayName |
+| LoadState | loaded/not-found | 恒 `loaded`（服务必然注册在 SCM） |
+| ActiveState | active/inactive/failed/... | 状态映射（见 D9.3） |
+| SubState | systemd 细分态 | SCM 原始状态小写（`running`/`stopped`/`paused`...） |
+| UnitFileState（自启态） | enabled/disabled/static/... | StartType 映射（见 D9.3） |
+| Preset | vendor preset | 空（Windows 无预设概念，前端 `—` 兜底） |
+
+生态选型：Go 官方 `golang.org/x/sys/windows/svc/mgr`（纯 syscall，
+CGO_ENABLED=0 可用，与 Windows 构建矩阵兼容）。kardianos/service 语义是
+"把自己装成服务"，与"管理既有服务"不同，不采用；gopsutil 只有进程视图，
+无自启态。macOS launchd 语义差异大（LaunchAgent/LaunchDaemon 双域、
+plist 文件即事实源），留 M3 单独设计，不在本节范围。
+
+### D9.2 capability 统一与探测
+
+capability 由 `systemd` 更名为 `service`，后端差异放 metadata：
+
+```json
+{ "type": "service", "version": "2", "metadata": { "backend": "systemd" } }
+{ "type": "service", "version": "2", "metadata": { "backend": "windows-scm" } }
+```
+
+- 更名理由：agent/server/前端同仓同发无兼容包袱；"systemd" 作为 capability
+  名会挡住 Windows 主机，而 `service` 才是能力本身的语义
+- Linux/macOS：沿用 DetectSystemd（systemctl + /run/systemd/system），
+  探测通过才上报 capability，backend=systemd
+- Windows：SCM 是操作系统内置组件恒存在，无需文件探测，直接上报
+  backend=windows-scm
+- providers.go `case "service"`：按 metadata.backend 构造对应 provider
+  （systemd → `NewServiceProvider(nil)`；windows-scm → `NewWindowsServiceProvider()`）
+- 日志页（logs provider）的 `systemd` 日志源类型与本 capability 无关，不改
+
+### D9.3 字段与动作映射
+
+**运行态映射**（`windowsStatusToActiveState`，纯函数）：
+
+| SCM Status | ActiveState | SubState |
+|---|---|---|
+| Running | active | running |
+| Stopped | inactive | stopped |
+| Start Pending | activating | start_pending |
+| Stop Pending | deactivating | stop_pending |
+| Paused / Pause Pending | paused | paused / pause_pending |
+| Continue Pending | activating | continue_pending |
+
+`paused` 不映射为 active：暂停是 Windows 特有语义，前端未知值按灰色徽标
+显示原词，不扭曲语义。
+
+**自启态映射**（`startTypeToUnitFileState`，纯函数）：
+
+| SCM StartType | UnitFileState |
+|---|---|
+| Automatic（含 DelayedAutostart） | enabled |
+| Manual | disabled |
+| Disabled | disabled |
+
+前端「自启」列只用 enabled/disabled 两态，Manual 与 Disabled 同为「手动」。
+
+**动作映射**（Windows 支持 6 动词中的 5 个，`reload` 不支持）：
+
+| 动作 | SCM 实现 | 说明 |
+|---|---|---|
+| start | `svc.Start()` | 即发即返，状态收敛靠前端 30s 轮询 |
+| stop | `svc.Stop()` | 同上；SCM 的启停是异步请求，与 systemd 同步语义有差异 |
+| restart | Stop → 等待 Stopped（30s 超时）→ Start | SCM 无原生 restart |
+| reload | — | 返回错误 "reload is not supported on windows-scm backend"；前端按 backend 隐藏按钮 |
+| enable | `SetStartType(Automatic)` | 等价 systemd enable 的开机自启 |
+| disable | `SetStartType(Disabled)` | 等价 systemd disable |
+
+超时复用 `serviceActionTimeout`（30s）。
+
+### D9.4 安全边界
+
+1. **Windows 服务名白名单**（与 systemd 正则分开，`validateWindowsServiceUnit`）：
+   正则 `^[A-Za-z0-9_.\- ]{1,256}$` 且不得为 `.` / `..`（SCM 注册表键名字符集，
+   不含 `/` `\` 与通配符）。服务名与 DisplayName 是两回事，操作一律按服务名
+2. 动作白名单：systemd 6 动词；Windows 5 动词（无 reload），provider 内各自校验
+3. **server 端校验放宽为双规则并集**：`{unit}` 满足 systemd 正则 **或** Windows
+   正则其一即放行转发。server 不解析 agent capability 做精确匹配——并集仍是
+   纯白名单（无 `/` `\` `..` 空字节），真正的后端专属严格校验仍在 agent 侧
+   兜底（systemd 侧拒绝无 `.service` 后缀，Windows 侧拒绝 `.service` 后缀外的
+   越界字符）；动作白名单不变
+4. SCM 权限边界：agent 运行身份对服务的写权限由 Windows ACL 决定，cockpit
+   不提权；无权限时 SCM 报错原样透传
+5. 审计不变：action 记 `service_action`，list/status 不审计
+
+### D9.5 实现组织（跨平台编译）
+
+三平台 CI 矩阵下所有 agent 代码全平台编译，Windows-only 代码用 build tag 隔离：
+
+```
+service_provider.go        无 tag：systemd 实现（现有，不改逻辑）
+service_windows_model.go   无 tag：WinService DTO → ServiceUnit 映射纯函数 +
+                                   validateWindowsServiceUnit（Linux CI 可测）
+service_windows_scm.go     //go:build windows：mgr.Connect 采集 + 动作真实现
+service_windows_stub.go    //go:build !windows：NewWindowsServiceProvider 返回
+                                   stub，Call 显式报错（防御层：非 Windows
+                                   平台探测门控根本不会注册它）
+```
+
+`x/sys` 已在依赖树（indirect），实现后转直接依赖。采集规模：SCM 本地 RPC
+枚举数百服务为毫秒级，与 systemctl 全量列表同量级，一次性全量返回不分页。
+
+### D9.6 Web 适配
+
+- agent 下拉过滤改 `c.type === 'service'`，从 capability metadata 读 backend
+- backend=windows-scm 的主机：隐藏「重载」按钮、「系统状态」概览项
+  （status 返回 systemState=`unknown`，SCM 无 systemd 全局状态概念）
+- 名称列 `replace(/\.service$/, '')` 对 Windows 名无副作用；「自启」列
+  Windows 只会出现 enabled/disabled 两态，渲染逻辑复用
+- 下拉未检测文案改「未检测到服务管理」
+
+### D9.7 测试策略
+
+- **agent**（service_windows_model_test.go，Linux CI 可跑）：运行态/自启态映射
+  表驱动全分支；validateWindowsServiceUnit 合法名/含 `/`/`..`/超长/reload 拒绝
+- **stub**：非 Windows 平台 Call 显式错误（CI 平台即测）
+- **server**（api_service_test.go 补例）：Windows 名（`wuauserv`，含连字符与
+  空格样例）转发 200；仍非法的名（`../x`、空字节）400
+- **systemd 回归**：现有 service_provider_test.go 不动即过（provider 逻辑未变）
+- **真机验收**（列入 todo.md）：Windows 主机列表/启停/自启切换/restart 等待、
+  无权限服务报错透传；reload 按钮确认隐藏
+
+### D9.8 验收清单
+
+- [ ] `GOOS=windows go build ./...` 通过；`go test ./...`（Linux）通过
+- [ ] `go vet ./...` 干净；新建文件 gofmt 干净
+- [ ] web tsc + build 通过
+- [ ] Windows 真机验收项列入 todo.md
+
