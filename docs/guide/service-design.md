@@ -377,3 +377,27 @@ service_windows_stub.go    //go:build !windows：NewWindowsServiceProvider 返�
 - **真机验收**（列入 todo.md）：macOS 主机列表/启停/自启切换、
   kickstart 回退 bootstrap 路径、无权限报错透传
 
+
+### D11 journal 日志跳转（M2 扩，纯 web）
+
+服务页排障（failed / inactive 定位原因）需要看 journal；logs provider
+（logs-design.md）已提供 `journalctl -u <unit>` 查询底层，服务页只差
+入口与源预选——零新端点、零 Go 改动。
+
+- **入口**：服务表操作列加「日志」按钮（FileTextOutlined 图标 + Tooltip），
+  所有行可见（排查不只 failed）；仅 `backend === 'systemd'` 的主机显示
+  （launchd / windows-scm 无 journal）
+- **交互**：点击打开 Drawer（760px）内嵌 Workbench 同款 `LogsPanel`，
+  `initialSource` 传当前行 unit 名——进入即锁定该服务为日志源
+- **LogsPanel 向后兼容扩展**：
+  - 新可选 prop `initialSource`：`pickedSource` 初值；源派生逻辑加一条
+    例外——`pickedSource === initialSource` 时**无条件优先**，不做
+    「不在列表回落第一项」。原因：`logs.sources` 只枚举
+    `systemctl list-units` 在册 unit，未加载的 inactive 服务不在列表，
+    但 `journalctl -u` 对其仍能返回历史日志（无记录时 `-q` 输出
+    "-- No Entries --"），回落会查错对象
+  - 自动首查：`initialSource` 存在时，`logs.status` 就绪后自动执行一次
+    查询（useRef 防重复），无需再点「查询」
+- **审计**：`logs.query` 浏览类不记审计（logs-design 纪律），入口复用
+  现有 `/api/agents/{id}/logs/query` 转发
+- **测试**：纯 web 侧，tsc + build 验证；Go 零改动
