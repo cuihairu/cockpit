@@ -9,6 +9,7 @@ import {
   ApiOutlined,
   ClusterOutlined,
   HddOutlined,
+  DatabaseOutlined,
   SettingOutlined,
   UserOutlined,
   LogoutOutlined,
@@ -47,6 +48,7 @@ const Cron = lazy(() => import('./pages/Cron'))
 const Services = lazy(() => import('./pages/Services'))
 const Network = lazy(() => import('./pages/Network'))
 const Disk = lazy(() => import('./pages/Disk'))
+const Nas = lazy(() => import('./pages/Nas'))
 const Drift = lazy(() => import('./pages/Drift'))
 const DNS = lazy(() => import('./pages/DNS'))
 const Acme = lazy(() => import('./pages/Acme'))
@@ -160,6 +162,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/disk',
       name: '磁盘健康',
       icon: <HddOutlined />,
+    },
+    {
+      path: '/nas',
+      name: '存储池',
+      icon: <DatabaseOutlined />,
     },
     {
       path: '/drift',
@@ -352,6 +359,7 @@ const MainLayout = () => {
             <Route path="/services" element={<Services />} />
             <Route path="/network" element={<Network />} />
             <Route path="/disk" element={<Disk />} />
+            <Route path="/nas" element={<Nas />} />
             <Route path="/drift" element={<Drift />} />
             <Route path="/dns" element={<DNS />} />
             <Route path="/acme" element={<Acme />} />

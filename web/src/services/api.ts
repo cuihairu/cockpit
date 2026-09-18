@@ -60,6 +60,8 @@ import type {
   CronStatus,
   SmartScanConfig,
   SmartStatus,
+  NasScanConfig,
+  NasStatus,
   DDNSConfig,
   DDNSConfigInput,
   DDNSCheckResult,
@@ -827,6 +829,23 @@ class ApiService {
 
   async putSmartConfig(scanIntervalSeconds: number): Promise<void> {
     await this.client.put('/smart/config', { scan_interval_seconds: scanIntervalSeconds })
+  }
+
+  // ========== NAS 存储观测（见 nas-design.md） ==========
+
+  async getNASStatus(agentId: string): Promise<NasStatus> {
+    return this.client.get<unknown, NasStatus>(`/agents/${encodeURIComponent(agentId)}/nas/status`)
+  }
+
+  async getNASConfig(): Promise<NasScanConfig> {
+    return this.client.get<unknown, NasScanConfig>('/nas/config')
+  }
+
+  async putNASConfig(scanIntervalSeconds: number, usageWarnPercent?: number): Promise<void> {
+    await this.client.put('/nas/config', {
+      scan_interval_seconds: scanIntervalSeconds,
+      usage_warn_percent: usageWarnPercent,
+    })
   }
 
   // ========== DDNS（动态域名解析，见 ddns-design.md） ==========

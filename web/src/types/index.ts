@@ -945,3 +945,54 @@ export interface AcmeScanConfig {
   max: number
   default: number
 }
+
+// ========== NAS 存储观测（见 nas-design.md） ==========
+
+// 存储池：mdadm（/proc/mdstat）、ZFS（zpool）、LVM（vgs）
+export interface NasPool {
+  name: string
+  kind: 'mdadm' | 'zfs' | 'lvm'
+  state: 'healthy' | 'degraded' | 'resync' | 'failed' | 'unknown'
+  totalGB?: number
+  usedGB?: number
+  devices?: string[]
+  detail?: string
+}
+
+// 挂载点容量（df 白名单：真实块设备且 ≥1GB）
+export interface NasMount {
+  device: string
+  mountPath: string
+  fsType: string
+  totalGB?: number
+  usedGB?: number
+}
+
+// 网络共享（SMB testparm / NFS exportfs）
+export interface NasShare {
+  protocol: 'smb' | 'nfs'
+  name: string
+  path: string
+  comment?: string
+  hosts?: string
+}
+
+// nas.status 返回（agent 本机只读观测，M1 源 = linux）
+export interface NasStatus {
+  available: boolean
+  source: string
+  pools: NasPool[]
+  mounts: NasMount[]
+  shares: NasShare[]
+}
+
+// 巡检配置（server 定时 nas.status + 池/容量告警；间隔 0 = 关闭）
+export interface NasScanConfig {
+  scan_interval_seconds: number
+  min: number
+  max: number
+  default: number
+  usage_warn_percent: number
+  usageMin: number
+  usageMax: number
+}
