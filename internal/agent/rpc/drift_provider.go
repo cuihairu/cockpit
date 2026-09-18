@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -24,10 +25,21 @@ const driftBaselineDefaultPath = "/var/lib/cockpit/drift-baseline.json"
 // drift check 单命令超时（仅 crontab -l 一处外呼）
 const driftCmdTimeout = 10 * time.Second
 
-// BaselineEntry 单条基线
+// Record 存原文上限：超过只存 hash（diff 时报「基线过大无原文」），基线文件不膨胀
+const driftBaselineContentMax = 256 << 10
+
+// drift.diff 单侧内容上限（超过拒绝，避免 RPC 大包与前端渲染失控）
+const driftDiffMaxBytes = 256 << 10
+
+// drift.diff name 长度上限（server 同规则校验，双端防御）
+const driftMaxNameLen = 128
+
+// BaselineEntry 单条基线；Content 为写入时的原文（diff 视图用，omitempty
+// 兼容旧版本基线——旧记录无原文，drift.diff 明确报错引导重新保存）
 type BaselineEntry struct {
 	SHA256    string `json:"sha256"`
 	UpdatedAt int64  `json:"updated_at"`
+	Content   string `json:"content,omitempty"`
 }
 
 // baselineFile 基线文件结构
@@ -60,13 +72,18 @@ func NewDriftBaseline(path string) *DriftBaseline {
 	return &DriftBaseline{path: path}
 }
 
-// Record 记录/更新条目；失败仅记日志（写路径成功不能被基线失败拖垮）
+// Record 记录/更新条目；失败仅记日志（写路径成功不能被基线失败拖垮）。
+// 原文随 hash 一并保存（diff 视图用，M3/D19）；超过上限只存 hash。
 func (b *DriftBaseline) Record(kind, name string, content []byte) {
 	sum := sha256.Sum256(content)
-	if err := b.update(kind+"/"+name, BaselineEntry{
+	entry := BaselineEntry{
 		SHA256:    hex.EncodeToString(sum[:]),
 		UpdatedAt: time.Now().Unix(),
-	}); err != nil {
+	}
+	if len(content) <= driftBaselineContentMax {
+		entry.Content = string(content)
+	}
+	if err := b.update(kind+"/"+name, entry); err != nil {
 		log.Printf("drift baseline record %s/%s: %v", kind, name, err)
 	}
 }
@@ -192,6 +209,8 @@ func (p *DriftProvider) Call(action string, params map[string]interface{}) (inte
 	switch action {
 	case "check":
 		return p.Check()
+	case "diff":
+		return p.Diff(paramString(params, "kind"), paramString(params, "name"))
 	default:
 		return nil, fmt.Errorf("unknown action %q", action)
 	}
@@ -308,4 +327,110 @@ func (p *DriftProvider) readCrontab() (string, error) {
 		return "", fmt.Errorf("crontab -l: %s", commandErrSummary(stderr, err))
 	}
 	return string(out), nil
+}
+
+// Diff 单对象两侧全文（M3/D20）：expected=基线原文，current=实时读盘（取法与
+// check/Record 完全同源，保证 diff 与 hash 判定一致）。cron 两侧返回前美化
+// （json.Indent，仅展示层——hash/基线层保持 compact marshal 不动）。
+func (p *DriftProvider) Diff(kind, name string) (interface{}, error) {
+	if err := validDriftTarget(kind, name); err != nil {
+		return nil, err
+	}
+	entry, has := p.baseline.snapshot()[kind+"/"+name]
+	if !has {
+		return nil, fmt.Errorf("no baseline for %s/%s (save it from the panel once)", kind, name)
+	}
+	if entry.Content == "" {
+		return nil, fmt.Errorf("baseline has no content (recorded by an older version); re-save from the panel to refresh it")
+	}
+	expected := entry.Content
+	current, err := p.currentContent(kind, name)
+	if err != nil {
+		return nil, err
+	}
+	if len(expected) > driftDiffMaxBytes {
+		return nil, fmt.Errorf("baseline content too large (%d bytes, max %d)", len(expected), driftDiffMaxBytes)
+	}
+	if len(current) > driftDiffMaxBytes {
+		return nil, fmt.Errorf("current content too large (%d bytes, max %d)", len(current), driftDiffMaxBytes)
+	}
+	if kind == "cron" {
+		expected = driftIndentJSON(expected)
+		current = []byte(driftIndentJSON(string(current)))
+	}
+	return map[string]interface{}{
+		"expected":            expected,
+		"current":             string(current),
+		"baseline_updated_at": entry.UpdatedAt,
+	}, nil
+}
+
+// currentContent 实时读当前内容：nginx=片段文件原始字节（meta 改坏同样可见）、
+// stack=compose.yml/.env、cron=readCrontab→splitCockpit→json.Marshal（与
+// check 的 hash 输入同源）
+func (p *DriftProvider) currentContent(kind, name string) ([]byte, error) {
+	switch kind {
+	case "nginx":
+		return os.ReadFile(filepath.Join(p.confDir, "cockpit-site-"+name+".conf"))
+	case "stack":
+		dirName, fileName, _ := strings.Cut(name, "/")
+		return os.ReadFile(filepath.Join(p.stacksDir, dirName, fileName))
+	case "cron":
+		content, err := p.readCrontab()
+		if err != nil {
+			return nil, err
+		}
+		_, jobs, _ := splitCockpit(content)
+		return json.Marshal(jobs)
+	}
+	return nil, fmt.Errorf("unknown kind %q", kind)
+}
+
+// validDriftTarget diff 目标校验（D20）：kind 白名单 + name 形态。server 同规则
+// 校验（双端防御）；stack name 形如 "<dir>/compose.yml" 或 "<dir>/.env"，文件名
+// 白名单从结构上排除穿越（dir 段禁分隔符与 . ..）。
+func validDriftTarget(kind, name string) error {
+	switch kind {
+	case "nginx":
+		if name == "" {
+			return fmt.Errorf("name required")
+		}
+		if len(name) > driftMaxNameLen {
+			return fmt.Errorf("name too long (max %d bytes)", driftMaxNameLen)
+		}
+		if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+			return fmt.Errorf("invalid nginx site name")
+		}
+	case "stack":
+		if name == "" {
+			return fmt.Errorf("name required")
+		}
+		if len(name) > driftMaxNameLen {
+			return fmt.Errorf("name too long (max %d bytes)", driftMaxNameLen)
+		}
+		dirName, fileName, ok := strings.Cut(name, "/")
+		if !ok || dirName == "" || dirName == "." || dirName == ".." || strings.Contains(dirName, `\`) {
+			return fmt.Errorf("invalid stack name")
+		}
+		if fileName != "compose.yml" && fileName != ".env" {
+			return fmt.Errorf("invalid stack file name")
+		}
+	case "cron":
+		if name != "cockpit" {
+			return fmt.Errorf("unknown cron object %q", name)
+		}
+	default:
+		return fmt.Errorf("unknown kind %q", kind)
+	}
+	return nil
+}
+
+// driftIndentJSON 展示层美化：json.Indent 失败（理论不可达，两侧都是 Marshal
+// 产物）退回原文，不让 diff 整体失败
+func driftIndentJSON(raw string) string {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(raw), "", "  "); err != nil {
+		return raw
+	}
+	return buf.String()
 }

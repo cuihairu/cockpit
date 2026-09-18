@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // fakeRecorder 捕获挂钩调用（注入 provider 测试写路径挂钩）
@@ -296,6 +298,240 @@ func TestDriftItemJSONShape(t *testing.T) {
 	for _, key := range []string{"kind", "name", "status", "baseline_sha", "current_sha"} {
 		if _, ok := m[key]; !ok {
 			t.Fatalf("missing key %q in %s", key, raw)
+		}
+	}
+}
+
+// ---------- M3：基线存原文 + drift.diff（D19/D20） ----------
+
+func TestDriftRecordStoresContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	b := NewDriftBaseline(path)
+	b.Record("nginx", "web", []byte("server block"))
+
+	snap := NewDriftBaseline(path).snapshot() // 重新打开验证持久化
+	if got := snap["nginx/web"].Content; got != "server block" {
+		t.Fatalf("content = %q", got)
+	}
+
+	// 超上限只存 hash 不存原文（基线文件不膨胀）
+	huge := strings.Repeat("x", driftBaselineContentMax+1)
+	b.Record("nginx", "big", []byte(huge))
+	if got := NewDriftBaseline(path).snapshot()["nginx/big"].Content; got != "" {
+		t.Fatalf("oversized content should be empty, got %d bytes", len(got))
+	}
+
+	// 恰好等于上限仍存原文
+	b.Record("nginx", "edge", []byte(strings.Repeat("y", driftBaselineContentMax)))
+	if got := NewDriftBaseline(path).snapshot()["nginx/edge"].Content; len(got) != driftBaselineContentMax {
+		t.Fatalf("edge content len = %d", len(got))
+	}
+}
+
+func TestDriftDiffNginx(t *testing.T) {
+	confDir := t.TempDir()
+	sitePath := filepath.Join(confDir, "cockpit-site-web.conf")
+	b := NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json"))
+	b.Record("nginx", "web", []byte("# meta\nserver block a"))
+	if err := os.WriteFile(sitePath, []byte("# meta\nserver block a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := NewDriftProvider(b, DriftConfig{ConfDir: confDir})
+
+	// 一致：两侧全文相等
+	res, err := p.Diff("nginx", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := res.(map[string]interface{})
+	if m["expected"] != "# meta\nserver block a" || m["current"] != "# meta\nserver block a" {
+		t.Fatalf("equal diff = %+v", m)
+	}
+	if m["baseline_updated_at"].(int64) == 0 {
+		t.Fatalf("baseline_updated_at = %v", m["baseline_updated_at"])
+	}
+
+	// 手改（含 meta 注释）→ diff 可见当前内容
+	if err := os.WriteFile(sitePath, []byte("# 被改的 meta\nserver block EVIL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err = p.Diff("nginx", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = res.(map[string]interface{})
+	if m["expected"] != "# meta\nserver block a" || m["current"] != "# 被改的 meta\nserver block EVIL" {
+		t.Fatalf("drifted diff = %+v", m)
+	}
+
+	// 文件被删 → 报错（current 缺失）
+	if err := os.Remove(sitePath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Diff("nginx", "web"); err == nil {
+		t.Fatal("missing file should error")
+	}
+}
+
+func TestDriftDiffCronPrettyAndSameSource(t *testing.T) {
+	runner := &mockCronRunner{hasFile: true}
+	b := NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json"))
+	p := NewDriftProvider(b, DriftConfig{CronRun: runner.run})
+
+	// 经 CronProvider 面板写路径登记基线（compact marshal 存入）
+	cp := NewCronProvider(runner.run)
+	cp.SetBaseline(b)
+	if _, err := cp.ApplyJob(&CronJob{Name: "backup", Schedule: "0 3 * * *", Command: "/opt/b.sh", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// diff 返回两侧均为美化后 JSON（多行），且与 check 判定同源（此刻 ok）
+	res, err := p.Diff("cron", "cockpit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := res.(map[string]interface{})
+	expected, current := m["expected"].(string), m["current"].(string)
+	if !strings.Contains(expected, "\n") || !strings.Contains(current, "\n") {
+		t.Fatalf("cron diff should be pretty-printed:\nexpected=%q\ncurrent=%q", expected, current)
+	}
+	if expected != current {
+		t.Fatalf("expected != current before drift:\n%q\n%q", expected, current)
+	}
+	if got := driftFind(t, mustCheck(t, p), "cron", "cockpit"); got.Status != "ok" {
+		t.Fatalf("check after record = %+v", got)
+	}
+
+	// 手改 cockpit 段 → drifted 且 diff 两侧不同（展示层美化不破坏判定）
+	runner.mu.Lock()
+	runner.content = `# cockpit:job {"name":"backup","schedule":"0 3 * * *","command":"/tmp/evil.sh","enabled":true}` + "\n"
+	runner.mu.Unlock()
+	if got := driftFind(t, mustCheck(t, p), "cron", "cockpit"); got.Status != "drifted" {
+		t.Fatalf("after edit = %+v", got)
+	}
+	res, err = p.Diff("cron", "cockpit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = res.(map[string]interface{})
+	if m["expected"] == m["current"] {
+		t.Fatal("diff sides should differ after drift")
+	}
+	if !strings.Contains(m["current"].(string), "/tmp/evil.sh") {
+		t.Fatalf("current should show drifted command: %q", m["current"])
+	}
+}
+
+func TestDriftDiffStack(t *testing.T) {
+	stacksDir := t.TempDir()
+	mk := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(stacksDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json"))
+	b.Record("stack", "web/compose.yml", []byte("services: {}"))
+	b.Record("stack", "web/.env", []byte("TAG=1.0"))
+	mk("web/compose.yml", "services:\n  nginx:\n    image: nginx") // 手改
+	mk("web/.env", "TAG=1.0")
+	p := NewDriftProvider(b, DriftConfig{StacksDir: stacksDir})
+
+	res, err := p.Diff("stack", "web/compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.(map[string]interface{})["current"] != "services:\n  nginx:\n    image: nginx" {
+		t.Fatalf("compose diff = %+v", res)
+	}
+	if _, err := p.Diff("stack", "web/.env"); err != nil {
+		t.Fatalf("env diff: %v", err)
+	}
+}
+
+func TestDriftDiffLegacyBaselineNoContent(t *testing.T) {
+	// 旧版本基线只有 hash 无原文（Content 空）→ 明确报错而非失败
+	b := NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json"))
+	if err := b.update("nginx/old", BaselineEntry{
+		SHA256:    strings.Repeat("a", 64),
+		UpdatedAt: time.Now().Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p := NewDriftProvider(b, DriftConfig{ConfDir: t.TempDir()})
+	_, err := p.Diff("nginx", "old")
+	if err == nil || !strings.Contains(err.Error(), "no content") {
+		t.Fatalf("legacy baseline err = %v", err)
+	}
+}
+
+func TestDriftDiffTooLarge(t *testing.T) {
+	confDir := t.TempDir()
+	sitePath := filepath.Join(confDir, "cockpit-site-web.conf")
+	b := NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json"))
+	b.Record("nginx", "web", []byte("small baseline"))
+	if err := os.WriteFile(sitePath, []byte(strings.Repeat("x", driftDiffMaxBytes+1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := NewDriftProvider(b, DriftConfig{ConfDir: confDir})
+	_, err := p.Diff("nginx", "web")
+	if err == nil || !strings.Contains(err.Error(), "current content too large") {
+		t.Fatalf("oversized current err = %v", err)
+	}
+
+	// 基线侧过大（手工构造超限原文的旧基线）→ 报 baseline too large
+	b2 := NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json"))
+	if err := b2.update("nginx/big", BaselineEntry{
+		SHA256: strings.Repeat("b", 64), UpdatedAt: 1,
+		Content: strings.Repeat("y", driftDiffMaxBytes+1),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bigPath := filepath.Join(confDir, "cockpit-site-big.conf")
+	if err := os.WriteFile(bigPath, []byte("anything"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewDriftProvider(b2, DriftConfig{ConfDir: confDir}).Diff("nginx", "big")
+	if err == nil || !strings.Contains(err.Error(), "baseline content too large") {
+		t.Fatalf("oversized baseline err = %v", err)
+	}
+}
+
+func TestDriftDiffValidation(t *testing.T) {
+	stacksDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(stacksDir, "web"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p := NewDriftProvider(
+		NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json")),
+		DriftConfig{ConfDir: t.TempDir(), StacksDir: stacksDir},
+	)
+
+	cases := []struct {
+		kind, name, wantErr string
+	}{
+		{"kubernetes", "x", "unknown kind"},
+		{"cron", "other", "unknown cron object"},
+		{"nginx", "", "name required"},
+		{"nginx", strings.Repeat("n", driftMaxNameLen+1), "name too long"},
+		{"nginx", "../etc/passwd", "invalid nginx site name"},
+		{"nginx", `a\b`, "invalid nginx site name"},
+		{"stack", "compose.yml", "invalid stack name"}, // 缺目录段
+		{"stack", "../escape/compose.yml", "invalid stack name"},
+		{"stack", `we\b/compose.yml`, "invalid stack name"},
+		{"stack", "web/other.txt", "invalid stack file name"},
+		{"stack", "web/nested/compose.yml", "invalid stack file name"}, // 文件名白名单拒绝多级
+		{"nginx", "ghost", "no baseline"},                              // 合法形态但无基线
+		{"stack", "web/compose.yml", "no baseline"},
+	}
+	for _, tc := range cases {
+		_, err := p.Diff(tc.kind, tc.name)
+		if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+			t.Errorf("Diff(%q, %q) err = %v, want contains %q", tc.kind, tc.name, err, tc.wantErr)
 		}
 	}
 }
