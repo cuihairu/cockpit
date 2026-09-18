@@ -22,13 +22,29 @@ import (
 // 动作双端同规则校验（白名单 + .service 后缀），非法请求 server 直接 400，
 // 不消耗 agent 往返；agent 侧错误原样透传。
 
-// 与 agent 侧 validateServiceUnit 完全一致的校验规则（双端同规则）
-var serviceUnitNamePattern = regexp.MustCompile(`^[A-Za-z0-9@._+-]+\.service$`)
+// server 侧 unit 名校验为双后端白名单并集（D9.4）：systemd unit 名或
+// Windows 服务名二者其一即放行转发——server 不解析 agent capability 做
+// 精确匹配，后端专属严格校验在 agent 侧各自兜底；并集仍是纯白名单
+// （无 / \ 空字节 ..），无注入面
+var (
+	serviceUnitNamePattern    = regexp.MustCompile(`^[A-Za-z0-9@._+-]+\.service$`)
+	windowsServiceNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.\- ]{1,256}$`)
+)
 
-// validateServiceAction server 侧 unit 名与动作校验（与 agent 同规则）
+func validateServiceUnitName(unit string) error {
+	if serviceUnitNamePattern.MatchString(unit) {
+		return nil
+	}
+	if windowsServiceNamePattern.MatchString(unit) && unit != "." && unit != ".." {
+		return nil
+	}
+	return fmt.Errorf("invalid unit name %q (expect *.service or windows service name)", unit)
+}
+
+// validateServiceAction server 侧 unit 名与动作校验（agent 侧按 backend 同规则校验）
 func validateServiceAction(unit, action string) error {
-	if !serviceUnitNamePattern.MatchString(unit) {
-		return fmt.Errorf("invalid unit name %q (expect *.service)", unit)
+	if err := validateServiceUnitName(unit); err != nil {
+		return err
 	}
 	switch action {
 	case "start", "stop", "restart", "reload", "enable", "disable":

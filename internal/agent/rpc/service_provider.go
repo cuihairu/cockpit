@@ -11,12 +11,13 @@ import (
 	"time"
 )
 
-// ============ Service Provider ============
+// ============ Service Provider（systemd 后端）============
 //
-// systemd 服务管理（见 service-design.md）：只做 *.service unit 的观测与
-// 六个动词操作（start/stop/restart/reload/enable/disable），argv 直调
-// systemctl 不经 shell。探测 = systemctl 可执行 + /run/systemd/system 存在
-// （D2），容器与非 systemd 平台自动跳过。
+// 服务管理 systemd 后端（见 service-design.md D2/D9）：只做 *.service unit
+// 的观测与六个动词操作（start/stop/restart/reload/enable/disable），argv
+// 直调 systemctl 不经 shell。探测 = systemctl 可执行 + /run/systemd/system
+// 存在（D2），容器与非 systemd 平台自动跳过；Windows 主机走 windows-scm
+// 后端（service_windows_*.go）。
 
 const (
 	// serviceActionTimeout systemctl 操作超时（restart 数据库类服务可能慢）

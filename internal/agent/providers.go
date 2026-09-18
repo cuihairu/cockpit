@@ -88,9 +88,14 @@ func (a *Agent) setupProviders() {
 		case "ddns":
 			// 公网出口 IP 探测（见 docs/guide/ddns-design.md D4）
 			a.rpc.RegisterProvider(rpc.NewDDNSProvider(nil))
-		case "systemd":
-			// systemd 服务管理（见 docs/guide/service-design.md）
-			a.rpc.RegisterProvider(rpc.NewServiceProvider(nil))
+		case "service":
+			// 服务管理（见 docs/guide/service-design.md D9）：按 backend
+			// 区分 systemd 与 Windows SCM
+			if cap.Metadata["backend"] == "windows-scm" {
+				a.rpc.RegisterProvider(rpc.NewWindowsServiceProvider())
+			} else {
+				a.rpc.RegisterProvider(rpc.NewServiceProvider(nil))
+			}
 		case "nas":
 			// NAS 存储观测（见 docs/guide/nas-design.md）
 			a.rpc.RegisterProvider(rpc.NewNasProvider(nil))

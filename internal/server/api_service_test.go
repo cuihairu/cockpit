@@ -75,19 +75,38 @@ func TestServiceActionValidatesAndAudits(t *testing.T) {
 		t.Fatalf("audit logs = %+v", logs)
 	}
 
-	// 非法请求：server 直接 400，不消耗 agent 往返
+	// 非法请求：server 直接 400，不消耗 agent 往返（D9.4 并集白名单：
+	// 无后缀/带点的名字属 Windows 名形态已放行，这里只留双后端都拒的样例）
 	before := len(gotParams)
 	for _, sub := range []string{
 		"nginx.service/mask",         // 白名单外动词
-		"nginx.service/start;reboot", // 注入样例
-		"nginx/start",                // 缺 .service
-		"nginx.socket/start",         // 非 service 类型
+		"nginx.service/start;reboot", // 注入样例（分号不在两套字符集）
+		"../start",                   // .. 目录引用
 	} {
 		rec = httptest.NewRecorder()
 		s.handleAgentServiceAPI(rec, serviceReq(http.MethodPost, "a1", sub), "a1/services/"+sub)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: code = %d, want 400", sub, rec.Code)
 		}
+	}
+	// 空字节以 %00 形态到达后解码进 rest，校验拒绝（target 需编码否则无法构造）
+	rec = httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, serviceReq(http.MethodPost, "a1", "svc%00name/start"), "a1/services/svc\x00name/start")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("null byte: code = %d, want 400", rec.Code)
+	}
+	if before != len(gotParams) {
+		t.Error("rejected requests must not reach the agent")
+	}
+
+	// Windows 服务名（无 .service 后缀）按并集白名单放行转发
+	rec = httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, serviceReq(http.MethodPost, "a1", "wuauserv/restart"), "a1/services/wuauserv/restart")
+	if rec.Code != http.StatusOK {
+		t.Errorf("windows service name: code = %d, want 200", rec.Code)
+	}
+	if gotParams["name"] != "wuauserv" || gotParams["action"] != "restart" {
+		t.Errorf("windows params = %+v", gotParams)
 	}
 	// 路径穿越：Split 出 4 段不构成 unit/action，404 拒绝（同样到不了 agent）
 	rec = httptest.NewRecorder()
@@ -148,6 +167,7 @@ func TestServiceAgentOfflineAndRouting(t *testing.T) {
 }
 
 func TestValidateServiceAction(t *testing.T) {
+	// systemd unit 名：字母数字与 @ . _ + - 且 .service 结尾
 	for _, name := range []string{"nginx.service", "user@1000.service", "openvpn@server.service", "my-app.service"} {
 		for _, action := range []string{"start", "stop", "restart", "reload", "enable", "disable"} {
 			if err := validateServiceAction(name, action); err != nil {
@@ -155,9 +175,19 @@ func TestValidateServiceAction(t *testing.T) {
 			}
 		}
 	}
+	// Windows 服务名（D9.4 并集放行）：无后缀、可含空格
 	for _, tc := range []struct{ unit, action string }{
-		{"nginx", "start"}, {"nginx.socket", "start"}, {"", "start"},
-		{"nginx.service", "mask"}, {"nginx.service", "STOP"}, {"a b.service", "start"},
+		{"wuauserv", "restart"}, {"nginx", "start"}, {"nginx.socket", "stop"},
+		{"Lenovo Vantage Service", "stop"}, {"a b.service", "start"},
+	} {
+		if err := validateServiceAction(tc.unit, tc.action); err != nil {
+			t.Errorf("validate(%q, %q): %v", tc.unit, tc.action, err)
+		}
+	}
+	for _, tc := range []struct{ unit, action string }{
+		{"", "start"}, {"svc;rm", "start"}, {"svc\x00", "start"},
+		{".", "start"}, {"..", "start"},
+		{"nginx.service", "mask"}, {"nginx.service", "STOP"},
 	} {
 		if err := validateServiceAction(tc.unit, tc.action); err == nil {
 			t.Errorf("validate(%q, %q) should fail", tc.unit, tc.action)
