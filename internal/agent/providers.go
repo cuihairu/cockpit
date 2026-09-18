@@ -68,8 +68,20 @@ func (a *Agent) setupProviders() {
 			cp.SetBaseline(baseline)
 			a.rpc.RegisterProvider(cp)
 		case "logs":
-			// 远程日志查询（见 docs/guide/logs-design.md）
-			a.rpc.RegisterProvider(rpc.NewLogsProvider(nil))
+			// 远程日志查询（见 docs/guide/logs-design.md）；M2 实时尾随经
+			// proxy 通道回推（proxyId="logs:<followId>"，与 terminal 前缀同构）
+			lp := rpc.NewLogsProvider(nil)
+			lp.SetSender(func(proxyID string, data []byte) {
+				a.proxyHandler.SendMessage(protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{
+					"proxyId": proxyID,
+					"connId":  proxyID, // follow 无对端连接，server 只按 proxyId 前缀分派
+					"data":    data,
+				}))
+			})
+			lp.SetCloser(func(proxyID, reason string) {
+				a.proxyHandler.SendClose(proxyID, proxyID, reason)
+			})
+			a.rpc.RegisterProvider(lp)
 		case "drift":
 			// 防漂移检测（见 docs/guide/drift-design.md）；cron 段检查
 			// 需要 crontab 命令，复用 cron capability 探测结果

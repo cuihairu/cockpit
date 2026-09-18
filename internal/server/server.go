@@ -512,13 +512,19 @@ func (s *Server) GetAgentConn(agentID string) (proxy.AgentConn, bool) {
 
 // handleProxyData 处理代理数据消息
 func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
-	if s.proxyMgr == nil {
-		return
-	}
-
 	p, err := protocol.DecodeProxyData(msg)
 	if err != nil {
 		log.Printf("decode proxy data from agent %s: %v", agent.ID, err)
+		return
+	}
+
+	// 日志实时尾随：proxyId 以 "logs:" 前缀（不依赖 proxyMgr，见 api_logs_follow.go）
+	if hasPrefix(p.ProxyID, "logs:") {
+		s.HandleLogsFollowData(p.ProxyID, p.Data)
+		return
+	}
+
+	if s.proxyMgr == nil {
 		return
 	}
 
@@ -550,13 +556,19 @@ func hasPrefix(s, prefix string) bool {
 
 // handleProxyClose 处理代理关闭消息
 func (s *Server) handleProxyClose(agent *Agent, msg *protocol.Message) {
-	if s.proxyMgr == nil {
-		return
-	}
-
 	p, err := protocol.DecodeProxyClose(msg)
 	if err != nil {
 		log.Printf("decode proxy close from agent %s: %v", agent.ID, err)
+		return
+	}
+
+	// 日志实时尾随终止：转 eof 帧收尾（不依赖 proxyMgr）
+	if hasPrefix(p.ProxyID, "logs:") {
+		s.HandleLogsFollowClose(p.ProxyID, p.Reason)
+		return
+	}
+
+	if s.proxyMgr == nil {
 		return
 	}
 

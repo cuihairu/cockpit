@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -76,13 +77,23 @@ type LogsProvider struct {
 	run Commander
 	// detect 可注入的源探测（默认 DetectLogs 的 LookPath），测试用
 	detect func() (journalctl, docker bool)
+	// fs 实时尾随会话状态（见 logs_follow.go，M2）
+	fs *followState
+	// followCmdFn 跟随命令构造（默认 startFollowCmd 走真实 journalctl/docker），
+	// 测试注入假命令
+	followCmdFn func(ctx context.Context, q *LogsQuery) (*exec.Cmd, *bufio.Reader, error)
 }
 
 func NewLogsProvider(run Commander) *LogsProvider {
 	if run == nil {
 		run = defaultCommander
 	}
-	return &LogsProvider{run: run, detect: DetectLogs}
+	return &LogsProvider{
+		run:         run,
+		detect:      DetectLogs,
+		fs:          &followState{follows: map[string]*logsFollowSession{}},
+		followCmdFn: startFollowCmd,
+	}
 }
 
 func (p *LogsProvider) Type() string { return "logs" }
@@ -103,6 +114,10 @@ func (p *LogsProvider) Call(action string, params map[string]interface{}) (inter
 			return nil, err
 		}
 		return p.Query(q)
+	case "follow.start":
+		return p.FollowStart(params)
+	case "follow.stop":
+		return p.FollowStop(params)
 	default:
 		return nil, fmt.Errorf("unknown logs action: %s", action)
 	}

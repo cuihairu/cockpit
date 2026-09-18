@@ -492,6 +492,22 @@ class ApiService {
     )
   }
 
+  // 实时尾随：NDJSON 流式响应（{"data":...} 数据帧 / {"eof":true,"reason":...} 终止帧）。
+  // EventSource 不能带 Authorization 头，用 fetch streaming（signal 供 abort 断流，
+  // 断开后 server 补发 follow.stop）。见 docs/guide/logs-design.md F4/F7
+  async followLogs(agentId: string, query: LogsQuery, signal: AbortSignal): Promise<Response> {
+    const token = localStorage.getItem('token')
+    return fetch(`/api/agents/${encodeURIComponent(agentId)}/logs/follow`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(query),
+      signal,
+    })
+  }
+
   // ========== 防漂移检测 ==========
   // 全量比对：面板写路径基线 vs 磁盘当前内容（nginx/cron/stack）
   async checkDrift(agentId: string): Promise<DriftCheckResult> {

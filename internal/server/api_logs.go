@@ -16,6 +16,7 @@ import (
 //	GET  /api/agents/{id}/logs/status   两类日志源可用性
 //	GET  /api/agents/{id}/logs/sources  运行中 systemd 服务 / docker 容器
 //	POST /api/agents/{id}/logs/query    查询日志（tail/since/grep）
+//	POST /api/agents/{id}/logs/follow   实时尾随（NDJSON 流，见 api_logs_follow.go）
 //
 // server 纯转发不落库；查询类操作不记审计（D9，与文件浏览同纪律）；
 // 参数校验与 agent 同规则（双端防御）；agent 侧错误原样透传。
@@ -109,6 +110,8 @@ func (s *Server) handleAgentLogsAPI(w http.ResponseWriter, r *http.Request, rest
 					"grep":          payload.Grep,
 				},
 			})
+	case sub == "follow" && r.Method == http.MethodPost:
+		s.handleAgentLogsFollow(w, r, agentID)
 	default:
 		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 	}
