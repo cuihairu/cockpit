@@ -41,6 +41,12 @@ Cockpit 已具备三个可复用基础，证书「签发 + 存储 + 续期」是
 
 - **D11 前端**：新页面 `/acme`「证书签发」（导航挂「资源」分组，紧跟「证书」观测项），页面结构照 DDNS Tab 模式：设置行（自动续期巡检开关 + 间隔分钟 + 新建按钮）+ 配置表（主域名+泛域名标记/CA 徽标（staging 橙色）/状态徽标（失败 Tooltip 错误）/到期时间+剩余天数/最后签发时间/操作（立即签发、下载下拉、编辑、删除））+ 新建/编辑 Modal（domains Tag 列表编辑、CA Select 默认 staging 带「测试用假证书」说明、自动续期 Switch、提前续期天数）+ email 账户设置（首次创建时内嵌在引导里）。未配置 token 时引导卡片（同 DNS 页文案，指出 ACME 与 DNS 管理共用 token）。
 
+- **D13 DNS provider 扩展：DNSPod / 阿里云（M2）**：lego provider 开箱即用（v4.35.2 源码核实：`dnspod.Config.LoginToken`（"ID,Token" 合并格式）、`alidns.Config.APIKey/SecretKey`），server 侧只差 provider 工厂与配置面。
+  - **配置**：`dns.provider` ∈ {空（=cloudflare，向后兼容）, dnspod, alidns}；凭据各走同源双通道——`dns.dnspod.login_token`（env `DNSPOD_LOGIN_TOKEN` 优先）、`dns.alidns.access_key` + `dns.alidns.secret_key`（env `ALIYUN_ACCESS_KEY` / `ALIYUN_ACCESS_KEY_SECRET` 优先，secret 不落 yaml 惯例同 cloudflare）。
+  - **issuer**：`NewLegoIssuer` 的单 token 闭包改为 `func() AcmeDNSConfig` 配置快照闭包（provider + 全部凭据）；`Issue()` 按快照构造对应 lego provider，未知 provider / 凭据缺失各报各的键名（替换 Cloudflare 专属的 errAcmeNoToken 文案）。
+  - **凭据就绪判定语义分叉**：DNS 管理页与 DDNS 仍 Cloudflare 专属（`dns.status.configured` 原样不动）；ACME 视角独立——`GET /api/acme/config` 响应新增 `dns: {provider, configured}`，issue 503 预检与巡检续期按 ACME provider 判定，错误文案报缺哪个键。
+  - **web**：引导卡片改读 acme config 的 `dns` 字段，未配置时按三种 provider 列配置方法。
+  - **测试**：provider 工厂表驱动（三家就绪/缺凭据/未知）；config defaults 的 env 覆盖；503 预检按 provider 分派。
 - **D12 校验面**：`domains[]` 非空、每个元素过与 DNS 记录名同规则的域名校验（允许 `*.` 前缀的泛域名，剥离后校验）；`renewBeforeDays` ∈ [7, 90]；`ca` 白名单；primary domain = domains[0]。token 未配置时 create/issue 返回 503（同 DNS 页 503 文案约定）。
 
 ## 测试策略
