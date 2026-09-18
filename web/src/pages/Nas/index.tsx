@@ -38,6 +38,7 @@ const KIND_LABEL: Record<NasPool['kind'], string> = {
   mdadm: 'mdadm',
   zfs: 'ZFS',
   lvm: 'LVM',
+  dsm: 'DSM',
 }
 
 const SHARE_PROTOCOL_LABEL: Record<NasShare['protocol'], string> = {
@@ -50,7 +51,8 @@ const formatGB = (gb?: number) => {
   return gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`
 }
 
-// 行模型：单主机面板不带 agent，总览跨主机平铺时填主机名
+// 行模型：单主机面板不带 agent，总览跨主机平铺时填主机名；
+// host（网络 NAS 设备名）非空时主机列显示「agent · 设备」
 interface PoolRow extends NasPool {
   key: string
   agent?: string
@@ -65,6 +67,9 @@ interface ShareRow extends NasShare {
   key: string
   agent?: string
 }
+
+const hostLabel = (r: { agent?: string; host?: string }) =>
+  r.host ? `${r.agent ?? ''} · ${r.host}` : r.agent ?? ''
 
 // 池异常严重度：failed > degraded/resync > unknown > healthy
 const poolSeverity = (state: NasPool['state']) =>
@@ -128,7 +133,9 @@ const PoolTable: React.FC<{ dataSource: PoolRow[]; showAgent?: boolean }> = ({
         )
       },
     },
-    ...(showAgent ? [{ title: '主机', dataIndex: 'agent', width: 150, ellipsis: true } as const] : []),
+    ...(showAgent
+      ? [{ title: '主机', key: 'agent', width: 150, ellipsis: true, render: (_: unknown, r: PoolRow) => hostLabel(r) }]
+      : []),
     { title: '存储池', dataIndex: 'name', width: 140, render: (v: string) => <Typography.Text code>{v}</Typography.Text> },
     { title: '类型', dataIndex: 'kind', width: 90, render: (v: NasPool['kind']) => KIND_LABEL[v] ?? v },
     { title: '容量', dataIndex: 'totalGB', width: 110, render: (v?: number) => formatGB(v) },
@@ -152,7 +159,9 @@ const MountTable: React.FC<{ dataSource: MountRow[]; warnPct?: number; showAgent
   showAgent = true,
 }) => {
   const columns: ColumnsType<MountRow> = [
-    ...(showAgent ? [{ title: '主机', dataIndex: 'agent', width: 150, ellipsis: true } as const] : []),
+    ...(showAgent
+      ? [{ title: '主机', key: 'agent', width: 150, ellipsis: true, render: (_: unknown, r: MountRow) => hostLabel(r) }]
+      : []),
     { title: '挂载点', dataIndex: 'mountPath', width: 200, render: (v: string) => <Typography.Text code>{v}</Typography.Text> },
     { title: '设备', dataIndex: 'device', width: 160, ellipsis: true, render: (v: string) => <Typography.Text code>{v}</Typography.Text> },
     { title: '文件系统', dataIndex: 'fsType', width: 100 },
@@ -190,7 +199,9 @@ const ShareTable: React.FC<{ dataSource: ShareRow[]; showAgent?: boolean }> = ({
   showAgent = true,
 }) => {
   const columns: ColumnsType<ShareRow> = [
-    ...(showAgent ? [{ title: '主机', dataIndex: 'agent', width: 150, ellipsis: true } as const] : []),
+    ...(showAgent
+      ? [{ title: '主机', key: 'agent', width: 150, ellipsis: true, render: (_: unknown, r: ShareRow) => hostLabel(r) }]
+      : []),
     { title: '协议', dataIndex: 'protocol', width: 80, render: (v: NasShare['protocol']) => SHARE_PROTOCOL_LABEL[v] ?? v },
     { title: '名称', dataIndex: 'name', width: 160, render: (v: string) => <Typography.Text code>{v}</Typography.Text> },
     { title: '路径', dataIndex: 'path', ellipsis: true, render: (v: string) => <Typography.Text code>{v}</Typography.Text> },
