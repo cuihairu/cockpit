@@ -39,6 +39,7 @@ const KIND_LABEL: Record<NasPool['kind'], string> = {
   zfs: 'ZFS',
   lvm: 'LVM',
   dsm: 'DSM',
+  truenas: 'TrueNAS',
 }
 
 const SHARE_PROTOCOL_LABEL: Record<NasShare['protocol'], string> = {

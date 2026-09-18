@@ -948,10 +948,10 @@ export interface AcmeScanConfig {
 
 // ========== NAS 存储观测（见 nas-design.md） ==========
 
-// 存储池：mdadm（/proc/mdstat）、ZFS（zpool）、LVM（vgs）、DSM 厂商池
+// 存储池：mdadm（/proc/mdstat）、ZFS（zpool）、LVM（vgs）、DSM/TrueNAS 厂商池
 export interface NasPool {
   name: string
-  kind: 'mdadm' | 'zfs' | 'lvm' | 'dsm'
+  kind: 'mdadm' | 'zfs' | 'lvm' | 'dsm' | 'truenas'
   state: 'healthy' | 'degraded' | 'resync' | 'failed' | 'unknown'
   totalGB?: number
   usedGB?: number
