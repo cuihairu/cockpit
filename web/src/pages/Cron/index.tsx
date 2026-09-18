@@ -23,6 +23,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { CronJob } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import dayjs from 'dayjs'
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
@@ -201,6 +202,18 @@ const Cron = () => {
           {v}
         </Typography.Text>
       ),
+    },
+    {
+      title: '下次触发',
+      key: 'next_run',
+      width: 170,
+      render: (_, record) => {
+        // 下次触发预览（cron-design.md M2）：agent 按服务器时区算好 unix 秒
+        if (!record.enabled) return <Typography.Text type="secondary">已禁用</Typography.Text>
+        if (record.schedule === '@reboot') return <Typography.Text type="secondary">开机时</Typography.Text>
+        if (!record.next_run) return '-'
+        return dayjs.unix(record.next_run).format('YYYY-MM-DD HH:mm')
+      },
     },
     {
       title: '启用',

@@ -704,12 +704,14 @@ export interface CronStatus {
   externalCount: number
 }
 
-// cockpit 名下的一个定时任务
+// cockpit 名下的一个定时任务（next_run 为下次触发预览 unix 秒，
+// disabled/@reboot/解析失败为 0；见 docs/guide/cron-design.md M2）
 export interface CronJob {
   name: string
   schedule: string
   command: string
   enabled: boolean
+  next_run?: number
 }
 
 // cron.jobs 返回：cockpit 任务列表 + 外部条目原文（只读）
