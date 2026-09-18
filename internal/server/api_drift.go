@@ -22,7 +22,7 @@ import (
 // 错误原样透传。
 
 // driftDiffKinds drift.diff 允许的对象类型（与 agent 侧白名单一致）
-var driftDiffKinds = map[string]bool{"nginx": true, "cron": true, "stack": true}
+var driftDiffKinds = map[string]bool{"nginx": true, "traefik": true, "cron": true, "stack": true}
 
 // driftDiffMaxNameLen diff 目标 name 长度上限（与 agent 侧同规则，双端防御）
 const driftDiffMaxNameLen = 128
@@ -105,7 +105,7 @@ func decodeDriftTarget(r *http.Request) (kind, name string, errMsg string, code 
 		return "", "", "Invalid request body", http.StatusBadRequest
 	}
 	if !driftDiffKinds[req.Kind] {
-		return "", "", "unknown kind (want nginx, cron or stack)", http.StatusBadRequest
+		return "", "", "unknown kind (want nginx, traefik, cron or stack)", http.StatusBadRequest
 	}
 	if req.Name == "" {
 		return "", "", "name required", http.StatusBadRequest

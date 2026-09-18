@@ -78,6 +78,23 @@ func validateProxySite(s *proxySitePayload) error {
 	return nil
 }
 
+// proxyRPCPrefix 按 agent capability 选 RPC 方法前缀（M2 D16）：同一套
+// REST 端点对后端透明。一机双后端时 nginx 优先（存量语义不变，traefik
+// 是升级路径）；都无（旧 agent 异常形态）回退 nginx 保持兼容。
+func (s *Server) proxyRPCPrefix(agentID string) string {
+	if a, ok := s.registry.Get(agentID); ok {
+		for _, c := range a.Capabilities {
+			if c.Type == "nginx-proxy" {
+				return "nginx."
+			}
+			if c.Type == "traefik-proxy" {
+				return "traefik."
+			}
+		}
+	}
+	return "nginx."
+}
+
 // handleAgentProxyAPI 分发 /api/agents/{id}/proxy/{rest}
 // rest 是 "/agents/" 之后的部分（形如 "{agentID}/proxy/sites"）
 func (s *Server) handleAgentProxyAPI(w http.ResponseWriter, r *http.Request, rest string) {
@@ -100,9 +117,9 @@ func (s *Server) handleAgentProxyAPI(w http.ResponseWriter, r *http.Request, res
 
 	switch {
 	case sub == "status" && r.Method == http.MethodGet:
-		s.forwardProxyRPC(w, r, agentID, "nginx.status", nil, "", nil)
+		s.forwardProxyRPC(w, r, agentID, s.proxyRPCPrefix(agentID)+"status", nil, "", nil)
 	case sub == "sites" && r.Method == http.MethodGet:
-		s.forwardProxyRPC(w, r, agentID, "nginx.sites", nil, "", nil)
+		s.forwardProxyRPC(w, r, agentID, s.proxyRPCPrefix(agentID)+"sites", nil, "", nil)
 	case sub == "sites/" || strings.HasPrefix(sub, "sites/"):
 		name := strings.TrimPrefix(sub, "sites/")
 		s.handleProxySite(w, r, agentID, name)
@@ -119,7 +136,7 @@ func (s *Server) handleProxySite(w http.ResponseWriter, r *http.Request, agentID
 	}
 	switch r.Method {
 	case http.MethodGet:
-		s.forwardProxyRPC(w, r, agentID, "nginx.site.get",
+		s.forwardProxyRPC(w, r, agentID, s.proxyRPCPrefix(agentID)+"site.get",
 			map[string]interface{}{"name": name}, name, nil)
 	case http.MethodPut:
 		var payload proxySitePayload
@@ -141,10 +158,10 @@ func (s *Server) handleProxySite(w http.ResponseWriter, r *http.Request, agentID
 			"upstream":    payload.Upstream,
 			"scheme":      payload.Scheme,
 		}
-		s.forwardProxyRPC(w, r, agentID, "nginx.site.apply",
+		s.forwardProxyRPC(w, r, agentID, s.proxyRPCPrefix(agentID)+"site.apply",
 			map[string]interface{}{"site": payload}, name, details)
 	case http.MethodDelete:
-		s.forwardProxyRPC(w, r, agentID, "nginx.site.delete",
+		s.forwardProxyRPC(w, r, agentID, s.proxyRPCPrefix(agentID)+"site.delete",
 			map[string]interface{}{"name": name}, name,
 			map[string]interface{}{})
 	default:
@@ -152,7 +169,8 @@ func (s *Server) handleProxySite(w http.ResponseWriter, r *http.Request, agentID
 	}
 }
 
-// forwardProxyRPC 转发 RPC 并透传结果；method 对应 agent 的 nginx provider action
+// forwardProxyRPC 转发 RPC 并透传结果；method 前缀由 agent capability 决定
+// （nginx.* / traefik.*），server 不感知后端差异（M2 D16）
 func (s *Server) forwardProxyRPC(w http.ResponseWriter, r *http.Request, agentID, method string,
 	params map[string]interface{}, siteName string, details map[string]interface{}) {
 

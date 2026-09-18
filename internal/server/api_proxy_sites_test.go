@@ -236,5 +236,81 @@ func TestProxyUnknownSubpath(t *testing.T) {
 	}
 }
 
+// withFakeProxyAgent 注册带指定 proxy capability 的假 agent（M2 分流测试用）
+func withFakeProxyAgent(t *testing.T, s *Server, agentID string, capTypes ...string) *[]string {
+	t.Helper()
+	agent := NewAgent(agentID, nil)
+	agent.Hostname = "host-" + agentID
+	caps := make([]protocol.Capability, 0, len(capTypes))
+	for _, ct := range capTypes {
+		caps = append(caps, protocol.Capability{Type: ct})
+	}
+	agent.Capabilities = caps
+	if err := s.registry.Register(agent); err != nil {
+		t.Fatalf("register agent: %v", err)
+	}
+	seen := &[]string{}
+	go func() {
+		for reqMsg := range agent.Send {
+			if reqMsg.Type != protocol.MessageTypeRPCRequest {
+				continue
+			}
+			method, _ := reqMsg.Payload["method"].(string)
+			*seen = append(*seen, method)
+			resp := protocol.NewMessage(protocol.MessageTypeRPCResponse,
+				map[string]interface{}{"status": "success", "data": map[string]interface{}{}})
+			resp.ID = reqMsg.ID
+			s.handleRPCResponse(resp)
+		}
+	}()
+	t.Cleanup(func() { close(agent.Send) })
+	return seen
+}
+
+// TestProxyRPCPrefixByCapability M2 D16：同一套 REST 端点按 agent capability
+// 分流 RPC 前缀——nginx 优先（双后端语义），仅 traefik 走 traefik.*，
+// 无相关 capability 的旧 agent 回退 nginx.*
+func TestProxyRPCPrefixByCapability(t *testing.T) {
+	cases := []struct {
+		name     string
+		capTypes []string
+		want     string // 首个转发方法的期望前缀形态
+	}{
+		{"nginx only", []string{"nginx-proxy"}, "nginx.status"},
+		{"traefik only", []string{"traefik-proxy"}, "traefik.status"},
+		{"both caps nginx wins", []string{"nginx-proxy", "traefik-proxy"}, "nginx.status"},
+		{"legacy agent fallback", []string{"backup"}, "nginx.status"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newBackupTestServer(t)
+			seen := withFakeProxyAgent(t, s, "a1", tc.capTypes...)
+			rec := httptest.NewRecorder()
+			s.handleAgentProxyAPI(rec, proxyReq(http.MethodGet, "a1", "status", ""), "a1/proxy/status")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status: code=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if len(*seen) != 1 || (*seen)[0] != tc.want {
+				t.Fatalf("forwarded methods = %v, want [%s]", *seen, tc.want)
+			}
+		})
+	}
+
+	// traefik agent 的变更端点同样走 traefik.* 且审计不变
+	s := newBackupTestServer(t)
+	seen := withFakeProxyAgent(t, s, "t1", "traefik-proxy")
+	rec := httptest.NewRecorder()
+	s.handleAgentProxyAPI(rec, proxyReq(http.MethodPut, "t1", "sites/blog",
+		`{"name":"blog","serverNames":["b.example.com"],"upstream":"127.0.0.1:3000","scheme":"http"}`),
+		"t1/proxy/sites/blog")
+	if rec.Code != http.StatusOK || len(*seen) != 1 || (*seen)[0] != "traefik.site.apply" {
+		t.Fatalf("apply: code=%d methods=%v body=%s", rec.Code, *seen, rec.Body.String())
+	}
+	logs, _, _ := s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": "proxy_apply"})
+	if len(logs) != 1 {
+		t.Errorf("proxy_apply audit = %d entries, want 1", len(logs))
+	}
+}
+
 // 防止 protocol 未使用（payload 构造经由 fake agent，与 backup_test 一致）
 var _ = protocol.MessageTypeRPCResponse
