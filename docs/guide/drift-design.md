@@ -45,6 +45,7 @@ stack SaveCompose ────────┘  (JSON)  ←逐项对比→  vs �
 |------|------|------|
 | `drift.check` | `{}` | `{items: [{kind, name, status, baseline_sha, current_sha}], checked_at}` |
 | `drift.diff` | `{kind, name}` | `{expected, current}`（两侧全文；cron 侧为 MarshalIndent 美化后的 cockpit 段） |
+| `drift.record` | `{kind, name}` | `{recorded: true, sha256}`（以当前内容登记基线，M4） |
 
 status 语义见 D5；`baseline_sha` / `current_sha` 空串表示对应侧不存在。
 
@@ -102,9 +103,41 @@ drifted 条目从「变没变 + hash 短码」升级为「哪里变了」：基�
 同源 / stack 两文件）、旧基线无原文报错、kind/name 校验、两侧过大拒绝；
 server——转发与 400 校验；web——tsc + build。
 
+## M4：手动登记基线「以当前为准」（2026-09-18）
+
+把「基线只来自面板写路径」补全为「也可来自用户确认」：面板外存量对象
+（no_baseline）一键纳入检测；手改后的 drifted 对象确认无误后一键以当前
+内容为新标准。agent 侧复用 M3 的 currentContent + Record，零新存储。
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D23 | `drift.record` | `{kind, name}`：kind/name 复用 M3 校验 → 实时读当前内容（与 check/diff 同源 `currentContent`，cron 为 splitCockpit→compact marshal）→ `baseline.Record` 登记原文；适用 no_baseline（纳入检测）与 drifted（确认手改为新标准）；missing/error 场景读不到当前内容直接报错（无需客户端状态白名单）；>256KB 照 Record 语义只存 hash | 全部复用 M3 积木（validDriftTarget + currentContent + Record）；「以当前为准」与面板重新保存互补——前者以磁盘为准（不重写文件），后者以面板为准（重写文件） |
+| D24 | server 端点 + 审计 | `POST /api/agents/{id}/drift/record`：与 diff 同规则校验（kind 白名单 + name 非空 ≤128）后转发；**记审计** `drift_record` / `drift_baseline`，resourceID=`kind/name`，detail 记 agent | check/diff 是浏览不审计，record 是用户主动变更漂移判定标准——之后该对象「漂不漂」以此为准，必须可追溯（与文件变更审计同档） |
+| D25 | Web 交互 | drifted 行「以当前为准」+ no_baseline 行「登记」按钮（Popconfirm：「之后的漂移检测将以当前磁盘内容为标准」）；成功后自动重查刷新清单；missing/error 行不出按钮 | 操作入口放结果行内就地闭环；两个文案同一 RPC，按行状态选择语义更准的动词 |
+
+### Agent 侧
+
+- `drift.record`：`validDriftTarget` → `currentContent`（读失败透传原因）→
+  `baseline.Record` → 返回 `{recorded: true, sha256}`（登记后 hash，供前端提示）。
+
+### Server 侧
+
+- `handleAgentDriftAPI` 加 `sub == "record"`：与 diff 共用 body 校验 →
+  `forwardDriftRPC(..., "drift.record", params)` → 成功后 `auditDriftRecord`
+  （username/IP/UA 同 auditFile 模式，detail 记 agent）。
+
+### Web 侧
+
+- `api.driftRecord(agentId, kind, name)`；操作列按状态出「差异」（drifted）/
+  「以当前为准」（drifted）/「登记」（no_baseline）；Popconfirm 确认 → 调用 →
+  message 成功 → 自动重跑 check 刷新清单（失败 Alert 透出 agent 原因）。
+
+**测试**：agent——no_baseline 登记→check 变 ok（nginx/cron/stack）、drifted
+以当前为准→ok 且基线原文更新、读失败报错、校验拒绝；server——转发参数、
+400 校验不达 agent、审计落库；web——tsc + build。
+
 ## 不做（后续版本）
 
-- `no_baseline` 对象的手动登记（「以当前为准」）；
 - nginx 非 cockpit 片段、外部 crontab 条目、docker 卷内容检测；
 - inventory 声明字段（hostname/IP/状态）与 agent 实报的一致性高亮；
 - 双栏对照式 diff / diff 语法高亮（行级统一 diff 先覆盖配置段落场景）。
