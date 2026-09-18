@@ -325,10 +325,10 @@ func TestCovDesktopVNCUnexpectedClose(t *testing.T) {
 
 	// desktop：关闭码 3000 → IsUnexpectedCloseError → 日志分支
 	dAgent := covRegisterBareAgent(t, s, "agent-dclose")
-	conn, _ := covDirectWS(t, s.handleDesktopWebSocket, "/api/remote/desktop",
+	conn, _, dDone := covDirectWSJoined(t, s.handleDesktopWebSocket, "/api/remote/desktop",
 		covTicket(t, s, map[string]string{
 			"agent_id": "agent-dclose", "host": "127.0.0.1", "port": "3389", "protocol": "rdp",
-		}), true)
+		}))
 	var connecting map[string]interface{}
 	covWSReadJSON(t, conn, &connecting)
 	newMsg := covAgentRecv(t, dAgent, "desktop_new")
@@ -343,13 +343,15 @@ func TestCovDesktopVNCUnexpectedClose(t *testing.T) {
 	if m := covAgentRecv(t, dAgent, "desktop_close"); m.Type != protocol.MessageTypeDesktopClose {
 		t.Fatalf("unexpected-close should still notify agent, got %s", m.Type)
 	}
+	// handler 退出 = keepaliveLoop 收尾完成，不留后台 goroutine 与清理竞态
+	covWaitHandlerExit(t, "desktop handler after abnormal close", dDone)
 
 	// vnc：关闭码 3000 → 日志分支 + 会话清理
 	vAgent := covRegisterBareAgent(t, s, "agent-vclose")
-	conn2, _ := covDirectWS(t, s.handleVNCWebSocket, "/api/remote/vnc",
+	conn2, _, vDone := covDirectWSJoined(t, s.handleVNCWebSocket, "/api/remote/vnc",
 		covTicket(t, s, map[string]string{
 			"agent_id": "agent-vclose", "host": "127.0.0.1", "port": "5900", "protocol": "vnc",
-		}), true)
+		}))
 	newMsg2 := covAgentRecv(t, vAgent, "proxy_new")
 	connID2, _ := newMsg2.Payload["connId"].(string)
 	if err := conn2.WriteControl(websocket.CloseMessage,
@@ -359,6 +361,9 @@ func TestCovDesktopVNCUnexpectedClose(t *testing.T) {
 	conn2.Close()
 	covAgentRecv(t, vAgent, "proxy_close")
 	covWaitGone(t, "vnc cleanup after abnormal close", func() bool { return !covVNCSessionByConn(connID2) })
+	// 会话表删除先于审计落库（closeVNCSession 内部顺序），join handler 才能
+	// 保证 auditRemoteEnd 的 db 写在 TempDir 清理前完成
+	covWaitHandlerExit(t, "vnc handler after abnormal close", vDone)
 }
 
 func TestCovVNCAgentGoneDuringForward(t *testing.T) {
@@ -366,10 +371,10 @@ func TestCovVNCAgentGoneDuringForward(t *testing.T) {
 	s := covRemoteSetup(t)
 	gAgent := covRegisterBareAgent(t, s, "agent-vgone")
 
-	conn, _ := covDirectWS(t, s.handleVNCWebSocket, "/api/remote/vnc",
+	conn, _, vDone := covDirectWSJoined(t, s.handleVNCWebSocket, "/api/remote/vnc",
 		covTicket(t, s, map[string]string{
 			"agent_id": "agent-vgone", "host": "127.0.0.1", "port": "5900", "protocol": "vnc",
-		}), true)
+		}))
 	newMsg := covAgentRecv(t, gAgent, "proxy_new")
 	connID, _ := newMsg.Payload["connId"].(string)
 
@@ -383,6 +388,8 @@ func TestCovVNCAgentGoneDuringForward(t *testing.T) {
 	}
 	covWaitGone(t, "vnc session cleanup after agent gone", func() bool { return !covVNCSessionByConn(connID) })
 	conn.Close()
+	// closeVNCSession 的审计写库在会话表删除之后，join handler 排干再返回
+	covWaitHandlerExit(t, "vnc handler after agent gone", vDone)
 }
 
 // ============ 30s 周期分支（非 -short） ============
@@ -443,8 +450,8 @@ func TestCovSlowKeepaliveAndCleanupTicks(t *testing.T) {
 	silent.Capabilities = append(silent.Capabilities, protocol.Capability{Type: "docker"})
 
 	// 终端会话
-	conn1, rec1 := covDirectWS(t, s.handleTerminalWebSocket, "/api/remote/terminal",
-		covTerminalTicket(t, s, "agent-ka-t"), true)
+	conn1, rec1, tDone := covDirectWSJoined(t, s.handleTerminalWebSocket, "/api/remote/terminal",
+		covTerminalTicket(t, s, "agent-ka-t"))
 	var connect map[string]interface{}
 	covWSReadJSON(t, conn1, &connect)
 	newMsg := covAgentRecv(t, tAgent, "proxy_new")
@@ -453,10 +460,10 @@ func TestCovSlowKeepaliveAndCleanupTicks(t *testing.T) {
 	go covDrain(conn1)
 
 	// 桌面会话
-	conn2, rec2 := covDirectWS(t, s.handleDesktopWebSocket, "/api/remote/desktop",
+	conn2, rec2, dDone := covDirectWSJoined(t, s.handleDesktopWebSocket, "/api/remote/desktop",
 		covTicket(t, s, map[string]string{
 			"agent_id": "agent-ka-d", "host": "127.0.0.1", "port": "3389", "protocol": "rdp",
-		}), true)
+		}))
 	var connecting map[string]interface{}
 	covWSReadJSON(t, conn2, &connecting)
 	dNew := covAgentRecv(t, dAgent, "desktop_new")
@@ -465,10 +472,10 @@ func TestCovSlowKeepaliveAndCleanupTicks(t *testing.T) {
 	go covDrain(conn2)
 
 	// VNC 会话
-	conn3, rec3 := covDirectWS(t, s.handleVNCWebSocket, "/api/remote/vnc",
+	conn3, rec3, vDone := covDirectWSJoined(t, s.handleVNCWebSocket, "/api/remote/vnc",
 		covTicket(t, s, map[string]string{
 			"agent_id": "agent-ka-v", "host": "127.0.0.1", "port": "5900", "protocol": "vnc",
-		}), true)
+		}))
 	vNew := covAgentRecv(t, vAgent, "proxy_new")
 	connID3, _ := vNew.Payload["connId"].(string)
 	covClearDeadline(conn3, rec3.conn)
@@ -549,4 +556,10 @@ func TestCovSlowKeepaliveAndCleanupTicks(t *testing.T) {
 	case <-time.After(35 * time.Second):
 		t.Fatal("handleAgentStacks on silent agent did not finish")
 	}
+
+	// 三个会话的超时清理各在 handler goroutine 里收尾（审计/录制回填写库
+	// 晚于会话表删除），join 排干后再返回，避免与 TempDir 清理竞态
+	covWaitHandlerExit(t, "terminal handler after keepalive timeout", tDone)
+	covWaitHandlerExit(t, "desktop handler after keepalive timeout", dDone)
+	covWaitHandlerExit(t, "vnc handler after keepalive timeout", vDone)
 }

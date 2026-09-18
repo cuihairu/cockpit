@@ -114,6 +114,31 @@ func covExtractHeader(raw []byte, name string) string {
 // （客户端会用它自生成的 key 校验 101 应答，两边必须一致）→ 启动 handler。
 func covDirectWS(t *testing.T, handler http.HandlerFunc, path, ticket string, wantUpgrade bool) (*websocket.Conn, *covHijackRec) {
 	t.Helper()
+	conn, rec, _ := covDirectWSChan(t, handler, path, ticket, wantUpgrade, false)
+	return conn, rec
+}
+
+// covDirectWSJoined 与 covDirectWS（wantUpgrade=true）相同，另返回 handler
+// goroutine 的退出信号。远控 handler 同步跑 keepaliveLoop，其返回即代表
+// 会话关闭路径（审计 / DB 回填）已执行完——需要在测试返回前排干后台
+// db 写的用例（TempDir RemoveAll 与之竞态会报 directory not empty）应等待它。
+func covDirectWSJoined(t *testing.T, handler http.HandlerFunc, path, ticket string) (*websocket.Conn, *covHijackRec, <-chan struct{}) {
+	t.Helper()
+	return covDirectWSChan(t, handler, path, ticket, true, true)
+}
+
+// covWaitHandlerExit 等 handler goroutine 退出（超时 fatal）
+func covWaitHandlerExit(t *testing.T, desc string, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("handler did not exit: %s", desc)
+	}
+}
+
+func covDirectWSChan(t *testing.T, handler http.HandlerFunc, path, ticket string, wantUpgrade, wantDone bool) (*websocket.Conn, *covHijackRec, <-chan struct{}) {
+	t.Helper()
 	clientConn, serverConn := net.Pipe()
 	deadline := time.Now().Add(10 * time.Second)
 	clientConn.SetDeadline(deadline)
@@ -132,8 +157,14 @@ func covDirectWS(t *testing.T, handler http.HandlerFunc, path, ticket string, wa
 	if !wantUpgrade {
 		clientConn.Close()
 		serverConn.Close()
+		if wantDone {
+			done := make(chan struct{})
+			go func() { defer close(done); handler(rec, req) }()
+			<-done
+			return nil, rec, done
+		}
 		handler(rec, req)
-		return nil, rec
+		return nil, rec, nil
 	}
 
 	u := &url.URL{Scheme: "ws", Host: "cov.internal", Path: path}
@@ -165,7 +196,13 @@ func covDirectWS(t *testing.T, handler http.HandlerFunc, path, ticket string, wa
 	}
 	req.Header.Set("Sec-Websocket-Key", key)
 
-	go handler(rec, req)
+	var handlerDone chan struct{}
+	if wantDone {
+		handlerDone = make(chan struct{})
+		go func() { defer close(handlerDone); handler(rec, req) }()
+	} else {
+		go handler(rec, req)
+	}
 
 	select {
 	case res := <-resCh:
@@ -178,10 +215,10 @@ func covDirectWS(t *testing.T, handler http.HandlerFunc, path, ticket string, wa
 			}
 			t.Fatalf("in-process websocket handshake: %v (status %d, body %q)", res.err, status, body)
 		}
-		return res.conn, rec
+		return res.conn, rec, handlerDone
 	case <-time.After(10 * time.Second):
 		t.Fatal("in-process websocket handshake timeout")
-		return nil, rec
+		return nil, rec, handlerDone
 	}
 }
 
@@ -271,8 +308,8 @@ func TestCovTerminalWebSocketFullFlow(t *testing.T) {
 	s := covRemoteSetup(t)
 	agent := covRegisterBareAgent(t, s, "agent-term")
 
-	conn, _ := covDirectWS(t, s.handleTerminalWebSocket, "/api/remote/terminal",
-		covTerminalTicket(t, s, "agent-term"), true)
+	conn, _, tDone := covDirectWSJoined(t, s.handleTerminalWebSocket, "/api/remote/terminal",
+		covTerminalTicket(t, s, "agent-term"))
 	t.Cleanup(func() { conn.Close() })
 
 	var connect map[string]interface{}
@@ -340,6 +377,9 @@ func TestCovTerminalWebSocketFullFlow(t *testing.T) {
 		t.Fatalf("close forward = %+v", closeMsg.Payload)
 	}
 	covWaitGone(t, "terminal session cleanup", func() bool { return !covTerminalSessionByConn(connID) })
+	// done 分支的 closeTerminalSession 在后台 goroutine：audit 写在会话表
+	// 删除之后，join handler 确保它在 TempDir 清理前落库完成
+	covWaitHandlerExit(t, "terminal handler after client close", tDone)
 
 	// 录制文件已生成并包含输出事件（recordingEnabled 默认开）
 	recs, err := s.db.ListTerminalRecordings(10)
@@ -676,8 +716,8 @@ func TestCovVNCWebSocketClientCloseAndBadRequests(t *testing.T) {
 	agent := covRegisterBareAgent(t, s, "agent-vnc2")
 
 	// 客户端断开 → proxy_close → closeVNCSession（含审计）
-	conn, _ := covDirectWS(t, s.handleVNCWebSocket, "/api/remote/vnc",
-		covTicket(t, s, map[string]string{"agent_id": "agent-vnc2", "host": "127.0.0.1", "port": "5900", "protocol": "vnc"}), true)
+	conn, _, vDone := covDirectWSJoined(t, s.handleVNCWebSocket, "/api/remote/vnc",
+		covTicket(t, s, map[string]string{"agent_id": "agent-vnc2", "host": "127.0.0.1", "port": "5900", "protocol": "vnc"}))
 	newMsg := covAgentRecv(t, agent, "proxy_new")
 	connID, _ := newMsg.Payload["connId"].(string)
 	conn.Close()
@@ -686,6 +726,8 @@ func TestCovVNCWebSocketClientCloseAndBadRequests(t *testing.T) {
 		t.Fatalf("close type = %s", closeMsg.Type)
 	}
 	covWaitGone(t, "vnc session cleanup on client close", func() bool { return !covVNCSessionByConn(connID) })
+	// 审计在 keepaliveLoop（handler goroutine）里、会话表删除之后写库，join 排干
+	covWaitHandlerExit(t, "vnc handler after client close", vDone)
 
 	covWantHTTP(t, "missing ticket", s.handleVNCWebSocket, "/api/remote/vnc", "", http.StatusBadRequest)
 	covWantHTTP(t, "bad ticket", s.handleVNCWebSocket, "/api/remote/vnc", "bad", http.StatusUnauthorized)
