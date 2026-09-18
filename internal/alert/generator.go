@@ -332,3 +332,10 @@ func (g *Generator) CheckDDNS(recordName, reason string) {
 	message := "动态域名解析检查失败，域名可能已指向过期 IP：\n" + reason
 	g.createAlertIfNotExists("warning", title, message, recordName, "ddns")
 }
+
+// CheckACME 证书签发/续期失败告警（真去重：同主域名未读期间只报一次）
+func (g *Generator) CheckACME(primaryDomain, reason string) {
+	title := "证书签发失败：" + primaryDomain
+	message := "ACME 自动签发/续期失败，证书可能临期无法续：\n" + reason
+	g.createAlertIfNotExists("warning", title, message, primaryDomain, "acme")
+}

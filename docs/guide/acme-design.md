@@ -26,7 +26,7 @@ Cockpit 已具备三个可复用基础，证书「签发 + 存储 + 续期」是
   - 证书与私钥存 SQLite：与面板数据同生命周期，server-backup（VACUUM INTO）自动覆盖；文件落盘留给 M2 部署联动按需导出。
 - **D6 签发流程**：`POST /acme/certs/{id}/issue` 同步执行——校验 token/账户 → lego `Obtain{Domains, Bundle:false}`（证书链与 issuer 分开存）→ 回写 `Status=issued / ExpiresAt（解析叶子证书 NotAfter）/ LastStatus / LastRenewAt` → **联动观测表**：upsert `Certificate`（`DomainName=primary`，`Issuer`，`ExpiresAt`，`Status=valid`，`Labels["source"]="acme"`），probe 的 TLS 探测对该域名继续独立观测，两层互补。同步等待 DNS 传播通常几秒~几十秒，M1 可接受（前端按钮 loading）；异步任务化（stack 模式）留给签发+部署联动的 M2。
 
-- **D7 续期巡检**：`acmeScanLoop` 复刻 drift/smart/ddns 模式；Setting `acme.scan_interval_seconds`，默认 3600，min 300，max 86400，`0 = 关闭`。每轮对每条 `AutoRenew && Status==issued` 证书判断 `ExpiresAt - now < RenewBeforeDays * 24h` → 重新 Obtain（全新证书，覆盖旧 PEM）。失败置 `Status=failed + LastError` + `alert.CheckACME` 真去重 warning（title 按主域名，同 CheckDDNS 构）。
+- **D7 续期巡检**：`acmeScanLoop` 复刻 drift/smart/ddns 模式；Setting `acme.scan_interval_seconds`，默认 3600，min 300，max 86400，`0 = 关闭`。扫描范围 `AutoRenew` 且 `Status ∈ {issued, failed}`：issued 判断 `ExpiresAt - now < RenewBeforeDays * 24h` 临期重签（重新 Obtain，全新证书覆盖旧 PEM）；failed 按 D8 节流后重试（否则一次失败证书就永远卡死）；pending 需用户手动首签（创建 ≠ 立即签发的语义预期）。失败置 `Status=failed + LastError` + `alert.CheckACME` 真去重 warning（title 按主域名，同 CheckDDNS 构）。
 
 - **D8 限频保护**：Let's Encrypt 生产限频（每注册域名每周 50 张、失败验证 5 次/小时/账户/主机名、重复证书 5 张/周）。M1 三道闸：a) 默认 staging（D4）；b) 签发失败节流——`LastRenewAt` 距今 < 1h 的证书巡检跳过重试（手动 issue 不节流，用户明确意图优先）；c) 传播 pre-check 由 lego 顺序 DNS 策略承担（查 authoritative NS，避免盲等固定时长）。
 

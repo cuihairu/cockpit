@@ -49,6 +49,7 @@ type Server struct {
 	inventorySync  *inventorysync.Manager
 	probeRunner    *probe.Runner
 	dns            dns.Provider
+	acme           AcmeIssuer
 	cfg            *config.Config
 	upgrader       websocket.Upgrader
 
@@ -177,6 +178,9 @@ func (s *Server) Start() error {
 		log.Print("DNS provider enabled: cloudflare")
 	}
 
+	// ACME 签发器（lego + Cloudflare DNS-01，见 acme-design.md D1/D4）
+	s.acme = NewLegoIssuer(s.db, func() string { return s.cfg.DNS.Cloudflare.APIToken })
+
 	// 注册所有路由
 	s.registerRoutes(mux)
 
@@ -199,6 +203,7 @@ func (s *Server) Start() error {
 	go s.driftScanLoop() // 漂移定时巡检（见 drift-design.md M2）
 	go s.smartScanLoop() // SMART 磁盘健康巡检（见 disk-health-design.md D8）
 	go s.ddnsScanLoop()  // DDNS 定时同步（见 ddns-design.md D6）
+	go s.acmeScanLoop()  // ACME 证书自动续期巡检（见 acme-design.md D7）
 	// 启动系统指标清理协程
 	go s.metricsCleanupLoop()
 	// 启动备份调度循环

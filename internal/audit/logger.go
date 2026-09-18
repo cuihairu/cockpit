@@ -87,6 +87,9 @@ const ResourceServerBackup = "server_backup"
 // ResourceDNSRecord DNS 记录资源类型（见 dns-design.md）
 const ResourceDNSRecord = "dns_record"
 
+// ResourceAcmeCert ACME 签发证书资源类型（见 acme-design.md）
+const ResourceAcmeCert = "acme_cert"
+
 // Status 状态
 const (
 	StatusSuccess = "success"
