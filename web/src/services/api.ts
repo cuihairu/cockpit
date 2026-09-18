@@ -61,6 +61,10 @@ import type {
   DDNSConfigInput,
   DDNSCheckResult,
   DDNSScanConfig,
+  AcmeCertView,
+  AcmeCertInput,
+  AcmeAccount,
+  AcmeScanConfig,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -832,6 +836,51 @@ class ApiService {
 
   async putDDNSScanConfig(scanIntervalSeconds: number): Promise<void> {
     await this.client.put('/ddns/config', { scan_interval_seconds: scanIntervalSeconds })
+  }
+
+  // ========== ACME（证书自动签发，见 acme-design.md） ==========
+
+  async getAcmeCerts(): Promise<AcmeCertView[]> {
+    return this.client.get<unknown, AcmeCertView[]>('/acme/certs')
+  }
+
+  async createAcmeCert(input: AcmeCertInput): Promise<AcmeCertView> {
+    return this.client.post<unknown, AcmeCertView>('/acme/certs', input)
+  }
+
+  async updateAcmeCert(id: number, input: AcmeCertInput): Promise<AcmeCertView> {
+    return this.client.put<unknown, AcmeCertView>(`/acme/certs/${id}`, input)
+  }
+
+  async deleteAcmeCert(id: number): Promise<void> {
+    await this.client.delete(`/acme/certs/${id}`)
+  }
+
+  // 立即签发/重签（同步；DNS-01 传播等待通常几秒~几十秒）
+  async issueAcmeCert(id: number): Promise<AcmeCertView> {
+    return this.client.post<unknown, AcmeCertView>(`/acme/certs/${id}/issue`)
+  }
+
+  // 下载 PEM（part=key 记审计）；返回原文供前端触发保存
+  async downloadAcmeCert(id: number, part: 'cert' | 'issuer' | 'key'): Promise<string> {
+    const resp = await this.client.get<unknown, string>(`/acme/certs/${id}/download`, { params: { part }, responseType: 'text' })
+    return resp
+  }
+
+  async getAcmeAccount(): Promise<AcmeAccount> {
+    return this.client.get<unknown, AcmeAccount>('/acme/account')
+  }
+
+  async putAcmeAccount(email: string): Promise<void> {
+    await this.client.put('/acme/account', { email })
+  }
+
+  async getAcmeScanConfig(): Promise<AcmeScanConfig> {
+    return this.client.get<unknown, AcmeScanConfig>('/acme/config')
+  }
+
+  async putAcmeScanConfig(scanIntervalSeconds: number): Promise<void> {
+    await this.client.put('/acme/config', { scan_interval_seconds: scanIntervalSeconds })
   }
 }
 

@@ -47,6 +47,7 @@ const Network = lazy(() => import('./pages/Network'))
 const Disk = lazy(() => import('./pages/Disk'))
 const Drift = lazy(() => import('./pages/Drift'))
 const DNS = lazy(() => import('./pages/DNS'))
+const Acme = lazy(() => import('./pages/Acme'))
 const Recordings = lazy(() => import('./pages/Recordings'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Profile = lazy(() => import('./pages/Profile'))
@@ -94,6 +95,10 @@ const routeConfig: ProLayoutProps['route'] = {
         {
           path: '/resources/certificates',
           name: '证书',
+        },
+        {
+          path: '/acme',
+          name: '证书签发',
         },
         {
           path: '/resources/services',
@@ -341,6 +346,7 @@ const MainLayout = () => {
             <Route path="/disk" element={<Disk />} />
             <Route path="/drift" element={<Drift />} />
             <Route path="/dns" element={<DNS />} />
+            <Route path="/acme" element={<Acme />} />
             <Route path="/recordings" element={<Recordings />} />
             <Route path="/monitor" element={<Monitor />} />
             <Route path="/settings" element={<Settings />} />
