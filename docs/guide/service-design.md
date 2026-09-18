@@ -401,3 +401,21 @@ service_windows_stub.go    //go:build !windows：NewWindowsServiceProvider 返�
 - **审计**：`logs.query` 浏览类不记审计（logs-design 纪律），入口复用
   现有 `/api/agents/{id}/logs/query` 转发
 - **测试**：纯 web 侧，tsc + build 验证；Go 零改动
+
+### D12 daemon-reload（M2 扩）
+
+`systemctl daemon-reload`：unit 文件变更（手编 / 装卸包）后刷新 systemd
+manager 配置。全局操作、不针对单个 unit，语义与 unit 动作不同构，独立成
+RPC 而不塞进 service.action：
+
+- **agent**：`ServiceProvider.DaemonReload()` → `systemctl daemon-reload`
+  （超时同 serviceActionTimeout，通常秒回）；RPC 方法 `service.daemon-reload`
+  （Call case 同名），params 空。仅 systemd provider 实现——windows-scm /
+  launchd 后端的 Call 对未知 action 本就报错，天然防御
+- **server**：`POST /api/agents/{id}/services/daemon-reload`——sub 只有一段，
+  在 unit/action 两段解析**之前**特判（unit 动作路由恒为两段，无歧义）；
+  记 service_action 审计（resourceID 与 details.action 均为 daemon-reload）
+- **web**：「重载配置」按钮（isSystemd 才显示）挂表格工具栏刷新旁，
+  Popconfirm 确认后调用，成功刷新列表与状态卡（unitFileState 可能已变）
+- **测试**：agent mock 断言 `systemctl daemon-reload` argv 直调；server
+  转发 + 审计恰好一条、GET/其他方法拒绝、两段 unit 路由不受影响
