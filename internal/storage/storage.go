@@ -118,6 +118,8 @@ func (d *DB) migrate() error {
 		&ProbeResult{},
 		&TerminalRecording{},
 		&DDNSConfig{},
+		&AcmeAccount{},
+		&AcmeCert{},
 	)
 }
 
