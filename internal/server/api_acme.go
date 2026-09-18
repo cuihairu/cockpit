@@ -307,8 +307,14 @@ func (s *Server) handleAcmeIssue(w http.ResponseWriter, r *http.Request, idStr s
 		s.handleError(w, r, http.StatusNotFound, "ACME certificate not found")
 		return
 	}
-	if s.acme == nil || s.cfg == nil || s.cfg.DNS.Cloudflare.APIToken == "" {
-		s.handleError(w, r, http.StatusServiceUnavailable, errAcmeNoToken.Error())
+	if s.acme == nil || s.cfg == nil {
+		s.handleError(w, r, http.StatusServiceUnavailable, "ACME issuer not configured")
+		return
+	}
+	// DNS 凭据就绪判定按 ACME provider 分派（D13，与 DNS 管理页的
+	// Cloudflare 判定语义分叉），错误文案报缺哪个键
+	if ok, msg := s.acmeDNS().Ready(); !ok {
+		s.handleError(w, r, http.StatusServiceUnavailable, msg)
 		return
 	}
 	var notifCfg *config.NotificationConfig
@@ -423,11 +429,23 @@ var acmeEmailRe = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 func (s *Server) handleAcmeConfigAPI(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		// dns 字段是 ACME 视角的 provider 与凭据就绪判定（D13，
+		// 与 DNS 管理页 /api/dns/status 的 Cloudflare 专属语义分叉）
+		dnsCfg := s.acmeDNS()
+		provider := dnsCfg.Provider
+		if provider == "" {
+			provider = "cloudflare"
+		}
+		configured, _ := dnsCfg.Ready()
 		s.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"scan_interval_seconds": s.GetAcmeScanInterval(),
 			"min":                   acmeMinIntervalSeconds,
 			"max":                   acmeMaxIntervalSeconds,
 			"default":               acmeDefaultInterval,
+			"dns": map[string]interface{}{
+				"provider":   provider,
+				"configured": configured,
+			},
 		})
 	case http.MethodPut:
 		var req struct {

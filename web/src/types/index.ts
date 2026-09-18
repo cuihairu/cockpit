@@ -952,12 +952,19 @@ export interface AcmeAccount {
   registrationURI?: string
 }
 
+// ACME 视角的 DNS provider 状态（D13：与 DNS 管理页的 Cloudflare 专属判定语义分叉）
+export interface AcmeDnsStatus {
+  provider: 'cloudflare' | 'dnspod' | 'alidns'
+  configured: boolean
+}
+
 // 续期巡检配置（server 定时重签；0 = 关闭）
 export interface AcmeScanConfig {
   scan_interval_seconds: number
   min: number
   max: number
   default: number
+  dns?: AcmeDnsStatus
 }
 
 // ========== NAS 存储观测（见 nas-design.md） ==========

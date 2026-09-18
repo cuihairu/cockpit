@@ -270,3 +270,43 @@ func TestDNSCloudflareEnvOverride(t *testing.T) {
 		t.Fatalf("default DNS config = %+v", cfg.DNS)
 	}
 }
+
+func TestDNSProvidersEnvOverride(t *testing.T) {
+	// DNSPod/阿里云凭据 env 优先（ACME D13），与 Cloudflare 同一惯例
+	t.Setenv("DNSPOD_LOGIN_TOKEN", "env-id,env-token")
+	t.Setenv("ALIYUN_ACCESS_KEY", "env-ak")
+	t.Setenv("ALIYUN_ACCESS_KEY_SECRET", "env-sk")
+	cfg := Normalize(&Config{DNS: &DNSConfig{
+		Provider: "dnspod",
+		DNSPod:   &DNSPodConfig{LoginToken: "yaml-token"},
+		AliDNS:   &AliDNSConfig{AccessKey: "yaml-ak", SecretKey: "yaml-sk"},
+	}})
+	if cfg.DNS.Provider != "dnspod" {
+		t.Errorf("Provider = %q, want dnspod", cfg.DNS.Provider)
+	}
+	if cfg.DNS.DNSPod.LoginToken != "env-id,env-token" {
+		t.Errorf("DNSPod.LoginToken = %q, want env value", cfg.DNS.DNSPod.LoginToken)
+	}
+	if cfg.DNS.AliDNS.AccessKey != "env-ak" || cfg.DNS.AliDNS.SecretKey != "env-sk" {
+		t.Errorf("AliDNS = %+v, want env values", cfg.DNS.AliDNS)
+	}
+
+	// env 未设置时保留 yaml 值
+	t.Setenv("DNSPOD_LOGIN_TOKEN", "")
+	t.Setenv("ALIYUN_ACCESS_KEY", "")
+	t.Setenv("ALIYUN_ACCESS_KEY_SECRET", "")
+	cfg = Normalize(&Config{DNS: &DNSConfig{
+		DNSPod: &DNSPodConfig{LoginToken: "yaml-token"},
+		AliDNS: &AliDNSConfig{AccessKey: "yaml-ak", SecretKey: "yaml-sk"},
+	}})
+	if cfg.DNS.DNSPod.LoginToken != "yaml-token" ||
+		cfg.DNS.AliDNS.AccessKey != "yaml-ak" || cfg.DNS.AliDNS.SecretKey != "yaml-sk" {
+		t.Fatalf("yaml values not kept: %+v", cfg.DNS)
+	}
+
+	// 完全未配置时子结构补齐为空（不 panic）
+	cfg = Normalize(&Config{})
+	if cfg.DNS == nil || cfg.DNS.DNSPod == nil || cfg.DNS.AliDNS == nil || cfg.DNS.Provider != "" {
+		t.Fatalf("default DNS config = %+v", cfg.DNS)
+	}
+}

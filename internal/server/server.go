@@ -50,6 +50,7 @@ type Server struct {
 	probeRunner    *probe.Runner
 	dns            dns.Provider
 	acme           AcmeIssuer
+	acmeDNSConfig  func() AcmeDNSConfig
 	cfg            *config.Config
 	upgrader       websocket.Upgrader
 
@@ -178,8 +179,9 @@ func (s *Server) Start() error {
 		log.Print("DNS provider enabled: cloudflare")
 	}
 
-	// ACME 签发器（lego + Cloudflare DNS-01，见 acme-design.md D1/D4）
-	s.acme = NewLegoIssuer(s.db, func() string { return s.cfg.DNS.Cloudflare.APIToken })
+	// ACME 签发器（lego DNS-01，provider 按 dns.provider 分派，见 acme-design.md D4/D13）
+	s.acmeDNSConfig = func() AcmeDNSConfig { return newAcmeDNSConfig(s.cfg) }
+	s.acme = NewLegoIssuer(s.db, s.acmeDNSConfig)
 
 	// 注册所有路由
 	s.registerRoutes(mux)

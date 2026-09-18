@@ -13,17 +13,22 @@ import (
 
 	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/certificate"
+	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/lego"
+	"github.com/go-acme/lego/v4/providers/dns/alidns"
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
+	"github.com/go-acme/lego/v4/providers/dns/dnspod"
 	"github.com/go-acme/lego/v4/registration"
 
+	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
 // ACME 证书签发（设计见 docs/guide/acme-design.md）。
 //
-// 签发抽成 AcmeIssuer 接口：生产实现包 lego（DNS-01 + Cloudflare），
-// 测试注入 fake——完整 ACME 流程需要真实 CA，单测不跑真流程。
+// 签发抽成 AcmeIssuer 接口：生产实现包 lego（DNS-01 + 多 DNS provider，
+// D13：Cloudflare/DNSPod/阿里云），测试注入 fake——完整 ACME 流程需要
+// 真实 CA，单测不跑真流程。
 //
 //	POST /api/acme/certs/{id}/issue → Issue(cert)（同步）
 //	巡检续期（acme_scan.go）→ Issue(cert)
@@ -39,8 +44,97 @@ var acmeDirectoryURLs = map[string]string{
 	AcmeCADirectoryProduction: "https://acme-v02.api.letsencrypt.org/directory",
 }
 
-// errAcmeNoToken cloudflare token 未配置（API 层映射 503，D12）
-var errAcmeNoToken = errors.New("Cloudflare token not configured: set dns.cloudflare.api_token in config.yaml or CLOUDFLARE_API_TOKEN env")
+// AcmeDNSConfig DNS provider 配置快照（D13）：provider 决定 ACME DNS-01
+// 用哪家 API，与 DNS 管理/DDNS 的 Cloudflare 专属判定语义分叉
+type AcmeDNSConfig struct {
+	Provider        string // 空 = cloudflare（向后兼容）/ dnspod / alidns
+	CloudflareToken string
+	DNSPodToken     string // "ID,Token" 合并格式
+	AliAccessKey    string
+	AliSecretKey    string
+}
+
+// acmeDNSProviders ACME 支持的 provider 名单（API 层校验与文档对齐）
+var acmeDNSProviders = []string{"cloudflare", "dnspod", "alidns"}
+
+// newAcmeDNSConfig 从全局配置快照 ACME DNS provider 配置（D13）。
+// Start 用它构造延迟取值闭包；测试直构 Server{} 未走 Start 时
+// Server.acmeDNS() 也用它兜底，两路语义一致。
+func newAcmeDNSConfig(cfg *config.Config) AcmeDNSConfig {
+	if cfg == nil || cfg.DNS == nil {
+		return AcmeDNSConfig{}
+	}
+	out := AcmeDNSConfig{Provider: cfg.DNS.Provider}
+	if cfg.DNS.Cloudflare != nil {
+		out.CloudflareToken = cfg.DNS.Cloudflare.APIToken
+	}
+	if cfg.DNS.DNSPod != nil {
+		out.DNSPodToken = cfg.DNS.DNSPod.LoginToken
+	}
+	if cfg.DNS.AliDNS != nil {
+		out.AliAccessKey = cfg.DNS.AliDNS.AccessKey
+		out.AliSecretKey = cfg.DNS.AliDNS.SecretKey
+	}
+	return out
+}
+
+// Ready 返回凭据是否就绪；未就绪返回面向用户的缺失键提示（D13）
+func (c AcmeDNSConfig) Ready() (bool, string) {
+	provider := c.Provider
+	if provider == "" {
+		provider = "cloudflare"
+	}
+	switch provider {
+	case "cloudflare":
+		if c.CloudflareToken == "" {
+			return false, "Cloudflare token not configured: set dns.cloudflare.api_token in config.yaml or CLOUDFLARE_API_TOKEN env"
+		}
+	case "dnspod":
+		if c.DNSPodToken == "" {
+			return false, "DNSPod token not configured: set dns.dnspod.login_token in config.yaml or DNSPOD_LOGIN_TOKEN env"
+		}
+	case "alidns":
+		if c.AliAccessKey == "" || c.AliSecretKey == "" {
+			return false, "AliDNS credentials not configured: set dns.alidns.access_key/secret_key in config.yaml or ALIYUN_ACCESS_KEY/ALIYUN_ACCESS_KEY_SECRET env"
+		}
+	default:
+		return false, fmt.Sprintf("unknown ACME DNS provider: %s (supported: cloudflare dnspod alidns)", provider)
+	}
+	return true, ""
+}
+
+// dnsProvider 按 D13 工厂构造 lego DNS provider（凭据校验前置）
+func dnsProvider(cfg AcmeDNSConfig) (challenge.Provider, error) {
+	if ok, msg := cfg.Ready(); !ok {
+		return nil, errors.New(msg)
+	}
+	switch cfg.Provider {
+	case "", "cloudflare":
+		cfCfg := cloudflare.NewDefaultConfig()
+		cfCfg.AuthToken = cfg.CloudflareToken
+		return cloudflare.NewDNSProviderConfig(cfCfg)
+	case "dnspod":
+		dpCfg := dnspod.NewDefaultConfig()
+		dpCfg.LoginToken = cfg.DNSPodToken
+		return dnspod.NewDNSProviderConfig(dpCfg)
+	case "alidns":
+		aliCfg := alidns.NewDefaultConfig()
+		aliCfg.APIKey = cfg.AliAccessKey
+		aliCfg.SecretKey = cfg.AliSecretKey
+		return alidns.NewDNSProviderConfig(aliCfg)
+	default:
+		return nil, fmt.Errorf("unknown ACME DNS provider: %s", cfg.Provider)
+	}
+}
+
+// acmeDNS 快照当前 ACME DNS provider 配置。acmeDNSConfig 闭包由 Start
+// 注入；测试直构 Server{} 未走 Start 时从 cfg 即时快照兜底（语义一致）。
+func (s *Server) acmeDNS() AcmeDNSConfig {
+	if s.acmeDNSConfig != nil {
+		return s.acmeDNSConfig()
+	}
+	return newAcmeDNSConfig(s.cfg)
+}
 
 // IssuedResult 一次签发的产物
 type IssuedResult struct {
@@ -55,14 +149,14 @@ type AcmeIssuer interface {
 	Issue(cert *storage.AcmeCert) (*IssuedResult, error)
 }
 
-// NewLegoIssuer 生产实现；cloudflareToken 延迟取（config 加载后固定，测试可注入）
-func NewLegoIssuer(db *storage.DB, cloudflareToken func() string) AcmeIssuer {
-	return &legoIssuer{db: db, cloudflareToken: cloudflareToken}
+// NewLegoIssuer 生产实现；dnsConfig 延迟取（config 加载后固定，测试可注入）
+func NewLegoIssuer(db *storage.DB, dnsConfig func() AcmeDNSConfig) AcmeIssuer {
+	return &legoIssuer{db: db, dnsConfig: dnsConfig}
 }
 
 type legoIssuer struct {
-	db              *storage.DB
-	cloudflareToken func() string
+	db        *storage.DB
+	dnsConfig func() AcmeDNSConfig
 }
 
 // legoUser 实现 lego registration.User
@@ -124,10 +218,7 @@ func (l *legoIssuer) Issue(cert *storage.AcmeCert) (*IssuedResult, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown CA directory: %s", cert.CADirectory)
 	}
-	token := l.cloudflareToken()
-	if token == "" {
-		return nil, errAcmeNoToken
-	}
+	dnsCfg := l.dnsConfig()
 
 	user, err := l.ensureAccount(cert.CADirectory, dirURL)
 	if err != nil {
@@ -142,15 +233,13 @@ func (l *legoIssuer) Issue(cert *storage.AcmeCert) (*IssuedResult, error) {
 		return nil, fmt.Errorf("lego client: %w", err)
 	}
 
-	// Cloudflare DNS-01（token 与 DNS 管理/DDNS 同源，D2/D4）；
+	// DNS-01 provider 按 D13 工厂构造（凭据缺失/未知 provider 各报各的键）；
 	// 默认顺序传播策略查 authoritative NS，不盲等固定时长（D8）
-	cfCfg := cloudflare.NewDefaultConfig()
-	cfCfg.AuthToken = token
-	cfProvider, err := cloudflare.NewDNSProviderConfig(cfCfg)
+	provider, err := dnsProvider(dnsCfg)
 	if err != nil {
-		return nil, fmt.Errorf("cloudflare dns provider: %w", err)
+		return nil, err
 	}
-	if err := client.Challenge.SetDNS01Provider(cfProvider); err != nil {
+	if err := client.Challenge.SetDNS01Provider(provider); err != nil {
 		return nil, fmt.Errorf("set dns01 provider: %w", err)
 	}
 

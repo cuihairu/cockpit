@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Badge,
@@ -27,12 +27,45 @@ import {
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
-import type { AcmeCertView } from '@/types'
+import type { AcmeCertView, AcmeDnsStatus } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 
-// ACME 证书自动签发页（见 docs/guide/acme-design.md D11）：
-// DNS-01 challenge + Cloudflare（token 与 DNS 管理共用），
-// 默认 staging 目录（假证书不触生产限频），自动续期巡检临期重签。
+// ACME 证书自动签发页（见 docs/guide/acme-design.md D11/D13）：
+// DNS-01 challenge，provider 按 dns.provider 分派（Cloudflare/DNSPod/阿里云，
+// 凭据判定独立于 DNS 管理页），默认 staging 目录（假证书不触生产限频），
+// 自动续期巡检临期重签。
+
+const ACME_DNS_PROVIDER_LABEL: Record<AcmeDnsStatus['provider'], string> = {
+  cloudflare: 'Cloudflare',
+  dnspod: 'DNSPod',
+  alidns: '阿里云 DNS',
+}
+
+// 各 provider 的凭据配置引导（与 server 端 Ready 文案对应，D13）
+const ACME_DNS_GUIDE: Record<AcmeDnsStatus['provider'], ReactNode> = {
+  cloudflare: (
+    <>
+      在 config.yaml 设置 <Typography.Text code>dns.cloudflare.api_token</Typography.Text>
+      ，或用环境变量 <Typography.Text code>CLOUDFLARE_API_TOKEN</Typography.Text> 注入后重启
+      server。需要 Zone.DNS 编辑权限。
+    </>
+  ),
+  dnspod: (
+    <>
+      在 config.yaml 设置 <Typography.Text code>dns.dnspod.login_token</Typography.Text>
+      （格式 <Typography.Text code>ID,Token</Typography.Text>），或用环境变量{' '}
+      <Typography.Text code>DNSPOD_LOGIN_TOKEN</Typography.Text> 注入后重启 server。
+    </>
+  ),
+  alidns: (
+    <>
+      在 config.yaml 设置 <Typography.Text code>dns.alidns.access_key</Typography.Text> 与{' '}
+      <Typography.Text code>dns.alidns.secret_key</Typography.Text>，或用环境变量{' '}
+      <Typography.Text code>ALIYUN_ACCESS_KEY</Typography.Text> /{' '}
+      <Typography.Text code>ALIYUN_ACCESS_KEY_SECRET</Typography.Text> 注入后重启 server。
+    </>
+  ),
+}
 
 const STATUS_META: Record<AcmeCertView['status'], { label: string; badge: 'success' | 'error' | 'default' }> = {
   issued: { label: '已签发', badge: 'success' },
@@ -68,7 +101,6 @@ const Acme = () => {
   const { data: certs = [], isLoading } = useQuery({ queryKey: ['acme-certs'], queryFn: () => api.getAcmeCerts() })
   const { data: scanCfg } = useQuery({ queryKey: ['acme-scan-config'], queryFn: () => api.getAcmeScanConfig() })
   const { data: account } = useQuery({ queryKey: ['acme-account'], queryFn: () => api.getAcmeAccount() })
-  const { data: dnsStatus } = useQuery({ queryKey: ['dns-status'], queryFn: () => api.getDNSStatus() })
 
   const savedInterval = scanCfg?.scan_interval_seconds ?? 0
   const scanOn = scanEdit?.on ?? savedInterval > 0
@@ -292,14 +324,14 @@ const Acme = () => {
     },
   ]
 
-  // 未配置 Cloudflare token：引导（ACME DNS-01 与 DNS 管理共用同一 token）
-  if (dnsStatus && !dnsStatus.configured) {
+  // DNS provider 凭据未配置：按 ACME 视角 provider 引导（D13，
+  // 读 /acme/config 的 dns 字段，与 DNS 管理页的 Cloudflare 专属判定分叉）
+  if (scanCfg?.dns && !scanCfg.dns.configured) {
     return (
       <Card>
         <Typography.Paragraph>
-          在 config.yaml 设置 <Typography.Text code>dns.cloudflare.api_token</Typography.Text>
-          ，或用环境变量 <Typography.Text code>CLOUDFLARE_API_TOKEN</Typography.Text> 注入后重启
-          server。证书签发（DNS-01 验证）与 DNS 管理共用这一份 token，只需 Zone.DNS 编辑权限。
+          ACME DNS-01 验证使用 {ACME_DNS_PROVIDER_LABEL[scanCfg.dns.provider]} 作为 DNS provider。
+          {ACME_DNS_GUIDE[scanCfg.dns.provider]}
         </Typography.Paragraph>
       </Card>
     )

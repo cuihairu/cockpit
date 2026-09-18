@@ -21,15 +21,31 @@ type Config struct {
 	DNS           *DNSConfig           `yaml:"dns,omitempty"`
 }
 
-// DNSConfig DNS 管理配置（M1：Cloudflare）
+// DNSConfig DNS 管理配置（M1：Cloudflare；M2 扩 DNSPod/阿里云——ACME D13，
+// provider 决定 ACME DNS-01 用的 API；DNS 管理与 DDNS 仍 Cloudflare 专属）
 type DNSConfig struct {
+	// Provider ACME DNS-01 provider：空 = cloudflare（向后兼容）/ dnspod / alidns
+	Provider   string               `yaml:"provider,omitempty"`
 	Cloudflare *CloudflareDNSConfig `yaml:"cloudflare,omitempty"`
+	DNSPod     *DNSPodConfig        `yaml:"dnspod,omitempty"`
+	AliDNS     *AliDNSConfig        `yaml:"alidns,omitempty"`
 }
 
 // CloudflareDNSConfig Cloudflare API token（建议用 env CLOUDFLARE_API_TOKEN
 // 注入，secret 不落 yaml）
 type CloudflareDNSConfig struct {
 	APIToken string `yaml:"api_token,omitempty"`
+}
+
+// DNSPodConfig DNSPod 凭据（"ID,Token" 合并格式；env DNSPOD_LOGIN_TOKEN 优先）
+type DNSPodConfig struct {
+	LoginToken string `yaml:"login_token,omitempty"`
+}
+
+// AliDNSConfig 阿里云 AccessKey（env ALIYUN_ACCESS_KEY / ALIYUN_ACCESS_KEY_SECRET 优先）
+type AliDNSConfig struct {
+	AccessKey string `yaml:"access_key,omitempty"`
+	SecretKey string `yaml:"secret_key,omitempty"`
 }
 
 // RemoteControlConfig 远程控制（Terminal/Desktop/VNC）相关配置
@@ -250,8 +266,23 @@ func applyDefaults(cfg *Config) {
 	if cfg.DNS.Cloudflare == nil {
 		cfg.DNS.Cloudflare = &CloudflareDNSConfig{}
 	}
-	// env CLOUDFLARE_API_TOKEN 优先于 yaml（secret 不落文件的惯例）
+	if cfg.DNS.DNSPod == nil {
+		cfg.DNS.DNSPod = &DNSPodConfig{}
+	}
+	if cfg.DNS.AliDNS == nil {
+		cfg.DNS.AliDNS = &AliDNSConfig{}
+	}
+	// env 优先于 yaml（secret 不落文件的惯例）
 	if v := os.Getenv("CLOUDFLARE_API_TOKEN"); v != "" {
 		cfg.DNS.Cloudflare.APIToken = v
+	}
+	if v := os.Getenv("DNSPOD_LOGIN_TOKEN"); v != "" {
+		cfg.DNS.DNSPod.LoginToken = v
+	}
+	if v := os.Getenv("ALIYUN_ACCESS_KEY"); v != "" {
+		cfg.DNS.AliDNS.AccessKey = v
+	}
+	if v := os.Getenv("ALIYUN_ACCESS_KEY_SECRET"); v != "" {
+		cfg.DNS.AliDNS.SecretKey = v
 	}
 }

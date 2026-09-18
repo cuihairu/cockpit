@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -448,5 +449,119 @@ func TestPemLeafNotAfter(t *testing.T) {
 	// 坏输入
 	if _, err := pemLeafNotAfter([]byte("not pem")); err == nil {
 		t.Error("non-PEM input should fail")
+	}
+}
+
+// TestAcmeDNSConfigReady Ready 按 provider 分派判定（D13）：
+// 三家各自校验自己的键，错误文案报缺哪个
+func TestAcmeDNSConfigReady(t *testing.T) {
+	cases := []struct {
+		name    string
+		cfg     AcmeDNSConfig
+		wantOK  bool
+		wantMsg string // 非空时断言文案包含
+	}{
+		{"cloudflare ready", AcmeDNSConfig{CloudflareToken: "tok"}, true, ""},
+		{"cloudflare default provider", AcmeDNSConfig{Provider: "cloudflare", CloudflareToken: "tok"}, true, ""},
+		{"cloudflare missing token", AcmeDNSConfig{}, false, "Cloudflare token not configured"},
+		{"dnspod ready", AcmeDNSConfig{Provider: "dnspod", DNSPodToken: "id,tok"}, true, ""},
+		{"dnspod missing token", AcmeDNSConfig{Provider: "dnspod"}, false, "DNSPod token not configured"},
+		{"alidns ready", AcmeDNSConfig{Provider: "alidns", AliAccessKey: "ak", AliSecretKey: "sk"}, true, ""},
+		{"alidns missing secret", AcmeDNSConfig{Provider: "alidns", AliAccessKey: "ak"}, false, "AliDNS credentials not configured"},
+		{"unknown provider", AcmeDNSConfig{Provider: "route53"}, false, "unknown ACME DNS provider"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, msg := tc.cfg.Ready()
+			if ok != tc.wantOK {
+				t.Fatalf("Ready() ok = %v msg = %q", ok, msg)
+			}
+			if tc.wantMsg != "" && !strings.Contains(msg, tc.wantMsg) {
+				t.Errorf("msg = %q, want contains %q", msg, tc.wantMsg)
+			}
+		})
+	}
+}
+
+// TestDNSProviderFactory 工厂按 provider 构造 lego provider；
+// 凭据缺失/未知 provider 各报各的错（构造不做网络请求）
+func TestDNSProviderFactory(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		cfg       AcmeDNSConfig
+		wantPType string
+	}{
+		{"cloudflare", AcmeDNSConfig{CloudflareToken: "tok"}, "*cloudflare.DNSProvider"},
+		{"dnspod", AcmeDNSConfig{Provider: "dnspod", DNSPodToken: "id,tok"}, "*dnspod.DNSProvider"},
+		{"alidns", AcmeDNSConfig{Provider: "alidns", AliAccessKey: "ak", AliSecretKey: "sk"}, "*alidns.DNSProvider"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := dnsProvider(tc.cfg)
+			if err != nil {
+				t.Fatalf("dnsProvider() error = %v", err)
+			}
+			if got := fmt.Sprintf("%T", p); got != tc.wantPType {
+				t.Errorf("provider type = %s, want %s", got, tc.wantPType)
+			}
+		})
+	}
+
+	// 缺凭据 → Ready 的文案
+	if _, err := dnsProvider(AcmeDNSConfig{Provider: "dnspod"}); err == nil || !strings.Contains(err.Error(), "DNSPod token not configured") {
+		t.Errorf("dnspod missing token error = %v", err)
+	}
+	// 未知 provider
+	if _, err := dnsProvider(AcmeDNSConfig{Provider: "route53", CloudflareToken: "tok"}); err == nil || !strings.Contains(err.Error(), "unknown ACME DNS provider") {
+		t.Errorf("unknown provider error = %v", err)
+	}
+}
+
+// TestAcmeConfigDNSField GET /acme/config 响应含 ACME 视角的 dns 字段；
+// 非 cloudflare provider 未配凭据时 issue 503 文案按 provider 报缺失键（D13）
+func TestAcmeConfigDNSField(t *testing.T) {
+	s, _ := newAcmeTestServer(t)
+
+	// 默认 provider（空 = cloudflare）+ token 已配 → configured
+	rec := httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/acme/config", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET config: code = %d", rec.Code)
+	}
+	var body struct {
+		DNS struct {
+			Provider   string `json:"provider"`
+			Configured bool   `json:"configured"`
+		} `json:"dns"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if body.DNS.Provider != "cloudflare" || !body.DNS.Configured {
+		t.Errorf("dns field = %+v, want cloudflare/configured", body.DNS)
+	}
+
+	// 切 dnspod 未配凭据：config 报未就绪；issue 503 文案报 DNSPod（不再检查 cloudflare token）
+	s.cfg.DNS.Provider = "dnspod"
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/acme/config", nil))
+	body.DNS = struct {
+		Provider   string `json:"provider"`
+		Configured bool   `json:"configured"`
+	}{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if body.DNS.Provider != "dnspod" || body.DNS.Configured {
+		t.Errorf("dns field = %+v, want dnspod/not configured", body.DNS)
+	}
+
+	cert := mkAcmeCert(t, s, nil)
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("issue under dnspod: code = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "DNSPod token not configured") {
+		t.Errorf("503 body = %s, want DNSPod hint", rec.Body.String())
 	}
 }
