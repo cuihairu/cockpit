@@ -21,7 +21,7 @@ import {
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
-import type { CronJob } from '@/types'
+import type { CronJob, SystemdTimer } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 import dayjs from 'dayjs'
 
@@ -115,6 +115,15 @@ const Cron = () => {
     queryKey: jobsKey,
     queryFn: () => api.getCronJobs(selectedAgent!),
     enabled: !!selectedAgent,
+  })
+
+  // systemd timer 只读列表（cron-design.md M3）：失败静默（如无 systemd 的
+  // 主机），面板不渲染
+  const { data: timersData } = useQuery({
+    queryKey: ['cron-timers', selectedAgent],
+    queryFn: () => api.getCronTimers(selectedAgent!),
+    enabled: !!selectedAgent,
+    retry: false,
   })
 
   const refresh = () => {
@@ -251,6 +260,63 @@ const Cron = () => {
 
   const jobs = jobsData?.jobs ?? []
 
+  // timer 关键字过滤（unit 名 / 描述）
+  const [timerKeyword, setTimerKeyword] = useState('')
+  const timers = useMemo(() => {
+    const all = timersData?.timers ?? []
+    const kw = timerKeyword.trim().toLowerCase()
+    if (!kw) return all
+    return all.filter(
+      (t) => t.unit.toLowerCase().includes(kw) || (t.description ?? '').toLowerCase().includes(kw),
+    )
+  }, [timersData, timerKeyword])
+
+  const timerColumns: ColumnsType<SystemdTimer> = [
+    {
+      title: 'Unit',
+      dataIndex: 'unit',
+      key: 'unit',
+      width: 240,
+      render: (v: string) => <Typography.Text code>{v}</Typography.Text>,
+    },
+    {
+      title: '描述',
+      dataIndex: 'description',
+      key: 'description',
+      ellipsis: true,
+      render: (v: string) => v || '-',
+    },
+    {
+      title: '日程',
+      dataIndex: 'schedule',
+      key: 'schedule',
+      ellipsis: true,
+      render: (v: string) =>
+        v ? (
+          <Typography.Text code ellipsis={{ tooltip: v }}>
+            {v}
+          </Typography.Text>
+        ) : (
+          '-'
+        ),
+    },
+    { title: '状态', dataIndex: 'unitFileState', key: 'unitFileState', width: 90, render: (v: string) => v || '-' },
+    {
+      title: '上次触发',
+      dataIndex: 'last_trigger',
+      key: 'last_trigger',
+      width: 150,
+      render: (v?: number) => (v ? dayjs.unix(v).format('YYYY-MM-DD HH:mm') : '-'),
+    },
+    {
+      title: '下次触发',
+      dataIndex: 'next_run',
+      key: 'next_run',
+      width: 150,
+      render: (v?: number) => (v ? dayjs.unix(v).format('YYYY-MM-DD HH:mm') : '-'),
+    },
+  ]
+
   return (
     <div style={{ padding: 24 }}>
       <Card
@@ -325,6 +391,35 @@ const Cron = () => {
                       >
                         {jobsData?.external}
                       </pre>
+                    ),
+                  },
+                ]}
+              />
+            )}
+            {timersData && timersData.timers.length > 0 && (
+              <Collapse
+                style={{ marginTop: 16 }}
+                items={[
+                  {
+                    key: 'timers',
+                    label: `systemd 定时器（只读，共 ${timersData.timers.length} 个）`,
+                    children: (
+                      <>
+                        <Input
+                          placeholder="按 unit 或描述过滤"
+                          allowClear
+                          style={{ maxWidth: 280, marginBottom: 12 }}
+                          value={timerKeyword}
+                          onChange={(e) => setTimerKeyword(e.target.value)}
+                        />
+                        <Table<SystemdTimer>
+                          rowKey="unit"
+                          size="small"
+                          columns={timerColumns}
+                          dataSource={timers}
+                          pagination={false}
+                        />
+                      </>
                     ),
                   },
                 ]}

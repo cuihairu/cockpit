@@ -720,6 +720,19 @@ export interface CronJobsResult {
   external: string
 }
 
+// 一个 systemd timer unit 的只读快照（cron-design.md M3：日程为
+// OnCalendar/OnBootUSec 原文不做语义解析；时间为 unix 秒，缺失/不可解析为 0；
+// 模板单元等 show 失败的仅 unit 名，其余字段空）
+export interface SystemdTimer {
+  unit: string
+  description: string
+  schedule: string
+  state: string
+  unitFileState: string
+  last_trigger: number
+  next_run: number
+}
+
 // ============ systemd 服务管理（见 docs/guide/service-design.md） ============
 
 // 一个 *.service unit 的观测快照

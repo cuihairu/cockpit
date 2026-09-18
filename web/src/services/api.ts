@@ -55,6 +55,7 @@ import type {
   ProxyStatus,
   CronJob,
   CronJobsResult,
+  SystemdTimer,
   ServiceActionName,
   ServiceUnitFile,
   ServiceUnitFileSaveResult,
@@ -824,6 +825,13 @@ class ApiService {
   // cockpit 名下任务列表 + 外部条目原文（只读）
   async getCronJobs(agentId: string): Promise<CronJobsResult> {
     return this.client.get<unknown, CronJobsResult>(`/agents/${encodeURIComponent(agentId)}/cron/jobs`)
+  }
+
+  // systemd timer 只读列表（cron-design.md M3）
+  async getCronTimers(agentId: string): Promise<{ timers: SystemdTimer[] }> {
+    return this.client.get<unknown, { timers: SystemdTimer[] }>(
+      `/agents/${encodeURIComponent(agentId)}/cron/timers`,
+    )
   }
 
   // 应用任务（写回时 agent 保证外部条目逐行不变）
