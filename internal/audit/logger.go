@@ -46,6 +46,8 @@ const (
 	ActionCronDelete = "cron_delete"
 	// systemd 服务管理（见 docs/guide/service-design.md）
 	ActionServiceAction = "service_action"
+	// 防漂移检测：手动登记基线「以当前为准」（见 docs/guide/drift-design.md M4）
+	ActionDriftRecord = "drift_record"
 )
 
 // ResourceStack Compose Stack 资源类型
@@ -88,6 +90,9 @@ const ResourceRecording = "recording"
 
 // ResourceServerBackup server 自身数据库备份资源类型（见 server-backup-design.md）
 const ResourceServerBackup = "server_backup"
+
+// ResourceDriftBaseline 漂移基线资源类型（手动登记以当前为准，drift-design M4）
+const ResourceDriftBaseline = "drift_baseline"
 
 // ResourceDNSRecord DNS 记录资源类型（见 dns-design.md）
 const ResourceDNSRecord = "dns_record"

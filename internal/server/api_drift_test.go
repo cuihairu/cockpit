@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/cuihairu/cockpit/internal/audit"
 )
 
 func TestDriftCheckForward(t *testing.T) {
@@ -156,5 +158,57 @@ func TestDriftDiffValidation(t *testing.T) {
 	s.handleAgentDriftAPI(rec, logsReq(http.MethodPost, "a2", "diff", `{"kind":"nginx","name":"ghost"}`), "a2/drift/diff")
 	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "no baseline") {
 		t.Fatalf("passthrough: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDriftRecordForwardAndAudit(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		if method != "drift.record" {
+			return nil, "unexpected method " + method
+		}
+		if params["kind"] != "nginx" || params["name"] != "legacy" {
+			return nil, "bad params"
+		}
+		return map[string]interface{}{"recorded": true, "sha256": strings.Repeat("a", 64)}, ""
+	})
+
+	body := `{"kind":"nginx","name":"legacy"}`
+	rec := httptest.NewRecorder()
+	s.handleAgentDriftAPI(rec, logsReq(http.MethodPost, "a1", "record", body), "a1/drift/record")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// 成功登记记审计（resourceID = kind/name，detail 记 agent）
+	logs, total, err := s.db.GetAuditLogs(0, 10, map[string]interface{}{
+		"action": audit.ActionDriftRecord, "resource": audit.ResourceDriftBaseline,
+	})
+	if err != nil || total != 1 || len(logs) != 1 {
+		t.Fatalf("drift_record audit missing: total=%d err=%v", total, err)
+	}
+	if logs[0].ResourceID != "nginx/legacy" || !strings.Contains(logs[0].Details, "a1") {
+		t.Fatalf("audit entry = %+v", logs[0])
+	}
+
+	// agent 报错 → 502 且不记审计
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		return nil, "no baseline for cron/cockpit"
+	})
+	rec = httptest.NewRecorder()
+	s.handleAgentDriftAPI(rec, logsReq(http.MethodPost, "a2", "record", `{"kind":"cron","name":"cockpit"}`), "a2/drift/record")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("passthrough code = %d", rec.Code)
+	}
+	_, total, err = s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": audit.ActionDriftRecord})
+	if err != nil || total != 1 {
+		t.Fatalf("failed record should not audit: total=%d err=%v", total, err)
+	}
+
+	// 校验失败 400 不达 agent
+	rec = httptest.NewRecorder()
+	s.handleAgentDriftAPI(rec, logsReq(http.MethodPost, "a1", "record", `{"kind":"docker","name":"x"}`), "a1/drift/record")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unknown kind") {
+		t.Fatalf("validation code = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
