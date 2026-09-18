@@ -16,7 +16,7 @@
 
 - journal 日志查看（logs provider 已覆盖 journalctl 查询）
 - timer / socket / mount 等 unit 类型（只做 `.service`）
-- mask / unmask、unit 文件编辑、daemon-reload（M2 候选）
+- unit 文件编辑、daemon-reload（M2 候选）
 - 非 systemd 平台：macOS launchd（M3 候选，见 D9 范围说明）；OpenRC / runit 不做
 
 定位：NAS 场景前置能力——服务启停与自启管理是主机运维的基本盘，模式与 cron 页同构，交付确定性高。
@@ -85,7 +85,10 @@ list-unit-files 补充未加载的安装项并提供自启态（enabled/disabled
 
 params：`{ "name": "nginx.service", "action": "restart" }`
 
-- **动作白名单**：start / stop / restart / reload / enable / disable（M2 再议 mask/unmask）
+- **动作白名单**：start / stop / restart / reload / enable / disable /
+  mask / unmask（M2 扩：mask 将 unit 链接到 /dev/null 彻底禁止启动——比
+  disable 更强的封禁，防误启与伪装服务；masked 态在列表 unitFileState
+  呈现，前端「屏蔽」Tag 已有渲染。注意 mask 不影响正在运行的服务）
 - **unit 名白名单**：正则 `^[A-Za-z0-9@._+-]+$` 且必须以 `.service` 结尾；
   排除 `/`、空格、`..` 等一切歧义字符。前端传参自动补 `.service` 后缀
 - 执行 `systemctl <action> <name>`，超时 30s（restart 数据库类服务可能慢）
@@ -94,7 +97,7 @@ params：`{ "name": "nginx.service", "action": "restart" }`
 
 ## D4 安全边界
 
-1. 只暴露 systemctl 六个动词，无任意命令执行面
+1. 只暴露 systemctl 八个动词，无任意命令执行面
 2. unit 名正则 + `.service` 后缀强制，双端同规则校验（server 拒一次、agent 拒一次）
 3. Commander 模式 argv 直传，参数不经过 shell，无注入可能
 4. 审计：action 类操作记 `service_action`（details 带 action 动词与 agent ID）；
@@ -243,7 +246,8 @@ capability 由 `systemd` 更名为 `service`，后端差异放 metadata：
 1. **Windows 服务名白名单**（与 systemd 正则分开，`validateWindowsServiceUnit`）：
    正则 `^[A-Za-z0-9_.\- ]{1,256}$` 且不得为 `.` / `..`（SCM 注册表键名字符集，
    不含 `/` `\` 与通配符）。服务名与 DisplayName 是两回事，操作一律按服务名
-2. 动作白名单：systemd 6 动词；Windows 5 动词（无 reload），provider 内各自校验
+2. 动作白名单：systemd 8 动词（M2 扩 mask/unmask）；Windows 与 launchd 各
+   5 动词（无 reload/mask），provider 内各自校验
 3. **server 端校验放宽为双规则并集**：`{unit}` 满足 systemd 正则 **或** Windows
    正则其一即放行转发。server 不解析 agent capability 做精确匹配——并集仍是
    纯白名单（无 `/` `\` `..` 空字节），真正的后端专属严格校验仍在 agent 侧
