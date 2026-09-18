@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -12,9 +13,15 @@ import (
 // 挂在 /api/agents/{id}/drift/... 下（serveAPI 的 /agents/ 分支转发到这里）：
 //
 //	POST /api/agents/{id}/drift/check  全量比对（nginx/cron/stack 基线 vs 当前）
+//	POST /api/agents/{id}/drift/diff   单对象两侧全文（M3，{kind, name}）
 //
-// server 纯转发不落库（D11）；浏览类操作不记审计；check 无用户输入参数，
-// 校验面为零；agent 侧错误原样透传。
+// server 纯转发不落库（D11）；浏览类操作不记审计；agent 侧错误原样透传。
+
+// driftDiffKinds drift.diff 允许的对象类型（与 agent 侧白名单一致）
+var driftDiffKinds = map[string]bool{"nginx": true, "cron": true, "stack": true}
+
+// driftDiffMaxNameLen diff 目标 name 长度上限（与 agent 侧同规则，双端防御）
+const driftDiffMaxNameLen = 128
 
 // handleDriftConfig 全局巡检配置：GET 返回当前间隔与范围；PUT 校验后写入
 // Setting（见 drift-design.md M2/D17）。路径全局（/api/drift/config），
@@ -75,9 +82,44 @@ func (s *Server) handleAgentDriftAPI(w http.ResponseWriter, r *http.Request, res
 			return
 		}
 		s.forwardDriftRPC(w, r, agentID, "drift.check", nil)
+	case sub == "diff":
+		s.handleDriftDiff(w, r, agentID)
 	default:
 		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 	}
+}
+
+// handleDriftDiff POST /drift/diff：{kind, name} 与 agent 同规则校验后转发
+// （M3/D21）。浏览性质不审计，与 check 一致。
+func (s *Server) handleDriftDiff(w http.ResponseWriter, r *http.Request, agentID string) {
+	if r.Method != http.MethodPost {
+		s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Kind string `json:"kind"`
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if !driftDiffKinds[req.Kind] {
+		s.handleError(w, r, http.StatusBadRequest, "unknown kind (want nginx, cron or stack)")
+		return
+	}
+	if req.Name == "" {
+		s.handleError(w, r, http.StatusBadRequest, "name required")
+		return
+	}
+	if len(req.Name) > driftDiffMaxNameLen {
+		s.handleError(w, r, http.StatusBadRequest, fmt.Sprintf("name too long (max %d bytes)", driftDiffMaxNameLen))
+		return
+	}
+	s.forwardDriftRPC(w, r, agentID, "drift.diff", map[string]interface{}{
+		"kind": req.Kind,
+		"name": req.Name,
+	})
 }
 
 // forwardDriftRPC 转发 RPC 并透传结果（与 forwardLogsRPC 同构）

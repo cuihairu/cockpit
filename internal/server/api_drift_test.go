@@ -82,3 +82,79 @@ func TestDriftErrorPassthrough(t *testing.T) {
 		t.Fatalf("code=%d body=%s, want 502 with agent error", rec.Code, rec.Body.String())
 	}
 }
+
+func TestDriftDiffForward(t *testing.T) {
+	s := newBackupTestServer(t)
+	var gotMethod string
+	var gotParams map[string]interface{}
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotMethod = method
+		gotParams = params
+		return map[string]interface{}{
+			"expected":            "# meta\nserver block a",
+			"current":             "# 被改\nserver block EVIL",
+			"baseline_updated_at": float64(1730000000),
+		}, ""
+	})
+
+	body := `{"kind":"nginx","name":"web"}`
+	rec := httptest.NewRecorder()
+	s.handleAgentDriftAPI(rec, logsReq(http.MethodPost, "a1", "diff", body), "a1/drift/diff")
+	if rec.Code != http.StatusOK || gotMethod != "drift.diff" {
+		t.Fatalf("code=%d method=%s body=%s", rec.Code, gotMethod, rec.Body.String())
+	}
+	if gotParams["kind"] != "nginx" || gotParams["name"] != "web" {
+		t.Fatalf("params = %+v", gotParams)
+	}
+	var resp struct {
+		Expected string `json:"expected"`
+		Current  string `json:"current"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Expected == "" || resp.Current == "" {
+		t.Fatalf("resp = %+v", resp)
+	}
+}
+
+func TestDriftDiffValidation(t *testing.T) {
+	s := newBackupTestServer(t)
+	dispatched := 0
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		dispatched++
+		return map[string]interface{}{}, ""
+	})
+
+	cases := []struct {
+		desc, body, wantMsg string
+		method              string
+		wantCode            int
+	}{
+		{"unknown kind", `{"kind":"docker","name":"x"}`, "unknown kind", http.MethodPost, http.StatusBadRequest},
+		{"empty name", `{"kind":"nginx","name":""}`, "name required", http.MethodPost, http.StatusBadRequest},
+		{"long name", `{"kind":"nginx","name":"` + strings.Repeat("n", 129) + `"}`, "name too long", http.MethodPost, http.StatusBadRequest},
+		{"bad body", `{invalid`, "Invalid request body", http.MethodPost, http.StatusBadRequest},
+		{"GET not allowed", `{"kind":"nginx","name":"web"}`, "method not allowed", http.MethodGet, http.StatusMethodNotAllowed},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		s.handleAgentDriftAPI(rec, logsReq(tc.method, "a1", "diff", tc.body), "a1/drift/diff")
+		if rec.Code != tc.wantCode || !strings.Contains(rec.Body.String(), tc.wantMsg) {
+			t.Errorf("%s: code=%d body=%s, want %d with %q", tc.desc, rec.Code, rec.Body.String(), tc.wantCode, tc.wantMsg)
+		}
+	}
+	if dispatched != 0 {
+		t.Errorf("validation failures must not reach agent, dispatched = %d", dispatched)
+	}
+
+	// agent 报错透传（无基线 / 旧基线无原文等）
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		return nil, "no baseline for nginx/ghost (save it from the panel once)"
+	})
+	rec := httptest.NewRecorder()
+	s.handleAgentDriftAPI(rec, logsReq(http.MethodPost, "a2", "diff", `{"kind":"nginx","name":"ghost"}`), "a2/drift/diff")
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "no baseline") {
+		t.Fatalf("passthrough: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
