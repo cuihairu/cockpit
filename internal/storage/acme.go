@@ -33,7 +33,7 @@ type AcmeCert struct {
 	ExpiresAt       time.Time `gorm:"index" json:"expiresAt"`
 	RenewBeforeDays int       `gorm:"default:30" json:"renewBeforeDays"` // 7~90
 	AutoRenew       bool      `json:"autoRenew"`
-	LastRenewAt     int64     `json:"lastRenewAt"` // 最近一次签发尝试（含失败）Unix 秒，0=从未——巡检失败节流依据（D8）
+	LastRenewAt     int64     `json:"lastRenewAt"`               // 最近一次签发尝试（含失败）Unix 秒，0=从未——巡检失败节流依据（D8）
 	LastStatus      string    `gorm:"size:16" json:"lastStatus"` // never / ok / failed
 	LastError       string    `gorm:"size:512" json:"lastError"`
 	CheckedAt       int64     `json:"checkedAt"` // 最近一次巡检看到它的时间，0=从未
