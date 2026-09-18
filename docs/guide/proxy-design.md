@@ -154,7 +154,7 @@ D1 承诺的后端扩展。**M2 仅 Traefik，且只走 file provider 动态目�
 | # | 决策 | 内容 | 理由 / 备注 |
 |---|------|------|------------|
 | D11 | 后端范围 | 仅 Traefik file provider；渲染/校验/应用按 backend 抽象（`SiteRenderer`/`SiteApplier`），RPC 方法名 `proxy.*` 不变，provider 持有 backend 实现分发 | 方法表不动 server 与 web 路由；nginx 行为零变化 |
-| D12 | 目录探测与 capability | 动态目录取值：静态配置 `/etc/traefik/traefik.yml`（或 `.yaml`）解析 `providers.file.directory` → 缺省 `/etc/traefik/dynamic`；capability `traefik-proxy` = 目录存在且可写。**不依赖 LookPath("traefik")** | Traefik 大多容器化跑，宿主机常无二进制；目录（含 docker 挂载的宿主侧路径）才是事实源；版本探测失败仅置 version 空 |
+| D12 | 目录探测与 capability | 动态目录取值：`COCKPIT_TRAEFIK_DIR` 覆盖 → 静态配置 `/etc/traefik/traefik.yml`（或 `.yaml`）解析 `providers.file.directory` → 缺省 `/etc/traefik/dynamic`；capability `traefik-proxy` = 目录存在（目录入 metadata 供 provider 初始化）。**不依赖 LookPath("traefik")** | Traefik 大多容器化跑，宿主机常无二进制；目录（含 docker 挂载的宿主侧路径）才是事实源；env 覆盖与 `COCKPIT_NGINX_CONF_DIR` 同惯例；版本探测失败仅置 version 空 |
 | D13 | 校验与应用 | 无 `nginx -t`/reload 等价物：渲染后 `yaml.Unmarshal` 语法自检 + router→service 引用一致性校验，**校验失败不落盘**；file provider 热加载（watch），写坏文件由 Traefik 拒载该文件、其余片段照常（局部隔离） | 比 nginx 弱在无全局预检（坏文件只影响本站点）、强在无 reload 失败回滚分支；apply 流程退化为 渲染→自检→原子写 |
 | D14 | 渲染映射 | 同站点模型（D7 字段不变）：`serverNames` → router rule 的 `Host(...)` 多值；`upstream` → service `loadBalancer.servers[].url`；https → 443 router `tls=true` + 文件级 `tls.certificates`（certFile/keyFile 路径引用，ACME 推送文件直引）+ 80 router 挂 `redirectScheme` 中间件永久跳转；**`websocket` 字段 no-op**（Traefik 原生透传 WS，字段保留兼容面板）；**`extra` 不支持**——非空时校验直接拒绝 | 跳转按站点双 router 而非静态 entrypoint 配置（不碰静态配置=零接触）；拒绝 extra 避免渲染任意 YAML 片段的注入面 |
 | D15 | 元数据与 drift | meta 首行 YAML 注释 `# cockpit:meta {json}` 与 nginx 同构；drift kind 白名单扩 `traefik`（`dynamicDir/cockpit-site-<name>.yml`，读文件即 current），drift 页 KIND_LABEL 加标签 | BaselineRecorder/diff 链路通用，仅扩 snapshot 分支与白名单 |
@@ -195,14 +195,23 @@ tls:
 router/service 命名 `cockpit-<site>`（冲突域在 Traefik 全局命名空间，
 加前缀避免与用户动态文件撞名）。
 
-### M2 清单（未实施）
+### M2 清单（2026-09-18 实施）
 
-- [ ] agent：`traefik_provider.go`（探测/渲染/yaml 自检/原子写）+ backend 抽象
-      + capability 追加；drift 白名单扩 traefik
-- [ ] server：零改动（验证现有 5 端点对 traefik agent 透传）
-- [ ] web：状态卡 backend 显示 + extra 禁用
-- [ ] 测试：渲染模板各形态（http/https+跳转/证书引用）、yaml 自检失败不落盘、
-      meta roundtrip、extra 拒绝、目录探测（自定义/缺省/不可写）、drift 分支
+- [x] agent：`traefik_provider.go`（探测/渲染/yaml 自检/原子写）+ capability
+      追加；drift 白名单扩 traefik。实施偏差：D11 原文「RPC 方法名 `proxy.*`
+      不变」与代码现实不符——M1 的 method 前缀实际是 `nginx.*`，实施按现实
+      走 `traefik.*`，server `proxyRPCPrefix` 按 agent capability 分流
+      （nginx 优先，旧 agent 回退 `nginx.*`）；D11 的意图（server 转发不
+      感知后端差异）不受影响
+- [x] server：转发逻辑零改动，仅 method 前缀按 capability 分流 + drift kind
+      白名单加 traefik（现有 5 端点对 traefik agent 透传有测试覆盖）
+- [x] web：状态卡「后端」行 + 生效方式热加载文案 + 片段后缀/提示语按后端
+      切换 + extra 禁用；drift 页 KIND_LABEL/COLOR 加 traefik
+- [x] 测试：渲染两形态（http / https+跳转+证书引用）、yaml 自检拒绝
+      （引用缺失 service / 无 http 段）、meta roundtrip、extra 拒绝不落盘、
+      生命周期（apply→get→delete + 基线登记/清除）、目录探测（env 覆盖/
+      静态配置解析）、drift 四态+diff+目标校验、server 前缀分流（仅 nginx/
+      仅 traefik/双后端/旧 agent 回退 + traefik 审计）
 - [ ] 真机验收（列入 todo.md）：Traefik 容器挂载宿主目录实测热加载与
       证书文件引用
 
