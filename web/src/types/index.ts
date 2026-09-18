@@ -489,7 +489,7 @@ export interface LogsQueryResult {
 
 // 防漂移检测（见 docs/guide/drift-design.md）
 export interface DriftCheckItem {
-  kind: 'nginx' | 'cron' | 'stack'
+  kind: 'nginx' | 'traefik' | 'cron' | 'stack'
   name: string
   status: 'ok' | 'drifted' | 'missing' | 'no_baseline' | 'error' | 'none'
   baseline_sha: string
@@ -669,11 +669,12 @@ export interface FileSearchResult {
 
 // proxy.status：nginx 安装状态概览
 export interface ProxyStatus {
+  backend?: 'nginx' | 'traefik' // M2 起区分后端；旧 agent 无此字段视为 nginx
   installed: boolean
   version: string
   confDir: string
   siteCount: number
-  reloadMode: 'systemctl' | 'signal'
+  reloadMode: 'systemctl' | 'signal' | 'hot'
 }
 
 // 一个反代站点的声明（与 agent 侧 ProxySite 同构）

@@ -38,8 +38,9 @@ const UPSTREAM_PATTERN = /^[A-Za-z0-9.:\-]{1,253}$/
 const schemeTag = (scheme: string) =>
   scheme === 'https' ? <Tag color="green">HTTPS</Tag> : <Tag color="blue">HTTP</Tag>
 
-// 反向代理管理：cockpit 只下发自己名下的 cockpit-site-*.conf 片段，
-// 用户已有 Nginx 配置零接触（见 docs/guide/proxy-design.md）。
+// 反向代理管理：cockpit 只下发自己名下的片段（nginx conf.d 的
+// cockpit-site-*.conf / traefik 动态目录的 cockpit-site-*.yml，M2），
+// 用户已有配置零接触（见 docs/guide/proxy-design.md）。
 // 状态以 Agent 侧片段文件为唯一事实源，server 纯转发不落库。
 const Proxy = () => {
   const queryClient = useQueryClient()
@@ -52,19 +53,24 @@ const Proxy = () => {
 
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => api.getAgents() })
 
-  // 只有带 nginx-proxy capability 的 agent 可选（其余主机没有 nginx 可管理）
+  // 带 nginx-proxy 或 traefik-proxy capability 的 agent 可选（M2 扩 Traefik）
   const agentOptions = useMemo(
     () =>
       (agents ?? []).map((a) => {
-        const hasNginx = (a.capabilities ?? []).some((c) => c.type === 'nginx-proxy')
-        const version = hasNginx
-          ? String((a.capabilities ?? []).find((c) => c.type === 'nginx-proxy')?.metadata?.version ?? '')
-          : ''
+        const caps = a.capabilities ?? []
+        const nginxCap = caps.find((c) => c.type === 'nginx-proxy')
+        const traefikCap = caps.find((c) => c.type === 'traefik-proxy')
+        const version = nginxCap
+          ? String(nginxCap.metadata?.version ?? '')
+          : traefikCap
+            ? String(traefikCap.metadata?.version ?? '')
+            : ''
+        const backendName = nginxCap ? 'Nginx' : traefikCap ? 'Traefik' : ''
         return {
           value: a.id,
-          disabled: !hasNginx || a.status === 'offline',
-          label: `${a.hostname || a.id}${version ? `（${version}）` : ''}${
-            a.status === 'offline' ? '（离线）' : !hasNginx ? '（未检测到 Nginx）' : ''
+          disabled: caps.length === 0 || a.status === 'offline',
+          label: `${a.hostname || a.id}${backendName ? `（${backendName}${version ? ` ${version}` : ''}）` : ''}${
+            a.status === 'offline' ? '（离线）' : !backendName ? '（未检测到 Nginx/Traefik）' : ''
           }`,
         }
       }),
@@ -74,7 +80,7 @@ const Proxy = () => {
   const sitesKey = ['proxy-sites', selectedAgent]
   const statusKey = ['proxy-status', selectedAgent]
 
-  const { data: status, isLoading: statusLoading } = useQuery({
+  const { data: status } = useQuery({
     queryKey: statusKey,
     queryFn: () => api.getProxyStatus(selectedAgent!),
     enabled: !!selectedAgent,
@@ -93,6 +99,18 @@ const Proxy = () => {
 
   const [form] = Form.useForm()
   const formScheme = Form.useWatch('scheme', form)
+
+  // 后端差异（M2 D16）：status.backend 缺省按 nginx（旧 agent 兼容）；
+  // traefik 热加载无 reload 命令，extra 直通口不支持
+  const isTraefik = status?.backend === 'traefik'
+  const backendName = isTraefik ? 'Traefik' : 'Nginx'
+  const fragmentGlob = isTraefik ? 'cockpit-site-*.yml' : 'cockpit-site-*.conf'
+  const reloadText =
+    status?.reloadMode === 'systemctl'
+      ? 'systemctl'
+      : status?.reloadMode === 'hot'
+        ? '热加载（file provider）'
+        : 'nginx -s reload'
 
   // ---- 编辑 Modal ----
 
@@ -202,7 +220,7 @@ const Proxy = () => {
           </Button>
           <Popconfirm
             title="删除站点"
-            description={`将从 Nginx 移除 ${record.name} 并 reload，确认？`}
+            description={`将从 ${backendName} 移除 ${record.name}，确认？`}
             okText="删除"
             okButtonProps={{ danger: true }}
             onConfirm={() => deleteSite(record.name)}
@@ -229,7 +247,7 @@ const Proxy = () => {
               options={agentOptions}
               value={selectedAgent}
               onChange={(v) => setSelectedAgent(v)}
-              placeholder="选择 Nginx 所在主机"
+              placeholder="选择网关所在主机"
               showSearch
               optionFilterProp="label"
             />
@@ -245,7 +263,7 @@ const Proxy = () => {
         }
       >
         {!selectedAgent ? (
-          <Empty description="选择一台安装了 Nginx 的主机开始管理" />
+          <Empty description="选择一台安装了 Nginx 或 Traefik 的主机开始管理" />
         ) : (
           <>
             {status && (
@@ -253,19 +271,23 @@ const Proxy = () => {
                 size="small"
                 column={{ xs: 1, sm: 2, md: 4 }}
                 style={{ marginBottom: 16 }}
-                loading={statusLoading}
                 items={[
                   {
+                    key: 'backend',
+                    label: '后端',
+                    children: <Tag color={isTraefik ? 'cyan' : 'green'}>{backendName}</Tag>,
+                  },
+                  {
                     key: 'version',
-                    label: 'Nginx 版本',
+                    label: '版本',
                     children: status.installed ? status.version || '已安装' : '未检测到',
                   },
                   { key: 'confDir', label: '配置目录', children: <Typography.Text code>{status.confDir}</Typography.Text> },
                   { key: 'siteCount', label: '站点数', children: status.siteCount },
                   {
                     key: 'reloadMode',
-                    label: 'reload 方式',
-                    children: status.reloadMode === 'systemctl' ? 'systemctl' : 'nginx -s reload',
+                    label: '生效方式',
+                    children: reloadText,
                   },
                 ]}
               />
@@ -274,7 +296,11 @@ const Proxy = () => {
               type="info"
               showIcon
               style={{ marginBottom: 16 }}
-              message={`只管理 ${status?.confDir ?? '配置目录'} 下的 cockpit-site-*.conf 片段，已有配置零接触；应用前先 nginx -t 校验，失败不落盘，reload 失败自动回滚。`}
+              message={
+                isTraefik
+                  ? `只管理 ${status?.confDir ?? '配置目录'} 下的 ${fragmentGlob} 片段，已有配置零接触；片段落盘后由 file provider 热加载生效，渲染前经 YAML 自检，失败不落盘。`
+                  : `只管理 ${status?.confDir ?? '配置目录'} 下的 ${fragmentGlob} 片段，已有配置零接触；应用前先 nginx -t 校验，失败不落盘，reload 失败自动回滚。`
+              }
             />
             <Table<ProxySite>
               rowKey="name"
@@ -399,9 +425,19 @@ const Proxy = () => {
           <Form.Item
             name="extra"
             label="高级指令"
-            tooltip="原样插入 server 块内，如 client_max_body_size 50m；语法由 nginx -t 校验兜底"
+            tooltip={
+              isTraefik
+                ? 'Traefik 后端不支持原生指令直通（避免渲染任意 YAML 片段）'
+                : '原样插入 server 块内，如 client_max_body_size 50m；语法由 nginx -t 校验兜底'
+            }
+            extra={isTraefik ? 'Traefik 后端不支持高级指令，留空即可' : undefined}
           >
-            <Input.TextArea rows={4} styles={{ input: { fontFamily: 'monospace' } }} placeholder="client_max_body_size 50m;" />
+            <Input.TextArea
+              rows={4}
+              disabled={isTraefik}
+              styles={{ textarea: { fontFamily: 'monospace' } }}
+              placeholder="client_max_body_size 50m;"
+            />
           </Form.Item>
         </Form>
       </Modal>
