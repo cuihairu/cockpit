@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
@@ -23,6 +23,7 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
+  EyeOutlined,
   FileOutlined,
   FolderAddOutlined,
   FolderOutlined,
@@ -40,6 +41,27 @@ import { getApiErrorMessage } from '@/utils/apiError'
 
 const EDIT_MAX_BYTES = 1024 * 1024 // 编辑器只允许 ≤1MB 文本（与 server 校验一致）
 const UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+// 图片预览（file-manager-design.md M2 D14）：白名单扩展名 + 20MB 上限
+const PREVIEW_MAX_BYTES = 20 * 1024 * 1024
+const PREVIEW_CHUNK_BYTES = 1024 * 1024 // agent file.read 单块上限
+const IMAGE_MIME: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  avif: 'image/avif',
+}
+
+const imageExt = (name: string): string | null => {
+  const idx = name.lastIndexOf('.')
+  if (idx < 0) return null
+  const ext = name.slice(idx + 1).toLowerCase()
+  return IMAGE_MIME[ext] ? ext : null
+}
 
 const formatBytes = (n: number): string => {
   if (n < 1024) return `${n} B`
@@ -249,6 +271,73 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
     }
   }
 
+  // ---- 图片预览（file-manager-design.md M2 D14）----
+  const [previewTarget, setPreviewTarget] = useState<FileEntry | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewDims, setPreviewDims] = useState<{ w: number; h: number } | null>(null)
+  const previewTokenRef = useRef(0)
+
+  const closePreview = () => {
+    previewTokenRef.current += 1 // 中止进行中的分块拉取
+    setPreviewTarget(null)
+    setPreviewError(null)
+    setPreviewDims(null)
+    setPreviewUrl((old) => {
+      if (old) URL.revokeObjectURL(old)
+      return null
+    })
+  }
+  // 组件卸载时兜底回收
+  useEffect(() => () => closePreview(), [])
+
+  // 分块拉取图片拼装 Blob（offset 按已读字节数推进；size 是总大小不是游标）
+  const openPreview = async (f: FileEntry) => {
+    const token = ++previewTokenRef.current
+    const path = joinPath(cwd, f.name)
+    const ext = imageExt(f.name)
+    const mime = ext ? IMAGE_MIME[ext] : 'application/octet-stream'
+    setPreviewTarget(f)
+    setPreviewError(null)
+    setPreviewDims(null)
+    setPreviewUrl((old) => {
+      if (old) URL.revokeObjectURL(old)
+      return null
+    })
+    setPreviewLoading(true)
+    try {
+      const parts: Array<Uint8Array<ArrayBuffer>> = []
+      let offset = 0
+      let total = 0
+      for (;;) {
+        const chunk = await api.readFileChunk(agentId, path, offset, PREVIEW_CHUNK_BYTES)
+        if (token !== previewTokenRef.current) return // Modal 已关闭/切换
+        total = chunk.size
+        if (total > PREVIEW_MAX_BYTES) {
+          setPreviewError(`文件 ${formatBytes(total)}，超过 20 MB 不支持在线预览，请下载后查看`)
+          return
+        }
+        const bytes = Uint8Array.from(atob(chunk.data), (c) => c.charCodeAt(0))
+        parts.push(bytes)
+        offset += bytes.length
+        if (chunk.eof) break
+      }
+      const url = URL.createObjectURL(new Blob(parts, { type: mime }))
+      if (token !== previewTokenRef.current) {
+        URL.revokeObjectURL(url)
+        return
+      }
+      setPreviewUrl(url)
+    } catch (err) {
+      if (token === previewTokenRef.current) {
+        setPreviewError(getApiErrorMessage(err, '读取文件失败'))
+      }
+    } finally {
+      if (token === previewTokenRef.current) setPreviewLoading(false)
+    }
+  }
+
   // 上传：读 File → base64 → write（truncate），>10MB 前端拒绝
   const uploadFiles = async (files: UploadFile[]) => {
     for (const f of files) {
@@ -325,8 +414,19 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
       render: (_, f) => {
         const path = joinPath(cwd, f.name)
         const editable = !f.isDir && !f.isSymlink && f.size <= EDIT_MAX_BYTES
+        const previewable = !f.isDir && !f.isSymlink && !!imageExt(f.name)
         return (
           <Space size={0}>
+            {previewable && (
+              <Button
+                type="link"
+                size="small"
+                icon={<EyeOutlined />}
+                title="预览图片"
+                loading={previewLoading && previewTarget?.name === f.name}
+                onClick={() => void openPreview(f)}
+              />
+            )}
             {!f.isDir && !f.isSymlink && (
               <Button
                 type="link"
@@ -536,6 +636,65 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
             overflowX: 'auto',
           }}
         />
+      </Modal>
+
+      {/* 图片预览 Modal（D14）：<img> 渲染（SVG secure static 模式无脚本） */}
+      <Modal
+        title={previewTarget?.name ?? ''}
+        open={!!previewTarget}
+        onCancel={closePreview}
+        footer={
+          <Space size={8}>
+            {previewDims && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {previewDims.w}×{previewDims.h} · {previewTarget ? formatBytes(previewTarget.size) : ''}
+              </Typography.Text>
+            )}
+            {previewTarget && (
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                loading={downloading === joinPath(cwd, previewTarget.name)}
+                onClick={() => download(joinPath(cwd, previewTarget.name))}
+              >
+                下载
+              </Button>
+            )}
+          </Space>
+        }
+        width={760}
+        destroyOnClose
+      >
+        {previewError ? (
+          <Alert type="warning" showIcon message={previewError} />
+        ) : previewLoading || !previewUrl ? (
+          <div style={{ textAlign: 'center', padding: 48 }}>
+            <Spin tip="加载中…" />
+          </div>
+        ) : (
+          <div
+            style={{
+              textAlign: 'center',
+              // 透明底纹：透明 PNG/SVG 可见
+              background:
+                'repeating-conic-gradient(rgba(128,128,128,0.18) 0% 25%, transparent 0% 50%) 50% / 16px 16px',
+              borderRadius: 4,
+              padding: 8,
+            }}
+          >
+            <img
+              src={previewUrl}
+              alt={previewTarget?.name ?? ''}
+              style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain' }}
+              onLoad={(e) =>
+                setPreviewDims({
+                  w: e.currentTarget.naturalWidth,
+                  h: e.currentTarget.naturalHeight,
+                })
+              }
+            />
+          </div>
+        )}
       </Modal>
 
       <Modal
