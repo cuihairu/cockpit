@@ -287,8 +287,11 @@ func (p *NasProvider) snapshotFromTargets(ctx context.Context, snap *NasSnapshot
 			pools, mounts, shares, err = dsmSnapshot(ctx, t)
 		case "truenas":
 			pools, mounts, shares, err = truenasSnapshot(ctx, t)
+		case "omv":
+			// OMV 无统一存储池概念，只产出挂载与共享（nas-design.md D3d）
+			mounts, shares, err = omvSnapshot(ctx, t)
 		default:
-			continue // omv 未实现，忽略
+			continue
 		}
 		if err != nil {
 			log.Printf("nas scan: %v", err) // 错误消息只含 target 名与错误码，无凭据
