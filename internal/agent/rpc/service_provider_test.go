@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,9 @@ type mockSystemctl struct {
 	isRunningErr error
 	actionErr    error
 	actions      []string
+	// unit 文件读写（D13）：show -p FragmentPath 与 cat 的预置输出
+	fragmentPath string
+	catOut       string
 }
 
 func (m *mockSystemctl) run(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
@@ -53,6 +57,13 @@ func (m *mockSystemctl) run(_ context.Context, name string, args ...string) ([]b
 			return nil, []byte("Failed to reload daemon: " + m.actionErr.Error()), m.actionErr
 		}
 		return nil, nil, nil
+	case "show":
+		if len(args) < 2 || args[1] != "-p" {
+			return nil, nil, fmt.Errorf("unexpected show args: %v", args)
+		}
+		return []byte(m.fragmentPath + "\n"), nil, nil
+	case "cat":
+		return []byte(m.catOut), nil, nil
 	}
 	return nil, nil, fmt.Errorf("unexpected systemctl subcommand: %v", args)
 }
@@ -225,6 +236,135 @@ func TestServiceDaemonReload(t *testing.T) {
 	m.actionErr = fmt.Errorf("exit status 1")
 	if _, err := p.DaemonReload(); err == nil || !strings.Contains(err.Error(), "daemon-reload") {
 		t.Errorf("error not passed through: %v", err)
+	}
+}
+
+func TestServiceUnitFileIO(t *testing.T) {
+	// D13：unit 文件读写。etcSystemdDir 注入临时目录（CI 无 /etc 写权限），
+	// FragmentPath 由 mock 控制指向真实临时文件，保存走真实磁盘 IO
+	tmp := t.TempDir()
+	etcDir := tmp + "/etc/systemd/system"
+	libDir := tmp + "/usr/lib/systemd/system"
+	if err := os.MkdirAll(etcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldEtc := etcSystemdDir
+	// etcSystemdDir 覆写经 t.Cleanup 恢复，panic 也不会泄漏到其他测试；
+	// 测试不得触碰真实 /etc
+	t.Cleanup(func() { etcSystemdDir = oldEtc })
+
+	t.Run("read", func(t *testing.T) {
+		m := &mockSystemctl{fragmentPath: libDir + "/a.service", catOut: "[Unit]\nDescription=A\n"}
+		p := NewServiceProvider(m.run)
+		res, err := p.UnitFile("a.service")
+		if err != nil {
+			t.Fatalf("UnitFile: %v", err)
+		}
+		got := res.(map[string]interface{})
+		if got["fragmentPath"] != libDir+"/a.service" || got["content"] != "[Unit]\nDescription=A\n" {
+			t.Errorf("UnitFile = %+v", got)
+		}
+		// 坏名与未安装
+		if _, err := p.UnitFile("../etc/passwd"); err == nil {
+			t.Error("bad name should fail")
+		}
+		m2 := &mockSystemctl{fragmentPath: ""}
+		p2 := NewServiceProvider(m2.run)
+		if _, err := p2.UnitFile("ghost.service"); err == nil {
+			t.Error("missing fragment should fail")
+		}
+	})
+
+	t.Run("save copies package-owned unit to etc override", func(t *testing.T) {
+		etcSystemdDir = etcDir
+		libUnit := libDir + "/b.service"
+		if err := os.WriteFile(libUnit, []byte("[Unit]\nDescription=B\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		m := &mockSystemctl{fragmentPath: libUnit}
+		p := NewServiceProvider(m.run)
+
+		res, err := p.SaveUnitFile("b.service", "[Unit]\nDescription=B2\n")
+		if err != nil {
+			t.Fatalf("SaveUnitFile: %v", err)
+		}
+		got := res.(map[string]interface{})
+		wantTarget := etcDir + "/b.service"
+		if got["path"] != wantTarget || got["reloaded"] != true {
+			t.Errorf("save result = %+v", got)
+		}
+		data, err := os.ReadFile(wantTarget)
+		if err != nil || string(data) != "[Unit]\nDescription=B2\n" {
+			t.Errorf("override content = %q err = %v", data, err)
+		}
+		// 保存捆绑 daemon-reload
+		m.mu.Lock()
+		last := m.actions[len(m.actions)-1]
+		m.mu.Unlock()
+		if last != "daemon-reload" {
+			t.Errorf("last action = %q, want daemon-reload", last)
+		}
+	})
+
+	t.Run("save edits etc unit in place", func(t *testing.T) {
+		etcSystemdDir = etcDir
+		etcUnit := etcDir + "/c.service"
+		if err := os.WriteFile(etcUnit, []byte("[Unit]\nDescription=C\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		m := &mockSystemctl{fragmentPath: etcUnit}
+		p := NewServiceProvider(m.run)
+		if _, err := p.SaveUnitFile("c.service", "[Unit]\nDescription=C2\n"); err != nil {
+			t.Fatalf("SaveUnitFile: %v", err)
+		}
+		data, _ := os.ReadFile(etcUnit)
+		if string(data) != "[Unit]\nDescription=C2\n" {
+			t.Errorf("content = %q", data)
+		}
+	})
+
+	t.Run("save rejects bad name and oversize", func(t *testing.T) {
+		etcSystemdDir = etcDir
+		m := &mockSystemctl{fragmentPath: etcDir + "/d.service"}
+		p := NewServiceProvider(m.run)
+		if _, err := p.SaveUnitFile("../x", "data"); err == nil {
+			t.Error("bad name should fail")
+		}
+		if _, err := p.SaveUnitFile("d.service", strings.Repeat("x", unitFileContentLimit+1)); err == nil {
+			t.Error("oversize content should fail")
+		}
+	})
+}
+
+func TestAtomicWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	target := dir + "/unit.file"
+	if err := atomicWriteFile(target, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("atomicWriteFile: %v", err)
+	}
+	data, _ := os.ReadFile(target)
+	if string(data) != "hello" {
+		t.Errorf("content = %q", data)
+	}
+	fi, _ := os.Stat(target)
+	if fi.Mode().Perm() != 0o644 {
+		t.Errorf("perm = %v", fi.Mode().Perm())
+	}
+	// 无临时残留
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("leftover temp files: %d entries", len(entries))
+	}
+	// 覆盖写
+	if err := atomicWriteFile(target, []byte("world"), 0o644); err != nil {
+		t.Fatalf("overwrite: %v", err)
+	}
+	data, _ = os.ReadFile(target)
+	if string(data) != "world" {
+		t.Errorf("content = %q", data)
 	}
 }
 

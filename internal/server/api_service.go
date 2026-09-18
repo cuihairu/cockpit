@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -17,6 +19,8 @@ import (
 //	GET  /api/agents/{id}/services/status          概览（浏览，不审计）
 //	GET  /api/agents/{id}/services                 服务列表（浏览，不审计）
 //	POST /api/agents/{id}/services/daemon-reload   刷新 manager 配置（审计 service_action，D12）
+//	GET  /api/agents/{id}/services/{unit}/file     unit 文件有效视图（浏览，不审计，D13）
+//	PUT  /api/agents/{id}/services/{unit}/file     保存 unit 文件（审计 service_action，D13）
 //	POST /api/agents/{id}/services/{unit}/{action} 执行动作（审计 service_action）
 //
 // server 纯转发不落库（cron D9 同款纪律）：systemd 为唯一事实源。unit 名与
@@ -85,6 +89,12 @@ func (s *Server) handleAgentServiceAPI(w http.ResponseWriter, r *http.Request, r
 		// systemd manager 配置刷新（D12）：全局操作不针对 unit，sub 只有一段，
 		// 在两段 unit/action 解析之前特判（unit 动作路由恒两段，无歧义）
 		s.forwardServiceRPC(w, r, agentID, "service.daemon-reload", nil, "daemon-reload", "daemon-reload")
+	case strings.HasSuffix(sub, "/file") && r.Method == http.MethodGet:
+		// unit 文件有效视图（D13，浏览不审计）；GET 与 unit 动作的 POST 不重叠
+		s.handleUnitFile(w, r, agentID, sub, false)
+	case strings.HasSuffix(sub, "/file") && r.Method == http.MethodPut:
+		// unit 文件保存（D13，审计 details.action=unitfile-save）
+		s.handleUnitFile(w, r, agentID, sub, true)
 	case sub != "" && r.Method == http.MethodPost:
 		parts := strings.Split(sub, "/")
 		if len(parts) != 2 {
@@ -101,6 +111,48 @@ func (s *Server) handleAgentServiceAPI(w http.ResponseWriter, r *http.Request, r
 	default:
 		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 	}
+}
+
+// unitFileBodyLimit 保存内容上限（与 agent 侧 unitFileContentLimit 同值，双端防御）
+const unitFileBodyLimit = 256 << 10
+
+// handleUnitFile 分发 GET/PUT /{unit}/file（D13）
+func (s *Server) handleUnitFile(w http.ResponseWriter, r *http.Request, agentID, sub string, saving bool) {
+	unit := strings.TrimSuffix(sub, "/file")
+	// 仅允许恰好两段（{unit}/file），多余段即 404
+	if unit == "" || strings.Contains(unit, "/") {
+		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
+		return
+	}
+	if err := validateServiceUnitName(unit); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !saving {
+		s.forwardServiceRPC(w, r, agentID, "service.unitfile",
+			map[string]interface{}{"name": unit}, "", "")
+		return
+	}
+	var payload struct {
+		Content string `json:"content"`
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, unitFileBodyLimit+1))
+	if err != nil {
+		s.handleError(w, r, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("unit file content exceeds limit (%d bytes)", unitFileBodyLimit))
+		return
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if len(payload.Content) > unitFileBodyLimit {
+		s.handleError(w, r, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("unit file content exceeds limit (%d bytes)", unitFileBodyLimit))
+		return
+	}
+	s.forwardServiceRPC(w, r, agentID, "service.unitsave",
+		map[string]interface{}{"name": unit, "content": payload.Content}, unit, "unitfile-save")
 }
 
 // forwardServiceRPC 转发 RPC 并透传结果；action 非空时记审计

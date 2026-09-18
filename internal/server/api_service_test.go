@@ -203,6 +203,78 @@ func TestServiceDaemonReload(t *testing.T) {
 	}
 }
 
+func TestServiceUnitFileAPI(t *testing.T) {
+	s := newBackupTestServer(t)
+	var gotMethod string
+	var gotParams map[string]interface{}
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotMethod, gotParams = method, params
+		if method == "service.unitfile" {
+			return map[string]interface{}{"name": "nginx.service", "fragmentPath": "/etc/x", "content": "[Unit]\n"}, ""
+		}
+		return map[string]interface{}{"name": "nginx.service", "path": "/etc/x", "reloaded": true}, ""
+	})
+
+	// GET：转发 service.unitfile，浏览不审计（D13）
+	rec := httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, serviceReq(http.MethodGet, "a1", "nginx.service/file"), "a1/services/nginx.service/file")
+	if rec.Code != http.StatusOK || gotMethod != "service.unitfile" {
+		t.Fatalf("get file: code=%d method=%s", rec.Code, gotMethod)
+	}
+	if gotParams["name"] != "nginx.service" {
+		t.Errorf("params = %+v", gotParams)
+	}
+	logs, _, _ := s.db.GetAuditLogs(0, 10, nil)
+	if len(logs) != 0 {
+		t.Errorf("read must not be audited, logs = %+v", logs)
+	}
+
+	// PUT：转发 service.unitsave（含 content），记审计
+	put := httptest.NewRequest(http.MethodPut, "/api/agents/a1/services/nginx.service/file",
+		strings.NewReader(`{"content":"[Unit]\nDescription=x\n"}`))
+	rec = httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, put, "a1/services/nginx.service/file")
+	if rec.Code != http.StatusOK || gotMethod != "service.unitsave" {
+		t.Fatalf("save file: code=%d method=%s", rec.Code, gotMethod)
+	}
+	if gotParams["content"] != "[Unit]\nDescription=x\n" {
+		t.Errorf("save params = %+v", gotParams)
+	}
+	logs, _, _ = s.db.GetAuditLogs(0, 10, nil)
+	if len(logs) != 1 || logs[0].ResourceID != "nginx.service" {
+		t.Fatalf("audit logs = %+v", logs)
+	}
+
+	// 超限 content → 413；坏 JSON → 400；多余路径段 → 404；坏名 → 400
+	big := `{"content":"` + strings.Repeat("x", unitFileBodyLimit+1) + `"}`
+	rec = httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, httptest.NewRequest(http.MethodPut, "/api/agents/a1/services/nginx.service/file",
+		strings.NewReader(big)), "a1/services/nginx.service/file")
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversize: code = %d, want 413", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, httptest.NewRequest(http.MethodPut, "/api/agents/a1/services/nginx.service/file",
+		strings.NewReader(`not-json`)), "a1/services/nginx.service/file")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("bad json: code = %d, want 400", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, serviceReq(http.MethodGet, "a1", "nginx.service/file/extra"), "a1/services/nginx.service/file/extra")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("extra segment: code = %d, want 404", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	s.handleAgentServiceAPI(rec, serviceReq(http.MethodGet, "a1", "../x/file"), "a1/services/../x/file")
+	// ../x 含路径分隔符，先被「仅允许恰好两段」拒绝（404），到不了名字校验
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("bad unit name: code = %d, want 404", rec.Code)
+	}
+	if gotMethod != "service.unitsave" {
+		t.Errorf("rejected requests must not reach the agent, last method = %s", gotMethod)
+	}
+}
+
 func TestValidateServiceAction(t *testing.T) {
 	// systemd unit 名：字母数字与 @ . _ + - 且 .service 结尾
 	for _, name := range []string{"nginx.service", "user@1000.service", "openvpn@server.service", "my-app.service"} {

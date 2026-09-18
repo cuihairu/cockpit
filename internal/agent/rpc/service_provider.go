@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -81,6 +82,10 @@ func (p *ServiceProvider) Call(action string, params map[string]interface{}) (in
 		return p.DoAction(paramString(params, "name"), paramString(params, "action"))
 	case "daemon-reload":
 		return p.DaemonReload()
+	case "unitfile":
+		return p.UnitFile(paramString(params, "name"))
+	case "unitsave":
+		return p.SaveUnitFile(paramString(params, "name"), paramString(params, "content"))
 	default:
 		return nil, fmt.Errorf("unknown service action: %s", action)
 	}
@@ -182,6 +187,137 @@ func (p *ServiceProvider) DaemonReload() (interface{}, error) {
 		return nil, fmt.Errorf("systemctl daemon-reload: %s", commandErrSummary(stderr, err))
 	}
 	return map[string]interface{}{"reloaded": true}, nil
+}
+
+// ============ unit 文件查看与编辑（D13）============
+
+// unitFileContentLimit 保存内容上限（unit 文件通常几 KB）
+const unitFileContentLimit = 256 << 10
+
+// etcSystemdDir systemd 管理员覆盖目录：/etc 优先级高于 /usr/lib，
+// 保存语义对齐 systemctl edit --full（D13）；var 仅为测试可注入
+// （CI 无法写真实 /etc），生产代码不得修改
+var etcSystemdDir = "/etc/systemd/system"
+
+// validateServiceUnitName 仅 unit 名校验（unit 文件读写无动作白名单）
+func validateServiceUnitName(name string) error {
+	if !serviceUnitNameRe.MatchString(name) {
+		return fmt.Errorf("invalid unit name %q (expect *.service)", name)
+	}
+	return nil
+}
+
+// systemctlRun systemd 命令快捷封装（超时同 serviceActionTimeout）
+func (p *ServiceProvider) systemctlRun(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), serviceActionTimeout)
+	defer cancel()
+	stdout, stderr, err := p.run(ctx, "systemctl", args...)
+	if err != nil {
+		return nil, fmt.Errorf("systemctl %s: %s", args[0], commandErrSummary(stderr, err))
+	}
+	return stdout, nil
+}
+
+// fragmentPath 查询 unit 主文件真实路径（未安装/找不到返回空）
+func (p *ServiceProvider) fragmentPath(name string) (string, error) {
+	out, err := p.systemctlRun("show", "-p", "FragmentPath", "--value", name)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0]), nil
+}
+
+// UnitFile 读 unit 文件有效视图（systemctl cat = 主文件 + drop-in 全文，D13）
+func (p *ServiceProvider) UnitFile(name string) (interface{}, error) {
+	if err := validateServiceUnitName(name); err != nil {
+		return nil, err
+	}
+	frag, err := p.fragmentPath(name)
+	if err != nil {
+		return nil, err
+	}
+	if frag == "" {
+		return nil, fmt.Errorf("unit %s is not installed (no fragment path)", name)
+	}
+	content, err := p.systemctlRun("cat", name)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"name":         name,
+		"fragmentPath": frag,
+		"content":      string(content),
+	}, nil
+}
+
+// SaveUnitFile 保存 unit 文件（D13）：路径由 FragmentPath 决定不收用户参数；
+// 包管文件（/usr/lib 等）先复制到 /etc/systemd/system（/etc 优先级更高，
+// systemctl edit --full 同款行为）再写入；临时文件 + rename 原子落盘；
+// 自动 daemon-reload 使改动即生效
+func (p *ServiceProvider) SaveUnitFile(name, content string) (interface{}, error) {
+	if err := validateServiceUnitName(name); err != nil {
+		return nil, err
+	}
+	if len(content) > unitFileContentLimit {
+		return nil, fmt.Errorf("unit file content too large: %d bytes (limit %d)", len(content), unitFileContentLimit)
+	}
+	frag, err := p.fragmentPath(name)
+	if err != nil {
+		return nil, err
+	}
+	if frag == "" {
+		return nil, fmt.Errorf("unit %s is not installed (no fragment path)", name)
+	}
+
+	// 包管文件 → 复制到 /etc 覆盖位（已存在 /etc 版本时以 /etc 为准）
+	target := frag
+	if !strings.HasPrefix(frag, etcSystemdDir+"/") {
+		override := etcSystemdDir + "/" + name
+		if data, err := os.ReadFile(frag); err == nil {
+			if err := atomicWriteFile(override, data, 0o644); err != nil {
+				return nil, fmt.Errorf("copy %s to %s: %w", frag, override, err)
+			}
+		}
+		target = override
+	}
+	if err := atomicWriteFile(target, []byte(content), 0o644); err != nil {
+		return nil, fmt.Errorf("write %s: %w", target, err)
+	}
+	if _, err := p.DaemonReload(); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"name": name, "path": target, "reloaded": true}, nil
+}
+
+// atomicWriteFile 临时文件（同目录）+ rename 原子写，不留半截文件
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".cockpit-unit-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if tmpName != "" {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	tmpName = "" // rename 成功后无需清理
+	return nil
 }
 
 // ============ 内部：systemctl 输出解析 ============

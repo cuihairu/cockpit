@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Badge, Button, Card, Descriptions, Drawer, Empty, Input, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
-import { FileTextOutlined, PoweroffOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons'
+import { Alert, Badge, Button, Card, Descriptions, Drawer, Empty, Input, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { FileOutlined, FileTextOutlined, PoweroffOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
-import type { ServiceActionName, ServiceUnit } from '@/types'
+import type { ServiceActionName, ServiceUnit, ServiceUnitFile } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 import LogsPanel from '@/workbench/LogsPanel'
 
@@ -51,6 +51,12 @@ const Services = () => {
   const [actionError, setActionError] = useState<{ unit: string; msg: string }>()
   // journal 日志抽屉：当前查看日志的 unit（D11）
   const [logUnit, setLogUnit] = useState<string>()
+  // unit 文件编辑（D13）
+  const [editUnit, setEditUnit] = useState<string>()
+  const [unitFile, setUnitFile] = useState<ServiceUnitFile>()
+  const [editContent, setEditContent] = useState('')
+  const [fileLoading, setFileLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => api.getAgents() })
 
@@ -131,6 +137,39 @@ const Services = () => {
       message.error(getApiErrorMessage(err, '重载配置失败'))
     } finally {
       setReloading(false)
+    }
+  }
+
+  // unit 文件读写（D13）：展示 systemctl cat 有效全文，保存走 systemctl
+  // edit --full 语义（包管文件复制到 /etc 覆盖位）+ 自动 daemon-reload
+  const openUnitFile = async (name: string) => {
+    if (!selectedAgent) return
+    setEditUnit(name)
+    setUnitFile(undefined)
+    setFileLoading(true)
+    try {
+      const res = await api.getServiceUnitFile(selectedAgent, name)
+      setUnitFile(res)
+      setEditContent(res.content)
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '读取 unit 文件失败'))
+      setEditUnit(undefined)
+    } finally {
+      setFileLoading(false)
+    }
+  }
+  const saveUnitFile = async () => {
+    if (!selectedAgent || !editUnit) return
+    setSaving(true)
+    try {
+      const res = await api.saveServiceUnitFile(selectedAgent, editUnit, editContent)
+      message.success(`${editUnit} 已保存（${res.path}），配置已重载`)
+      refresh()
+      setEditUnit(undefined)
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '保存失败'))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -271,6 +310,17 @@ const Services = () => {
                 />
               </Tooltip>
             )}
+            {/* unit 文件编辑（D13，仅 systemd 后端） */}
+            {isSystemd && (
+              <Tooltip title="编辑 unit 文件">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<FileOutlined />}
+                  onClick={() => void openUnitFile(r.name)}
+                />
+              </Tooltip>
+            )}
           </Space>
         )
       },
@@ -404,6 +454,44 @@ const Services = () => {
           </Space>
         )}
       </Card>
+      {/* unit 文件编辑（D13）：等宽编辑器展示 systemctl cat 有效全文 */}
+      <Modal
+        title={`编辑 unit 文件：${editUnit ?? ''}`}
+        open={!!editUnit}
+        onCancel={() => setEditUnit(undefined)}
+        width={720}
+        footer={[
+          <Button key="cancel" onClick={() => setEditUnit(undefined)}>
+            取消
+          </Button>,
+          <Button key="save" type="primary" loading={saving} disabled={fileLoading} onClick={() => void saveUnitFile()}>
+            保存并重载
+          </Button>,
+        ]}
+      >
+        {fileLoading ? (
+          <div style={{ textAlign: 'center', padding: 48 }}>
+            <Spin />
+          </div>
+        ) : (
+          unitFile && (
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Typography.Text code style={{ fontSize: 12 }}>
+                {unitFile.fragmentPath}
+              </Typography.Text>
+              <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                包管文件保存时自动复制到 /etc/systemd/system 覆盖位（升级不丢）；保存后自动执行 daemon-reload
+              </Typography.Text>
+              <Input.TextArea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                rows={18}
+                style={{ fontFamily: 'SFMono-Regular, Consolas, monospace', fontSize: 12 }}
+              />
+            </Space>
+          )
+        )}
+      </Modal>
       {/* journal 日志抽屉（D11）：内嵌 Workbench 同款 LogsPanel，锁定当前 unit 为源 */}
       {logUnit && selectedAgent && (
         <Drawer

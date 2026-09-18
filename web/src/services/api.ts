@@ -54,6 +54,8 @@ import type {
   CronJob,
   CronJobsResult,
   ServiceActionName,
+  ServiceUnitFile,
+  ServiceUnitFileSaveResult,
   ServiceListResult,
   ServiceStatus,
   OverlayStatus,
@@ -812,6 +814,21 @@ class ApiService {
   async serviceDaemonReload(agentId: string): Promise<{ reloaded: boolean }> {
     return this.client.post<unknown, { reloaded: boolean }>(
       `/agents/${encodeURIComponent(agentId)}/services/daemon-reload`,
+    )
+  }
+
+  // unit 文件有效视图（D13，systemctl cat 全文）
+  async getServiceUnitFile(agentId: string, unit: string): Promise<ServiceUnitFile> {
+    return this.client.get<unknown, ServiceUnitFile>(
+      `/agents/${encodeURIComponent(agentId)}/services/${encodeURIComponent(unit)}/file`,
+    )
+  }
+
+  // 保存 unit 文件（D13）：包管文件自动复制到 /etc 覆盖位 + daemon-reload
+  async saveServiceUnitFile(agentId: string, unit: string, content: string): Promise<ServiceUnitFileSaveResult> {
+    return this.client.put<unknown, ServiceUnitFileSaveResult>(
+      `/agents/${encodeURIComponent(agentId)}/services/${encodeURIComponent(unit)}/file`,
+      { content },
     )
   }
 

@@ -727,6 +727,20 @@ export interface ServiceStatus {
 // 服务管理动作（白名单，双端同规则；mask/unmask 仅 systemd 后端）
 export type ServiceActionName = 'start' | 'stop' | 'restart' | 'reload' | 'enable' | 'disable' | 'mask' | 'unmask'
 
+// service.unitfile 返回（D13）：systemctl cat 有效视图
+export interface ServiceUnitFile {
+  name: string
+  fragmentPath: string
+  content: string
+}
+
+// service.unitsave 返回：包管文件保存时 path 为 /etc 覆盖位
+export interface ServiceUnitFileSaveResult {
+  name: string
+  path: string
+  reloaded: boolean
+}
+
 // ========== Overlay 组网观测（见 overlay-design.md） ==========
 
 // 组网对端节点（工具间字段取可用子集）
