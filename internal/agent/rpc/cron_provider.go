@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ============ Cron Provider ============
@@ -204,21 +205,28 @@ func (p *CronProvider) Status() (interface{}, error) {
 	}, nil
 }
 
-// Jobs cockpit 名下任务列表 + 外部条目原文（只读展示）
+// Jobs cockpit 名下任务列表 + 外部条目原文（只读展示）；next_run 为下次触发
+// 预览（cron-design.md M2，服务器本地时区；disabled/@reboot/解析失败为 0）
 func (p *CronProvider) Jobs() (interface{}, error) {
 	content, err := p.readCrontab()
 	if err != nil {
 		return nil, err
 	}
 	_, cockpit, external := splitCockpit(content)
+	now := time.Now()
 	jobs := make([]map[string]interface{}, 0, len(cockpit))
 	for i := range cockpit {
 		j := &cockpit[i]
+		nextRun := int64(0)
+		if j.Enabled {
+			nextRun = nextCronRun(j.Schedule, now)
+		}
 		jobs = append(jobs, map[string]interface{}{
 			"name":     j.Name,
 			"schedule": j.Schedule,
 			"command":  j.Command,
 			"enabled":  j.Enabled,
+			"next_run": nextRun,
 		})
 	}
 	return map[string]interface{}{
