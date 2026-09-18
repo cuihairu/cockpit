@@ -39,6 +39,10 @@
 | D7 | 符号链接 | 列表标注 `isSymlink`+`target`；read/write/delete 拒绝直接作用于 symlink 路径；不跟随 | 与备份「不跟随」原则一致；symlink 穿越是最经典攻击面 |
 | D8 | capability | 新增 `file` capability，**全平台注册**（Go 标准库，openwrt/busybox 通用） | 文件操作无平台差异；backup 是 Linux-only，file 不是 |
 | D9 | 审计 | 写/删/重命名/新建目录/上传 记审计（ResourceFile）；浏览/读/下载不记 | 读操作量大无审计价值，变更必须可追溯 |
+| D10 | 搜索语义 | `file.search {dir, query, caseSensitive?, maxResults?}`，query 纯文本 contains（非正则），默认大小写不敏感 | 与 logs grep 同纪律（防 ReDoS、双端行为一致可测）；运维搜配置常大小写混用，默认不敏感更实用 |
+| D11 | 扫描边界 | 递归深度 ≤8；跳过 symlink（不跟随，D7 延伸）与非普通文件；二进制跳过（首 512B 含 NUL）；单文件 >1MB 跳过（与编辑器 read 上限一致）；文件总数 ≤5000；命中 ≤200 条即停；总超时 15s 返回已扫部分；排除 `.git`/`node_modules` 目录，其余隐藏目录照搜（`.ssh`/`.config` 可能正是目标） | 大目录树/大日志不拖垮 agent；每个上限都有 truncated/skipped 计数可解释 |
+| D12 | server 端点 | `POST /api/agents/{id}/files/search` 纯转发，双端同规则校验（dir 路径 + query 非空 ≤256），不审计（浏览性质，D9 延伸） | 与既有文件端点同模式 |
+| D13 | web 交互 | 工具栏「搜索」按钮 → Modal（当前目录为根 + 关键词 + 大小写开关）→ 结果列表（相对路径 + 行号 + 命中行高亮，行截断 200 字符）→ 点路径跳转所在目录 | 搜索天然以当前浏览位置为起点 |
 
 ## Agent 侧设计
 
@@ -116,10 +120,38 @@
   - **下载**：GET download → axios blob → createObjectURL（备份同款）；
   - **删除**：文件 Popconfirm；目录 Modal 输入目录名确认（D6）。
 
+## M2：文本搜索（2026-09-18）
+
+目录内递归文本搜索（D10-D13），排障场景定位「配置项写在哪个文件」。
+
+### Agent 侧
+
+- RPC `file.search`：`{dir, query, caseSensitive, maxResults}` → 
+  `{matches: [{path, line, text}], truncated, scanned, skipped}`；
+  - `filepath.WalkDir` 递归；相对路径相对 `dir` 呈现；行号从 1 起；
+  - 匹配：`strings.Contains`（不敏感时 ToLower 双侧），命中行 `text` 截断 200 字符；
+  - 每个 `matches` 命中即使停（D11），`truncated=true`；目录深于 8 / 文件数超 5000 /
+    总超时 15s 同样置 truncated 提前收尾；skipped 计大文件与二进制；
+- 路径校验与 list 同款（Clean/IsAbs/非根）；`query` 为空或 >256 字符拒绝。
+
+### Server 侧
+
+- `POST /api/agents/{id}/files/search`（api_files.go 分发）：双端同规则校验后转发
+  `file.search`；agent 错误 502 透传；不审计。
+
+### Web 侧
+
+- FileBrowser 工具栏加「搜索」：Modal 内输入关键词（当前目录为根）+ 大小写开关；
+- 结果列表：命中路径（点击跳转所在目录并关闭 Modal）+ 行号 + 命中行（关键词高亮）；
+- 底部状态行：`N 处命中 · 已扫描 M 文件`，truncated/skipped>0 给提示 Tag。
+
+**测试**：agent 临时目录树（命中与大小写开关 / 深度上限 / 二进制与大文件跳过 /
+200 条截断 / 路径校验拒绝 / 空结果非错误）；server 转发与校验 400；web build。
+
 ## 不做（后续项）
 
 - 断点续传/分块上传大文件（>10MB）：`file.write` append 通道已留好，UI 后补；
-- 文本搜索/目录大小统计/回收站；
+- 目录大小统计/回收站；
 - chmod/chown/权限编辑：风险与 UI 复杂度都高，等真实需求；
 - 文件预览增强（图片/二进制 hex）：编辑器先覆盖文本主场景。
 
