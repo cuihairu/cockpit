@@ -41,6 +41,8 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleDriftConfig(w, r)
 	case path == "/smart/config":
 		s.handleSmartConfig(w, r)
+	case path == "/nas/config":
+		s.handleNASConfig(w, r)
 	case path == "/recordings":
 		s.handleRecordings(w, r)
 	case strings.HasPrefix(path, "/recordings/"):
@@ -73,6 +75,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		// systemd 服务管理 /agents/{id}/services/...（见 api_service.go）
 		if strings.Contains(agentID, "/services/") {
 			s.handleAgentServiceAPI(w, r, agentID)
+			return
+		}
+		// NAS 存储观测 /agents/{id}/nas/...（见 api_nas.go）
+		if strings.Contains(agentID, "/nas/") {
+			s.handleAgentNASAPI(w, r, agentID)
 			return
 		}
 		// 远程日志查询 /agents/{id}/logs/...（见 api_logs.go）

@@ -204,6 +204,7 @@ func (s *Server) Start() error {
 	go s.smartScanLoop() // SMART 磁盘健康巡检（见 disk-health-design.md D8）
 	go s.ddnsScanLoop()  // DDNS 定时同步（见 ddns-design.md D6）
 	go s.acmeScanLoop()  // ACME 证书自动续期巡检（见 acme-design.md D7）
+	go s.nasScanLoop()   // NAS 存储巡检（见 nas-design.md D5）
 	// 启动系统指标清理协程
 	go s.metricsCleanupLoop()
 	// 启动备份调度循环

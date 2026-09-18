@@ -333,6 +333,29 @@ func (g *Generator) CheckDDNS(recordName, reason string) {
 	g.createAlertIfNotExists("warning", title, message, recordName, "ddns")
 }
 
+// CheckNasPool NAS 存储池异常告警（见 nas-design.md D5）：title 按池名
+// 真去重——池名未处理期间同一异常只提醒一次；failed 升级 error 级
+// （title 同步升级，warning→error 叠加属合理新事件）；恢复后不再产生。
+func (g *Generator) CheckNasPool(agentID, hostname, poolName, state, detail string) {
+	title := "存储池异常：" + poolName + "（主机 " + hostname + "）"
+	level := "warning"
+	message := "存储池状态为 " + state + "，存在降级或同步风险，建议检查成员盘：\n" + detail
+	if state == "failed" {
+		title = "存储池故障：" + poolName + "（主机 " + hostname + "）"
+		level = "error"
+		message = "存储池已不可用，数据访问可能中断，建议立即检查 RAID 成员盘并备份：\n" + detail
+	}
+	g.createAlertIfNotExists(level, title, message, poolName, "nas_pool")
+}
+
+// CheckNasUsage NAS 挂载容量超阈值告警（见 nas-design.md D5）：title 按
+// 挂载路径真去重；恢复后不再产生。
+func (g *Generator) CheckNasUsage(agentID, hostname, mountPath string, usedPercent int) {
+	title := "存储空间告警：" + mountPath + " 已用 " + strconv.Itoa(usedPercent) + "%（主机 " + hostname + "）"
+	message := fmt.Sprintf("挂载点 %s 容量使用率 %d%%，超过告警阈值，请清理或扩容。", mountPath, usedPercent)
+	g.createAlertIfNotExists("warning", title, message, mountPath, "nas_mount")
+}
+
 // CheckACME 证书签发/续期失败告警（真去重：同主域名未读期间只报一次）
 func (g *Generator) CheckACME(primaryDomain, reason string) {
 	title := "证书签发失败：" + primaryDomain

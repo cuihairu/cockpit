@@ -73,17 +73,17 @@ M2 网络 API 型的共同纪律（OpenWrt/PVE provider 同款）：
 
 | 类别 | 命令 | 解析要点 |
 |---|---|---|
-| mdadm RAID | `/proc/mdstat` 读文件 | `md0 : active raid1 sda1[0] sdb1[2](F)` → (F) 标记 failed 盘；resync/recovery 进度行 → State=resync |
-| ZFS 池 | `zpool list -H -p` + `zpool status` | list 出容量；status 出 DEGRADED/OFFLINE 等状态；无 zpool 跳过 |
-| LVM 卷组 | `vgs --noheadings --units b` | VG 容量；无 pvs/vgs 跳过 |
-| btrfs | `btrfs filesystem usage -B <mount>`（对 btrfs 挂载点逐个） | 单盘数据卷标 btrfs；失败静默跳过 |
-| 挂载容量 | `df -k -P` | 过滤伪文件系统（tmpfs/devtmpfs/overlay/squashfs/efivarfs 等）与 <1GB 卷；排除 Docker overlay 场景噪声 |
-| SMB 共享 | `testparm -s`（stderr 吐出共享段） | 解析 `[share]` 段的 path/comment；无 samba 跳过 |
-| NFS 导出 | `exportfs -v`，fallback `/etc/exports` | 行格式 `<path>\t<host>(opts)`；无 nfs-utils 跳过 |
+| mdadm RAID | `/proc/mdstat` 读文件 | `md0 : active raid1 sda1[0] sdb1[2](F)` → (F) 标记 failed 盘；resync/recovery 进度行 → State=resync；`[U_]` 位图缺 U → degraded |
+| ZFS 池 | `zpool list -H -p -o name,size,alloc,health` | health 列 ONLINE→healthy，其余原词小写；无 zpool 跳过 |
+| LVM 卷组 | `vgs --noheadings --units b --nosuffix -o vg_name,vg_size,vg_free` | VG 容量与剩余；无 vgs 跳过 |
+| btrfs | —（不池化） | 单盘 btrfs 容量经 df 挂载表可见，M1 不做池化解析 |
+| 挂载容量 | `df -k -P`（GNU/busybox 通用） | source 以 `/` 开头且非 `//` 前缀（排除 tmpfs/overlay/网络挂载等伪与远端 FS）且 ≥1GB；同 (source,容量) 去重防 bind mount 噪声 |
+| SMB 共享 | `testparm -s`（stderr 吐出配置） | 解析非 global `[share]` 段的 path/comment；无 samba 跳过 |
+| NFS 导出 | `exportfs -v` | 行格式 `<path> <host>(opts)`；空输出 fallback `/etc/exports` 同规则；无 nfs-utils 跳过 |
 
-- 池 State 判定：mdadm → active(+无F)=healthy、有(F)=degraded、resync/recovery=resync、
-  inactive/failed=failed；ZFS → ONLINE=healthy、其余原词小写；LVM 无状态概念=unknown
-  （不告警）
+- 池 State 判定：mdadm → 有 (F) 盘或位图 [U_] 缺 U = degraded、resync/recovery/check
+  进度行 = resync、inactive/failed = failed、否则 healthy；ZFS → ONLINE=healthy、
+  其余原词小写；LVM 无状态概念=unknown（不告警）
 - `Available` = 任一子源有产出或任一工具存在；全部缺失（纯容器/最小系统）时
   available=false，巡检与前端跳过不报错（smart available=false 同款）
 - 命令超时：单命令 5s，整次 RPC 30s 上限；argv 直调不经 shell，**只读命令白名单**，
@@ -104,7 +104,7 @@ REST（照 smart 模式）：
 ```
 GET  /api/agents/{id}/nas/status   纯转发 nas.status（浏览，不审计，不落库）
 GET  /api/nas/config               巡检设置 + 阈值
-PUT  /api/nas/config               保存（nas_config_update 审计）
+PUT  /api/nas/config               保存（巡检配置类不记审计，smart/drift 同构）
 ```
 
 巡检 `nasScanLoop`（smart/ddns/acme 同款骨架）：
