@@ -293,6 +293,17 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		})
 	}
 
+	// traefik-proxy capability：探测 Traefik file provider 动态目录
+	// （见 proxy-design.md M2 D12；不依赖 traefik 二进制，容器化宿主
+	// 目录才是事实源），目录入 metadata 供 provider 初始化
+	if dir, ok := rpc.DetectTraefik(); ok {
+		capabilities = append(capabilities, protocol.Capability{
+			Type:     "traefik-proxy",
+			Version:  "1",
+			Metadata: map[string]interface{}{"dynamicDir": dir},
+		})
+	}
+
 	// cron capability：探测 crontab 命令（见 cron-design.md D7）
 	if rpc.DetectCron() {
 		capabilities = append(capabilities, protocol.Capability{
@@ -309,10 +320,11 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		})
 	}
 
-	// drift capability：nginx-proxy / cron / docker-api（stack）任一存在，
-	// 有可挂钩的管理写路径漂移检测才有意义（见 drift-design.md D9）
+	// drift capability：nginx-proxy / traefik-proxy / cron / docker-api
+	// （stack）任一存在，有可挂钩的管理写路径漂移检测才有意义
+	// （见 drift-design.md D9）
 	for _, c := range capabilities {
-		if c.Type == "nginx-proxy" || c.Type == "cron" || c.Type == "docker-api" {
+		if c.Type == "nginx-proxy" || c.Type == "traefik-proxy" || c.Type == "cron" || c.Type == "docker-api" {
 			capabilities = append(capabilities, protocol.Capability{
 				Type:    "drift",
 				Version: "1",

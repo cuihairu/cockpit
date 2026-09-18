@@ -21,6 +21,7 @@ import (
 //   - PVEProvider：检测到 "pve-api" capability 且环境变量 PVE_TOKEN_ID / PVE_TOKEN_SECRET 同时存在时注册
 //   - OpenWrtProvider：检测到 "openwrt" capability 且 OPENWRT_HOST/OPENWRT_USER/OPENWRT_PASS 存在时注册
 //   - NginxProvider：检测到 "nginx-proxy" capability（nginx 可执行存在）时注册
+//   - TraefikProvider：检测到 "traefik-proxy" capability（动态目录存在）时注册
 //   - LogsProvider：检测到 "logs" capability（journalctl/docker 至少一个存在）时注册
 //   - DriftProvider：检测到 "drift" capability（nginx/cron/stack 任一存在）时注册，
 //     并向三者注入同一个基线挂钩
@@ -62,6 +63,13 @@ func (a *Agent) setupProviders() {
 			np := rpc.NewNginxProvider(rpc.NginxConfig{})
 			np.SetBaseline(baseline)
 			a.rpc.RegisterProvider(np)
+		case "traefik-proxy":
+			// Traefik 反代管理（见 docs/guide/proxy-design.md M2）；
+			// 动态目录取自探测阶段写入的 capability metadata
+			dir, _ := cap.Metadata["dynamicDir"].(string)
+			tp := rpc.NewTraefikProvider(dir, nil)
+			tp.SetBaseline(baseline)
+			a.rpc.RegisterProvider(tp)
 		case "cron":
 			// Crontab 任务管理（见 docs/guide/cron-design.md）
 			cp := rpc.NewCronProvider(nil)

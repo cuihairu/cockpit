@@ -163,17 +163,19 @@ func (b *DriftBaseline) save(f baselineFile) error {
 
 // DriftConfig DriftProvider 配置（零值字段回退 env / 默认值）
 type DriftConfig struct {
-	ConfDir   string    // nginx 片段目录，默认 /etc/nginx/conf.d
-	StacksDir string    // stacks 根目录，默认 /var/lib/cockpit/stacks
-	CronRun   Commander // 非 nil 才检查 cron 段
+	ConfDir    string    // nginx 片段目录，默认 /etc/nginx/conf.d
+	DynamicDir string    // traefik 动态目录，默认 /etc/traefik/dynamic
+	StacksDir  string    // stacks 根目录，默认 /var/lib/cockpit/stacks
+	CronRun    Commander // 非 nil 才检查 cron 段
 }
 
 // DriftProvider drift.check：按类枚举当前对象，与基线比对出四态清单
 type DriftProvider struct {
-	baseline  *DriftBaseline
-	confDir   string
-	stacksDir string
-	cronRun   Commander
+	baseline   *DriftBaseline
+	confDir    string
+	dynamicDir string
+	stacksDir  string
+	cronRun    Commander
 }
 
 func NewDriftProvider(baseline *DriftBaseline, cfg DriftConfig) *DriftProvider {
@@ -184,6 +186,13 @@ func NewDriftProvider(baseline *DriftBaseline, cfg DriftConfig) *DriftProvider {
 			cfg.ConfDir = "/etc/nginx/conf.d"
 		}
 	}
+	if cfg.DynamicDir == "" {
+		if v := os.Getenv("COCKPIT_TRAEFIK_DIR"); v != "" {
+			cfg.DynamicDir = v
+		} else {
+			cfg.DynamicDir = traefikDynamicDirDefault
+		}
+	}
 	if cfg.StacksDir == "" {
 		if v := os.Getenv("COCKPIT_STACKS_DIR"); v != "" {
 			cfg.StacksDir = v
@@ -192,10 +201,11 @@ func NewDriftProvider(baseline *DriftBaseline, cfg DriftConfig) *DriftProvider {
 		}
 	}
 	return &DriftProvider{
-		baseline:  baseline,
-		confDir:   cfg.ConfDir,
-		stacksDir: cfg.StacksDir,
-		cronRun:   cfg.CronRun,
+		baseline:   baseline,
+		confDir:    cfg.ConfDir,
+		dynamicDir: cfg.DynamicDir,
+		stacksDir:  cfg.StacksDir,
+		cronRun:    cfg.CronRun,
 	}
 }
 
@@ -227,8 +237,8 @@ type driftItem struct {
 	CurrentSHA  string `json:"current_sha"`
 }
 
-// Check 全量检查：nginx 片段文件 / cron cockpit 段 / stack compose+.env。
-// 检查只读，任何一类失败不影响其他类（该类报 error 条目）。
+// Check 全量检查：nginx 片段文件 / traefik 动态片段 / cron cockpit 段 /
+// stack compose+.env。检查只读，任何一类失败不影响其他类（该类报 error 条目）。
 func (p *DriftProvider) Check() (interface{}, error) {
 	items := make([]driftItem, 0, 8)
 	seen := map[string]bool{} // 已枚举到的基线 key（用于补 missing）
@@ -243,6 +253,22 @@ func (p *DriftProvider) Check() (interface{}, error) {
 			continue
 		}
 		items = append(items, p.compare("nginx", name, content, seen))
+	}
+
+	// traefik：动态目录片段原始字节 hash，与 nginx 同语义（M2 D15）
+	tfMatches, _ := filepath.Glob(filepath.Join(p.dynamicDir, "cockpit-site-*.yml"))
+	for _, m := range tfMatches {
+		base := filepath.Base(m)
+		if traefikFileRe.FindStringSubmatch(base) == nil {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(base, "cockpit-site-"), ".yml")
+		content, err := os.ReadFile(m)
+		if err != nil {
+			items = append(items, driftItem{Kind: "traefik", Name: name, Status: "error"})
+			continue
+		}
+		items = append(items, p.compare("traefik", name, content, seen))
 	}
 
 	// cron：cockpit 任务列表 marshal hash；外部条目不在检测范围（D2）
@@ -279,7 +305,7 @@ func (p *DriftProvider) Check() (interface{}, error) {
 			continue
 		}
 		kind, name, ok := strings.Cut(key, "/")
-		if !ok || (kind != "nginx" && kind != "stack") {
+		if !ok || (kind != "nginx" && kind != "traefik" && kind != "stack") {
 			continue // cron 单条目无 missing 态（drifted 覆盖全删场景）
 		}
 		items = append(items, driftItem{
@@ -374,6 +400,8 @@ func (p *DriftProvider) currentContent(kind, name string) ([]byte, error) {
 	switch kind {
 	case "nginx":
 		return os.ReadFile(filepath.Join(p.confDir, "cockpit-site-"+name+".conf"))
+	case "traefik":
+		return os.ReadFile(filepath.Join(p.dynamicDir, "cockpit-site-"+name+".yml"))
 	case "stack":
 		dirName, fileName, _ := strings.Cut(name, "/")
 		return os.ReadFile(filepath.Join(p.stacksDir, dirName, fileName))
@@ -412,7 +440,7 @@ func (p *DriftProvider) RecordCurrent(kind, name string) (interface{}, error) {
 // 白名单从结构上排除穿越（dir 段禁分隔符与 . ..）。
 func validDriftTarget(kind, name string) error {
 	switch kind {
-	case "nginx":
+	case "nginx", "traefik":
 		if name == "" {
 			return fmt.Errorf("name required")
 		}
@@ -420,7 +448,7 @@ func validDriftTarget(kind, name string) error {
 			return fmt.Errorf("name too long (max %d bytes)", driftMaxNameLen)
 		}
 		if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
-			return fmt.Errorf("invalid nginx site name")
+			return fmt.Errorf("invalid %s site name", kind)
 		}
 	case "stack":
 		if name == "" {

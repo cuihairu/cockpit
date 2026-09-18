@@ -197,6 +197,7 @@ func (p *NginxProvider) Status() (interface{}, error) {
 	}
 	version, ok := DetectNginx()
 	return map[string]interface{}{
+		"backend":    "nginx", // web 状态卡按 backend 显示（M2 D16）
 		"installed":  ok,
 		"version":    version,
 		"confDir":    p.confDir,
