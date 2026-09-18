@@ -45,12 +45,13 @@ var (
 // NasPool 存储池 / RAID / 卷组
 type NasPool struct {
 	Name    string   `json:"name"`
-	Kind    string   `json:"kind"` // mdadm | zfs | lvm
+	Kind    string   `json:"kind"` // mdadm | zfs | lvm | dsm
 	State   string   `json:"state"`
 	TotalGB float64  `json:"totalGB"`
 	UsedGB  float64  `json:"usedGB"`
 	Devices []string `json:"devices"`
 	Detail  string   `json:"detail"`
+	Host    string   `json:"host"` // 来源设备：本地观测为空，网络 NAS 填 target 名（M2）
 }
 
 // NasMount 本地文件系统挂载容量
@@ -60,6 +61,7 @@ type NasMount struct {
 	FsType    string  `json:"fsType"`
 	TotalGB   float64 `json:"totalGB"`
 	UsedGB    float64 `json:"usedGB"`
+	Host      string  `json:"host"`
 }
 
 // NasShare SMB / NFS 共享导出
@@ -69,6 +71,7 @@ type NasShare struct {
 	Path     string `json:"path"`
 	Comment  string `json:"comment"`
 	Hosts    string `json:"hosts"`
+	Host     string `json:"host"`
 }
 
 // NasSnapshot 统一快照（所有 provider——M2 的 dsm/truenas/omv——映射到此结构）
@@ -85,13 +88,15 @@ type NasProvider struct {
 	run Commander
 	// readFile 文件读取器（/proc/mdstat、/etc/exports fallback），测试注入用
 	readFile func(path string) ([]byte, error)
+	// targets 网络 NAS 目标（M2，COCKPIT_NAS_TARGETS；nil = 仅本地观测）
+	targets []NasTarget
 }
 
 func NewNasProvider(run Commander) *NasProvider {
 	if run == nil {
 		run = defaultCommander
 	}
-	return &NasProvider{run: run, readFile: os.ReadFile}
+	return &NasProvider{run: run, readFile: os.ReadFile, targets: parseNasTargets(os.Getenv(nasTargetsEnv))}
 }
 
 func (p *NasProvider) Type() string { return "nas" }
@@ -116,16 +121,21 @@ func DetectNas() bool {
 	return false
 }
 
-// Snapshot 全量快照：各源独立降级，单源失败不拖垮整体
+// Snapshot 全量快照：各源独立降级，单源失败不拖垮整体；本地源 + M2 网络
+// target 合并，Source 逗号 join 参与源（如 linux,dsm）
 func (p *NasProvider) Snapshot() (interface{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), nasTotalTimeout)
 	defer cancel()
 
 	snap := NasSnapshot{Source: "linux"}
+	sources := []string{"linux"}
 	snap.Pools = append(p.poolsFromMdstat(), p.poolsFromZfs(ctx)...)
 	snap.Pools = append(snap.Pools, p.poolsFromLvm(ctx)...)
 	snap.Mounts = p.mountsFromDf(ctx)
 	snap.Shares = append(p.sharesFromSmb(ctx), p.sharesFromNfs(ctx)...)
+
+	p.snapshotFromTargets(ctx, &snap, &sources)
+	snap.Source = strings.Join(sources, ",")
 
 	snap.Available = len(snap.Pools) > 0 || len(snap.Mounts) > 0 || len(snap.Shares) > 0
 	return map[string]interface{}{
@@ -426,7 +436,7 @@ func poolsToMaps(pools []NasPool) []map[string]interface{} {
 		out = append(out, map[string]interface{}{
 			"name": pools[i].Name, "kind": pools[i].Kind, "state": pools[i].State,
 			"totalGB": pools[i].TotalGB, "usedGB": pools[i].UsedGB,
-			"devices": pools[i].Devices, "detail": pools[i].Detail,
+			"devices": pools[i].Devices, "detail": pools[i].Detail, "host": pools[i].Host,
 		})
 	}
 	return out
@@ -438,6 +448,7 @@ func mountsToMaps(mounts []NasMount) []map[string]interface{} {
 		out = append(out, map[string]interface{}{
 			"device": mounts[i].Device, "mountPath": mounts[i].MountPath,
 			"fsType": mounts[i].FsType, "totalGB": mounts[i].TotalGB, "usedGB": mounts[i].UsedGB,
+			"host": mounts[i].Host,
 		})
 	}
 	return out
@@ -448,7 +459,7 @@ func sharesToMaps(shares []NasShare) []map[string]interface{} {
 	for i := range shares {
 		out = append(out, map[string]interface{}{
 			"protocol": shares[i].Protocol, "name": shares[i].Name, "path": shares[i].Path,
-			"comment": shares[i].Comment, "hosts": shares[i].Hosts,
+			"comment": shares[i].Comment, "hosts": shares[i].Hosts, "host": shares[i].Host,
 		})
 	}
 	return out
