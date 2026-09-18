@@ -158,6 +158,8 @@ func (p *CronProvider) Call(action string, params map[string]interface{}) (inter
 		return p.ApplyJob(job)
 	case "job.delete":
 		return p.DeleteJob(paramString(params, "name"))
+	case "timers":
+		return p.ListTimers()
 	default:
 		return nil, fmt.Errorf("unknown cron action: %s", action)
 	}
