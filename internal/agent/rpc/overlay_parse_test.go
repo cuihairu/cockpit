@@ -2,6 +2,8 @@ package rpc
 
 import (
 	"encoding/json"
+	"errors"
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -208,4 +210,44 @@ func TestParseWGDumpTruncatesPeers(t *testing.T) {
 func marshalJSONForTest(v interface{}) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// ============ 纯函数补测（覆盖率缺口）============
+
+// degrade 工具标记 error 并携带阶段与错误摘要
+func TestOverlayDegrade(t *testing.T) {
+	tool := &overlayTool{Tool: "wg", Status: "ok"}
+	got := degrade(tool, "execute", errors.New("exit status 1"))
+	if got != tool || got.Status != "error" || got.Error != "execute: exit status 1" {
+		t.Fatalf("degrade = %+v", got)
+	}
+}
+
+// isNotFoundErr 只认 exec.Error 包裹的 ErrNotFound（LookPath 失败形态）
+func TestOverlayIsNotFoundErr(t *testing.T) {
+	if !isNotFoundErr(&exec.Error{Name: "wg", Err: exec.ErrNotFound}) {
+		t.Fatal("exec.ErrNotFound not recognized")
+	}
+	if isNotFoundErr(&exec.Error{Name: "wg", Err: errors.New("permission denied")}) {
+		t.Fatal("non-notfound exec error should not match")
+	}
+	if isNotFoundErr(errors.New("plain error")) {
+		t.Fatal("plain error should not match")
+	}
+	if isNotFoundErr(nil) {
+		t.Fatal("nil should not match")
+	}
+}
+
+func TestOverlayItoa(t *testing.T) {
+	for _, c := range []struct {
+		in   int
+		want string
+	}{
+		{0, "0"}, {42, "42"}, {-7, "-7"}, {overlayMaxPeers, "200"},
+	} {
+		if got := itoa(c.in); got != c.want {
+			t.Errorf("itoa(%d) = %q, want %q", c.in, got, c.want)
+		}
+	}
 }

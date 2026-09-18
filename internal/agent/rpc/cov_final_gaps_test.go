@@ -175,3 +175,13 @@ func TestCovAddSourceCopyError(t *testing.T) {
 		t.Fatal("quota-limited addSource should fail during io.Copy")
 	}
 }
+
+func TestCovProviderTypes(t *testing.T) {
+	// Type() 标识常量（rpc 层路由与 capability 关联依赖）
+	if p := (&NasProvider{}).Type(); p != "nas" {
+		t.Errorf("nas type = %q", p)
+	}
+	if p := (&ServiceProvider{}).Type(); p != "service" {
+		t.Errorf("service type = %q", p)
+	}
+}

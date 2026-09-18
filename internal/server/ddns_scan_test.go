@@ -112,6 +112,76 @@ func mkDDNSConfig(t *testing.T, s *Server, mutate func(*storage.DDNSConfig)) *st
 	return cfg
 }
 
+// TestDDNSScanConfigAPI 全局巡检间隔配置端点（GET 范围与当前值 / PUT
+// 校验写入 / 非法 body 与越界 400 / 其他方法 405）
+func TestDDNSScanConfigAPI(t *testing.T) {
+	s, _ := newDDNSTestServer(t)
+
+	// GET：默认值 + 合法范围
+	rec := httptest.NewRecorder()
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodGet, "/ddns/config", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET config: code=%d", rec.Code)
+	}
+	var cfgResp struct {
+		ScanIntervalSeconds int `json:"scan_interval_seconds"`
+		Min                 int `json:"min"`
+		Max                 int `json:"max"`
+		Default             int `json:"default"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &cfgResp)
+	if cfgResp.ScanIntervalSeconds != ddnsDefaultInterval || cfgResp.Min != ddnsMinIntervalSeconds ||
+		cfgResp.Max != ddnsMaxIntervalSeconds || cfgResp.Default != ddnsDefaultInterval {
+		t.Fatalf("GET config = %+v", cfgResp)
+	}
+
+	// PUT：合法值写入并回读生效
+	rec = httptest.NewRecorder()
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/ddns/config",
+		strings.NewReader(`{"scan_interval_seconds":600}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT config: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodGet, "/ddns/config", nil))
+	json.Unmarshal(rec.Body.Bytes(), &cfgResp)
+	if cfgResp.ScanIntervalSeconds != 600 {
+		t.Fatalf("after PUT interval = %d, want 600", cfgResp.ScanIntervalSeconds)
+	}
+
+	// PUT：0 = 关闭，合法
+	rec = httptest.NewRecorder()
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/ddns/config",
+		strings.NewReader(`{"scan_interval_seconds":0}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT 0: code=%d", rec.Code)
+	}
+
+	// PUT：越界（低于 min / 高于 max / 负数）
+	for _, bad := range []int{ddnsMinIntervalSeconds - 1, ddnsMaxIntervalSeconds + 1, -5} {
+		rec = httptest.NewRecorder()
+		s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/ddns/config",
+			strings.NewReader(`{"scan_interval_seconds":`+strconv.Itoa(bad)+`}`)))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("PUT %d: code=%d, want 400", bad, rec.Code)
+		}
+	}
+
+	// PUT：非法 body
+	rec = httptest.NewRecorder()
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/ddns/config", strings.NewReader(`{bad`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("bad body: code=%d, want 400", rec.Code)
+	}
+
+	// 其他方法 405
+	rec = httptest.NewRecorder()
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodDelete, "/ddns/config", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("DELETE config: code=%d, want 405", rec.Code)
+	}
+}
+
 func TestDDNSConfigAPI(t *testing.T) {
 	s, _ := newDDNSTestServer(t)
 
