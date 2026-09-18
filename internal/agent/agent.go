@@ -328,10 +328,11 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		Version: "1",
 	})
 
-	// service capability：Windows SCM 内置恒可用；其余平台沿用 systemd 探测
-	// （systemctl + /run/systemd/system，见 service-design.md D2/D9），容器与
-	// 非 systemd 平台自动跳过
-	if runtime.GOOS == "windows" {
+	// service capability：Windows SCM 与 macOS launchd 内置恒可用（D9/D10）；
+	// 其余平台沿用 systemd 探测（systemctl + /run/systemd/system，见
+	// service-design.md D2），容器与非 systemd 平台自动跳过
+	switch {
+	case runtime.GOOS == "windows":
 		capabilities = append(capabilities, protocol.Capability{
 			Type:    "service",
 			Version: "2",
@@ -339,7 +340,15 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 				"backend": "windows-scm",
 			},
 		})
-	} else if rpc.DetectSystemd() {
+	case runtime.GOOS == "darwin":
+		capabilities = append(capabilities, protocol.Capability{
+			Type:    "service",
+			Version: "2",
+			Metadata: map[string]interface{}{
+				"backend": "launchd",
+			},
+		})
+	case rpc.DetectSystemd():
 		capabilities = append(capabilities, protocol.Capability{
 			Type:    "service",
 			Version: "2",

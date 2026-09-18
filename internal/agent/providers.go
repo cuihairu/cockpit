@@ -89,11 +89,14 @@ func (a *Agent) setupProviders() {
 			// 公网出口 IP 探测（见 docs/guide/ddns-design.md D4）
 			a.rpc.RegisterProvider(rpc.NewDDNSProvider(nil))
 		case "service":
-			// 服务管理（见 docs/guide/service-design.md D9）：按 backend
-			// 区分 systemd 与 Windows SCM
-			if cap.Metadata["backend"] == "windows-scm" {
+			// 服务管理（见 docs/guide/service-design.md D9/D10）：按 backend
+			// 区分 systemd / Windows SCM / macOS launchd
+			switch cap.Metadata["backend"] {
+			case "windows-scm":
 				a.rpc.RegisterProvider(rpc.NewWindowsServiceProvider())
-			} else {
+			case "launchd":
+				a.rpc.RegisterProvider(rpc.NewLaunchdServiceProvider(nil))
+			default:
 				a.rpc.RegisterProvider(rpc.NewServiceProvider(nil))
 			}
 		case "nas":
