@@ -60,6 +60,48 @@ func TestCronStatusAndJobsForward(t *testing.T) {
 	}
 }
 
+func TestCronTimersForward(t *testing.T) {
+	// systemd timer 只读列表（M3 D20）：纯转发不审计
+	s := newBackupTestServer(t)
+	var gotMethod string
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotMethod = method
+		return map[string]interface{}{
+			"timers": []map[string]interface{}{
+				{"unit": "apt-daily.timer", "description": "Daily apt download activities",
+					"schedule": "*-*-* 06,18:00:00", "state": "active",
+					"lastTrigger": 1787461235, "nextRun": 1787545829},
+			},
+		}, ""
+	})
+
+	rec := httptest.NewRecorder()
+	s.handleAgentCronAPI(rec, cronReq(http.MethodGet, "a1", "timers", ""), "a1/cron/timers")
+	if rec.Code != http.StatusOK || gotMethod != "cron.timers" {
+		t.Fatalf("timers: code=%d method=%s body=%s", rec.Code, gotMethod, rec.Body.String())
+	}
+	var resp struct {
+		Timers []map[string]interface{} `json:"timers"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if len(resp.Timers) != 1 || resp.Timers[0]["unit"] != "apt-daily.timer" {
+		t.Fatalf("timers resp = %+v", resp)
+	}
+
+	// 只读不审计：不应出现 cron 相关审计记录
+	logs, _, _ := s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": "cron_apply"})
+	if len(logs) != 0 {
+		t.Fatalf("timers must not audit, got %d", len(logs))
+	}
+
+	// 方法不允许
+	rec = httptest.NewRecorder()
+	s.handleAgentCronAPI(rec, cronReq(http.MethodPost, "a1", "timers", ""), "a1/cron/timers")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("POST timers = %d, want 404", rec.Code)
+	}
+}
+
 func TestCronApplyValidatesBeforeForwarding(t *testing.T) {
 	s := newBackupTestServer(t)
 	dispatched := 0

@@ -18,6 +18,7 @@ import (
 //
 //	GET    /api/agents/{id}/cron/status        概览（运行用户 + 条目计数）
 //	GET    /api/agents/{id}/cron/jobs          cockpit 名下任务 + 外部条目原文
+//	GET    /api/agents/{id}/cron/timers        systemd timer 只读列表（cron-design M3）
 //	PUT    /api/agents/{id}/cron/jobs/{name}   应用任务（审计 cron_apply）
 //	DELETE /api/agents/{id}/cron/jobs/{name}   删除任务（审计 cron_delete）
 //
@@ -134,6 +135,9 @@ func (s *Server) handleAgentCronAPI(w http.ResponseWriter, r *http.Request, rest
 		s.forwardCronRPC(w, r, agentID, "cron.status", nil, "", nil)
 	case sub == "jobs" && r.Method == http.MethodGet:
 		s.forwardCronRPC(w, r, agentID, "cron.jobs", nil, "", nil)
+	case sub == "timers" && r.Method == http.MethodGet:
+		// systemd timer 只读列表（M3 D20）：纯转发，只读不审计
+		s.forwardCronRPC(w, r, agentID, "cron.timers", nil, "", nil)
 	case sub == "jobs/" || strings.HasPrefix(sub, "jobs/"):
 		name := strings.TrimPrefix(sub, "jobs/")
 		s.handleCronJob(w, r, agentID, name)
