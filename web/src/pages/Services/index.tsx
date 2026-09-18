@@ -19,6 +19,8 @@ const ACTION_LABELS: Record<ServiceActionName, string> = {
   reload: '重载',
   enable: '设自启',
   disable: '停自启',
+  mask: '屏蔽',
+  unmask: '解屏蔽',
 }
 
 // activeState → 徽标样式
@@ -173,9 +175,11 @@ const Services = () => {
       width: 260,
       render: (_, r) => {
         const acting = actingUnit === r.name
-        // 操作显隐按当前状态：active → 停止/重启/重载；inactive → 启动；
-        // enabled ↔ disabled → 自启切换；static 等无 [Install] 段的不可设自启
+        // 操作显隐按当前状态：active → 停止/重启/重载；inactive → 启动
+        // （masked 服务启动必失败，隐藏启动改显解屏蔽）；enabled ↔ disabled
+        // → 自启切换；屏蔽/解屏蔽为 systemd 特有（mask 强封禁，D3）
         const canToggleEnable = r.unitFileState === 'enabled' || r.unitFileState === 'disabled'
+        const masked = r.unitFileState === 'masked'
         return (
           <Space size={4}>
             {r.activeState === 'active' ? (
@@ -201,16 +205,32 @@ const Services = () => {
                 )}
               </>
             ) : (
-              <Button
-                size="small"
-                type="text"
-                icon={<PoweroffOutlined />}
-                loading={acting}
-                onClick={() => runAction(r.name, 'start')}
-              >
-                启动
-              </Button>
+              !masked && (
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<PoweroffOutlined />}
+                  loading={acting}
+                  onClick={() => runAction(r.name, 'start')}
+                >
+                  启动
+                </Button>
+              )
             )}
+            {isSystemd &&
+              (masked ? (
+                <Tooltip title="masked：unit 已链接到 /dev/null 彻底禁止启动，解除后才能再操作">
+                  <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'unmask')}>
+                    解屏蔽
+                  </Button>
+                </Tooltip>
+              ) : (
+                <Tooltip title="屏蔽：链接到 /dev/null 彻底禁止启动（比停自启更强），不影响正在运行的服务">
+                  <Button size="small" type="text" danger loading={acting} onClick={() => runAction(r.name, 'mask')}>
+                    屏蔽
+                  </Button>
+                </Tooltip>
+              ))}
             {canToggleEnable &&
               (r.unitFileState === 'enabled' ? (
                 <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'disable')}>

@@ -79,9 +79,9 @@ func TestServiceActionValidatesAndAudits(t *testing.T) {
 	// 无后缀/带点的名字属 Windows 名形态已放行，这里只留双后端都拒的样例）
 	before := len(gotParams)
 	for _, sub := range []string{
-		"nginx.service/mask",         // 白名单外动词
-		"nginx.service/start;reboot", // 注入样例（分号不在两套字符集）
-		"../start",                   // .. 目录引用
+		"nginx.service/daemon-reload", // 白名单外动词
+		"nginx.service/start;reboot",  // 注入样例（分号不在两套字符集）
+		"../start",                    // .. 目录引用
 	} {
 		rec = httptest.NewRecorder()
 		s.handleAgentServiceAPI(rec, serviceReq(http.MethodPost, "a1", sub), "a1/services/"+sub)
@@ -169,7 +169,7 @@ func TestServiceAgentOfflineAndRouting(t *testing.T) {
 func TestValidateServiceAction(t *testing.T) {
 	// systemd unit 名：字母数字与 @ . _ + - 且 .service 结尾
 	for _, name := range []string{"nginx.service", "user@1000.service", "openvpn@server.service", "my-app.service"} {
-		for _, action := range []string{"start", "stop", "restart", "reload", "enable", "disable"} {
+		for _, action := range []string{"start", "stop", "restart", "reload", "enable", "disable", "mask", "unmask"} {
 			if err := validateServiceAction(name, action); err != nil {
 				t.Errorf("validate(%q, %q): %v", name, action, err)
 			}
@@ -187,7 +187,7 @@ func TestValidateServiceAction(t *testing.T) {
 	for _, tc := range []struct{ unit, action string }{
 		{"", "start"}, {"svc;rm", "start"}, {"svc\x00", "start"},
 		{".", "start"}, {"..", "start"},
-		{"nginx.service", "mask"}, {"nginx.service", "STOP"},
+		{"nginx.service", "daemon-reload"}, {"nginx.service", "STOP"},
 	} {
 		if err := validateServiceAction(tc.unit, tc.action); err == nil {
 			t.Errorf("validate(%q, %q) should fail", tc.unit, tc.action)

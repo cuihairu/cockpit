@@ -47,7 +47,7 @@ func validateServiceAction(unit, action string) error {
 		return err
 	}
 	switch action {
-	case "start", "stop", "restart", "reload", "enable", "disable":
+	case "start", "stop", "restart", "reload", "enable", "disable", "mask", "unmask":
 		return nil
 	}
 	return fmt.Errorf("unsupported action %q", action)

@@ -27,10 +27,11 @@ const (
 var (
 	// serviceUnitNameRe unit 名：字母数字与 @ . _ + - ，且必须 .service 结尾（D4）
 	serviceUnitNameRe = regexp.MustCompile(`^[A-Za-z0-9@._+-]+\.service$`)
-	// serviceActions systemctl 动词白名单（M2 再议 mask/unmask）
+	// serviceActions systemctl 动词白名单（M2 扩 mask/unmask，D3）
 	serviceActions = map[string]bool{
 		"start": true, "stop": true, "restart": true,
 		"reload": true, "enable": true, "disable": true,
+		"mask": true, "unmask": true,
 	}
 )
 
@@ -51,7 +52,7 @@ func validateServiceUnit(name, action string) error {
 		return fmt.Errorf("invalid unit name %q (expect *.service)", name)
 	}
 	if !serviceActions[action] {
-		return fmt.Errorf("unsupported action %q (allowed: start stop restart reload enable disable)", action)
+		return fmt.Errorf("unsupported action %q (allowed: start stop restart reload enable disable mask unmask)", action)
 	}
 	return nil
 }

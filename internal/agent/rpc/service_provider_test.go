@@ -38,7 +38,7 @@ func (m *mockSystemctl) run(_ context.Context, name string, args ...string) ([]b
 		return []byte(m.filesOut), nil, nil
 	case "is-system-running":
 		return []byte(m.isRunningOut), nil, m.isRunningErr
-	case "start", "stop", "restart", "reload", "enable", "disable":
+	case "start", "stop", "restart", "reload", "enable", "disable", "mask", "unmask":
 		m.actions = append(m.actions, args[0]+" "+args[1])
 		if m.actionErr != nil {
 			return nil, []byte("Failed to " + args[0] + " " + args[1] + ": Unit is masked"), m.actionErr
@@ -139,18 +139,20 @@ func TestServiceActionWhitelist(t *testing.T) {
 	m := &mockSystemctl{unitsOut: sampleUnitsOut, filesOut: sampleFilesOut}
 	p := NewServiceProvider(m.run)
 
-	// 合法动作
-	if _, err := p.DoAction("nginx.service", "restart"); err != nil {
-		t.Fatalf("restart: %v", err)
+	// 合法动作（M2 扩 mask/unmask）
+	for _, action := range []string{"restart", "mask", "unmask"} {
+		if _, err := p.DoAction("nginx.service", action); err != nil {
+			t.Fatalf("%s: %v", action, err)
+		}
 	}
-	if len(m.actions) != 1 || m.actions[0] != "restart nginx.service" {
+	if len(m.actions) != 3 || m.actions[1] != "mask nginx.service" {
 		t.Errorf("actions = %v", m.actions)
 	}
 
 	// 非法动词 / 危险 unit 名 / 缺 .service 后缀
 	for _, tc := range []struct{ name, action string }{
-		{"nginx.service", "mask"},          // 白名单外动词
 		{"nginx.service", "start; reboot"}, // 注入样例
+		{"nginx.service", "systemctl"},     // 白名单外动词
 		{"../etc/passwd", "start"},         // 路径穿越
 		{"nginx", "start"},                 // 缺 .service
 		{"nginx.socket", "start"},          // 非 service 类型
@@ -160,7 +162,7 @@ func TestServiceActionWhitelist(t *testing.T) {
 			t.Errorf("DoAction(%q, %q) should fail", tc.name, tc.action)
 		}
 	}
-	if len(m.actions) != 1 {
+	if len(m.actions) != 3 {
 		t.Errorf("rejected calls must not reach systemctl, actions = %v", m.actions)
 	}
 

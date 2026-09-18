@@ -724,8 +724,8 @@ export interface ServiceStatus {
   enabled: number
 }
 
-// systemd 服务管理动作（白名单，双端同规则）
-export type ServiceActionName = 'start' | 'stop' | 'restart' | 'reload' | 'enable' | 'disable'
+// 服务管理动作（白名单，双端同规则；mask/unmask 仅 systemd 后端）
+export type ServiceActionName = 'start' | 'stop' | 'restart' | 'reload' | 'enable' | 'disable' | 'mask' | 'unmask'
 
 // ========== Overlay 组网观测（见 overlay-design.md） ==========
 
