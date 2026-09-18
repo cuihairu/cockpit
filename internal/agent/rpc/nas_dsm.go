@@ -58,13 +58,33 @@ func parseNasTargets(raw string) []NasTarget {
 	return out
 }
 
-// nasDsmClientFactory HTTP client 工厂，测试注入（自签证书场景跳过校验）
-var nasDsmClientFactory = func(insecure bool) *http.Client {
+// nasHTTPClientFactory HTTP client 工厂（M2 网络 NAS 共用，自签证书场景跳过校验）
+var nasHTTPClientFactory = func(insecure bool) *http.Client {
 	transport := &http.Transport{}
 	if insecure {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // 家用 NAS 自签常态，D2 明示
 	}
 	return &http.Client{Timeout: nasCmdTimeout, Transport: transport}
+}
+
+// nasHTTPGet 通用 GET：状态码校验 + 8MB 响应上限（M2 网络 NAS 共用）
+func nasHTTPGet(ctx context.Context, client *http.Client, fullURL string, headers map[string]string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 }
 
 // nasDsmSession 一次 DSM 会话：登录后顺序取数，退出时登出
@@ -79,32 +99,24 @@ func (s *nasDsmSession) dsmEntry(ctx context.Context, params url.Values) (json.R
 	base := strings.TrimSuffix(s.target.Addr, "/") + "/webapi/entry.cgi"
 	q := params
 	q.Set("_sid", s.sid)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"?"+q.Encode(), nil)
+	body, err := nasHTTPGet(ctx, s.client, base+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("http %d", resp.StatusCode)
-	}
-	var body struct {
+	var parsed struct {
 		Success bool            `json:"success"`
 		Data    json.RawMessage `json:"data"`
 		Error   struct {
 			Code int `json:"code"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&body); err != nil {
+	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, err
 	}
-	if !body.Success {
-		return nil, fmt.Errorf("dsm error code %d", body.Error.Code)
+	if !parsed.Success {
+		return nil, fmt.Errorf("dsm error code %d", parsed.Error.Code)
 	}
-	return body.Data, nil
+	return parsed.Data, nil
 }
 
 // dsmLogin 登录取 sid（密码只经 url.Values 编码，不出现在错误里）
@@ -195,7 +207,7 @@ func bytesToGB(b int64) float64 {
 
 // dsmSnapshot 拉一台 DSM 的池/卷/共享（调用方负责 Host 打标与失败降级）
 func dsmSnapshot(ctx context.Context, t NasTarget) ([]NasPool, []NasMount, []NasShare, error) {
-	client := nasDsmClientFactory(t.InsecureTLS)
+	client := nasHTTPClientFactory(t.InsecureTLS)
 	sess, err := dsmLogin(ctx, t, client)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("target %s login failed: %w", t.Name, err)
@@ -266,16 +278,24 @@ func dsmSnapshot(ctx context.Context, t NasTarget) ([]NasPool, []NasMount, []Nas
 func (p *NasProvider) snapshotFromTargets(ctx context.Context, snap *NasSnapshot, sources *[]string) bool {
 	anyOK := false
 	for _, t := range p.targets {
-		if t.Type != "dsm" {
-			continue // truenas/omv 未实现，忽略
+		var pools []NasPool
+		var mounts []NasMount
+		var shares []NasShare
+		var err error
+		switch t.Type {
+		case "dsm":
+			pools, mounts, shares, err = dsmSnapshot(ctx, t)
+		case "truenas":
+			pools, mounts, shares, err = truenasSnapshot(ctx, t)
+		default:
+			continue // omv 未实现，忽略
 		}
-		pools, mounts, shares, err := dsmSnapshot(ctx, t)
 		if err != nil {
 			log.Printf("nas scan: %v", err) // 错误消息只含 target 名与错误码，无凭据
 			continue
 		}
 		anyOK = true
-		*sources = append(*sources, "dsm")
+		*sources = append(*sources, t.Type)
 		snap.Pools = append(snap.Pools, pools...)
 		snap.Mounts = append(snap.Mounts, mounts...)
 		snap.Shares = append(snap.Shares, shares...)
