@@ -9,6 +9,7 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Progress,
   Space,
   Spin,
   Switch,
@@ -40,7 +41,11 @@ import type { FileEntry, FileSearchResult } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 
 const EDIT_MAX_BYTES = 1024 * 1024 // 编辑器只允许 ≤1MB 文本（与 server 校验一致）
+// 上传（file-manager-design.md M3 D15-D17）：≤10MB 单块快速路径；更大走分块
+// （单块 1MB = agent fileWriteChunkLimit 满额，首块 truncate 建文件续块 append）
 const UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+const UPLOAD_CHUNK_MAX_BYTES = 2 * 1024 * 1024 * 1024
+const UPLOAD_CHUNK_BYTES = 1024 * 1024
 // 图片预览（file-manager-design.md M2 D14）：白名单扩展名 + 20MB 上限
 const PREVIEW_MAX_BYTES = 20 * 1024 * 1024
 const PREVIEW_CHUNK_BYTES = 1024 * 1024 // agent file.read 单块上限
@@ -291,6 +296,10 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
   }
   // 组件卸载时兜底回收
   useEffect(() => () => closePreview(), [])
+  // 卸载兜底：在途分块上传立即中止（不留半途请求）
+  useEffect(() => () => {
+    uploadTokenRef.current++
+  }, [])
 
   // 分块拉取图片拼装 Blob（offset 按已读字节数推进；size 是总大小不是游标）
   const openPreview = async (f: FileEntry) => {
@@ -338,20 +347,87 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
     }
   }
 
-  // 上传：读 File → base64 → write（truncate），>10MB 前端拒绝
+  // 上传（file-manager-design.md M3）：≤10MB 单块；更大分块（首块 truncate
+  // 建文件、续块 append），进度/取消走 token 递增；失败探测续传 ≤3 次
+  const [uploading, setUploading] = useState<{ name: string; uploaded: number; total: number } | null>(null)
+  const uploadTokenRef = useRef(0)
+  const handledUploadUids = useRef(new Set<string>())
+
+  // 探测目标文件当前大小（续传游标）；null = 不存在
+  const probeUploadedSize = async (dir: string, name: string): Promise<number | null> => {
+    const list = await api.listFiles(agentId, dir)
+    const hit = list.entries.find((e) => e.name === name)
+    return hit ? hit.size : null
+  }
+
+  const uploadChunked = async (raw: File, path: string, token: number) => {
+    const dir = cwd
+    let uploaded = 0
+    let first = true
+    let retries = 0
+    while (uploaded < raw.size) {
+      if (token !== uploadTokenRef.current) throw new Error('cancelled')
+      const end = Math.min(uploaded + UPLOAD_CHUNK_BYTES, raw.size)
+      const bytes = new Uint8Array(await raw.slice(uploaded, end).arrayBuffer())
+      setUploading({ name: raw.name, uploaded, total: raw.size })
+      try {
+        const res = await api.writeFile(agentId, path, toBase64(bytes), first)
+        // agent 返回写入后总大小：与本地进度一致才继续（防交错产出损坏文件）
+        if (res.size !== end) throw new Error('size-mismatch')
+        uploaded = end
+        first = false
+        retries = 0
+      } catch (err) {
+        if (token !== uploadTokenRef.current) throw new Error('cancelled')
+        if (err instanceof Error && err.message === 'size-mismatch') throw err
+        retries++
+        if (retries > 3) throw err
+        // 断点续传：以服务器文件实际大小为准决定从哪继续
+        const remote = await probeUploadedSize(dir, raw.name).catch(() => null)
+        if (remote === uploaded || remote === uploaded + UPLOAD_CHUNK_BYTES) {
+          uploaded = remote // 响应丢失时该块可能已落盘，跳过
+          first = false
+        } else if (remote === null || remote === 0) {
+          uploaded = 0 // 目标丢失/为空 → 首块重建
+          first = true
+        } else {
+          throw err // 其他大小（并发写入）→ 不覆盖别人的改动
+        }
+      }
+    }
+  }
+
+  const cancelUpload = () => {
+    uploadTokenRef.current++
+    const cur = uploading
+    setUploading(null)
+    // 清理半成品（分块留下的截断文件），失败静默
+    if (cur && cur.uploaded > 0) {
+      api.deleteRemoteFile(agentId, joinPath(cwd, cur.name)).catch(() => {})
+    }
+  }
+
   const uploadFiles = async (files: UploadFile[]) => {
     for (const f of files) {
       const raw = f.originFileObj as File | undefined
-      if (!raw) continue
-      if (raw.size > UPLOAD_MAX_BYTES) {
-        message.error(`${raw.name} 超过 10 MB，暂不支持上传`)
+      if (!raw || handledUploadUids.current.has(f.uid)) continue // antd onChange 累积 fileList，按 uid 去重
+      handledUploadUids.current.add(f.uid)
+      if (raw.size > UPLOAD_CHUNK_MAX_BYTES) {
+        message.error(`${raw.name} 超过 ${formatBytes(UPLOAD_CHUNK_MAX_BYTES)}，请走 scp 或终端上传`)
         continue
       }
+      const path = joinPath(cwd, raw.name)
       try {
-        const bytes = new Uint8Array(await raw.arrayBuffer())
-        await api.writeFile(agentId, joinPath(cwd, raw.name), toBase64(bytes), true)
+        if (raw.size <= UPLOAD_MAX_BYTES) {
+          const bytes = new Uint8Array(await raw.arrayBuffer())
+          await api.writeFile(agentId, path, toBase64(bytes), true)
+        } else {
+          await uploadChunked(raw, path, uploadTokenRef.current)
+        }
         message.success(`${raw.name} 已上传`)
+        invalidate()
       } catch (err) {
+        if (err instanceof Error && err.message === 'cancelled') return
         message.error(getApiErrorMessage(err, `上传 ${raw.name} 失败`))
       }
     }
@@ -533,6 +609,21 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
           >
             <Button size="small" icon={<UploadOutlined />}>上传</Button>
           </Upload>
+          {uploading && (
+            <Space size={4}>
+              <Progress
+                percent={Math.floor((uploading.uploaded * 100) / Math.max(uploading.total, 1))}
+                size="small"
+                style={{ width: 110, marginBottom: 0 }}
+              />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {uploading.name} {formatBytes(uploading.uploaded)}/{formatBytes(uploading.total)}
+              </Typography.Text>
+              <Button size="small" type="text" danger onClick={cancelUpload}>
+                取消
+              </Button>
+            </Space>
+          )}
         </Space>
       </Space>
 
