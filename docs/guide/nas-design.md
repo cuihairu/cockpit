@@ -194,7 +194,9 @@ params `{username,password}`（对象）→ `response.sessionid`，失败 HTTP 4
 
 ## D4 capability 与注册
 
-- `DetectNas()`：mdadm/zpool/vgs/btrfs/testparm/exportfs 任一 LookPath 成功
+- `DetectNas()`：mdadm/zpool/vgs/btrfs/testparm/exportfs 任一 LookPath 成功，
+  **或 `COCKPIT_NAS_TARGETS` 解析出有效条目**（跳板模式：Windows/macOS 主机
+  无本地存储工具也能观测网络 NAS；非法 JSON/空值不触发）
   （纯容器最小系统不注册，避免全量 agent 冗余 capability）
 - capability：`{Type: "nas", Version: "1"}`，detectCapabilities 追加（cron 同款）
 - providers.go：`case "nas"` 注册 `NewNasProvider(NasConfig{})`

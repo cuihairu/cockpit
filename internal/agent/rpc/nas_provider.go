@@ -108,8 +108,13 @@ func (p *NasProvider) Call(action string, params map[string]interface{}) (interf
 	return p.Snapshot()
 }
 
-// DetectNas 探测 NAS 观测价值：mdstat 存在（软件 RAID 可能有）或任一存储工具可用
+// DetectNas 探测 NAS 观测价值：mdstat 存在（软件 RAID 可能有）、任一存储
+// 工具可用，或配置了网络 NAS targets（跳板模式——Windows/macOS 无本地存储
+// 工具也能经 COCKPIT_NAS_TARGETS 观测网络 NAS，nas-design.md D4）
 func DetectNas() bool {
+	if len(parseNasTargets(os.Getenv(nasTargetsEnv))) > 0 {
+		return true
+	}
 	if _, err := os.Stat(nasMdstatPath); err == nil {
 		return true
 	}

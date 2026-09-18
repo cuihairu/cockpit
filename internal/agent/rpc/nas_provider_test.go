@@ -256,3 +256,28 @@ func TestDetectNasToolScan(t *testing.T) {
 		t.Error("zpool present should detect")
 	}
 }
+
+// 跳板模式（nas-design.md D4）：无本地存储工具时，配置了有效网络 NAS
+// targets 同样注册 nas capability——Windows/macOS 主机当跳板的前提
+func TestDetectNasTargetsFallback(t *testing.T) {
+	origLook, origMd := nasLookPath, nasMdstatPath
+	t.Cleanup(func() { nasLookPath = origLook; nasMdstatPath = origMd })
+	nasMdstatPath = "/proc/mdstat.does-not-exist"
+	nasLookPath = func(string) (string, error) { return "", errors.New("not found") }
+
+	t.Setenv(nasTargetsEnv, "not-json")
+	if DetectNas() {
+		t.Error("invalid targets JSON should not detect")
+	}
+	// 缺 password 的条目被 parseNasTargets 丢弃，不触发
+	t.Setenv(nasTargetsEnv, `[{"name":"a","type":"dsm","addr":"http://x","username":"u"}]`)
+	if DetectNas() {
+		t.Error("incomplete entries only should not detect")
+	}
+	// 字段完整的条目即算有效配置（type 未实现也注册——快照阶段才忽略，
+	// 探测看意图，provider 实现随 agent 升级自动生效）
+	t.Setenv(nasTargetsEnv, `[{"name":"nas1","type":"dsm","addr":"https://192.168.1.10:5001","username":"u","password":"p"}]`)
+	if !DetectNas() {
+		t.Error("valid targets should detect (jump mode)")
+	}
+}
