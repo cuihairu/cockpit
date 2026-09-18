@@ -61,7 +61,7 @@ type NasShare struct {
 |---|---|---|---|
 | linux | agent 本地命令 | /proc/mdstat、zpool、vgs、btrfs、df、testparm、exportfs | **M1** ✅ |
 | dsm | agent→DSM HTTP API | SYNO.API 系列接口，Session 登录 | **M2** ✅ |
-| truenas | agent→TrueNAS REST/WebSocket | /api/v2.0 pool/dataset/sharing | M2 排队 |
+| truenas | agent→TrueNAS REST | /api/v2.0 pool/dataset/sharing，Basic Auth | **M2** ✅ |
 | omv | agent→OMV JSON-RPC | Login + Rpc | M2 排队 |
 
 一个 agent 可观测多台网络 NAS（targets 数组），快照合并返回：来源设备标在
@@ -140,6 +140,27 @@ DSM 6/7 通用 webapi 入口（`{addr}/webapi/entry.cgi`，全部 GET + query �
 capability 语义不变：`DetectNas()` 仍只看本地工具（targets 是运行期配置，
 配了 target 的 agent 天然有观测价值，但 capability 影响的是「这台 agent 有
 NAS 可看」，保持探测可复现——无本地工具也无 target 的 agent 不注册）。
+
+## D3c M2：TrueNAS provider
+
+TrueNAS CORE/SCALE 通用 REST v2.0（`{addr}/api/v2.0/...`，全部 GET +
+JSON 数组响应），**Basic Auth**（username/password，无会话状态——比 DSM
+的 sid 流程简单；建议专用账号）。TLS/insecure/超时/降级纪律与 DSM 同。
+
+| 端点 | 消费字段 | 说明 |
+|---|---|---|
+| `GET /pool` | name/status/size/allocated/topology.data[].disk/scan | 池状态为 ZFS 原词（ONLINE/DEGRADED/FAULTED/OFFLINE/UNAVAIL/REMOVED），scan.state=SCANNING（resilver/scrub 进行中）→ resync |
+| `GET /dataset?limit=0` | 过滤 `type==FILESYSTEM && mounted && name 不含 /`（顶层） | 顶层即每池一个挂载（`/mnt/tank`），子数据集配额是细粒度管理，观测不取（防噪声）；`used + available` = 总量 |
+| `GET /sharing/smb` | name/path/comment | Protocol=smb |
+| `GET /sharing/nfs` | paths[]/networks[]/hosts[]/comment | 逐 path 展开一条 share；Hosts = networks+hosts 逗号 join |
+
+- 状态映射：ONLINE→healthy（scan SCANNING→resync）、DEGRADED→degraded、
+  FAULTED/OFFLINE/UNAVAIL/REMOVED→failed、其余→unknown；`Kind="truenas"`
+- `used`/`available` 等容量字段在部分版本是**字符串数字**（如 `"123456"`），
+  解析用 flexInt 兼容 number/string 两种
+- 认证失败（HTTP 401）→ 该 target 降级，错误消息不含凭据
+- 凭据/Host/降级纪律全部与 DSM 同（D2/D3b），消费端（巡检告警、前端）
+  零改动
 
 ## D4 capability 与注册
 
