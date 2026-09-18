@@ -328,6 +328,15 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		Version: "1",
 	})
 
+	// systemd capability：systemctl 可执行 + /run/systemd/system 存在
+	// （见 service-design.md D2），容器与非 systemd 平台自动跳过
+	if rpc.DetectSystemd() {
+		capabilities = append(capabilities, protocol.Capability{
+			Type:    "systemd",
+			Version: "1",
+		})
+	}
+
 	return capabilities
 }
 
