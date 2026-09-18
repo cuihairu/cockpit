@@ -162,6 +162,36 @@ JSON 数组响应），**Basic Auth**（username/password，无会话状态—�
 - 凭据/Host/降级纪律全部与 DSM 同（D2/D3b），消费端（巡检告警、前端）
   零改动
 
+## D3d M2：OMV provider（OpenMediaVault）
+
+OMV 全版本统一的 JSON-RPC（`POST {addr}/rpc.php`，body
+`{"service","method","params"}`，响应包装 `{"response":...,"error":...}`，
+错误时 error 含 code/message）。**认证走请求头**
+`X-Openmediavault-Sessionid: <sid>`（非 Cookie 非 body；源码
+session.inc `HTTP_X_OPENMEDIAVAULT_SESSIONID`）：`session.login`
+params `{username,password}`（对象）→ `response.sessionid`，失败 HTTP 400
+固定文案；`session.logout` best-effort。TLS/insecure/超时/降级纪律同前。
+
+| 端点（service.method） | 消费字段 | 说明 |
+|---|---|---|
+| `filesystemmgmt.enumerateFilesystems` | devicefile/type/mounted/mountpoint/size/used/available | 全部文件系统条目，`mounted=true && mountpoint!=""` → Mounts；swap 等未挂载条目自然过滤 |
+| `smb.getShareList`（params `{start:0,limit:-1}`） | data[].sharedfoldername/comment/guest/readonly/hostsallow | 仅 `enable=true`；`{total,data}` 包装 |
+| `nfs.getShareList`（params 同上） | data[].sharedfoldername/client/options/comment | 全量（schema 无 enable 字段） |
+
+- **Pools 置空**：OMV 无统一存储池概念（底层 mdadm/btrfs 由 OS 层呈现），
+  若 OMV 主机跑 agent 由 linux 源本地覆盖，网络 API 只补文件系统/共享视角；
+  `available` 判定依赖 mounts/shares，`Kind` 无池条目
+- **容量是 binary_format 字符串**（`"1.50 GiB"`，未挂载 `"-1"`）：解析函数
+  `parseBinarySize` 按单位 B/KiB/MiB/GiB/TiB/PiB 换算为 GB（十进制口径与
+  df 侧一致），非法/负值 → 0（前端显示 —）
+- **共享 Path 留空**：OMV API 不直接给共享绝对路径（sharedfolder 位置 =
+  mntent 挂载点 + reldirpath，需两次关联查询且导出根版本间有差异
+  `/export` vs `/sharedfolders`），不伪造；Name=sharedfoldername、
+  SMB Hosts=hostsallow、NFS Hosts=client
+- 2FA 开启的账号登录返回 `challengeRequired` 无 sessionid，等同登录失败
+  降级（提示文案不含敏感信息）；观测建议用无 2FA 专用账号
+- 凭据/Host/降级纪律全部与 DSM 同（D2/D3b），消费端零改动
+
 ## D4 capability 与注册
 
 - `DetectNas()`：mdadm/zpool/vgs/btrfs/testparm/exportfs 任一 LookPath 成功
@@ -227,6 +257,11 @@ PUT  /api/nas/config               保存（巡检配置类不记审计，smart/
   shares→smb、快照记录 Host=target 名、**快照与错误消息不含密码**；
   登录失败该 target 降级其余不受影响；targets JSON 非法/缺字段/条目
   丢弃；type 未实现的条目忽略
+- **agent OMV**（rpc/nas_omv_test.go）：`httptest` 假 OMV（body 的
+  service/method 分发 + `X-Openmediavault-Sessionid` 头校验）——登录→
+  enumerateFilesystems→getShareList×2→登出全流程、binary 容量字符串
+  解析（GiB/MB/裸数字/`-1`）、mounted 过滤、SMB enable 过滤、
+  pools 置空断言、坏 target 降级、快照不含密码
 - **server**（api_nas_test.go + nas_scan_test.go）：转发 + config 校验
   （interval 0/300/86400 合法、299/86401 拒绝；阈值 50-99）；巡检告警——
   degraded 池告警 warning、failed 池 error、超阈值挂载点告警、恢复不再重复、
