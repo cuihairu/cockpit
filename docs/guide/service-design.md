@@ -307,7 +307,7 @@ service_windows_stub.go    //go:build !windows：NewWindowsServiceProvider 返�
 
 - 只管 **system 域 LaunchDaemons**（`/Library/LaunchDaemons` +
   `/System/Library/LaunchDaemons`；agent 以 root 运行的前提与 systemd 侧同）。
-  LaunchAgents（用户会话域，gui/<UID>）不做——域前缀依赖用户 UID，语义另议
+  LaunchAgents（用户会话域，`gui/<UID>`）不做——域前缀依赖用户 UID，语义另议
 - 探测：`runtime.GOOS == "darwin"` 恒注册，capability 同 D9.2 统一模型
   `{type: "service", metadata: {backend: "launchd"}}`（launchd 是 PID 1 无需文件探测）
 - D1 的「macOS launchd M3 候选」至此关闭；OpenRC / runit 仍不做
