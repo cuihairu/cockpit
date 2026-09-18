@@ -145,9 +145,32 @@ apply/delete：
 **测试**：agent——每分钟/@daily/@reboot/步长范围/或语义/AND 语义/闰年 2·29/
 dow=7/非法表达式 0/禁用不计算；web——tsc + build。
 
+## M3：systemd timer 只读列表（2026-09-18）
+
+crontab 之外的第二类定时机制。只读预览：列出系统 timer unit 的日程与触发
+时间，不做启停/编辑（写路径涉及 root 边界，不做）。
+
+| 决策 | 内容 | 理由 |
+|------|------|------|
+| D18 | 列举与查询走稳定 API：`systemctl list-unit-files --type=timer --no-legend` 取每行**首列**（unit 名，不依赖列数），再**一条命令** `systemctl show 全部 unit 名 -p Description -p ActiveState -p UnitFileState -p LastTriggerUSec -p NextElapseUSecRealtime -p TimersCalendar -p TimersMonotonic` 属性查询，输出按空行分段、每段 `Key=Value` | `list-timers` 表格式输出列随 systemd 版本变（此前「不做」的根因）；`show -p` 属性名是稳定 bus API，实测验证两段式各一次 exec |
+| D19 | 日程取原文不做语义解析：`TimersCalendar` 的 `OnCalendar=` 原文优先，缺则拼 `TimersMonotonic` 各行（OnBootUSec/OnUnitActiveUSec）；`NextElapseUSecRealtime`/`LastTriggerUSec` 剥尾时区缩写后按**本机本地时区**解析为 unix 秒（`@` 前缀 = epoch 微秒直解；`n/a`/空/解析失败归 0）；show 失败的 unit（如模板 `@.timer`）仅列名、属性留空 | systemd 的 OnCalendar 语法超集太大不自写解析器；systemctl 与 agent 同机同 TZ，墙钟字符串与 `time.Local` 一致；模板单元本机实测 show 报错，兜底不致命 |
+| D20 | 呈现与只读边界：agent cron provider 新 action `timers`（纯读，capability 不动——入口挂 Cron 页）；server `GET /api/agents/{id}/cron/timers` 纯转发不落库不审计；web Cron 页新增「systemd 定时器」折叠面板（unit/描述/日程/状态/上次触发/下次触发，关键字过滤，请求失败或空列表不显示面板，时间 `dayjs.unix` 本地格式） | 列表性质与外部条目折叠面板一致；只读不涉审计与 capability 语义变化 |
+
+### Agent 侧
+
+- `cron_timers.go`：`listTimers`（两次 exec + 分段解析 + 时间解析
+  `parseSystemdTime`）；`Call` 加 case `timers`。
+
+### Web 侧
+
+- Cron 页「systemd 定时器」折叠面板（默认收起；空/失败不渲染）。
+
+**测试**：agent——时间解析各形态（UTC/本地尾缀/`@`epoch/`n/a`/垃圾）、
+分段解析（两 unit + 错误段跳过 + 模板单元仅列名）、schedule 原文提取
+（calendar 与 monotonic 多行）；server——转发；web——tsc + build。
+
 ## 不做（后续项）
 
-- systemd timer / service 列表展示：`systemctl list-timers` 输出解析脆弱，按需后补；
 - 多用户 crontab（`-u`）：需要 agent 侧用户枚举与权限边界设计，等真实需求；
 - 执行历史 / 失败告警：需包装器或日志采集，属日志聚合范畴；
 - 分布式锁 / server 侧调度下发：agent 侧 crontab 已是事实源，无需中心化调度。
