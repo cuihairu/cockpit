@@ -7,9 +7,9 @@ import { api } from '@/services/api'
 import type { ServiceActionName, ServiceUnit } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 
-// systemd 服务管理（见 docs/guide/service-design.md）：*.service unit 观测 +
-// 六动词操作。systemd 是唯一事实源，server 纯转发不落库；动作经白名单校验
-// 并记审计日志。
+// 服务管理（见 docs/guide/service-design.md）：systemd 与 Windows SCM 双后端
+// 统一观测 + 动作操作（capability type=service，metadata.backend 区分）。
+// 事实源在 agent 侧，server 纯转发不落库；动作经白名单校验并记审计日志。
 
 // systemctl 动词中文名与语义提示
 const ACTION_LABELS: Record<ServiceActionName, string> = {
@@ -49,21 +49,24 @@ const Services = () => {
 
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => api.getAgents() })
 
-  // 只有带 systemd capability（systemctl + /run/systemd/system）的 agent 可选
+  // 只有带 service capability（systemd 或 Windows SCM）的 agent 可选；
+  // backend 决定 Windows 特有处理（无 reload、无系统状态概念）
   const agentOptions = useMemo(
     () =>
       (agents ?? []).map((a) => {
-        const hasSystemd = (a.capabilities ?? []).some((c) => c.type === 'systemd')
+        const cap = (a.capabilities ?? []).find((c) => c.type === 'service')
         return {
           value: a.id,
-          disabled: !hasSystemd || a.status === 'offline',
+          disabled: !cap || a.status === 'offline',
           label: `${a.hostname || a.id}${
-            a.status === 'offline' ? '（离线）' : !hasSystemd ? '（未检测到 systemd）' : ''
+            a.status === 'offline' ? '（离线）' : !cap ? '（未检测到服务管理）' : ''
           }`,
+          backend: (cap?.metadata?.backend as string | undefined) ?? 'systemd',
         }
       }),
     [agents],
   )
+  const isWindows = agentOptions.find((o) => o.value === selectedAgent)?.backend === 'windows-scm'
 
   const statusKey = ['service-status', selectedAgent]
   const listKey = ['service-list', selectedAgent]
@@ -187,9 +190,12 @@ const Services = () => {
                 <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'restart')}>
                   重启
                 </Button>
-                <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'reload')}>
-                  重载
-                </Button>
+                {/* SCM 无 reload 语义（windows-scm 后端不支持，D9.3） */}
+                {!isWindows && (
+                  <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'reload')}>
+                    重载
+                  </Button>
+                )}
               </>
             ) : (
               <Button
@@ -265,11 +271,11 @@ const Services = () => {
       >
         {!selectedAgent ? (
           <Empty
-            description="选择一台 systemd 主机管理服务"
+            description="选择一台主机管理服务"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
           >
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              仅列出检测到 systemd capability 的主机（需要 systemctl 命令与 /run/systemd/system 存在）
+              仅列出检测到服务管理 capability 的主机：Linux 需 systemd（systemctl + /run/systemd/system），Windows 由 SCM 内置支持
             </Typography.Text>
           </Empty>
         ) : (
@@ -279,11 +285,16 @@ const Services = () => {
                 size="small"
                 column={{ xs: 1, sm: 4 }}
                 items={[
-                  {
-                    key: 'state',
-                    label: '系统状态',
-                    children: <Badge status={sysMeta.status} text={sysMeta.label} />,
-                  },
+                  // SCM 无 systemd 全局状态概念，Windows 主机不显示系统状态项
+                  ...(!isWindows
+                    ? [
+                        {
+                          key: 'state',
+                          label: '系统状态',
+                          children: <Badge status={sysMeta.status} text={sysMeta.label} />,
+                        },
+                      ]
+                    : []),
                   { key: 'total', label: '服务总数', children: status.total },
                   { key: 'active', label: '运行中', children: status.active },
                   {
@@ -298,7 +309,11 @@ const Services = () => {
               type="info"
               showIcon
               style={{ marginBottom: 0 }}
-              message="所有启停/自启操作直接作用于 systemd 并记入审计日志；failed 服务失败状态会在系统状态中体现（degraded）。"
+              message={
+                isWindows
+                  ? '所有启停/自启操作直接作用于 Windows 服务控制管理器并记入审计日志；不支持重载操作。'
+                  : '所有启停/自启操作直接作用于 systemd 并记入审计日志；failed 服务失败状态会在系统状态中体现（degraded）。'
+              }
             />
             {actionError && (
               <Alert
