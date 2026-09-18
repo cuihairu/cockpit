@@ -100,11 +100,27 @@ docker ：docker logs --tail {tail} --timestamps [{--since Nm}] {name}
     ERROR/FATAL 行红、WARN 行橙（前端正则着色，不改 agent 输出）；
   - **状态行**：返回行数 / 截断提示（`已截断，仅显示最后 N KB`）/ 查询耗时。
 
+## M2：实时尾随（2026-09-18）
+
+tail -f 式流式查看：agent 侧跟随进程持续推 chunk，server 经 HTTP 流式响应转发浏览器，断开即停。数据面复用 ProxyData 通道（与 terminal 同构），控制面走常规 RPC——**协议零新增**。
+
+| D | 决策 | 理由 |
+|---|------|------|
+| F1 | 通道拆分 | **控制面** RPC：`logs.follow.start`（`{followId, type, source, tail, grep}`，返回成功即开始）/ `logs.follow.stop`（`{followId}`）；**数据面** 复用 `proxy_data`/`proxy_close` 消息，`proxyId = "logs:<followId>"`——与 terminal 前缀模式同构，协议不加新类型 | RPC 校验/错误/测试走既有惯例；数据单向高频，ProxyData 已是二进制高效路径 |
+| F2 | agent 跟随进程 | systemd：`journalctl -f -n $TAIL -o short-iso -u $UNIT`；docker：`docker logs -f --tail $TAIL --timestamps $NAME`；bufio 按行扫描（行上限 1MB 同 query），grep 内存 contains 同款过滤 | 命令拼装复用 query 同款参数语义，行为一致；argv 直传不经 shell |
+| F3 | agent 会话上限 | 单会话累计输出 4MB 即停（发 close reason=limit）；会话超时 10 分钟自动停；follows map 上限 16 个；followId 重复 start 覆盖旧会话（先杀旧进程） | 防打爆 WS 与浏览器内存；上限内个人场景富余 |
+| F4 | server 流式端点 | `POST /api/agents/{id}/logs/follow`（body 同 query 参数），响应 NDJSON 流：`{"data":"..."}` 数据帧 / `{"eof":true,"reason":"..."}` 终止帧；认证走既有 JWT 中间件（fetch POST 可带头，不用 EventSource） | fetch streaming（ReadableStream）现代浏览器全支持；abort() 即断开，客户端关闭 → server 检测 ctx.Done → 发 follow.stop |
+| F5 | server 生命周期 | `logsFollowers` 注册表（followId → chan + agentID）；ProxyData `logs:` 前缀分派写入；ProxyClose 同前缀 → 流发 eof 帧收尾；全局 follow 上限 8 / 每 agent 上限 2；CallAgent 失败即 4xx/5xx 不占表 | 与 terminalSessions 同款注册表模式；上限防滥用 |
+| F6 | 语义细节 | start 后 agent 先推回填 tail 行再持续跟随（journalctl -f 自带、docker logs -f --tail 自带）；docker 容器停止 → 进程退出 → ProxyClose reason=exited；server 校验与 query 完全同规则（source 白名单/tail 上限/grep 无换行） | tail -f 心智：回填 + 跟随一体 |
+| F7 | web | LogsPanel「实时尾随」开关：开启清空当前视图 → fetch POST 流式读（AbortController），逐行追加渲染（复用 GrepLine 着色与 grep 高亮）；尾随中锁定源/参数输入；关闭/切源/组件卸载 abort | 单向流 + abort 足够，不引入 WS 复杂度 |
+| F8 | 审计 | 尾随不记审计（同查询浏览纪律，D9） | 无变更操作 |
+
+**测试**：agent follow 会话（mock Commander 输出逐行推、grep 过滤、4MB 上限停、stop 杀进程、followId 覆盖）；server 端点（校验 400、上限 429、NDJSON 帧序列、客户端断开触发 stop RPC、ProxyClose 收尾）；web build。
+
 ## 不做（后续项）
 
 - 推送式采集与服务端存储聚合（Loki 对接或自研索引）：独立量级，M2 立项；
 - 跨机统一检索：依赖采集管道先行；
-- 实时尾随（tail -f 式流式）：需流式 RPC 通道（当前 WS RPC 一问一答），M2 评估；
 - 日志级别结构化解析（journalctl -o json 的字段提取）：当前文本形态已够用；
 - `--all` 历史对象枚举、多 unit 联合查询、PCRE 过滤：按需后补。
 
