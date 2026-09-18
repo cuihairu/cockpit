@@ -211,6 +211,8 @@ func (p *DriftProvider) Call(action string, params map[string]interface{}) (inte
 		return p.Check()
 	case "diff":
 		return p.Diff(paramString(params, "kind"), paramString(params, "name"))
+	case "record":
+		return p.RecordCurrent(paramString(params, "kind"), paramString(params, "name"))
 	default:
 		return nil, fmt.Errorf("unknown action %q", action)
 	}
@@ -384,6 +386,25 @@ func (p *DriftProvider) currentContent(kind, name string) ([]byte, error) {
 		return json.Marshal(jobs)
 	}
 	return nil, fmt.Errorf("unknown kind %q", kind)
+}
+
+// RecordCurrent 手动登记基线「以当前为准」（M4/D23）：实时读当前内容（与
+// check/diff 同源）后按 Record 语义登记原文。missing/error 场景读不到当前
+// 内容在此直接报错；>256KB 照 Record 规则只存 hash。
+func (p *DriftProvider) RecordCurrent(kind, name string) (interface{}, error) {
+	if err := validDriftTarget(kind, name); err != nil {
+		return nil, err
+	}
+	content, err := p.currentContent(kind, name)
+	if err != nil {
+		return nil, err
+	}
+	p.baseline.Record(kind, name, content)
+	sum := sha256.Sum256(content)
+	return map[string]interface{}{
+		"recorded": true,
+		"sha256":   hex.EncodeToString(sum[:]),
+	}, nil
 }
 
 // validDriftTarget diff 目标校验（D20）：kind 白名单 + name 形态。server 同规则

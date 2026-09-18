@@ -535,3 +535,117 @@ func TestDriftDiffValidation(t *testing.T) {
 		}
 	}
 }
+
+// ---------- M4：手动登记基线「以当前为准」（D23） ----------
+
+func TestDriftRecordCurrentRegisters(t *testing.T) {
+	confDir := t.TempDir()
+	sitePath := filepath.Join(confDir, "cockpit-site-legacy.conf")
+	if err := os.WriteFile(sitePath, []byte("# 存量站点\nserver block legacy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json"))
+	p := NewDriftProvider(b, DriftConfig{ConfDir: confDir})
+
+	// no_baseline → 登记 → ok
+	if got := driftFind(t, mustCheck(t, p), "nginx", "legacy"); got.Status != "no_baseline" {
+		t.Fatalf("before = %+v", got)
+	}
+	res, err := p.RecordCurrent("nginx", "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := res.(map[string]interface{})
+	if m["recorded"] != true || len(m["sha256"].(string)) != 64 {
+		t.Fatalf("record result = %+v", m)
+	}
+	if got := driftFind(t, mustCheck(t, p), "nginx", "legacy"); got.Status != "ok" {
+		t.Fatalf("after record = %+v", got)
+	}
+
+	// 登记 contents 存了原文（diff 可用）
+	if _, err := p.Diff("nginx", "legacy"); err != nil {
+		t.Fatalf("diff after record: %v", err)
+	}
+
+	// drifted → 以当前为准 → ok 且基线更新为新内容
+	if err := os.WriteFile(sitePath, []byte("# 手改后的新标准"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := driftFind(t, mustCheck(t, p), "nginx", "legacy"); got.Status != "drifted" {
+		t.Fatalf("after edit = %+v", got)
+	}
+	if _, err := p.RecordCurrent("nginx", "legacy"); err != nil {
+		t.Fatal(err)
+	}
+	if got := driftFind(t, mustCheck(t, p), "nginx", "legacy"); got.Status != "ok" {
+		t.Fatalf("after re-record = %+v", got)
+	}
+	if _, err := p.Diff("nginx", "legacy"); err != nil {
+		t.Fatalf("diff after re-record: %v", err)
+	}
+}
+
+func TestDriftRecordCurrentCronAndStack(t *testing.T) {
+	runner := &mockCronRunner{hasFile: true, content: "*/5 * * * * /usr/bin/existing.sh\n"}
+	b := NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json"))
+	p := NewDriftProvider(b, DriftConfig{CronRun: runner.run})
+
+	// cron：外部存的 cockpit 段（无面板基线）→ 登记 → ok
+	if got := driftFind(t, mustCheck(t, p), "cron", "cockpit"); got.Status != "no_baseline" {
+		t.Fatalf("cron before = %+v", got)
+	}
+	if _, err := p.RecordCurrent("cron", "cockpit"); err != nil {
+		t.Fatal(err)
+	}
+	if got := driftFind(t, mustCheck(t, p), "cron", "cockpit"); got.Status != "ok" {
+		t.Fatalf("cron after = %+v", got)
+	}
+
+	// stack：以磁盘为准登记两个文件
+	stacksDir := t.TempDir()
+	mk := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(stacksDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("api/compose.yml", "services: {}")
+	mk("api/.env", "K=V")
+	p2 := NewDriftProvider(NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json")), DriftConfig{StacksDir: stacksDir})
+	for _, name := range []string{"api/compose.yml", "api/.env"} {
+		if _, err := p2.RecordCurrent("stack", name); err != nil {
+			t.Fatalf("record %s: %v", name, err)
+		}
+		if got := driftFind(t, mustCheck(t, p2), "stack", name); got.Status != "ok" {
+			t.Fatalf("%s after record = %+v", name, got)
+		}
+	}
+}
+
+func TestDriftRecordCurrentErrors(t *testing.T) {
+	p := NewDriftProvider(
+		NewDriftBaseline(filepath.Join(t.TempDir(), "baseline.json")),
+		DriftConfig{ConfDir: t.TempDir(), StacksDir: t.TempDir()},
+	)
+
+	// 文件缺失（missing 场景）→ 读不到当前内容报错
+	if _, err := p.RecordCurrent("nginx", "ghost"); err == nil {
+		t.Fatal("missing file should error")
+	}
+	// stack 目录缺失
+	if _, err := p.RecordCurrent("stack", "gone/compose.yml"); err == nil {
+		t.Fatal("missing stack should error")
+	}
+	// 校验拒绝复用 M3 规则
+	if _, err := p.RecordCurrent("cron", "other"); err == nil || !strings.Contains(err.Error(), "unknown cron object") {
+		t.Fatalf("validation err = %v", err)
+	}
+	if _, err := p.RecordCurrent("nginx", "../etc"); err == nil || !strings.Contains(err.Error(), "invalid nginx site name") {
+		t.Fatalf("traversal err = %v", err)
+	}
+}
