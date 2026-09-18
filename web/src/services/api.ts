@@ -47,6 +47,7 @@ import type {
   BackupFile,
   BackupTask,
   FileEntry,
+  FileSearchResult,
   FileReadResult,
   ProxySite,
   ProxySiteDetail,
@@ -737,6 +738,20 @@ class ApiService {
 
   async renameRemoteFile(agentId: string, path: string, name: string): Promise<void> {
     await this.client.post(`/agents/${encodeURIComponent(agentId)}/files/rename`, { path, name })
+  }
+
+  // 目录内递归文本搜索（file-manager-design.md D10-D12：纯文本 contains，
+  // 默认大小写不敏感；agent 侧有深度/文件数/命中数/超时多重上限）
+  async searchFiles(
+    agentId: string,
+    dir: string,
+    query: string,
+    caseSensitive = false,
+  ): Promise<FileSearchResult> {
+    return this.client.post<unknown, FileSearchResult>(
+      `/agents/${encodeURIComponent(agentId)}/files/search`,
+      { dir, query, caseSensitive },
+    )
   }
 
   // 下载远程文件（流式 blob；大小不限，server 分块拉取不落盘）

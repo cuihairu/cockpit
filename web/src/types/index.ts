@@ -644,6 +644,20 @@ export interface FileReadResult {
   eof: boolean
 }
 
+// file.search 文本搜索结果（见 file-manager-design.md D10-D11）
+export interface FileSearchMatch {
+  path: string // 相对搜索根目录
+  line: number
+  text: string // 命中行（agent 侧已截断 200 字符）
+}
+
+export interface FileSearchResult {
+  matches: FileSearchMatch[]
+  truncated: boolean
+  scanned: number
+  skipped: number
+}
+
 // ============ 反向代理（Nginx 站点管理） ============
 
 // proxy.status：nginx 安装状态概览

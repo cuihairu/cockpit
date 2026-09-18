@@ -1,12 +1,17 @@
 package rpc
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
+	"time"
 )
 
 // ============ File Provider ============
@@ -51,6 +56,8 @@ func (p *FileProvider) Call(action string, params map[string]interface{}) (inter
 		return p.Delete(paramString(params, "path"))
 	case "rename":
 		return p.Rename(paramString(params, "path"), paramString(params, "name"))
+	case "search":
+		return p.Search(params)
 	default:
 		return nil, fmt.Errorf("unknown file action: %s", action)
 	}
@@ -299,4 +306,169 @@ func (p *FileProvider) Rename(path, name string) (interface{}, error) {
 		return nil, fmt.Errorf("rename: %w", err)
 	}
 	return map[string]interface{}{"path": target}, nil
+}
+
+// ============ 文本搜索（见 file-manager-design.md M2，D10-D11） ============
+
+const (
+	// fileSearchMaxDepth 递归深度上限
+	fileSearchMaxDepth = 8
+	// fileSearchMaxFiles 扫描文件总数上限（防大目录树）
+	fileSearchMaxFiles = 5000
+	// fileSearchMaxMatches 命中条数上限（达到即停）
+	fileSearchMaxMatches = 200
+	// fileSearchMaxFileSize 单文件参与搜索的大小上限（与编辑器 read 上限一致）
+	fileSearchMaxFileSize = 1024 * 1024
+	// fileSearchMaxQuery 关键词长度上限
+	fileSearchMaxQuery = 256
+	// fileSearchLineMaxChars 命中行文本截断长度
+	fileSearchLineMaxChars = 200
+	// fileSearchTimeout 单次搜索总超时
+	fileSearchTimeout = 15 * time.Second
+)
+
+// Search 目录内递归文本搜索：纯文本 contains（D10，防 ReDoS 与 logs grep 同纪律）、
+// 默认大小写不敏感；跳过 symlink/二进制/大文件（D11），各上限置 truncated。
+// 命中即停返回已得结果——搜索是浏览性质操作，部分结果同样可用。
+func (p *FileProvider) Search(params map[string]interface{}) (interface{}, error) {
+	dir, err := cleanAbsPath(paramString(params, "dir"), "dir")
+	if err != nil {
+		return nil, err
+	}
+	query := paramString(params, "query")
+	if query == "" {
+		return nil, fmt.Errorf("query required")
+	}
+	if len(query) > fileSearchMaxQuery {
+		return nil, fmt.Errorf("query too long (max %d bytes)", fileSearchMaxQuery)
+	}
+	caseSensitive, _ := params["caseSensitive"].(bool)
+	maxResults := fileSearchMaxMatches
+	if n := int(paramFloat(params, "maxResults")); n > 0 && n < fileSearchMaxMatches {
+		maxResults = n
+	}
+	needle := query
+	if !caseSensitive {
+		needle = strings.ToLower(query)
+	}
+
+	type searchState struct {
+		matches   []map[string]interface{}
+		scanned   int
+		skipped   int
+		truncated bool
+	}
+	st := &searchState{matches: []map[string]interface{}{}}
+	rootDepth := strings.Count(dir, string(filepath.Separator))
+	deadline := time.Now().Add(fileSearchTimeout)
+
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // 无权限目录等瞬时错误跳过，不中断整体搜索
+		}
+		if time.Now().After(deadline) {
+			st.truncated = true
+			return filepath.SkipAll
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			base := d.Name()
+			if rel != "." && (base == ".git" || base == "node_modules") {
+				return filepath.SkipDir
+			}
+			// 深度按根目录的层级数起算，超限整枝跳过
+			if rel != "." && strings.Count(path, string(filepath.Separator))-rootDepth > fileSearchMaxDepth {
+				st.truncated = true
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// 只搜普通文件：symlink（WalkDir Lstat 语义）与设备等一律跳过（D7 延伸）
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		st.scanned++
+		if st.scanned > fileSearchMaxFiles {
+			st.truncated = true
+			return filepath.SkipAll
+		}
+		info, err := d.Info()
+		if err != nil || info.Size() > fileSearchMaxFileSize {
+			st.skipped++
+			return nil
+		}
+		matches, scannedLine := searchInFile(path, needle, caseSensitive, maxResults-len(st.matches))
+		for _, m := range matches {
+			m["path"] = rel // 相对 dir 呈现
+		}
+		st.matches = append(st.matches, matches...)
+		if scannedLine {
+			st.skipped++
+		}
+		if len(st.matches) >= maxResults {
+			st.truncated = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil && err != filepath.SkipAll {
+		return nil, fmt.Errorf("search: %w", err)
+	}
+	return map[string]interface{}{
+		"matches":   st.matches,
+		"truncated": st.truncated,
+		"scanned":   st.scanned,
+		"skipped":   st.skipped,
+	}, nil
+}
+
+// searchInFile 单文件行扫描，返回命中（相对信息由调用方补）与是否二进制跳过
+func searchInFile(path, needle string, caseSensitive bool, budget int) (matches []map[string]interface{}, binarySkipped bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+
+	// 二进制探测：首 512 字节含 NUL 即跳过（git 同款启发式）
+	head := make([]byte, 512)
+	n, _ := f.Read(head)
+	if bytes.IndexByte(head[:n], 0) >= 0 {
+		return nil, true
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return nil, false
+	}
+
+	matches = nil
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), fileSearchMaxFileSize)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := scanner.Text()
+		hay := line
+		if !caseSensitive {
+			hay = strings.ToLower(line)
+		}
+		if !strings.Contains(hay, needle) {
+			continue
+		}
+		text := line
+		if len(text) > fileSearchLineMaxChars {
+			text = text[:fileSearchLineMaxChars]
+		}
+		matches = append(matches, map[string]interface{}{
+			"path": path,
+			"line": lineNo,
+			"text": text,
+		})
+		if len(matches) >= budget {
+			break
+		}
+	}
+	return matches, false
 }

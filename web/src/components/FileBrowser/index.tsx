@@ -10,6 +10,8 @@ import {
   Modal,
   Popconfirm,
   Space,
+  Spin,
+  Switch,
   Table,
   Tag,
   Typography,
@@ -26,13 +28,14 @@ import {
   FolderOutlined,
   LinkOutlined,
   RedoOutlined,
+  SearchOutlined,
   SwapOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { api } from '@/services/api'
-import type { FileEntry } from '@/types'
+import type { FileEntry, FileSearchResult } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 
 const EDIT_MAX_BYTES = 1024 * 1024 // 编辑器只允许 ≤1MB 文本（与 server 校验一致）
@@ -58,6 +61,31 @@ const pathSegments = (p: string): Array<{ label: string; path: string }> => {
 
 const joinPath = (dir: string, name: string) =>
   dir === '/' ? `/${name}` : `${dir}/${name}`
+
+// 命中行关键词高亮（大小写按搜索模式切分，纯展示不递归）
+const HighlightText = ({ text, query, caseSensitive }: { text: string; query: string; caseSensitive: boolean }) => {
+  if (!query) return <>{text}</>
+  const needle = caseSensitive ? query : query.toLowerCase()
+  const parts: React.ReactNode[] = []
+  let rest = text
+  let key = 0
+  while (rest) {
+    const h = caseSensitive ? rest : rest.toLowerCase()
+    const idx = h.indexOf(needle)
+    if (idx < 0) {
+      parts.push(rest)
+      break
+    }
+    if (idx > 0) parts.push(rest.slice(0, idx))
+    parts.push(
+      <mark key={key++} style={{ background: '#613400', color: '#ffd666', padding: '0 1px' }}>
+        {rest.slice(idx, idx + needle.length)}
+      </mark>,
+    )
+    rest = rest.slice(idx + needle.length)
+  }
+  return <>{parts}</>
+}
 
 const toBase64 = (bytes: Uint8Array): string => {
   let bin = ''
@@ -97,6 +125,13 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
   const [editSaving, setEditSaving] = useState(false)
   const [deleteDir, setDeleteDir] = useState<FileEntry | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState('')
+  // 文本搜索（file-manager-design.md M2 D13）：以打开时的目录为根
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchCase, setSearchCase] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const [searchResult, setSearchResult] = useState<FileSearchResult | null>(null)
+  const [searchRoot, setSearchRoot] = useState('/')
   const [form] = Form.useForm<{ name: string }>()
 
   const filesQuery = useQuery({
@@ -105,6 +140,37 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
     retry: 1,
   })
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['agent-files', agentId, cwd] })
+
+  const openSearch = () => {
+    setSearchQuery('')
+    setSearchResult(null)
+    setSearchRoot(cwd)
+    setSearchOpen(true)
+  }
+
+  const runSearch = async () => {
+    const q = searchQuery.trim()
+    if (!q) {
+      message.warning('请输入搜索关键词')
+      return
+    }
+    setSearching(true)
+    try {
+      setSearchResult(await api.searchFiles(agentId, searchRoot, q, searchCase))
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '搜索失败'))
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  // 点击命中路径：跳转到该文件所在目录（相对搜索根解析为绝对路径）
+  const gotoMatch = (relPath: string) => {
+    const abs = joinPath(searchRoot, relPath)
+    const dir = abs.slice(0, abs.lastIndexOf('/')) || '/'
+    setCwd(dir)
+    setSearchOpen(false)
+  }
 
   const mkdirMutation = useMutation({
     mutationFn: (path: string) => api.createRemoteDir(agentId, path),
@@ -356,6 +422,9 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
           }}>
             新建目录
           </Button>
+          <Button size="small" icon={<SearchOutlined />} onClick={openSearch}>
+            搜索
+          </Button>
           <Upload
             multiple
             showUploadList={false}
@@ -492,6 +561,89 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
           value={deleteConfirm}
           onChange={(e) => setDeleteConfirm(e.target.value)}
         />
+      </Modal>
+
+      {/* 文本搜索 Modal（D13）：当前目录为根递归 contains */}
+      <Modal
+        title={`搜索文件内容：${searchRoot}`}
+        open={searchOpen}
+        onCancel={() => setSearchOpen(false)}
+        footer={null}
+        width={760}
+        destroyOnClose
+      >
+        <Space.Compact style={{ width: '100%', marginBottom: 8 }}>
+          <Input
+            placeholder="关键词（纯文本，递归搜索子目录）"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onPressEnter={() => void runSearch()}
+            prefix={<SearchOutlined />}
+            autoFocus
+          />
+          <Button type="primary" loading={searching} onClick={() => void runSearch()}>
+            搜索
+          </Button>
+        </Space.Compact>
+        <Space size={8} style={{ marginBottom: 12 }}>
+          <Switch checked={searchCase} onChange={setSearchCase} size="small" />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            区分大小写（默认忽略；跳过 symlink/二进制/大于 1MB 文件，最多返回 200 条）
+          </Typography.Text>
+        </Space>
+        {searching ? (
+          <div style={{ textAlign: 'center', padding: 24 }}>
+            <Spin tip="扫描中…" />
+          </div>
+        ) : searchResult ? (
+          <>
+            <Space size={8} style={{ marginBottom: 8 }}>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {searchResult.matches.length} 处命中 · 已扫描 {searchResult.scanned} 文件
+                {searchResult.skipped > 0 && ` · 跳过 ${searchResult.skipped}`}
+              </Typography.Text>
+              {searchResult.truncated && (
+                <Tag color="warning">结果截断，可换更具体的关键词或子目录</Tag>
+              )}
+            </Space>
+            {searchResult.matches.length === 0 ? (
+              <Empty description="无命中" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <div style={{ maxHeight: 420, overflow: 'auto' }}>
+                {searchResult.matches.map((m, i) => (
+                  <div key={`${m.path}:${m.line}:${i}`} style={{ marginBottom: 6 }}>
+                    <div>
+                      <a onClick={() => gotoMatch(m.path)} style={{ fontSize: 12 }}>
+                        {m.path}
+                      </a>
+                      <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                        :{m.line}
+                      </Typography.Text>
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: 'SFMono-Regular, Consolas, monospace',
+                        fontSize: 12,
+                        lineHeight: 1.5,
+                        background: 'rgba(128,128,128,0.08)',
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      <HighlightText text={m.text} query={searchQuery.trim()} caseSensitive={searchCase} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            以 {searchRoot} 为根递归搜索文件内容；适合定位「配置项写在哪个文件」。
+          </Typography.Text>
+        )}
       </Modal>
     </div>
   )

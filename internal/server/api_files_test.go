@@ -175,3 +175,73 @@ func TestFilesDownload(t *testing.T) {
 		t.Fatalf("bad path code = %d, want 400", rec.Code)
 	}
 }
+
+// TestFilesSearchValidatesAndForwards 文本搜索端点（file-manager-design.md D12）：
+// 校验（相对 dir / 空 query / 超长 query 400）+ 转发参数透传 + 浏览不审计
+func TestFilesSearchValidatesAndForwards(t *testing.T) {
+	s := newBackupTestServer(t)
+	var gotMethod string
+	var gotParams map[string]interface{}
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotMethod = method
+		gotParams = params
+		return map[string]interface{}{
+			"matches": []map[string]interface{}{
+				{"path": "nginx.conf", "line": 1, "text": "server_name example.com;"},
+			},
+			"truncated": false, "scanned": 12, "skipped": 2,
+		}, ""
+	})
+
+	// 相对 dir → 400
+	rec := httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("search", "a1", `{"dir":"rel/path","query":"x"}`), "a1/files/search")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("relative dir: code = %d", rec.Code)
+	}
+
+	// 空 query → 400
+	rec = httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("search", "a1", `{"dir":"/etc","query":""}`), "a1/files/search")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty query: code = %d", rec.Code)
+	}
+
+	// 超长 query → 400
+	longQuery := strings.Repeat("q", 257)
+	rec = httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("search", "a1", `{"dir":"/etc","query":"`+longQuery+`"}`), "a1/files/search")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("long query: code = %d", rec.Code)
+	}
+
+	// 正常转发：caseSensitive 透传
+	rec = httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("search", "a1", `{"dir":"/etc/nginx","query":"server_name","caseSensitive":true}`), "a1/files/search")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("search code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if gotMethod != "file.search" {
+		t.Fatalf("method = %s", gotMethod)
+	}
+	if gotParams["dir"] != "/etc/nginx" || gotParams["query"] != "server_name" || gotParams["caseSensitive"] != true {
+		t.Fatalf("params = %v", gotParams)
+	}
+	var out struct {
+		Matches []map[string]interface{} `json:"matches"`
+		Scanned int                      `json:"scanned"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Matches) != 1 || out.Matches[0]["path"] != "nginx.conf" || out.Scanned != 12 {
+		t.Fatalf("out = %v", out)
+	}
+	// 浏览性质不审计（D9 延伸）：无 file_search 审计记录
+	logs, _, _ := s.db.GetAuditLogs(0, 100, nil)
+	for _, l := range logs {
+		if strings.Contains(l.Action, "search") {
+			t.Fatalf("search must not be audited, got %s", l.Action)
+		}
+	}
+}

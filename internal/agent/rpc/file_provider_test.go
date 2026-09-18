@@ -372,3 +372,162 @@ func TestFileWriteMode(t *testing.T) {
 		t.Fatalf("mode 0 perm = %v, want 0644", fi.Mode().Perm())
 	}
 }
+
+// ============ 文本搜索（file-manager-design.md M2，D10-D11） ============
+
+// mkSearchTree 构造搜索测试目录树
+func mkSearchTree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	mustWrite := func(rel, content string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("nginx.conf", "server_name example.com;\nlisten 443 ssl;\n")
+	mustWrite("app/settings.py", "SERVER_NAME = 'prod'\nDEBUG = True\n")
+	mustWrite("notes.txt", "random content\n")
+	mustWrite("bin.dat", "ok\x00binary")                   // 二进制（NUL）跳过
+	mustWrite(".git/HEAD", "server_name ref\n")            // 排除目录
+	mustWrite("node_modules/x.js", "server_name\n")        // 排除目录
+	mustWrite("big.log", strings.Repeat("x", 1024*1024+1)) // >1MB 跳过
+	return root
+}
+
+func fileSearchParams(root, query string) map[string]interface{} {
+	return map[string]interface{}{"dir": root, "query": query}
+}
+
+func TestFileSearchBasic(t *testing.T) {
+	p := NewFileProvider()
+	root := mkSearchTree(t)
+
+	res, err := p.Call("search", fileSearchParams(root, "server_name"))
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	out := res.(map[string]interface{})
+	matches := out["matches"].([]map[string]interface{})
+	// 命中 nginx.conf、app/settings.py（大小写不敏感）；bin.dat/.git/node_modules/big.log/deep 不参与
+	if len(matches) != 2 {
+		t.Fatalf("matches = %d (%v), want 2", len(matches), matches)
+	}
+	paths := map[string]bool{}
+	for _, m := range matches {
+		paths[m["path"].(string)] = true
+		if m["line"].(int) <= 0 {
+			t.Errorf("line number missing: %v", m)
+		}
+	}
+	if !paths["nginx.conf"] || !paths[filepath.Join("app", "settings.py")] {
+		t.Fatalf("paths = %v", paths)
+	}
+	if out["truncated"].(bool) {
+		t.Error("truncated should be false")
+	}
+	if out["scanned"].(int) < 3 {
+		t.Errorf("scanned = %v, want >= 3", out["scanned"])
+	}
+	// skipped：big.log（>1MB）计 1；bin.dat 二进制也计 1
+	if out["skipped"].(int) != 2 {
+		t.Errorf("skipped = %v, want 2", out["skipped"])
+	}
+}
+
+func TestFileSearchCaseSensitive(t *testing.T) {
+	p := NewFileProvider()
+	root := mkSearchTree(t)
+
+	// 默认不敏感：SERVER_NAME 命中 app/settings.py 与 nginx.conf 各一处
+	res, _ := p.Call("search", fileSearchParams(root, "SERVER_NAME"))
+	matches := res.(map[string]interface{})["matches"].([]map[string]interface{})
+	if len(matches) != 2 {
+		t.Fatalf("case-insensitive matches = %d, want 2", len(matches))
+	}
+
+	// 敏感模式：小写 needle 只命中 nginx.conf（内容小写），
+	// settings.py 的大写 SERVER_NAME 不命中
+	res, _ = p.Call("search", map[string]interface{}{
+		"dir": root, "query": "server_name", "caseSensitive": true,
+	})
+	matches = res.(map[string]interface{})["matches"].([]map[string]interface{})
+	if len(matches) != 1 || matches[0]["path"].(string) != "nginx.conf" {
+		t.Fatalf("case-sensitive matches = %v, want only nginx.conf", matches)
+	}
+}
+
+func TestFileSearchLimitsAndValidation(t *testing.T) {
+	p := NewFileProvider()
+	root := mkSearchTree(t)
+
+	// 空结果非错误
+	res, err := p.Call("search", fileSearchParams(root, "no-such-token-xyz"))
+	if err != nil {
+		t.Fatalf("empty result: %v", err)
+	}
+	if n := len(res.(map[string]interface{})["matches"].([]map[string]interface{})); n != 0 {
+		t.Fatalf("matches = %d, want 0", n)
+	}
+
+	// 校验拒绝：空 query / 超长 query / 相对路径
+	if _, err := p.Call("search", map[string]interface{}{"dir": root, "query": ""}); err == nil {
+		t.Error("empty query should fail")
+	}
+	if _, err := p.Call("search", map[string]interface{}{"dir": root, "query": strings.Repeat("q", 257)}); err == nil {
+		t.Error("long query should fail")
+	}
+	if _, err := p.Call("search", map[string]interface{}{"dir": "relative/path", "query": "x"}); err == nil {
+		t.Error("relative dir should fail")
+	}
+
+	// 200 条命中截断：一个目录 201 个文件各一行命中
+	big := filepath.Join(t.TempDir(), "many")
+	for i := 0; i < 201; i++ {
+		fp := filepath.Join(big, fmt.Sprintf("f%03d.txt", i))
+		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fp, []byte("needle\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err = p.Call("search", map[string]interface{}{"dir": big, "query": "needle"})
+	if err != nil {
+		t.Fatalf("many files: %v", err)
+	}
+	out := res.(map[string]interface{})
+	if n := len(out["matches"].([]map[string]interface{})); n != 200 {
+		t.Fatalf("matches = %d, want 200 (capped)", n)
+	}
+	if !out["truncated"].(bool) {
+		t.Error("truncated should be true when capped")
+	}
+}
+
+func TestFileSearchDepthLimit(t *testing.T) {
+	p := NewFileProvider()
+	root := t.TempDir()
+	deep := filepath.Join(root, "a/b/c/d/e/f/g/h/i")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deep, "x.conf"), []byte("deep needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "top.txt"), []byte("shallow needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := p.Call("search", fileSearchParams(root, "needle"))
+	out := res.(map[string]interface{})
+	matches := out["matches"].([]map[string]interface{})
+	if len(matches) != 1 || matches[0]["path"].(string) != "top.txt" {
+		t.Fatalf("matches = %v, want only top.txt (depth limit)", matches)
+	}
+	if !out["truncated"].(bool) {
+		t.Error("truncated should mark depth skip")
+	}
+}

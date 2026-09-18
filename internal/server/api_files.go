@@ -25,6 +25,7 @@ import (
 //	POST /api/agents/{id}/files/mkdir    {path}（审计）
 //	POST /api/agents/{id}/files/delete   {path}（审计）
 //	POST /api/agents/{id}/files/rename   {path, name}（审计）
+//	POST /api/agents/{id}/files/search   {dir, query, caseSensitive}（文本搜索，不审计）
 //	GET  /api/agents/{id}/files/download?path=   分块流式转发
 //
 // 只记变更类操作的审计（D9）；文件内容从不入审计与日志。
@@ -56,7 +57,7 @@ func (s *Server) handleAgentFilesAPI(w http.ResponseWriter, r *http.Request, res
 	}
 
 	switch action {
-	case "list", "read", "write", "mkdir", "delete", "rename":
+	case "list", "read", "write", "mkdir", "delete", "rename", "search":
 		if r.Method != http.MethodPost {
 			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -73,15 +74,17 @@ func (s *Server) handleAgentFilesAPI(w http.ResponseWriter, r *http.Request, res
 	}
 }
 
-// fileRPRequest 通用转发请求体：path 类 + read/write 专有字段
+// fileRPRequest 通用转发请求体：path 类 + read/write/search 专有字段
 type fileRPRequest struct {
-	Dir      string `json:"dir"`
-	Path     string `json:"path"`
-	Name     string `json:"name"`
-	Offset   *int64 `json:"offset"`
-	Length   *int64 `json:"length"`
-	Data     string `json:"data"`
-	Truncate *bool  `json:"truncate"`
+	Dir           string `json:"dir"`
+	Path          string `json:"path"`
+	Name          string `json:"name"`
+	Offset        *int64 `json:"offset"`
+	Length        *int64 `json:"length"`
+	Data          string `json:"data"`
+	Truncate      *bool  `json:"truncate"`
+	Query         string `json:"query"`
+	CaseSensitive *bool  `json:"caseSensitive"`
 }
 
 // cleanServerPath server 侧路径校验，规则与 agent 的 cleanAbsPath 一致（双端防御）：
@@ -130,6 +133,22 @@ func (s *Server) forwardFileRPC(w http.ResponseWriter, r *http.Request, agentID,
 		}
 		params["path"] = path
 		params["name"] = req.Name
+	case "search":
+		// 双端同规则（D12）：dir 路径校验 + query 非空 ≤256；浏览性质不审计
+		dir, ok := cleanServerPath(req.Dir, "dir")
+		if !ok {
+			s.handleError(w, r, http.StatusBadRequest, "dir must be an absolute path")
+			return
+		}
+		if req.Query == "" || len(req.Query) > 256 {
+			s.handleError(w, r, http.StatusBadRequest, "query must be 1-256 bytes")
+			return
+		}
+		params["dir"] = dir
+		params["query"] = req.Query
+		if req.CaseSensitive != nil {
+			params["caseSensitive"] = *req.CaseSensitive
+		}
 	}
 
 	if action == "read" {
