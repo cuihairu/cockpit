@@ -337,6 +337,15 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		})
 	}
 
+	// nas capability：软件 RAID（/proc/mdstat）或任一存储工具存在
+	// （见 nas-design.md D4），纯容器最小系统自动跳过
+	if rpc.DetectNas() {
+		capabilities = append(capabilities, protocol.Capability{
+			Type:    "nas",
+			Version: "1",
+		})
+	}
+
 	return capabilities
 }
 

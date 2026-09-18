@@ -91,6 +91,9 @@ func (a *Agent) setupProviders() {
 		case "systemd":
 			// systemd 服务管理（见 docs/guide/service-design.md）
 			a.rpc.RegisterProvider(rpc.NewServiceProvider(nil))
+		case "nas":
+			// NAS 存储观测（见 docs/guide/nas-design.md）
+			a.rpc.RegisterProvider(rpc.NewNasProvider(nil))
 		}
 	}
 }
