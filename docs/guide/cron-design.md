@@ -120,12 +120,36 @@ apply/delete：
     每周一 03:00/自定义，选中自动填）、命令 TextArea（等宽，校验无换行）、启用开关；
   - **外部条目** 折叠面板：只读 pre 展示非 cockpit 名下的原始行（可见不可编辑）。
 
+## M2：下次触发预览（2026-09-18）
+
+任务列表从「何时配的」升级为「何时会跑」：agent 侧自写 cron 解析器算下次
+触发，`cron.jobs` 响应顺带返回，server 零改动。
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D14 | 计算位置在 agent | `next_run` 由 agent 用服务器本地时区（`time.Now()`）计算，返回 unix 秒 | cron 触发语义绑定服务器时区——浏览器时区算必错；server 纯转发不动 |
+| D15 | 解析器自写 | `cron_next.go`：复用 `validateCronExpr` 已定义的语法（`cronFieldRe` 字段形 + `cronFieldRanges` 范围 + @ 白名单）——白名单式校验保证表达式形态有界，不需要 Robfig 的秒/年字段超集；@ 简写展开等价 5 字段（@hourly=`0 * * * *`、@daily=`0 0 * * *`、@weekly=`0 0 * * 0`、@monthly=`0 0 1 * *`、@yearly/@annually=`0 0 1 1 *`）；@reboot 返回 0（无下次触发） | 不引第三方库：支持的表达式域是自身校验器的子集，解析器与校验器同源演进 |
+| D16 | 触发判定语义 | 字段展开为位集合逐分钟扫描（上限 5 年，262 万次整数比较 <10ms，任务量级个位数到百）；dom/dow 联合遵循 Vixie cron 规则——**两者都受限时 OR**（`0 0 1 * 1` = 每月 1 号或每周一），**任一为 `*` 时 AND**；dow 7 归一为 0（周日） | Vixie 联合语义是 crontab(5) 事实标准，漏掉必算错；逐分钟扫描简单正确优先 |
+| D17 | 呈现 | `Jobs()` 每个 job 加 `next_run`（unix 秒；disabled=0 不计算，解析失败=0 不致命——外部手改的非法表达式不影响列表）；web 任务列表加「下次触发」列：disabled→「已禁用」、@reboot→「开机时」、0→`-`、其余本地时间 | 列表 RPC 顺带返回零新增往返 |
+
+### Agent 侧
+
+- `cron_next.go`：`parseCronSchedule`（表达式 → 位集合）+ `nextCronRun`（从
+  下一整分钟起逐分钟扫描）；
+- `Jobs()` 集成：enabled 任务逐个计算 `next_run`。
+
+### Web 侧
+
+- Cron 页任务列表「下次触发」列（`dayjs.unix` 本地格式 YYYY-MM-DD HH:mm）。
+
+**测试**：agent——每分钟/@daily/@reboot/步长范围/或语义/AND 语义/闰年 2·29/
+dow=7/非法表达式 0/禁用不计算；web——tsc + build。
+
 ## 不做（后续项）
 
 - systemd timer / service 列表展示：`systemctl list-timers` 输出解析脆弱，按需后补；
 - 多用户 crontab（`-u`）：需要 agent 侧用户枚举与权限边界设计，等真实需求；
 - 执行历史 / 失败告警：需包装器或日志采集，属日志聚合范畴；
-- cron 表达式「下次触发时间」预览：需要完整 cron 解析器，M2 考虑引入成熟库；
 - 分布式锁 / server 侧调度下发：agent 侧 crontab 已是事实源，无需中心化调度。
 
 ## M1 清单
