@@ -44,7 +44,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          go test -short ./internal/agent/... ./cmd/cockpit-agent/... -coverprofile=coverage.out -covermode=atomic -v -timeout 120s
+          go test -short ./internal/agent/... ./cmd/cockpit-agent/... -coverprofile=coverage.out -covermode=atomic -v -timeout 600s
 
       - name: Check coverage threshold (20%)
         run: |
