@@ -119,6 +119,7 @@ type nasScanPool struct {
 	Kind   string `json:"kind"`
 	State  string `json:"state"`
 	Detail string `json:"detail"`
+	Host   string `json:"host"` // 来源设备：网络 NAS（M2）非空，告警 title 以设备名显示
 }
 
 type nasScanMount struct {
@@ -126,6 +127,7 @@ type nasScanMount struct {
 	MountPath string  `json:"mountPath"`
 	TotalGB   float64 `json:"totalGB"`
 	UsedGB    float64 `json:"usedGB"`
+	Host      string  `json:"host"`
 }
 
 // scanNASOnce 扫一轮：带 nas capability 的在线 agent
@@ -158,13 +160,18 @@ func (s *Server) scanNASOnce() {
 		}
 		hasFlag := false
 		for _, pool := range snap.Pools {
+			// 网络 NAS（M2）告警以设备名标识来源（title 含设备名，去重天然隔离）
+			poolHost := hostname
+			if pool.Host != "" {
+				poolHost = pool.Host
+			}
 			switch pool.State {
 			case "failed":
-				generator.CheckNasPool(agent.ID, hostname, pool.Name, pool.State, pool.Detail)
+				generator.CheckNasPool(agent.ID, poolHost, pool.Name, pool.State, pool.Detail)
 				hasFlag = true
 			case "degraded", "resync":
 				// unknown 不告警（观测缺失≠故障）；degraded/resync 是真实异常
-				generator.CheckNasPool(agent.ID, hostname, pool.Name, pool.State, pool.Detail)
+				generator.CheckNasPool(agent.ID, poolHost, pool.Name, pool.State, pool.Detail)
 				hasFlag = true
 			}
 		}
@@ -174,7 +181,11 @@ func (s *Server) scanNASOnce() {
 			}
 			usedPct := int(m.UsedGB / m.TotalGB * 100)
 			if usedPct >= warnPct {
-				generator.CheckNasUsage(agent.ID, hostname, m.MountPath, usedPct)
+				mountHost := hostname
+				if m.Host != "" {
+					mountHost = m.Host
+				}
+				generator.CheckNasUsage(agent.ID, mountHost, m.MountPath, usedPct)
 				hasFlag = true
 			}
 		}

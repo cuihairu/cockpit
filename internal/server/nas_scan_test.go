@@ -193,6 +193,44 @@ func TestNasScanAlerts(t *testing.T) {
 	}
 }
 
+// M2：网络 NAS（DSM target）的记录带 Host，告警 title 以设备名标识来源
+func TestNasScanRemoteHostAlert(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeNASAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		return nasStatusPayload(
+			[]map[string]interface{}{
+				{"name": "volume_1", "kind": "dsm", "state": "failed", "detail": "Crashed", "host": "home-dsm"},
+			},
+			[]map[string]interface{}{
+				{"device": "pool1", "mountPath": "/volume1", "totalGB": 2000.0, "usedGB": 1900.0, "host": "home-dsm"},
+			},
+			nil,
+		), ""
+	})
+
+	s.scanNASOnce()
+	alerts, _ := s.db.ListAlerts(10)
+	if len(alerts) != 2 {
+		t.Fatalf("alerts = %d, want 2: %+v", len(alerts), alerts)
+	}
+	titles := map[string]string{}
+	for _, a := range alerts {
+		titles[a.Title] = a.Type
+	}
+	if titles["存储池故障：volume_1（主机 home-dsm）"] != "error" {
+		t.Errorf("remote pool alert missing: %v", titles)
+	}
+	usageFound := false
+	for title := range titles {
+		if strings.Contains(title, "（主机 home-dsm）") && strings.Contains(title, "95%") {
+			usageFound = true
+		}
+	}
+	if !usageFound {
+		t.Errorf("remote usage alert missing: %v", titles)
+	}
+}
+
 func TestNasScanHealthySkips(t *testing.T) {
 	s := newBackupTestServer(t)
 	withFakeNASAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
