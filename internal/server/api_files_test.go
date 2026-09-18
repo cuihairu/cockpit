@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/cuihairu/cockpit/internal/audit"
 )
 
 // filesReq 构造 POST 到 /api/agents/{id}/files/{action} 的请求
@@ -243,5 +245,48 @@ func TestFilesSearchValidatesAndForwards(t *testing.T) {
 		if strings.Contains(l.Action, "search") {
 			t.Fatalf("search must not be audited, got %s", l.Action)
 		}
+	}
+}
+
+func TestFilesWriteAuditTruncateSplit(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		return map[string]interface{}{"size": 1024}, ""
+	})
+
+	// truncate=true（编辑保存/分块首块）→ 记审计
+	rec := httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("write", "a1",
+		`{"path":"/tmp/x/big.bin","data":"aGk=","truncate":true}`), "a1/files/write")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first chunk code = %d", rec.Code)
+	}
+	_, total, err := s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": audit.ActionFileWrite})
+	if err != nil || total != 1 {
+		t.Fatalf("truncate write should audit once: total=%d err=%v", total, err)
+	}
+
+	// truncate=false（分块续块）→ 不记审计（file-manager-design M3/D18）
+	rec = httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("write", "a1",
+		`{"path":"/tmp/x/big.bin","data":"aGk=","truncate":false}`), "a1/files/write")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("append chunk code = %d", rec.Code)
+	}
+	_, total, err = s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": audit.ActionFileWrite})
+	if err != nil || total != 1 {
+		t.Fatalf("append chunk should not audit: total=%d err=%v", total, err)
+	}
+
+	// truncate 缺省（既有调用方）→ 视为 true 照记
+	rec = httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("write", "a1",
+		`{"path":"/tmp/x/a.txt","data":"aGk="}`), "a1/files/write")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("default write code = %d", rec.Code)
+	}
+	_, total, err = s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": audit.ActionFileWrite})
+	if err != nil || total != 2 {
+		t.Fatalf("default truncate should audit: total=%d err=%v", total, err)
 	}
 }

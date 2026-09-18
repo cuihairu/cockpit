@@ -198,7 +198,12 @@ func (s *Server) forwardFileRPC(w http.ResponseWriter, r *http.Request, agentID,
 
 	switch action {
 	case "write":
-		s.auditFile(r, agentID, audit.ActionFileWrite, req.Path, nil)
+		// 审计只记新写入会话（truncate=true：编辑保存/分块首块/覆盖上传）；
+		// append 续块（分块上传的 truncate=false）不记——否则大文件分块上传
+		// 每块一条 file_write 刷屏（file-manager-design M3/D18）
+		if req.Truncate == nil || *req.Truncate {
+			s.auditFile(r, agentID, audit.ActionFileWrite, req.Path, nil)
+		}
 	case "mkdir":
 		s.auditFile(r, agentID, audit.ActionFileMkdir, req.Path, nil)
 	case "delete":
