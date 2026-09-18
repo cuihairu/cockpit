@@ -68,11 +68,16 @@ const GrepLine = ({ line, grep }: { line: string; grep: string }) => {
 
 interface LogsPanelProps {
   agentId: string
+  // 外部预选源（服务页 journal 跳转传入 unit 名）：作为 pickedSource 初值，
+  // 且源派生时无条件优先——该 unit 可能不在 sources 列表（logs.sources 只
+  // 枚举 list-units 在册 unit，未加载服务不在），但 journalctl -u 仍能查到
+  // 历史日志，回落会查错对象；传入时 status 就绪后自动首查一次
+  initialSource?: string
 }
 
-const LogsPanel = ({ agentId }: LogsPanelProps) => {
+const LogsPanel = ({ agentId, initialSource }: LogsPanelProps) => {
   const [sourceType, setSourceType] = useState<'systemd' | 'docker'>('systemd')
-  const [pickedSource, setPickedSource] = useState<string>('')
+  const [pickedSource, setPickedSource] = useState<string>(initialSource ?? '')
   const [sinceMinutes, setSinceMinutes] = useState(0)
   const [tail, setTail] = useState(200)
   const [grep, setGrep] = useState('')
@@ -101,9 +106,11 @@ const LogsPanel = ({ agentId }: LogsPanelProps) => {
   )
 
   // 选中源派生：用户手选的源不在当前类型列表里（切类型/列表到达）时回落到第一项；
-  // 切回原类型时保留原选择
+  // 切回原类型时保留原选择；外部预选（initialSource）无条件优先
   const source =
-    pickedSource && sourceOptions.includes(pickedSource) ? pickedSource : (sourceOptions[0] ?? '')
+    pickedSource && (pickedSource === initialSource || sourceOptions.includes(pickedSource))
+      ? pickedSource
+      : (sourceOptions[0] ?? '')
 
   const runQuery = async () => {
     if (!source) {
@@ -135,6 +142,15 @@ const LogsPanel = ({ agentId }: LogsPanelProps) => {
       viewRef.current.scrollTop = viewRef.current.scrollHeight
     }
   }, [result])
+
+  // 外部预选源：logs.status 就绪后自动首查一次（useRef 守卫防重复）
+  const autoQueried = useRef(false)
+  useEffect(() => {
+    if (!initialSource || autoQueried.current || !status) return
+    autoQueried.current = true
+    if (typeAvailable.systemd && source) void runQuery()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, initialSource, source, typeAvailable])
 
   const lines = useMemo(() => (result ? result.lines.split('\n') : []), [result])
 

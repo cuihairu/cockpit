@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Badge, Button, Card, Descriptions, Empty, Input, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
-import { PoweroffOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Alert, Badge, Button, Card, Descriptions, Drawer, Empty, Input, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
+import { FileTextOutlined, PoweroffOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { ServiceActionName, ServiceUnit } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import LogsPanel from '@/workbench/LogsPanel'
 
 // 服务管理（见 docs/guide/service-design.md）：systemd 与 Windows SCM 双后端
 // 统一观测 + 动作操作（capability type=service，metadata.backend 区分）。
@@ -48,6 +49,8 @@ const Services = () => {
   const [search, setSearch] = useState('')
   const [actingUnit, setActingUnit] = useState<string>()
   const [actionError, setActionError] = useState<{ unit: string; msg: string }>()
+  // journal 日志抽屉：当前查看日志的 unit（D11）
+  const [logUnit, setLogUnit] = useState<string>()
 
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => api.getAgents() })
 
@@ -172,7 +175,7 @@ const Services = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 260,
+      width: 300,
       render: (_, r) => {
         const acting = actingUnit === r.name
         // 操作显隐按当前状态：active → 停止/重启/重载；inactive → 启动
@@ -241,6 +244,17 @@ const Services = () => {
                   设自启
                 </Button>
               ))}
+            {/* journal 日志抽屉（D11，仅 systemd 后端有 journalctl） */}
+            {isSystemd && (
+              <Tooltip title="journal 日志">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<FileTextOutlined />}
+                  onClick={() => setLogUnit(r.name)}
+                />
+              </Tooltip>
+            )}
           </Space>
         )
       },
@@ -362,6 +376,17 @@ const Services = () => {
           </Space>
         )}
       </Card>
+      {/* journal 日志抽屉（D11）：内嵌 Workbench 同款 LogsPanel，锁定当前 unit 为源 */}
+      {logUnit && selectedAgent && (
+        <Drawer
+          title={`日志：${logUnit}`}
+          width="min(760px, 96vw)"
+          open
+          onClose={() => setLogUnit(undefined)}
+        >
+          <LogsPanel agentId={selectedAgent} initialSource={logUnit} />
+        </Drawer>
+      )}
     </div>
   )
 }
