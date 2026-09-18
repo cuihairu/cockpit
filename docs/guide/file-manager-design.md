@@ -43,6 +43,7 @@
 | D11 | 扫描边界 | 递归深度 ≤8；跳过 symlink（不跟随，D7 延伸）与非普通文件；二进制跳过（首 512B 含 NUL）；单文件 >1MB 跳过（与编辑器 read 上限一致）；文件总数 ≤5000；命中 ≤200 条即停；总超时 15s 返回已扫部分；排除 `.git`/`node_modules` 目录，其余隐藏目录照搜（`.ssh`/`.config` 可能正是目标） | 大目录树/大日志不拖垮 agent；每个上限都有 truncated/skipped 计数可解释 |
 | D12 | server 端点 | `POST /api/agents/{id}/files/search` 纯转发，双端同规则校验（dir 路径 + query 非空 ≤256），不审计（浏览性质，D9 延伸） | 与既有文件端点同模式 |
 | D13 | web 交互 | 工具栏「搜索」按钮 → Modal（当前目录为根 + 关键词 + 大小写开关）→ 结果列表（相对路径 + 行号 + 命中行高亮，行截断 200 字符）→ 点路径跳转所在目录 | 搜索天然以当前浏览位置为起点 |
+| D14 | 图片预览 | 纯 web 实现，复用 `files/read` 分块端点（零 Go 改动）；扩展名白名单 jpg/jpeg/png/gif/webp/bmp/svg/ico/avif；>20MB 拒绝预览引导下载；一律 `<img>` 渲染（含 SVG） | 预览是浏览性质，走既有 read 端点无新攻击面；`<img>` 上下文的 SVG 处于 secure static 模式脚本不执行，天然隔离；MIME 按扩展名映射、不依赖内容嗅探；20MB 上限外的图片属罕见场景，下载本地看体验更好 |
 
 ## Agent 侧设计
 
@@ -148,12 +149,34 @@
 **测试**：agent 临时目录树（命中与大小写开关 / 深度上限 / 二进制与大文件跳过 /
 200 条截断 / 路径校验拒绝 / 空结果非错误）；server 转发与校验 400；web build。
 
+## M2：图片预览（2026-09-18）
+
+文件列表内直接预览图片（D14），免下载看截图/图标/证书二维码等场景。
+
+### Web 侧（纯前端，零 Go 改动）
+
+- **触发**：操作列「预览」按钮（EyeOutlined），仅对扩展名命中白名单
+  （jpg/jpeg/png/gif/webp/bmp/svg/ico/avif，大小写不敏感）且非目录非 symlink
+  的文件显示；
+- **拉取**：`readFileChunk` 1MB 分块循环拼装，offset 按**已读字节数**推进
+  （返回值 `size` 是文件总大小，不能当游标）；首块返回的 `size` >20MB 直接拒绝
+  （提示走下载）；Modal 关闭置 cancelled 标志，循环立即中止不再发后续请求；
+- **渲染**：按扩展名映射 MIME（image/jpeg 等，白名单内完备）→ `Blob` →
+  `createObjectURL` → `<img>`；关闭与重新打开都 revoke 旧 URL；
+- **安全**：SVG 一律走 `<img>`（浏览器 secure static 模式，脚本不执行），
+  绝不 innerHTML；MIME 不信任 agent 内容嗅探（read 端点本就不返回 content-type）；
+- **Modal**：标题为文件名；加载中 Spin；失败 Alert 兜底 + 引导下载；
+  图片 `max-width:100% / max-height:60vh`、透明底纹深色底（透明 PNG 可见）；
+  页脚显示自然分辨率（onLoad 读 naturalWidth×Height）与文件大小。
+
+**测试**：纯 web 改动——`pnpm build`（tsc 零错误）+ 既有 Go 测试零回归。
+
 ## 不做（后续项）
 
 - 断点续传/分块上传大文件（>10MB）：`file.write` append 通道已留好，UI 后补；
 - 目录大小统计/回收站；
 - chmod/chown/权限编辑：风险与 UI 复杂度都高，等真实需求；
-- 文件预览增强（图片/二进制 hex）：编辑器先覆盖文本主场景。
+- 二进制 hex 预览：编辑器/图片预览先覆盖文本与图片主场景。
 
 ## M1 清单
 
