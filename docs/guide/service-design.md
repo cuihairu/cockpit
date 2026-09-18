@@ -297,3 +297,79 @@ service_windows_stub.go    //go:build !windows：NewWindowsServiceProvider 返�
 - [ ] web tsc + build 通过
 - [ ] Windows 真机验收项列入 todo.md
 
+## D10 macOS launchd 后端（M3）
+
+### D10.1 范围与探测
+
+- 只管 **system 域 LaunchDaemons**（`/Library/LaunchDaemons` +
+  `/System/Library/LaunchDaemons`；agent 以 root 运行的前提与 systemd 侧同）。
+  LaunchAgents（用户会话域，gui/<UID>）不做——域前缀依赖用户 UID，语义另议
+- 探测：`runtime.GOOS == "darwin"` 恒注册，capability 同 D9.2 统一模型
+  `{type: "service", metadata: {backend: "launchd"}}`（launchd 是 PID 1 无需文件探测）
+- D1 的「macOS launchd M3 候选」至此关闭；OpenRC / runit 仍不做
+
+### D10.2 观测模型映射（复用 ServiceUnit）
+
+| ServiceUnit 字段 | launchd 来源 |
+|---|---|
+| Name | plist `Label` 键（如 `com.example.ssh`，≠文件名） |
+| Description | plist 文件路径（launchd 无描述概念，路径即「这个 daemon 是谁」的线索） |
+| ActiveState | `launchctl list` PID>0 → active；Status 非 0（上次异常退出）→ failed；其余（含仅安装未加载）→ inactive |
+| SubState | 空（launchd 无细分态） |
+| UnitFileState（自启态） | `RunAtLoad && !Disabled` → enabled，否则 disabled |
+| Preset | 空 |
+
+两源合并（systemd list-units/list-unit-files 同构）：
+
+1. `launchctl list`（三列 PID/Status/Label，TSV）→ 运行态；Status 为 `-` 表示
+   从未运行（inactive）
+2. 扫描 LaunchDaemons 目录 `*.plist` → 全量安装项 + RunAtLoad/Disabled 键。
+   plist 是 XML，标准库 `encoding/xml` 轻量解析顶层 dict 的
+   Label/RunAtLoad/Disabled 三键即可，**不引入第三方 plist 库**；
+   解析失败的文件跳过（log），全部失败不报错（目录可空）
+
+### D10.3 动作映射（5 动词，`system/<label>` 服务目标）
+
+| 动作 | launchctl 实现 | 说明 |
+|---|---|---|
+| start | `kickstart system/<label>`，失败回退 `bootstrap system <plist>` | kickstart 仅对已加载服务有效；bootout 过的需重新 bootstrap |
+| stop | `bootout system/<label>` | launchd 无 stop 动词，卸载即停；plist 仍在（对比 systemd stop 不卸载，语义差异见下） |
+| restart | `kickstart -k system/<label>` | 原生 kill+重启 |
+| reload | — | launchd 无 reload 语义，报错同 Windows SCM |
+| enable | `enable system/<label>` | 清 disabled DB 标记 |
+| disable | `disable system/<label>` | 写 disabled DB 标记；**不卸载正在运行的实例**（与 systemd disable 立即生效语义不同，前端提示文案已通用化不涉及） |
+
+超时复用 serviceActionTimeout；Commander 抽象复用（argv 直调 launchctl 不经 shell）。
+
+### D10.4 安全边界
+
+1. **label 白名单**（`validateLaunchdLabel`）：`^[A-Za-z0-9_][A-Za-z0-9._-]{0,254}$`
+   （反向域名惯例字符集，不含 `/` 与空格）+ 动作白名单 5 动词；
+   与 systemd/Windows 校验三足鼎立，agent 侧按 backend 各自严格校验
+2. server 端并集白名单已天然覆盖 label 字符集（匹配 Windows 名正则），零改动
+3. system 域动作需要 root；权限错误原样透传
+4. 审计/浏览纪律不变（action 记 service_action）
+
+### D10.5 实现组织与 Web
+
+- 三层组织同 D9.5：`service_launchd_model.go`（无 tag：plist 解析 +
+  launchctl list 解析 + 映射 + 校验纯函数，Linux CI 可测）、
+  `service_launchd_darwin.go`（//go:build darwin 真执行）、
+  `service_launchd_stub.go`（//go:build !darwin 防御 stub）
+- Web：D9.6 的 `isWindows` 特判泛化为「backend === 'systemd' 才显示重载
+  按钮与系统状态项」——launchd 与 windows-scm 同隐藏；status 的
+  systemState 恒 `unknown`（launchd 无全局 degraded 概念）
+- capability 过滤、下拉文案、名称列渲染零改动（`replace(/\.service$/)`
+  对 label 无副作用）
+
+### D10.6 测试策略
+
+- **模型层**（service_launchd_model_test.go，Linux CI）：plist XML 解析
+  （RunAtLoad/Disabled 有无组合、缺 Label 跳过、格式坏文件）、launchctl list
+  输出解析（PID/-/非零 Status）、自启态映射、label 校验（合法/`/`/空格/超长）、
+  动作白名单（5 动词过、reload 拒）
+- **stub**：非 darwin 平台 Call 显式报错
+- **server/web**：零改动即回归；`GOOS=darwin go build` 编译验证
+- **真机验收**（列入 todo.md）：macOS 主机列表/启停/自启切换、
+  kickstart 回退 bootstrap 路径、无权限报错透传
+
