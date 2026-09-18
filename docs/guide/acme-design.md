@@ -49,6 +49,16 @@ Cockpit 已具备三个可复用基础，证书「签发 + 存储 + 续期」是
   - **测试**：provider 工厂表驱动（三家就绪/缺凭据/未知）；config defaults 的 env 覆盖；503 预检按 provider 分派。
 - **D12 校验面**：`domains[]` 非空、每个元素过与 DNS 记录名同规则的域名校验（允许 `*.` 前缀的泛域名，剥离后校验）；`renewBeforeDays` ∈ [7, 90]；`ca` 白名单；primary domain = domains[0]。token 未配置时 create/issue 返回 503（同 DNS 页 503 文案约定）。
 
+- **D14 签发后部署推送到 agent（M2，proxy 站点联动）**：proxy-design.md D7 的 https 站点 `tlsCert/tlsKey` 是 agent 本机绝对路径，M1 靠「工作台-文件上传」手动搬证书；证书存 server SQLite，续期后 agent 侧文件不会自更新——联动闭环 = 签发成功后把 PEM 推到 agent，nginx reload 即生效。
+  - **绑定模型（一对一，多目标网关留后续）**：`AcmeCert` 加 `DeployAgentID / DeployCertPath / DeployKeyPath`（空 = 未绑定）+ `LastDeployAt`（Unix 秒，0=从未）+ `LastDeployError`（空 = 最近一次成功）。绑定/解绑走既有 `PUT /api/acme/certs/{id}`（`acmeCertInput` 加三个可选字段，路径必须绝对路径，双端同规则）。
+  - **通道**：复用 `file.write`（base64 单块 + `truncate` 覆盖写；1MB 块上限对 PEM 富余）。私钥落盘权限：`file.write` 加可选 `mode` 参数，白名单 `{0600, 0644}`（缺省 0644 行为不变，向后兼容）——证书 0644、私钥 0600。唯一 agent 侧改动。
+  - **路径约定**：不强制，web 提供一键填充 `/etc/cockpit/certs/<primary>.crt.pem` / `.key.pem`；`/proxy` 页 https 表单提示该约定，nginx 站点路径直接引用。
+  - **触发**：① `runACMEIssue` 成功路径统一触发（手动 issue 与巡检续期共用）；② 手动立即部署 `POST /api/acme/certs/{id}/deploy`（审计 `acme_deploy`；未绑定 400、agent 离线 503）。推送失败不回滚签发成功状态，记 `LastDeployError`（web 红标 Tooltip），不产告警——巡检场景避免告警风暴，未部署状态页面可见。
+  - **server**：`deployAcmeCert(cert)` = 校验绑定 → agent 在线 → 两次 `CallAgent file.write`（cert 0644 / key 0600，`truncate=true`）→ 回写 `LastDeployAt/LastDeployError` → 审计 `acme_deploy`（details 含 agentID 与路径，不含 PEM）。
+  - **web**：配置 Modal 加「自动部署」区（在线 agent Select + 两路径输入 + 默认路径一键填充）；操作列「部署」按钮（绑定后可用）；部署状态红标 + Tooltip（时间/错误）。
+  - **测试**：agent `file.write` mode 白名单（0600/0644 过、其他拒、缺省不变）；deploy 端点（未绑定 400 / 离线 503 / 成功两次 RPC 往返 + 审计）；`runACMEIssue` 成功后自动推送；PUT 绑定更新。
+
+
 ## 测试策略
 
 lego 完整 ACME 流程需真实 CA（官方测试用 Pebble 外部进程），M1 单测不跑真流程——把「签发」抽成 `AcmeIssuer` 接口（`Issue(cert *storage.AcmeCert) (issued *IssuedResult{CertificatePEM, IssuerPEM, PrivateKeyPEM, ExpiresAt}, err error)`），server 依赖接口、生产实现包 lego、测试注入 fake（与 fakeDNSProvider 同构）：
