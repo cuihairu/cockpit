@@ -70,6 +70,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			s.handleAgentCronAPI(w, r, agentID)
 			return
 		}
+		// systemd 服务管理 /agents/{id}/services/...（见 api_service.go）
+		if strings.Contains(agentID, "/services/") {
+			s.handleAgentServiceAPI(w, r, agentID)
+			return
+		}
 		// 远程日志查询 /agents/{id}/logs/...（见 api_logs.go）
 		if strings.Contains(agentID, "/logs/") {
 			s.handleAgentLogsAPI(w, r, agentID)

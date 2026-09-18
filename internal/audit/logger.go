@@ -44,6 +44,8 @@ const (
 	// 定时任务管理（见 docs/guide/cron-design.md）
 	ActionCronApply  = "cron_apply"
 	ActionCronDelete = "cron_delete"
+	// systemd 服务管理（见 docs/guide/service-design.md）
+	ActionServiceAction = "service_action"
 )
 
 // ResourceStack Compose Stack 资源类型
@@ -77,6 +79,9 @@ const ResourceProxySite = "proxy_site"
 
 // ResourceCronJob 定时任务资源类型（见 docs/guide/cron-design.md）
 const ResourceCronJob = "cron_job"
+
+// ResourceService systemd 服务资源类型（见 docs/guide/service-design.md）
+const ResourceService = "service"
 
 // ResourceRecording 会话录制资源类型（见 recording-design.md）
 const ResourceRecording = "recording"
