@@ -349,9 +349,10 @@ func (g *Generator) CheckNasPool(agentID, hostname, poolName, state, detail stri
 }
 
 // CheckNasUsage NAS 挂载容量超阈值告警（见 nas-design.md D5）：title 按
-// 挂载路径真去重；恢复后不再产生。
+// 挂载路径真去重；恢复后不再产生。title 稳定不含使用率（CheckDiskSpace
+// 同模式）——否则磁盘缓涨每升 1% 就产生一条新告警。
 func (g *Generator) CheckNasUsage(agentID, hostname, mountPath string, usedPercent int) {
-	title := "存储空间告警：" + mountPath + " 已用 " + strconv.Itoa(usedPercent) + "%（主机 " + hostname + "）"
+	title := "存储空间告警：" + mountPath + "（主机 " + hostname + "）"
 	message := fmt.Sprintf("挂载点 %s 容量使用率 %d%%，超过告警阈值，请清理或扩容。", mountPath, usedPercent)
 	g.createAlertIfNotExists("warning", title, message, mountPath, "nas_mount")
 }

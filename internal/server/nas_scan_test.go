@@ -177,7 +177,8 @@ func TestNasScanAlerts(t *testing.T) {
 	}
 	usageFound := false
 	for title := range titles {
-		if strings.Contains(title, "/mnt/data") && strings.Contains(title, "95%") {
+		// 容量告警 title 稳定按挂载路径去重（不含使用率，缓涨不刷屏）
+		if title == "存储空间告警：/mnt/data（主机 host-a1）" {
 			usageFound = true
 		}
 	}
@@ -222,7 +223,7 @@ func TestNasScanRemoteHostAlert(t *testing.T) {
 	}
 	usageFound := false
 	for title := range titles {
-		if strings.Contains(title, "（主机 home-dsm）") && strings.Contains(title, "95%") {
+		if title == "存储空间告警：/volume1（主机 home-dsm）" {
 			usageFound = true
 		}
 	}
