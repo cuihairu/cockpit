@@ -143,10 +143,73 @@ server {
     WebSocket 开关、高级指令 TextArea；保存失败展示 nginx -t 错误摘要；
   - **配置查看 Modal**：只读 pre 展示渲染后的完整片段。
 
+## M2：Traefik 后端（设计，2026-09-18）
+
+D1 承诺的后端扩展。**M2 仅 Traefik，且只走 file provider 动态目录**——
+`providers.file.directory` 指向的目录里每个 YAML 文件是一段独立动态配置，
+与 nginx `conf.d` 片段模式同构，D2「自己名下片段、用户配置零接触」原样
+成立。Caddy 暂缓：Caddyfile 是整文件语义，按站点分片必须改用户主文件加
+`import` 行，与零接触原则冲突（见不做清单）。
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D11 | 后端范围 | 仅 Traefik file provider；渲染/校验/应用按 backend 抽象（`SiteRenderer`/`SiteApplier`），RPC 方法名 `proxy.*` 不变，provider 持有 backend 实现分发 | 方法表不动 server 与 web 路由；nginx 行为零变化 |
+| D12 | 目录探测与 capability | 动态目录取值：静态配置 `/etc/traefik/traefik.yml`（或 `.yaml`）解析 `providers.file.directory` → 缺省 `/etc/traefik/dynamic`；capability `traefik-proxy` = 目录存在且可写。**不依赖 LookPath("traefik")** | Traefik 大多容器化跑，宿主机常无二进制；目录（含 docker 挂载的宿主侧路径）才是事实源；版本探测失败仅置 version 空 |
+| D13 | 校验与应用 | 无 `nginx -t`/reload 等价物：渲染后 `yaml.Unmarshal` 语法自检 + router→service 引用一致性校验，**校验失败不落盘**；file provider 热加载（watch），写坏文件由 Traefik 拒载该文件、其余片段照常（局部隔离） | 比 nginx 弱在无全局预检（坏文件只影响本站点）、强在无 reload 失败回滚分支；apply 流程退化为 渲染→自检→原子写 |
+| D14 | 渲染映射 | 同站点模型（D7 字段不变）：`serverNames` → router rule 的 `Host(...)` 多值；`upstream` → service `loadBalancer.servers[].url`；https → 443 router `tls=true` + 文件级 `tls.certificates`（certFile/keyFile 路径引用，ACME 推送文件直引）+ 80 router 挂 `redirectScheme` 中间件永久跳转；**`websocket` 字段 no-op**（Traefik 原生透传 WS，字段保留兼容面板）；**`extra` 不支持**——非空时校验直接拒绝 | 跳转按站点双 router 而非静态 entrypoint 配置（不碰静态配置=零接触）；拒绝 extra 避免渲染任意 YAML 片段的注入面 |
+| D15 | 元数据与 drift | meta 首行 YAML 注释 `# cockpit:meta {json}` 与 nginx 同构；drift kind 白名单扩 `traefik`（`dynamicDir/cockpit-site-<name>.yml`，读文件即 current），drift 页 KIND_LABEL 加标签 | BaselineRecorder/diff 链路通用，仅扩 snapshot 分支与白名单 |
+| D16 | server / web | server 纯转发不感知 backend，零改动；web 状态卡显示 backend 名称与版本（无二进制则「-」），编辑 Modal 的 extra 控件在 traefik 后端禁用并提示不支持，其余 UI 复用 | 后端差异收敛在 agent 渲染层与两处 UI 提示 |
+
+渲染片段示例（https 站点）：
+
+```yaml
+# cockpit:meta {"name":"blog","serverNames":["blog.example.com"],...}
+http:
+  routers:
+    cockpit-blog-web:
+      rule: "Host(`blog.example.com`)"
+      entryPoints: ["web"]
+      middlewares: ["cockpit-blog-redirect"]
+      service: cockpit-blog
+    cockpit-blog-websecure:
+      rule: "Host(`blog.example.com`)"
+      entryPoints: ["websecure"]
+      service: cockpit-blog
+      tls: {}
+  middlewares:
+    cockpit-blog-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
+  services:
+    cockpit-blog:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:3000"
+tls:
+  certificates:
+    - certFile: /path/fullchain.pem
+      keyFile: /path/privkey.pem
+```
+
+router/service 命名 `cockpit-<site>`（冲突域在 Traefik 全局命名空间，
+加前缀避免与用户动态文件撞名）。
+
+### M2 清单（未实施）
+
+- [ ] agent：`traefik_provider.go`（探测/渲染/yaml 自检/原子写）+ backend 抽象
+      + capability 追加；drift 白名单扩 traefik
+- [ ] server：零改动（验证现有 5 端点对 traefik agent 透传）
+- [ ] web：状态卡 backend 显示 + extra 禁用
+- [ ] 测试：渲染模板各形态（http/https+跳转/证书引用）、yaml 自检失败不落盘、
+      meta roundtrip、extra 拒绝、目录探测（自定义/缺省/不可写）、drift 分支
+- [ ] 真机验收（列入 todo.md）：Traefik 容器挂载宿主目录实测热加载与
+      证书文件引用
+
 ## 不做（后续项）
 
-- Caddy（Caddyfile 渲染）/ Traefik（动态配置）：provider 接口已按后端无关命名（proxy.*），
-  扩展时新增 provider + capability 即可；
+- Caddy（Caddyfile 渲染）：Caddyfile 整文件语义，按站点分片必须改用户主文件加
+  import 行，与 D2 零接触冲突；除非有真实需求且接受一次性主文件协作，暂缓；
 - 流量统计 / 访问日志分析：需要日志采集管道，独立立项；
 - 证书签发与续期联动：P1 证书资源与 acme 集成后一起做；
 - upstream 健康检查 / 负载均衡多后端：个人场景单上游先够用；
