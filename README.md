@@ -16,22 +16,37 @@
 
 ## 架构
 
-```text
-Browser Web UI
-    |
-    | HTTP API / WebSocket
-    v
-Cockpit Server (cmd/cockpit)
-    |  \
-    |   \ SQLite
-    |
-    | WebSocket /ws
-    v
-Cockpit Agent (cmd/cockpit-agent)
-    |
-    | local socket / TCP / platform API
-    v
-Managed targets
+```mermaid
+flowchart LR
+    subgraph browser["浏览器"]
+        UI["Web UI<br/>资源 · 工作台 · 监控<br/>终端 / VNC / 桌面"]
+    end
+
+    inv["inventory.yaml"]
+
+    subgraph ctrl["Cockpit Server 控制面（cmd/cockpit）"]
+        direction TB
+        API["HTTP API · WebSocket /ws"]
+        CORE["认证 · 审计 · 告警<br/>Inventory 资源视图"]
+        DB[("SQLite")]
+        API --> CORE --> DB
+    end
+
+    subgraph nodes["Cockpit Agent 执行面（cmd/cockpit-agent）"]
+        direction TB
+        A1["Agent · 本地机房"]
+        A2["Agent · 云 VPS"]
+        A3["Agent · NAT 后节点"]
+    end
+
+    subgraph targets["受管目标"]
+        T["systemd / Docker<br/>Nginx / Traefik / OpenWrt<br/>终端 · VNC · 桌面"]
+    end
+
+    UI -- "HTTP / WSS" --> API
+    inv -- "cockpit sync" --> API
+    A1 & A2 & A3 -- "主动连出 WebSocket<br/>（无需暴露入站端口）" --> API
+    A1 & A2 & A3 -- "local socket / TCP / 平台 API" --> T
 ```
 
 Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连出，所以 NAT 后节点不需要暴露入站端口。
