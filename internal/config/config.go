@@ -19,6 +19,7 @@ type Config struct {
 	Inventory     *InventoryConfig     `yaml:"inventory,omitempty"`
 	RemoteControl *RemoteControlConfig `yaml:"remote_control,omitempty"`
 	DNS           *DNSConfig           `yaml:"dns,omitempty"`
+	Overlay       *OverlayConfig       `yaml:"overlay,omitempty"`
 }
 
 // DNSConfig DNS 管理配置（M1：Cloudflare；M2 扩 DNSPod/阿里云——ACME D13，
@@ -46,6 +47,25 @@ type DNSPodConfig struct {
 type AliDNSConfig struct {
 	AccessKey string `yaml:"access_key,omitempty"`
 	SecretKey string `yaml:"secret_key,omitempty"`
+}
+
+// OverlayConfig 组网云管理面配置（见 overlay-design.md M2 D12；观测在 agent，
+// 管理凭据是账号级的，server 直连云 API）
+type OverlayConfig struct {
+	ZeroTier  *ZeroTierCloudConfig  `yaml:"zerotier,omitempty"`
+	Tailscale *TailscaleCloudConfig `yaml:"tailscale,omitempty"`
+}
+
+// ZeroTierCloudConfig ZeroTier Central API token（env ZEROTIER_API_TOKEN 优先）
+type ZeroTierCloudConfig struct {
+	APIToken string `yaml:"api_token,omitempty"`
+}
+
+// TailscaleCloudConfig Tailscale API token（env TAILSCALE_API_TOKEN 优先；
+// Tailnet 空 = "-"，即 token 所属默认 tailnet）
+type TailscaleCloudConfig struct {
+	APIToken string `yaml:"api_token,omitempty"`
+	Tailnet  string `yaml:"tailnet,omitempty"`
 }
 
 // RemoteControlConfig 远程控制（Terminal/Desktop/VNC）相关配置
@@ -284,5 +304,21 @@ func applyDefaults(cfg *Config) {
 	}
 	if v := os.Getenv("ALIYUN_ACCESS_KEY_SECRET"); v != "" {
 		cfg.DNS.AliDNS.SecretKey = v
+	}
+
+	if cfg.Overlay == nil {
+		cfg.Overlay = &OverlayConfig{}
+	}
+	if cfg.Overlay.ZeroTier == nil {
+		cfg.Overlay.ZeroTier = &ZeroTierCloudConfig{}
+	}
+	if cfg.Overlay.Tailscale == nil {
+		cfg.Overlay.Tailscale = &TailscaleCloudConfig{}
+	}
+	if v := os.Getenv("ZEROTIER_API_TOKEN"); v != "" {
+		cfg.Overlay.ZeroTier.APIToken = v
+	}
+	if v := os.Getenv("TAILSCALE_API_TOKEN"); v != "" {
+		cfg.Overlay.Tailscale.APIToken = v
 	}
 }

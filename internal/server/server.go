@@ -19,6 +19,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/dns"
 	"github.com/cuihairu/cockpit/internal/notification"
+	"github.com/cuihairu/cockpit/internal/overlay"
 	"github.com/cuihairu/cockpit/internal/probe"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/proxy"
@@ -51,6 +52,8 @@ type Server struct {
 	dns            dns.Provider
 	acme           AcmeIssuer
 	acmeDNSConfig  func() AcmeDNSConfig
+	overlayZT      *overlay.ZeroTierClient
+	overlayTS      *overlay.TailscaleClient
 	cfg            *config.Config
 	upgrader       websocket.Upgrader
 
@@ -185,6 +188,18 @@ func (s *Server) Start() error {
 	// ACME 签发器（lego DNS-01，provider 按 dns.provider 分派，见 acme-design.md D4/D13）
 	s.acmeDNSConfig = func() AcmeDNSConfig { return newAcmeDNSConfig(s.cfg) }
 	s.acme = NewLegoIssuer(s.db, s.acmeDNSConfig)
+
+	// 组网云管理面 client（凭据未配置时为 nil，API 统一 503 引导，D11/D12）
+	if s.cfg.Overlay != nil {
+		if s.cfg.Overlay.ZeroTier != nil && s.cfg.Overlay.ZeroTier.APIToken != "" {
+			s.overlayZT = overlay.NewZeroTier(s.cfg.Overlay.ZeroTier.APIToken)
+			log.Print("Overlay cloud management enabled: zerotier")
+		}
+		if s.cfg.Overlay.Tailscale != nil && s.cfg.Overlay.Tailscale.APIToken != "" {
+			s.overlayTS = overlay.NewTailscale(s.cfg.Overlay.Tailscale.APIToken, s.cfg.Overlay.Tailscale.Tailnet)
+			log.Print("Overlay cloud management enabled: tailscale")
+		}
+	}
 
 	// 注册所有路由
 	s.registerRoutes(mux)

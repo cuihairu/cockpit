@@ -103,6 +103,9 @@ const ResourceDNSRecord = "dns_record"
 // ResourceAcmeCert ACME 签发证书资源类型（见 acme-design.md）
 const ResourceAcmeCert = "acme_cert"
 
+// ResourceOverlayMember 组网云管理面成员/设备资源类型（见 overlay-design.md M2 D14）
+const ResourceOverlayMember = "overlay_member"
+
 // Status 状态
 const (
 	StatusSuccess = "success"
