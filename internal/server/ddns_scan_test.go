@@ -18,10 +18,12 @@ import (
 
 // fakeDNSProvider dns.Provider 测试桩：记录写调用、返回预置记录表
 type fakeDNSProvider struct {
-	records []dns.Record
-	created []dns.RecordInput
-	updated map[string]dns.RecordInput
-	listErr error
+	records   []dns.Record
+	created   []dns.RecordInput
+	updated   map[string]dns.RecordInput
+	listErr   error
+	createErr error
+	updateErr error
 }
 
 func (f *fakeDNSProvider) ListZones(ctx context.Context) ([]dns.Zone, error) { return nil, nil }
@@ -34,6 +36,9 @@ func (f *fakeDNSProvider) ListRecords(ctx context.Context, zoneID, recordType st
 }
 
 func (f *fakeDNSProvider) CreateRecord(ctx context.Context, zoneID string, input dns.RecordInput) (*dns.Record, error) {
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
 	f.created = append(f.created, input)
 	// 回填记录表：与真实 provider 行为一致，后续轮次 ListRecords 能查到
 	rec := dns.Record{ID: "rec-" + strconv.Itoa(len(f.records)+1), Type: input.Type, Name: input.Name, Content: input.Content}
@@ -42,6 +47,9 @@ func (f *fakeDNSProvider) CreateRecord(ctx context.Context, zoneID string, input
 }
 
 func (f *fakeDNSProvider) UpdateRecord(ctx context.Context, zoneID, recordID string, input dns.RecordInput) (*dns.Record, error) {
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
 	if f.updated == nil {
 		f.updated = map[string]dns.RecordInput{}
 	}
