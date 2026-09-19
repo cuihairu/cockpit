@@ -8,6 +8,10 @@ services:
     restart: unless-stopped
     ports:
       - "${COCKPIT_HTTP_PORT:-9000}:9000"
+      # 9090：CF Tunnel（cockpit.cuihairu.site）控制台里的历史回源端口
+      # （originService=http://192.168.5.188:9090）。CI 侧无法改控制台，
+      # 先双端口兼容让公网恢复；控制台改回 9000 后可移除此行
+      - "9090:9000"
     environment:
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}"
