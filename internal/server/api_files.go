@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -25,6 +26,8 @@ import (
 //	POST /api/agents/{id}/files/mkdir    {path}（审计）
 //	POST /api/agents/{id}/files/delete   {path}（审计）
 //	POST /api/agents/{id}/files/rename   {path, name}（审计）
+//	POST /api/agents/{id}/files/chmod    {path, mode}（审计，M4/D22）
+//	POST /api/agents/{id}/files/chown    {path, uid, gid}（审计，M4/D22）
 //	POST /api/agents/{id}/files/search   {dir, query, caseSensitive}（文本搜索，不审计）
 //	GET  /api/agents/{id}/files/download?path=   分块流式转发
 //
@@ -57,7 +60,7 @@ func (s *Server) handleAgentFilesAPI(w http.ResponseWriter, r *http.Request, res
 	}
 
 	switch action {
-	case "list", "read", "write", "mkdir", "delete", "rename", "search":
+	case "list", "read", "write", "mkdir", "delete", "rename", "chmod", "chown", "search":
 		if r.Method != http.MethodPost {
 			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -74,17 +77,25 @@ func (s *Server) handleAgentFilesAPI(w http.ResponseWriter, r *http.Request, res
 	}
 }
 
-// fileRPRequest 通用转发请求体：path 类 + read/write/search 专有字段
+// fileRPRequest 通用转发请求体：path 类 + read/write/search/chmod/chown 专有字段
 type fileRPRequest struct {
-	Dir           string `json:"dir"`
-	Path          string `json:"path"`
-	Name          string `json:"name"`
-	Offset        *int64 `json:"offset"`
-	Length        *int64 `json:"length"`
-	Data          string `json:"data"`
-	Truncate      *bool  `json:"truncate"`
-	Query         string `json:"query"`
-	CaseSensitive *bool  `json:"caseSensitive"`
+	Dir           string   `json:"dir"`
+	Path          string   `json:"path"`
+	Name          string   `json:"name"`
+	Offset        *int64   `json:"offset"`
+	Length        *int64   `json:"length"`
+	Data          string   `json:"data"`
+	Truncate      *bool    `json:"truncate"`
+	Query         string   `json:"query"`
+	CaseSensitive *bool    `json:"caseSensitive"`
+	Mode          *float64 `json:"mode"` // chmod：权限位 0-0o777
+	UID           *float64 `json:"uid"`  // chown：0-uint32
+	GID           *float64 `json:"gid"`
+}
+
+// validFileNumber 数字参数双端同规则校验（D20）：非负整数且 ≤ max
+func validFileNumber(v *float64, max float64) bool {
+	return v != nil && *v == math.Trunc(*v) && *v >= 0 && *v <= max
 }
 
 // cleanServerPath server 侧路径校验，规则与 agent 的 cleanAbsPath 一致（双端防御）：
@@ -121,6 +132,31 @@ func (s *Server) forwardFileRPC(w http.ResponseWriter, r *http.Request, agentID,
 			return
 		}
 		params["path"] = path
+	case "chmod":
+		path, ok := cleanServerPath(req.Path, "path")
+		if !ok {
+			s.handleError(w, r, http.StatusBadRequest, "path must be an absolute path")
+			return
+		}
+		if !validFileNumber(req.Mode, 0o777) {
+			s.handleError(w, r, http.StatusBadRequest, "mode must be an integer in [0, 0777]")
+			return
+		}
+		params["path"] = path
+		params["mode"] = *req.Mode
+	case "chown":
+		path, ok := cleanServerPath(req.Path, "path")
+		if !ok {
+			s.handleError(w, r, http.StatusBadRequest, "path must be an absolute path")
+			return
+		}
+		if !validFileNumber(req.UID, 1<<32-1) || !validFileNumber(req.GID, 1<<32-1) {
+			s.handleError(w, r, http.StatusBadRequest, "uid/gid must be integers in [0, 4294967295]")
+			return
+		}
+		params["path"] = path
+		params["uid"] = *req.UID
+		params["gid"] = *req.GID
 	case "rename":
 		path, ok := cleanServerPath(req.Path, "path")
 		if !ok {
@@ -211,6 +247,12 @@ func (s *Server) forwardFileRPC(w http.ResponseWriter, r *http.Request, agentID,
 	case "rename":
 		s.auditFile(r, agentID, audit.ActionFileRename, req.Path,
 			map[string]interface{}{"new_name": req.Name})
+	case "chmod":
+		s.auditFile(r, agentID, audit.ActionFileChmod, req.Path,
+			map[string]interface{}{"mode": fmt.Sprintf("%04o", int(*req.Mode))})
+	case "chown":
+		s.auditFile(r, agentID, audit.ActionFileChown, req.Path,
+			map[string]interface{}{"uid": int(*req.UID), "gid": int(*req.GID)})
 	}
 	s.writeJSON(w, http.StatusOK, data)
 }

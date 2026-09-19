@@ -290,3 +290,80 @@ func TestFilesWriteAuditTruncateSplit(t *testing.T) {
 		t.Fatalf("default truncate should audit: total=%d err=%v", total, err)
 	}
 }
+
+// TestFilesChmodChownValidatesForwardsAudits 权限编辑端点（M4/D22）：双端
+// 同规则校验 → 转发 → file_chmod/file_chown 审计；agent 失败不记审计
+func TestFilesChmodChownValidatesForwardsAudits(t *testing.T) {
+	s := newBackupTestServer(t)
+	var gotParams map[string]interface{}
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotParams = params
+		return map[string]interface{}{"mode": "0644"}, ""
+	})
+
+	// chmod 合法：转发 path+mode，审计含八进制 mode
+	rec := httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("chmod", "a1", `{"path":"/etc/nginx/a.conf","mode":420}`), "a1/files/chmod")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("chmod code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if gotParams["path"] != "/etc/nginx/a.conf" || gotParams["mode"] != float64(0o644) {
+		t.Fatalf("chmod forwarded = %v", gotParams)
+	}
+	_, total, err := s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": audit.ActionFileChmod})
+	if err != nil || total != 1 {
+		t.Fatalf("chmod should audit once: total=%d err=%v", total, err)
+	}
+
+	// chown 合法：转发 path+uid+gid，审计
+	rec = httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("chown", "a1", `{"path":"/etc/nginx/a.conf","uid":0,"gid":0}`), "a1/files/chown")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("chown code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if gotParams["uid"] != float64(0) || gotParams["gid"] != float64(0) {
+		t.Fatalf("chown forwarded = %v", gotParams)
+	}
+	_, total, err = s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": audit.ActionFileChown})
+	if err != nil || total != 1 {
+		t.Fatalf("chown should audit once: total=%d err=%v", total, err)
+	}
+
+	// 校验拒绝（400，不达 agent）：相对路径 / mode 越界 / mode 非整数 / mode 缺失 / uid 越界 / gid 缺失
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"relative path", `{"path":"etc/a.conf","mode":420}`},
+		{"mode beyond 0777", `{"path":"/etc/a.conf","mode":4096}`},
+		{"mode fractional", `{"path":"/etc/a.conf","mode":420.5}`},
+		{"mode missing", `{"path":"/etc/a.conf"}`},
+		{"negative mode", `{"path":"/etc/a.conf","mode":-1}`},
+		{"uid beyond uint32", `{"path":"/etc/a.conf","uid":4294967296,"gid":0}`},
+		{"gid missing", `{"path":"/etc/a.conf","uid":0}`},
+	} {
+		rec := httptest.NewRecorder()
+		s.handleAgentFilesAPI(rec, filesReq("chmod", "a1", tc.body), "a1/files/chmod")
+		if tc.name == "uid beyond uint32" || tc.name == "gid missing" {
+			rec = httptest.NewRecorder()
+			s.handleAgentFilesAPI(rec, filesReq("chown", "a1", tc.body), "a1/files/chown")
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: code = %d, want 400", tc.name, rec.Code)
+		}
+	}
+
+	// agent 失败不记审计
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		return nil, "refusing to operate on a symlink"
+	})
+	rec = httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("chmod", "a2", `{"path":"/etc/link.conf","mode":420}`), "a2/files/chmod")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("agent failure code = %d, want 502", rec.Code)
+	}
+	_, total, _ = s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": audit.ActionFileChmod})
+	if total != 1 {
+		t.Fatalf("failed chmod must not audit: total=%d", total)
+	}
+}

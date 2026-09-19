@@ -71,6 +71,8 @@ const (
 	ActionFileMkdir  = "file_mkdir"
 	ActionFileDelete = "file_delete"
 	ActionFileRename = "file_rename"
+	ActionFileChmod  = "file_chmod"
+	ActionFileChown  = "file_chown"
 )
 
 // ResourceFile 远程文件资源类型
