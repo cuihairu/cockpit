@@ -1,6 +1,7 @@
 package cert
 
 import (
+	"crypto/tls"
 	"testing"
 	"time"
 )
@@ -416,5 +417,21 @@ func TestInfoFields(t *testing.T) {
 
 	if info.IsExpired {
 		t.Error("IsExpired should be false")
+	}
+}
+
+// TestCovParseFirstCertEmpty 注入空证书链，覆盖 parseFirstCert 的防御分支。
+func TestCovParseFirstCertEmpty(t *testing.T) {
+	m := NewMonitor(Config{Timeout: time.Second})
+	if _, err := m.parseFirstCert(tls.ConnectionState{}, "d", "1.2.3.4:443"); err == nil {
+		t.Error("parseFirstCert with empty chain should fail")
+	}
+}
+
+// TestCovParseAllCertsEmpty 注入空证书链，覆盖 parseAllCerts 的防御分支。
+func TestCovParseAllCertsEmpty(t *testing.T) {
+	m := NewMonitor(Config{Timeout: time.Second})
+	if _, err := m.parseAllCerts(tls.ConnectionState{}, "d", "1.2.3.4:443"); err == nil {
+		t.Error("parseAllCerts with empty chain should fail")
 	}
 }

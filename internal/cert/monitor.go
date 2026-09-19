@@ -67,14 +67,27 @@ func (m *Monitor) CheckDomain(domain string, port int) (*Info, error) {
 	}
 	defer conn.Close()
 
-	// Get peer certificates
-	state := conn.ConnectionState()
+	return m.parseFirstCert(conn.ConnectionState(), domain, conn.RemoteAddr().String())
+}
+
+// parseFirstCert 从 TLS 连接状态解析首张证书（空 PeerCertificates 属防御分支）。
+func (m *Monitor) parseFirstCert(state tls.ConnectionState, domain, remote string) (*Info, error) {
 	if len(state.PeerCertificates) == 0 {
 		return nil, fmt.Errorf("no certificates found")
 	}
+	return m.parseCertInfo(state.PeerCertificates[0], domain, remote), nil
+}
 
-	cert := state.PeerCertificates[0]
-	return m.parseCertInfo(cert, domain, conn.RemoteAddr().String()), nil
+// parseAllCerts 解析 TLS 连接状态中的全部证书链。
+func (m *Monitor) parseAllCerts(state tls.ConnectionState, domain, remote string) ([]*Info, error) {
+	if len(state.PeerCertificates) == 0 {
+		return nil, fmt.Errorf("no certificates found")
+	}
+	result := make([]*Info, len(state.PeerCertificates))
+	for i, cert := range state.PeerCertificates {
+		result[i] = m.parseCertInfo(cert, domain, remote)
+	}
+	return result, nil
 }
 
 // CheckFile checks certificate from file
@@ -123,17 +136,7 @@ func (m *Monitor) CheckDomainChain(domain string, port int) ([]*Info, error) {
 	}
 	defer conn.Close()
 
-	state := conn.ConnectionState()
-	if len(state.PeerCertificates) == 0 {
-		return nil, fmt.Errorf("no certificates found")
-	}
-
-	result := make([]*Info, len(state.PeerCertificates))
-	for i, cert := range state.PeerCertificates {
-		result[i] = m.parseCertInfo(cert, domain, conn.RemoteAddr().String())
-	}
-
-	return result, nil
+	return m.parseAllCerts(conn.ConnectionState(), domain, conn.RemoteAddr().String())
 }
 
 // parseCertInfo parses certificate to Info
@@ -330,13 +333,7 @@ func (m *Monitor) CheckMailServer(domain string, port int) (*Info, error) {
 	}
 	defer conn.Close()
 
-	state := conn.ConnectionState()
-	if len(state.PeerCertificates) == 0 {
-		return nil, fmt.Errorf("no certificates found")
-	}
-
-	cert := state.PeerCertificates[0]
-	return m.parseCertInfo(cert, domain, conn.RemoteAddr().String()), nil
+	return m.parseFirstCert(conn.ConnectionState(), domain, conn.RemoteAddr().String())
 }
 
 // BatchCheckResult batch check result
