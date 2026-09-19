@@ -189,6 +189,27 @@ CMDB 一致性管「Git 里声明的机器还是不是那台机器」。数据�
 多字段同报/unregistered/undeclared/声明空跳过）；server——端点 wiring
 （200 形态、nil manager 503、JWT 外校验不涉及）；web——tsc 零新增 + build。
 
+## M6 清单
+
+- [x] inventory：`consistency.go` 比对纯函数（四态 + field 级 mismatch +
+      summary 计数 + id 稳定排序）+ 表驱动单测
+- [x] sync：`Manager.Consistency()`（GetInventory × ListAgents 即时比对）
+- [x] server：`GET /api/inventory/consistency`（JWT，浏览类不审计；
+      `inventorySync == nil` 503 指名引导 `inventory.path`）+ 端点测试
+- [x] web：types + `api.getInventoryConsistency()` + 漂移页 Tabs 化 +
+      `ConsistencyTab`（汇总条 + 四态表 + mismatch 行展开对照）
+- [x] 测试：inventory 3 测试 + server 2 测试全绿（-race 全包过）；
+      web tsc 零新增（基线 9 不变）+ build 过
+- [x] 文档收尾（本清单勾选）+ todo.md 同步
+
+✅ M6 完成（2026-09-19）。落地差异补记：① `Consistency()` 为无参方法
+（db 由 `NewManager` 构造时持有），非设计行文的 `Consistency(db)`；②
+mismatch 对照落地以**行展开**（字段级子表：字段/声明值/实报值）为准，
+「Web 侧」行文的 Tooltip 只承载四态状态语义，不做 Tooltip 塞对照；③
+Tabs 化随附卡片标题「漂移检测」→「漂移与一致性」（两 Tab 同属期望 vs
+实际主题）；④ 未启用 inventory 的 503 文案在 web 侧以引导 Alert 透出
+（含 `inventory.path` 指引），与 server 端点文案同口径。
+
 ## 不做（后续版本）
 
 - nginx 非 cockpit 片段、外部 crontab 条目、docker 卷内容检测。
