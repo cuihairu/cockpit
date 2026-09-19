@@ -46,6 +46,11 @@ type Config struct {
 	StoragePath string
 }
 
+// jsonMarshalIndent 注入点：结构体序列化不会失败，错误分支仅供测试覆盖。
+var jsonMarshalIndent = func(v interface{}) ([]byte, error) {
+	return json.MarshalIndent(v, "", "  ")
+}
+
 // NewManager creates links manager
 func NewManager(cfg Config) (*Manager, error) {
 	m := &Manager{
@@ -148,7 +153,7 @@ func (m *Manager) save() error {
 		Categories: categories,
 	}
 
-	data, err := json.MarshalIndent(store, "", "  ")
+	data, err := jsonMarshalIndent(store)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}

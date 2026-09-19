@@ -1,6 +1,7 @@
 package links
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -740,5 +741,20 @@ func TestManagerSaveCreatesDir(t *testing.T) {
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		t.Error("save() should create parent directories")
+	}
+}
+
+// TestCovSaveMarshalInjectFail 注入序列化失败，覆盖 save 的 marshal 错误分支。
+func TestCovSaveMarshalInjectFail(t *testing.T) {
+	orig := jsonMarshalIndent
+	t.Cleanup(func() { jsonMarshalIndent = orig })
+	jsonMarshalIndent = func(v interface{}) ([]byte, error) { return nil, errors.New("boom json") }
+
+	m, err := NewManager(Config{StoragePath: filepath.Join(t.TempDir(), "links.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.save(); err == nil {
+		t.Error("save with failing marshal should fail")
 	}
 }
