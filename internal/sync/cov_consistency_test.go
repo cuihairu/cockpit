@@ -135,17 +135,13 @@ func TestManagerValidateEmpty(t *testing.T) {
 	}
 }
 
-// applyInventory 的 no-op 分支：db/inv 为 nil 直接跳过。Sync 的 error
-// 返回分支实际不可达——syncer 对单条落库失败只计数（result.Errors++）
-// 不上抛，此处验证 no-op 契约即可。
+// applyInventory 的 no-op 分支：db/inv 为 nil 直接跳过。
+// （原 Sync 的 error 返回分支已随签名简化移除——syncer 对单条落库
+// 失败只计数 result.Errors++ 不上抛，无可失败路径。）
 func TestApplyInventoryBranches(t *testing.T) {
 	w := &Watcher{}
-	if err := w.applyInventory(&inventory.Inventory{}); err != nil {
-		t.Errorf("nil db should no-op, got %v", err)
-	}
-	if err := w.applyInventory(nil); err != nil {
-		t.Errorf("nil inv should no-op, got %v", err)
-	}
+	w.applyInventory(&inventory.Inventory{}) // nil db：no-op 不 panic
+	w.applyInventory(nil)                    // nil inv：no-op 不 panic
 }
 
 // loadInventory 中 applyInventory 失败只记日志不上抛：ForceReload 成功

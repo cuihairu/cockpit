@@ -240,10 +240,7 @@ func TestApplyInventoryNilDB(t *testing.T) {
 	defer w.watcher.Close()
 
 	// Should not panic with nil DB
-	err := w.applyInventory(nil)
-	if err != nil {
-		t.Errorf("applyInventory() with nil DB and nil inv should not error, got %v", err)
-	}
+	w.applyInventory(nil)
 }
 
 func TestConfigDefaults(t *testing.T) {

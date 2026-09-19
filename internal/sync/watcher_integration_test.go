@@ -201,10 +201,7 @@ func TestApplyInventoryWithRealDB(t *testing.T) {
 		},
 	}
 
-	err := w.applyInventory(inv)
-	if err != nil {
-		t.Fatalf("applyInventory() error = %v", err)
-	}
+	w.applyInventory(inv)
 
 	agent, err := db.GetAgent("a1")
 	if err != nil {

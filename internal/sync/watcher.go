@@ -90,10 +90,10 @@ func (w *Watcher) Stop() {
 
 // watchLoop watches for file changes
 func (w *Watcher) watchLoop() {
+	// 立即停掉 NewTimer(0) 的初始触发，避免首轮 select 就收到一次多余 tick
+	// （go1.23 起 Stop 保证之后不会送达旧值，无需再排空通道）。
 	debounceTimer := time.NewTimer(0)
-	if !debounceTimer.Stop() {
-		<-debounceTimer.C
-	}
+	debounceTimer.Stop()
 
 	for {
 		select {
@@ -151,10 +151,8 @@ func (w *Watcher) loadInventory() error {
 		return err
 	}
 
-	// Apply to database
-	if err := w.applyInventory(inv); err != nil {
-		log.Printf("Apply inventory error: %v", err)
-	}
+	// Apply to database（无失败路径，见 applyInventory 注释）
+	w.applyInventory(inv)
 
 	// Call custom reload handler
 	if w.onReload != nil {
@@ -176,15 +174,13 @@ func (w *Watcher) loadInventory() error {
 
 // applyInventory applies inventory to database via the shared Syncer.
 // 复用 inventory.Syncer 统一同步逻辑，避免 CLI sync 与 watch 两套并行实现。
-func (w *Watcher) applyInventory(inv *inventory.Inventory) error {
+// Syncer 内部对单条落库失败只计数不上抛，因此这里没有可失败路径。
+func (w *Watcher) applyInventory(inv *inventory.Inventory) {
 	if w.db == nil || inv == nil {
-		return nil
+		return
 	}
 
-	result, err := inventory.NewSyncer(w.db).Sync(w.ctx, inv)
-	if err != nil {
-		return err
-	}
+	result := inventory.NewSyncer(w.db).Sync(w.ctx, inv)
 
 	log.Printf("Inventory applied: agents=%d domains=%d certificates=%d compute=%d services=%d gateways=%d storages=%d",
 		countResult(result.Agents),
@@ -194,7 +190,6 @@ func (w *Watcher) applyInventory(inv *inventory.Inventory) error {
 		countResult(result.Services),
 		countResult(result.Gateways),
 		countResult(result.Storages))
-	return nil
 }
 
 // countResult 汇总 ResourceResult 的处理总数（Created+Updated+Errors）
@@ -295,32 +290,6 @@ func (m *Manager) Consistency() (*inventory.ConsistencyReport, error) {
 
 // Validate validates inventory file
 func (m *Manager) Validate() error {
-	inv, err := m.watcher.GetInventory()
-	if err != nil {
-		return err
-	}
-
-	// Validate structure
-	if len(inv.Regions) == 0 && len(inv.Domains) == 0 {
-		return nil // Empty inventory is valid
-	}
-
-	// Validate regions
-	for regionKey, region := range inv.Regions {
-		if region.ID == "" {
-			region.ID = regionKey
-		}
-		for zoneKey, zone := range region.Zones {
-			if zone.ID == "" {
-				zone.ID = zoneKey
-			}
-			for agentKey, agent := range zone.Agents {
-				if agent.ID == "" {
-					agent.ID = agentKey
-				}
-			}
-		}
-	}
-
-	return nil
+	_, err := m.watcher.GetInventory()
+	return err
 }
