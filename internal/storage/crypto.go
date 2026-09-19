@@ -15,6 +15,14 @@ import (
 var encryptionKey []byte
 var usingDefaultKey = false
 
+// 底层原语注入点：生产实现永不失败（go1.26 crypto/rand 读取不会出错、
+// 密钥恒为 32 字节），错误分支仅供测试注入覆盖。
+var (
+	newCipher  = aes.NewCipher
+	newGCM     = cipher.NewGCM
+	cryptoRand = rand.Reader
+)
+
 const defaultKeyPrefix = "change-this-totp-encryption-key"
 
 func init() {
@@ -67,18 +75,18 @@ func ValidateKey() error {
 
 // Encrypt 使用 AES-256-GCM 加密明文
 func Encrypt(plaintext string) (string, error) {
-	block, err := aes.NewCipher(encryptionKey)
+	block, err := newCipher(encryptionKey)
 	if err != nil {
 		return "", err
 	}
 
-	gcm, err := cipher.NewGCM(block)
+	gcm, err := newGCM(block)
 	if err != nil {
 		return "", err
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+	if _, err := io.ReadFull(cryptoRand, nonce); err != nil {
 		return "", err
 	}
 
@@ -93,12 +101,12 @@ func Decrypt(ciphertext string) (string, error) {
 		return "", err
 	}
 
-	block, err := aes.NewCipher(encryptionKey)
+	block, err := newCipher(encryptionKey)
 	if err != nil {
 		return "", err
 	}
 
-	gcm, err := cipher.NewGCM(block)
+	gcm, err := newGCM(block)
 	if err != nil {
 		return "", err
 	}
@@ -123,7 +131,7 @@ func GenerateBackupCodes() ([]string, error) {
 	for i := 0; i < 10; i++ {
 		// 生成 12 位随机字符
 		b := make([]byte, 6)
-		if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		if _, err := io.ReadFull(cryptoRand, b); err != nil {
 			return nil, err
 		}
 		code := fmt.Sprintf("%04x-%04x-%04x", b[0:2], b[2:4], b[4:6])

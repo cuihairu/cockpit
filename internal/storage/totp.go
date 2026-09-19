@@ -9,6 +9,9 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
+// jsonMarshal 注入点：[]string 的序列化不会失败，错误分支仅供测试覆盖。
+var jsonMarshal = json.Marshal
+
 var (
 	// ErrBackupCodeUsed 备份码已使用错误
 	ErrBackupCodeUsed = errors.New("backup code already used")
@@ -16,7 +19,7 @@ var (
 
 // EnableTOTP 启用 TOTP 验证
 func (d *DB) EnableTOTP(userID, encryptedSecret string, hashedBackupCodes []string) error {
-	backupJSON, err := json.Marshal(hashedBackupCodes)
+	backupJSON, err := jsonMarshal(hashedBackupCodes)
 	if err != nil {
 		return err
 	}
@@ -106,7 +109,7 @@ func (d *DB) ConsumeBackupCode(userID, codeHash string) (bool, error) {
 
 // RegenerateBackupCodes 重新生成备份码
 func (d *DB) RegenerateBackupCodes(userID string, hashedBackupCodes []string) error {
-	backupJSON, err := json.Marshal(hashedBackupCodes)
+	backupJSON, err := jsonMarshal(hashedBackupCodes)
 	if err != nil {
 		return err
 	}

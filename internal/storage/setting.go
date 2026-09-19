@@ -1,9 +1,6 @@
 package storage
 
 import (
-	"errors"
-
-	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -36,13 +33,10 @@ func (d *DB) SetSetting(key, value string) error {
 	}).Error
 }
 
-// DeleteSetting 删除设置；不存在时返回 nil（幂等）
+// DeleteSetting 删除设置；不存在时 gorm 删除 0 行同样返回 nil（幂等）。
+// 注：gorm 的 Delete 不会返回 ErrRecordNotFound，无需特判。
 func (d *DB) DeleteSetting(key string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	err := d.db.Where("`key` = ?", key).Delete(&Setting{}).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
-	return err
+	return d.db.Where("`key` = ?", key).Delete(&Setting{}).Error
 }

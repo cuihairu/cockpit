@@ -2,6 +2,8 @@ package storage
 
 import (
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // AuditLog 审计日志
@@ -27,6 +29,12 @@ func (AuditLog) TableName() string {
 // CreateAuditLog 创建审计日志
 func (d *DB) CreateAuditLog(log *AuditLog) error {
 	return d.db.Create(log).Error
+}
+
+// auditLogFind 注入点：生产即 gorm Find；Count 与 Find 连续执行，
+// 仅靠 db 层错误无法单独触发 Find 失败分支，测试经此注入覆盖。
+var auditLogFind = func(q *gorm.DB, dest interface{}) error {
+	return q.Find(dest).Error
 }
 
 // GetAuditLogs 获取审计日志列表
@@ -62,7 +70,7 @@ func (d *DB) GetAuditLogs(offset, limit int, filters map[string]interface{}) ([]
 	}
 
 	// 分页查询，按时间倒序
-	if err := query.Order("created_at DESC").Offset(offset).Limit(limit).Find(&logs).Error; err != nil {
+	if err := auditLogFind(query.Order("created_at DESC").Offset(offset).Limit(limit), &logs); err != nil {
 		return nil, 0, err
 	}
 

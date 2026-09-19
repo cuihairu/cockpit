@@ -23,10 +23,13 @@ func verifyPassword(hashedPassword, password string) bool {
 	return err == nil
 }
 
+// randRead 注入点：go1.26 crypto/rand.Read 不会失败，错误分支仅供测试覆盖。
+var randRead = rand.Read
+
 // GenerateAgentSecret 生成随机 Agent 密钥（32字节，64位hex）
 func GenerateAgentSecret() (string, error) {
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := randRead(b); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil

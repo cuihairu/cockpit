@@ -1031,10 +1031,7 @@ func TestGetStats(t *testing.T) {
 		db.UpsertService(s)
 	}
 
-	stats, err := db.GetStats()
-	if err != nil {
-		t.Fatalf("GetStats() error = %v", err)
-	}
+	stats := db.GetStats()
 
 	if stats.AgentsOnline != 1 {
 		t.Errorf("AgentsOnline = %d, want 1", stats.AgentsOnline)
