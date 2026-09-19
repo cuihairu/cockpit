@@ -29,6 +29,8 @@ import type {
   LogsSources,
   LogsQuery,
   LogsQueryResult,
+  LogsSearchQuery,
+  LogsSearchResult,
   DriftCheckResult,
   DriftDiffResult,
   DriftScanConfig,
@@ -493,6 +495,12 @@ class ApiService {
       `/agents/${encodeURIComponent(agentId)}/logs/query`,
       query,
     )
+  }
+
+  // 跨机日志联邦检索：server 并行扇出 logs.query 按主机分组返回
+  // （logs-design.md M3/D11-D16；tail 上限 500 由 server 校验）
+  async searchLogs(payload: LogsSearchQuery): Promise<LogsSearchResult> {
+    return this.client.post<unknown, LogsSearchResult>('/logs/search', payload)
   }
 
   // 实时尾随：NDJSON 流式响应（{"data":...} 数据帧 / {"eof":true,"reason":...} 终止帧）。

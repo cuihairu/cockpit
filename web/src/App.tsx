@@ -24,6 +24,7 @@ import {
   SafetyCertificateOutlined,
   GlobalOutlined,
   VideoCameraOutlined,
+  FileSearchOutlined,
 } from '@ant-design/icons'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
@@ -40,6 +41,7 @@ import './App.less'
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Resources = lazy(() => import('./pages/Resources'))
 const Workbench = lazy(() => import('./pages/Workbench'))
+const LogSearch = lazy(() => import('./pages/LogSearch'))
 const Docker = lazy(() => import('./pages/Docker'))
 const Stacks = lazy(() => import('./pages/Stacks'))
 const Backups = lazy(() => import('./pages/Backups'))
@@ -122,6 +124,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/workbench',
       name: '工作台',
       icon: <ApiOutlined />,
+    },
+    {
+      path: '/logsearch',
+      name: '日志检索',
+      icon: <FileSearchOutlined />,
     },
     {
       path: '/docker',
@@ -350,6 +357,7 @@ const MainLayout = () => {
             <Route path="/resources" element={<Resources />} />
             <Route path="/resources/*" element={<Resources />} />
             <Route path="/workbench" element={<Workbench />} />
+            <Route path="/logsearch" element={<LogSearch />} />
             <Route path="/agents" element={<Navigate to="/workbench" replace />} />
             <Route path="/docker" element={<Docker />} />
             <Route path="/stacks" element={<Stacks />} />

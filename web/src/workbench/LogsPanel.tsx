@@ -40,8 +40,8 @@ const SINCE_OPTIONS = [
   { value: 1440, label: '最近 24 小时' },
 ]
 
-// 行级着色：ERROR/FATAL 红、WARN 橙；返回 null 用默认色
-const lineTone = (line: string): string | null => {
+// 行级着色：ERROR/FATAL 红、WARN 橙；返回 null 用默认色（LogSearch 跨机检索页复用）
+export const lineTone = (line: string): string | null => {
   const upper = line.toUpperCase()
   if (upper.includes('ERROR') || upper.includes('FATAL') || upper.includes('PANIC')) return '#ff6b6b'
   if (upper.includes('WARN')) return '#ffa940'
@@ -49,7 +49,7 @@ const lineTone = (line: string): string | null => {
 }
 
 // GrepLine 单行渲染：grep 命中片段高亮（大小写敏感，与 agent contains 行为一致）
-const GrepLine = ({ line, grep }: { line: string; grep: string }) => {
+export const GrepLine = ({ line, grep }: { line: string; grep: string }) => {
   const color = lineTone(line)
   const style: React.CSSProperties = color ? { color } : {}
 

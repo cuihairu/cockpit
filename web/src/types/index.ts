@@ -487,6 +487,35 @@ export interface LogsQueryResult {
   truncated: boolean
 }
 
+// 跨机日志联邦检索（见 docs/guide/logs-design.md M3，D11-D16）
+export interface LogsSearchQuery {
+  type: 'systemd' | 'docker'
+  source: string
+  tail?: number
+  since_minutes?: number
+  grep?: string
+  agents?: string[]
+}
+
+export interface LogsSearchItem {
+  agentId: string
+  hostname: string
+  ok: boolean
+  truncated?: boolean
+  lines?: string
+  error?: string
+}
+
+export interface LogsSearchSkipped {
+  agentId: string
+  reason: 'offline' | 'no-logs'
+}
+
+export interface LogsSearchResult {
+  results: LogsSearchItem[]
+  skipped: LogsSearchSkipped[]
+}
+
 // 防漂移检测（见 docs/guide/drift-design.md）
 export interface DriftCheckItem {
   kind: 'nginx' | 'traefik' | 'cron' | 'stack'
