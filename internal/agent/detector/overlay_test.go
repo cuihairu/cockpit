@@ -70,6 +70,6 @@ func TestOverlayDetectorMeta(t *testing.T) {
 		t.Errorf("Name() = %q", d.Name())
 	}
 	if d.Priority() <= 15 {
-		t.Errorf("Priority() = %d, want after network-monitor(15)", d.Priority())
+		t.Errorf("Priority() = %d, want 16", d.Priority())
 	}
 }

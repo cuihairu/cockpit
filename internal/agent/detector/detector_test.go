@@ -415,32 +415,6 @@ func TestPVEDetectorGetVersion(t *testing.T) {
 	}
 }
 
-// ============ NetworkDetector Tests ============
-
-func TestNetworkDetectorName(t *testing.T) {
-	d := &NetworkDetector{}
-	if d.Name() != "network-monitor" {
-		t.Errorf("Name() = %v, want network-monitor", d.Name())
-	}
-}
-
-func TestNetworkDetectorPriority(t *testing.T) {
-	d := &NetworkDetector{}
-	if d.Priority() != 15 {
-		t.Errorf("Priority() = %v, want 15", d.Priority())
-	}
-}
-
-func TestNetworkDetectorDetect(t *testing.T) {
-	d := &NetworkDetector{}
-	cap, err := d.Detect()
-	if err != nil {
-		t.Errorf("Detect() error = %v", err)
-	}
-	// May return nil if no network features detected
-	_ = cap
-}
-
 // ============ OpenWrtDetector Tests ============
 
 func TestOpenWrtDetectorName(t *testing.T) {

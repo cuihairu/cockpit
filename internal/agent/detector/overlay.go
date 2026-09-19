@@ -29,7 +29,7 @@ func (d *OverlayDetector) Name() string {
 	return "overlay"
 }
 
-// Priority 检测优先级（紧随 network-monitor）
+// Priority 检测优先级
 func (d *OverlayDetector) Priority() int {
 	return 16
 }
@@ -55,6 +55,11 @@ func (d *OverlayDetector) Detect() (*protocol.Capability, error) {
 
 	if len(features) == 0 {
 		return nil, nil
+	}
+
+	// M2-B：虚拟网身份提取（D15/D16）——失败静默缺席，不阻塞注册
+	if id := extractIdentity(features); id != nil {
+		features["identity"] = id
 	}
 
 	return &protocol.Capability{

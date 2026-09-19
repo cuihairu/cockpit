@@ -252,7 +252,7 @@ func TestSetupProviders_MultipleCapabilities(t *testing.T) {
 func TestSetupProviders_UnknownCapabilityIgnored(t *testing.T) {
 	a := NewAgent(Config{ServerURL: "ws://test"})
 	a.capabilities = []protocol.Capability{
-		{Type: "network-monitor"},
+		{Type: "removed-network-monitor"},
 		{Type: "unknown-future-cap"},
 	}
 	a.setupProviders()

@@ -4,15 +4,6 @@ import (
 	"testing"
 )
 
-func TestGetNetworkInterfacesNonLinux(t *testing.T) {
-	_, err := GetNetworkInterfaces()
-	if err == nil {
-		t.Log("GetNetworkInterfaces() succeeded (running on Linux)")
-	} else {
-		t.Logf("GetNetworkInterfaces() error (expected on non-Linux): %v", err)
-	}
-}
-
 func TestGetDisksNonLinux(t *testing.T) {
 	_, err := GetDisks()
 	if err == nil {

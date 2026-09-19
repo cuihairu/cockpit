@@ -279,46 +279,6 @@ func TestGetRemoteCapabilityWrongType(t *testing.T) {
 	}
 }
 
-// ============ Network detector helpers ============
-
-func TestNetworkDetectorHelpers(t *testing.T) {
-	d := &NetworkDetector{}
-
-	// Exercise path-dependent helpers; assertions only on API shape.
-	_ = d.hasWireGuard()
-	ifaces := d.getWireGuardInterfaces()
-	for _, iface := range ifaces {
-		info := d.getWireGuardInfo(iface)
-		if info["type"] != "wireguard" {
-			t.Errorf("wireguard info type = %v, want wireguard", info["type"])
-		}
-		if info["interface"] != iface {
-			t.Errorf("wireguard info interface = %v, want %v", info["interface"], iface)
-		}
-	}
-
-	// getWireGuardInfo always returns base info even when wg binary is absent
-	info := d.getWireGuardInfo("wg-test")
-	if info["interface"] != "wg-test" || info["type"] != "wireguard" {
-		t.Errorf("unexpected wireguard info: %v", info)
-	}
-
-	tunnels := d.detectTunnels()
-	if tunnels == nil {
-		// nil is expected on hosts without wireguard/cloudflared
-		tunnels = []map[string]any{}
-	}
-	cf := d.detectCloudflareTunnels()
-	if cf == nil {
-		cf = []map[string]any{}
-	}
-}
-
-func TestHasRouteInfo(t *testing.T) {
-	d := &NetworkDetector{}
-	_ = d.hasRouteInfo() // environment dependent; must not panic
-}
-
 // ============ Hardware detector helpers ============
 
 func TestHardwareDetectorHelpers(t *testing.T) {
@@ -355,7 +315,7 @@ func TestOpenWrtGetSystemInfoWithoutUbus(t *testing.T) {
 func TestRegisteredDetectorsIncludeCoreOnes(t *testing.T) {
 	want := map[string]bool{
 		"docker-api": false, "pve-api": false, "openwrt": false,
-		"network-monitor": false, "hardware-monitor": false,
+		"overlay": false, "hardware-monitor": false,
 	}
 	for _, d := range All() {
 		name := d.Name()
@@ -448,97 +408,6 @@ func TestHardwareDetectWithoutTools(t *testing.T) {
 	}
 	if cap != nil {
 		t.Errorf("Detect() should return nil without tools and thermal dir, got %+v", cap)
-	}
-}
-
-func TestNetworkDetectWithRouteStub(t *testing.T) {
-	fakeBinDir(t, map[string]string{"ip": "exit 0"})
-
-	d := &NetworkDetector{}
-	if !d.hasRouteInfo() {
-		t.Error("hasRouteInfo should be true with stubbed ip")
-	}
-
-	cap, err := d.Detect()
-	if err != nil {
-		t.Fatalf("Detect() error = %v", err)
-	}
-	if cap == nil {
-		t.Fatal("Detect() should report network capability with routes available")
-	}
-	if cap.Metadata["routes"] != true {
-		t.Errorf("routes feature = %v, want true", cap.Metadata["routes"])
-	}
-}
-
-func TestNetworkHasWireGuardWithStub(t *testing.T) {
-	fakeBinDir(t, map[string]string{"wg": "exit 0"})
-	d := &NetworkDetector{}
-	if !d.hasWireGuard() {
-		t.Error("hasWireGuard should be true with stubbed wg")
-	}
-}
-
-func TestNetworkGetWireGuardInfoWithStubOutput(t *testing.T) {
-	fakeBinDir(t, map[string]string{
-		"wg": "printf 'l1\\nl2\\nl3\\n'",
-	})
-	d := &NetworkDetector{}
-	info := d.getWireGuardInfo("wg-stub")
-	if info["configured"] != true {
-		t.Errorf("configured = %v, want true", info["configured"])
-	}
-	// printf emits a trailing newline, so lines = [l1 l2 l2 ""] and peer_count = 3
-	if info["peer_count"].(int) != 3 {
-		t.Errorf("peer_count = %v, want 3", info["peer_count"])
-	}
-}
-
-func TestNetworkDetectCloudflareTunnelsWithStub(t *testing.T) {
-	fakeBinDir(t, map[string]string{
-		"pgrep":       "exit 0",
-		"cloudflared": "printf 'tun-id-1  my-tunnel  running\\n'",
-	})
-	d := &NetworkDetector{}
-	tunnels := d.detectCloudflareTunnels()
-	if len(tunnels) != 1 {
-		t.Fatalf("tunnels length = %d, want 1", len(tunnels))
-	}
-	if tunnels[0]["id"] != "tun-id-1" {
-		t.Errorf("tunnel id = %v, want tun-id-1", tunnels[0]["id"])
-	}
-	if tunnels[0]["status"] != "running" {
-		t.Errorf("tunnel status = %v, want running", tunnels[0]["status"])
-	}
-}
-
-func TestNetworkDetectCloudflareTunnelsCmdFails(t *testing.T) {
-	fakeBinDir(t, map[string]string{
-		"pgrep":       "exit 0",
-		"cloudflared": "exit 1",
-	})
-	d := &NetworkDetector{}
-	tunnels := d.detectCloudflareTunnels()
-	if len(tunnels) != 1 {
-		t.Fatalf("tunnels length = %d, want 1 (detected marker)", len(tunnels))
-	}
-	if tunnels[0]["status"] != "detected" {
-		t.Errorf("tunnel status = %v, want detected", tunnels[0]["status"])
-	}
-}
-
-func TestNetworkDetectTunnelsWithCloudflareStub(t *testing.T) {
-	fakeBinDir(t, map[string]string{
-		"pgrep":       "exit 0",
-		"cloudflared": "printf 'tun-a  alpha  running\\n'",
-	})
-	d := &NetworkDetector{}
-	tunnels := d.detectTunnels()
-	if len(tunnels) != 1 {
-		t.Fatalf("detectTunnels length = %d, want 1", len(tunnels))
-	}
-	if tunnels[0]["type"] != "cloudflare" {
-		t.Errorf("tunnel type = %v, want cloudflare", tunnels[0]["type"])
 	}
 }
 
