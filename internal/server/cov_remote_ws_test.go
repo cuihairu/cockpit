@@ -231,7 +231,8 @@ func covWantHTTP(t *testing.T, desc string, handler http.HandlerFunc, path, tick
 }
 
 // covWaitGone 轮询等待条件成立
-func covWaitGone(t *testing.T, desc string, check func() bool) {	t.Helper()
+func covWaitGone(t *testing.T, desc string, check func() bool) {
+	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if check() {

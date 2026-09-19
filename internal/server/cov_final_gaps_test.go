@@ -421,7 +421,7 @@ func TestCovRegisterProxyAPIRoutes(t *testing.T) {
 	}
 	covWantCode(t, "proxies GET", do(http.MethodGet, "/api/proxies"), http.StatusOK)
 	covWantCode(t, "proxies POST", do(http.MethodPost, "/api/proxies"), http.StatusBadRequest) // 到 handler：缺字段
-	covWantCode(t, "proxies PUT", do(http.MethodPut, "/api/proxies"), http.StatusBadRequest)  // 空 id
+	covWantCode(t, "proxies PUT", do(http.MethodPut, "/api/proxies"), http.StatusBadRequest)   // 空 id
 	covWantCode(t, "proxies PATCH", do(http.MethodPatch, "/api/proxies"), http.StatusBadRequest)
 	covWantCode(t, "proxies DELETE", do(http.MethodDelete, "/api/proxies"), http.StatusBadRequest)
 	covWantCode(t, "proxies CONNECT", do("PROPFIND", "/api/proxies"), http.StatusMethodNotAllowed)

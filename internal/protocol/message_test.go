@@ -71,20 +71,20 @@ func TestMessageTypes(t *testing.T) {
 
 func TestLocation(t *testing.T) {
 	tests := []struct {
-		name   string
-		loc    Location
+		name       string
+		loc        Location
 		wantRegion string
 		wantZone   string
 	}{
 		{
-			name:   "full location",
-			loc:    Location{Region: "us-west", Zone: "zone-a"},
+			name:       "full location",
+			loc:        Location{Region: "us-west", Zone: "zone-a"},
 			wantRegion: "us-west",
 			wantZone:   "zone-a",
 		},
 		{
-			name:   "empty location",
-			loc:    Location{},
+			name:       "empty location",
+			loc:        Location{},
 			wantRegion: "",
 			wantZone:   "",
 		},
@@ -145,8 +145,8 @@ func TestCapabilityWithEmptyFields(t *testing.T) {
 
 func TestVirtualizationInfo(t *testing.T) {
 	tests := []struct {
-		name  string
-		info  VirtualizationInfo
+		name string
+		info VirtualizationInfo
 	}{
 		{
 			name: "KVM guest",
@@ -315,7 +315,7 @@ func TestRPCRequestPayload(t *testing.T) {
 
 func TestRPCResponsePayload(t *testing.T) {
 	tests := []struct {
-		name   string
+		name    string
 		payload RPCResponsePayload
 	}{
 		{

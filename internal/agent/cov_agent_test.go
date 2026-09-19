@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 }
 
 // covWSServer 起一个 fake WebSocket server；onConn 在连接升级后回调
-//（可为 nil）。返回 server 与已升级服务端连接的通知通道。
+// （可为 nil）。返回 server 与已升级服务端连接的通知通道。
 func covWSServer(t *testing.T, onConn func(conn *websocket.Conn)) (*httptest.Server, chan *websocket.Conn) {
 	t.Helper()
 	upgrader := websocket.Upgrader{}

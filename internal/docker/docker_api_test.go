@@ -103,8 +103,8 @@ func TestClientGetContainer(t *testing.T) {
 				Created: "2024-01-15T10:30:00Z",
 				State:   &container.State{Status: "running", Running: running},
 				Config: &container.Config{
-					Image:   "nginx:latest",
-					Labels:  map[string]string{"env": "test"},
+					Image:  "nginx:latest",
+					Labels: map[string]string{"env": "test"},
 				},
 			})
 			return

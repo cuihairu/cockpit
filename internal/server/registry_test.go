@@ -111,13 +111,13 @@ func TestRegistryListByLocation(t *testing.T) {
 	r := NewRegistry()
 
 	agent1 := &Agent{
-		ID:   "a1",
-		Send: make(chan *protocol.Message, 256),
+		ID:       "a1",
+		Send:     make(chan *protocol.Message, 256),
 		Location: protocol.Location{Region: "us-east", Zone: "us-east-1a"},
 	}
 	agent2 := &Agent{
-		ID:   "a2",
-		Send: make(chan *protocol.Message, 256),
+		ID:       "a2",
+		Send:     make(chan *protocol.Message, 256),
 		Location: protocol.Location{Region: "eu-west", Zone: "eu-west-1a"},
 	}
 	r.Register(agent1)

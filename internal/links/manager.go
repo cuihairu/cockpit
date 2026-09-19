@@ -26,19 +26,19 @@ type Link struct {
 
 // Category link category
 type Category struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Icon        string   `json:"icon,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Order       int      `json:"order"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Icon        string `json:"icon,omitempty"`
+	Description string `json:"description,omitempty"`
+	Order       int    `json:"order"`
 }
 
 // Manager links manager
 type Manager struct {
-	mu       sync.RWMutex
-	links    map[string]*Link
+	mu         sync.RWMutex
+	links      map[string]*Link
 	categories map[string]*Category
-	filePath string
+	filePath   string
 }
 
 // Config manager configuration
@@ -97,7 +97,7 @@ func (m *Manager) load() error {
 	}
 
 	var store struct {
-		Links      []*Link      `json:"links"`
+		Links      []*Link     `json:"links"`
 		Categories []*Category `json:"categories"`
 	}
 
@@ -141,7 +141,7 @@ func (m *Manager) save() error {
 	}
 
 	store := struct {
-		Links      []*Link      `json:"links"`
+		Links      []*Link     `json:"links"`
 		Categories []*Category `json:"categories"`
 	}{
 		Links:      links,
@@ -412,7 +412,7 @@ func (m *Manager) SetCategoryOrder(categoryIDs []string) error {
 // Import imports links from JSON
 func (m *Manager) Import(data []byte) error {
 	var store struct {
-		Links      []*Link      `json:"links"`
+		Links      []*Link     `json:"links"`
 		Categories []*Category `json:"categories"`
 	}
 
@@ -456,9 +456,9 @@ func (m *Manager) Export() ([]byte, error) {
 	}
 
 	store := struct {
-		Links      []*Link      `json:"links"`
+		Links      []*Link     `json:"links"`
 		Categories []*Category `json:"categories"`
-		ExportedAt time.Time    `json:"exported_at"`
+		ExportedAt time.Time   `json:"exported_at"`
 	}{
 		Links:      links,
 		Categories: categories,
@@ -481,9 +481,9 @@ func (m *Manager) Stats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_links":    len(m.links),
+		"total_links":      len(m.links),
 		"total_categories": len(m.categories),
-		"tags":           tagCounts,
+		"tags":             tagCounts,
 	}
 }
 

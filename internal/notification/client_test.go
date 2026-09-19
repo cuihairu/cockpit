@@ -245,9 +245,9 @@ func TestBuildEventLabels(t *testing.T) {
 
 func TestNewClient(t *testing.T) {
 	tests := []struct {
-		name     string
-		cfg      *config.NotificationConfig
-		wantNil  bool
+		name    string
+		cfg     *config.NotificationConfig
+		wantNil bool
 	}{
 		{
 			name:    "nil config",
@@ -551,8 +551,8 @@ func TestSendAlertNonBlocking(t *testing.T) {
 			client: NewClient(&config.NotificationConfig{
 				Enabled: false,
 			}),
-			alert: &storage.Alert{Type: "error", Title: "test"},
-			cfg:   &config.NotificationConfig{},
+			alert:       &storage.Alert{Type: "error", Title: "test"},
+			cfg:         &config.NotificationConfig{},
 			expectPanic: false,
 		},
 		{

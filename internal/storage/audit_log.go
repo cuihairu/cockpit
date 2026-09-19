@@ -6,17 +6,17 @@ import (
 
 // AuditLog 审计日志
 type AuditLog struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	UserID    string    `gorm:"index;size:50" json:"user_id"`
-	Username  string    `gorm:"size:100;index" json:"username"`
-	Action    string    `gorm:"size:50;index" json:"action"`         // login, logout, create, update, delete, view
-	Resource  string    `gorm:"size:100;index" json:"resource"`      // user, agent, domain, certificate, service, etc.
-	ResourceID string   `gorm:"size:100" json:"resource_id"`         // 资源ID
-	Details   string    `gorm:"type:text" json:"details"`            // JSON格式的详细信息
-	IP        string    `gorm:"size:50" json:"ip"`
-	UserAgent string    `gorm:"size:500" json:"user_agent"`
-	Status    string    `gorm:"size:20;index" json:"status"`         // success, failure
-	CreatedAt time.Time `gorm:"index" json:"created_at"`
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	UserID     string    `gorm:"index;size:50" json:"user_id"`
+	Username   string    `gorm:"size:100;index" json:"username"`
+	Action     string    `gorm:"size:50;index" json:"action"`    // login, logout, create, update, delete, view
+	Resource   string    `gorm:"size:100;index" json:"resource"` // user, agent, domain, certificate, service, etc.
+	ResourceID string    `gorm:"size:100" json:"resource_id"`    // 资源ID
+	Details    string    `gorm:"type:text" json:"details"`       // JSON格式的详细信息
+	IP         string    `gorm:"size:50" json:"ip"`
+	UserAgent  string    `gorm:"size:500" json:"user_agent"`
+	Status     string    `gorm:"size:20;index" json:"status"` // success, failure
+	CreatedAt  time.Time `gorm:"index" json:"created_at"`
 }
 
 // TableName 指定表名

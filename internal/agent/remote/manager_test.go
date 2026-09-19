@@ -46,10 +46,10 @@ func TestManagerStartStop(t *testing.T) {
 func TestConnectionStruct(t *testing.T) {
 	now := time.Now()
 	conn := &Connection{
-		ID:       "test-conn",
-		Protocol: protocol.RemoteProtocolSSH,
-		Target:   "192.168.1.1:22",
-		CreatedAt: now,
+		ID:         "test-conn",
+		Protocol:   protocol.RemoteProtocolSSH,
+		Target:     "192.168.1.1:22",
+		CreatedAt:  now,
 		LastActive: now,
 	}
 

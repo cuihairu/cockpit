@@ -152,11 +152,11 @@ func parseTailscaleStatus(out []byte) (version string, networks []map[string]int
 	}
 
 	networks = []map[string]interface{}{{
-		"id":       "tailscale",
-		"name":     st.Self.HostName,
-		"status":   st.BackendState,
-		"online":   st.Self.Online,
-		"ips":      st.Self.TailscaleIPs,
+		"id":     "tailscale",
+		"name":   st.Self.HostName,
+		"status": st.BackendState,
+		"online": st.Self.Online,
+		"ips":    st.Self.TailscaleIPs,
 	}}
 	peers = make([]overlayPeer, 0, len(st.Peer))
 	for _, p := range st.Peer {
@@ -198,9 +198,9 @@ var wgHandshakeOnline = 3 * time.Minute
 // listen-port（字段数 >= 9 视为 peer 行，其余按 interface 行处理）。
 func parseWGDump(out []byte, now time.Time) []map[string]interface{} {
 	type wgIface struct {
-		name      string
-		listen    string
-		peers     []overlayPeer
+		name   string
+		listen string
+		peers  []overlayPeer
 	}
 	ifaces := map[string]*wgIface{}
 	var order []string
@@ -249,10 +249,10 @@ func parseWGDump(out []byte, now time.Time) []map[string]interface{} {
 			peers = peers[:overlayMaxPeers]
 		}
 		result = append(result, map[string]interface{}{
-			"name":      ifc.name,
+			"name":       ifc.name,
 			"listenPort": ifc.listen,
-			"peerCount": len(ifc.peers),
-			"peers":     peers,
+			"peerCount":  len(ifc.peers),
+			"peers":      peers,
 		})
 	}
 	return result

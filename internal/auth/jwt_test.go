@@ -7,19 +7,19 @@ import (
 
 func TestSetSecret(t *testing.T) {
 	tests := []struct {
-		name  string
+		name   string
 		secret string
 	}{
 		{
-			name:  "custom secret",
+			name:   "custom secret",
 			secret: "my-custom-secret",
 		},
 		{
-			name:  "empty secret uses default",
+			name:   "empty secret uses default",
 			secret: "",
 		},
 		{
-			name:  "long secret",
+			name:   "long secret",
 			secret: "this-is-a-very-long-secret-key-for-testing-purposes",
 		},
 	}
@@ -38,25 +38,25 @@ func TestGenerateToken(t *testing.T) {
 	SetSecret("test-secret")
 
 	tests := []struct {
-		name    string
-		userID  string
+		name     string
+		userID   string
 		username string
-		role    string
-		wantErr bool
+		role     string
+		wantErr  bool
 	}{
 		{
-			name:    "valid token",
-			userID:  "user-123",
+			name:     "valid token",
+			userID:   "user-123",
 			username: "testuser",
-			role:    "admin",
-			wantErr: false,
+			role:     "admin",
+			wantErr:  false,
 		},
 		{
-			name:    "empty fields",
-			userID:  "",
+			name:     "empty fields",
+			userID:   "",
 			username: "",
-			role:    "",
-			wantErr: false,
+			role:     "",
+			wantErr:  false,
 		},
 	}
 

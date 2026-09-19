@@ -100,8 +100,8 @@ func TestHandlePingNoConnection(t *testing.T) {
 func TestHandleRPCRequestNoConnection(t *testing.T) {
 	a := NewAgent(Config{ServerURL: "ws://localhost:8080"})
 	msg := protocol.NewMessage(protocol.MessageTypeRPCRequest, map[string]any{
-		"method":  "nonexistent",
-		"params":  map[string]any{},
+		"method": "nonexistent",
+		"params": map[string]any{},
 	})
 	msg.ID = "rpc-123"
 

@@ -221,8 +221,8 @@ func TestCovSyncOpenDBError(t *testing.T) {
 }
 
 func TestCovPrintResultVariants(t *testing.T) {
-	printResult("nil", nil)                                                    // nil 直接返回
-	printResult("created", &inventory.ResourceResult{Created: 2})              // +2
-	printResult("deleted", &inventory.ResourceResult{Created: 1, Deleted: 1})  // +1 -1
-	printResult("errors", &inventory.ResourceResult{Updated: 1, Errors: 2})    // ~1 (2 errors)
+	printResult("nil", nil)                                                   // nil 直接返回
+	printResult("created", &inventory.ResourceResult{Created: 2})             // +2
+	printResult("deleted", &inventory.ResourceResult{Created: 1, Deleted: 1}) // +1 -1
+	printResult("errors", &inventory.ResourceResult{Updated: 1, Errors: 2})   // ~1 (2 errors)
 }

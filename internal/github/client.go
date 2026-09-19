@@ -13,17 +13,17 @@ import (
 
 // Client GitHub client
 type Client struct {
-	token     string
-	baseURL   string
-	client    *http.Client
-	timeout   time.Duration
+	token   string
+	baseURL string
+	client  *http.Client
+	timeout time.Duration
 }
 
 // Config client configuration
 type Config struct {
-	Token     string
-	BaseURL   string
-	Timeout   time.Duration
+	Token   string
+	BaseURL string
+	Timeout time.Duration
 }
 
 // NewClient creates GitHub client
@@ -91,29 +91,29 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 
 // WorkflowRun workflow run information
 type WorkflowRun struct {
-	ID             int64     `json:"id"`
-	Name           string    `json:"name"`
-	NodeID         string    `json:"node_id"`
-	HeadBranch     string    `json:"head_branch"`
-	HeadSHA        string    `json:"head_sha"`
-	Status         string    `json:"status"`
-	Conclusion     string    `json:"conclusion"`
-	WorkflowID     int64     `json:"workflow_id"`
-	URL            string    `json:"html_url"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	StartedAt      time.Time `json:"run_started_at"`
-	CompletedAt    time.Time `json:"-"` // 从 UpdatedAt 推导
-	RunNumber      int       `json:"run_number"`
-	RunAttempt     int       `json:"run_attempt"`
-	Event          string    `json:"event"`
-	TriggeredBy    string    `json:"triggered_by"`
-	JobsURL        string    `json:"jobs_url"`
-	LogsURL        string    `json:"logs_url"`
-	CheckSuiteURL  string    `json:"check_suite_url"`
-	ArtifactsURL   string    `json:"artifacts_url"`
-	CancelURL      string    `json:"cancel_url"`
-	RerunURL       string    `json:"rerun_url"`
+	ID            int64     `json:"id"`
+	Name          string    `json:"name"`
+	NodeID        string    `json:"node_id"`
+	HeadBranch    string    `json:"head_branch"`
+	HeadSHA       string    `json:"head_sha"`
+	Status        string    `json:"status"`
+	Conclusion    string    `json:"conclusion"`
+	WorkflowID    int64     `json:"workflow_id"`
+	URL           string    `json:"html_url"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	StartedAt     time.Time `json:"run_started_at"`
+	CompletedAt   time.Time `json:"-"` // 从 UpdatedAt 推导
+	RunNumber     int       `json:"run_number"`
+	RunAttempt    int       `json:"run_attempt"`
+	Event         string    `json:"event"`
+	TriggeredBy   string    `json:"triggered_by"`
+	JobsURL       string    `json:"jobs_url"`
+	LogsURL       string    `json:"logs_url"`
+	CheckSuiteURL string    `json:"check_suite_url"`
+	ArtifactsURL  string    `json:"artifacts_url"`
+	CancelURL     string    `json:"cancel_url"`
+	RerunURL      string    `json:"rerun_url"`
 }
 
 // ListWorkflowRuns lists workflow runs for a repository
@@ -209,12 +209,12 @@ type Job struct {
 
 // Step job step
 type Step struct {
-	Name        string     `json:"name"`
-	Status      string     `json:"status"`
-	Conclusion  string     `json:"conclusion"`
-	Number      int        `json:"number"`
-	StartedAt   time.Time  `json:"started_at"`
-	CompletedAt time.Time  `json:"completed_at"`
+	Name        string    `json:"name"`
+	Status      string    `json:"status"`
+	Conclusion  string    `json:"conclusion"`
+	Number      int       `json:"number"`
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
 }
 
 // ListJobsForWorkflowRun lists jobs for a workflow run
@@ -315,8 +315,8 @@ func (c *Client) GetWorkflowRunStatus(ctx context.Context, owner, repo string) (
 
 // TriggerWorkflowOptions options for triggering workflow
 type TriggerWorkflowOptions struct {
-	Ref       string                 `json:"ref,omitempty"`
-	Inputs    map[string]interface{} `json:"inputs,omitempty"`
+	Ref    string                 `json:"ref,omitempty"`
+	Inputs map[string]interface{} `json:"inputs,omitempty"`
 }
 
 // TriggerWorkflow triggers a workflow
@@ -338,17 +338,17 @@ func (c *Client) TriggerWorkflow(ctx context.Context, owner, repo, workflowID st
 
 // Artifact artifact information
 type Artifact struct {
-	ID                 int64     `json:"id"`
-	Name               string    `json:"name"`
-	SizeInBytes        int64     `json:"size_in_bytes"`
-	URL                string    `json:"archive_download_url"`
-	Expired            bool      `json:"expired"`
-	CreatedAt          time.Time `json:"created_at"`
-	ExpiresAt          time.Time `json:"expires_at"`
-	WorkflowRun        struct {
-		ID    int64  `json:"id"`
-		URL   string `json:"html_url"`
-		Number int   `json:"run_number"`
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	SizeInBytes int64     `json:"size_in_bytes"`
+	URL         string    `json:"archive_download_url"`
+	Expired     bool      `json:"expired"`
+	CreatedAt   time.Time `json:"created_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	WorkflowRun struct {
+		ID     int64  `json:"id"`
+		URL    string `json:"html_url"`
+		Number int    `json:"run_number"`
 	} `json:"workflow_run"`
 }
 
@@ -438,9 +438,9 @@ func (c *Client) GetRateLimit(ctx context.Context) (*RateLimit, error) {
 
 	var resp struct {
 		Resources struct {
-			Core   RateLimit `json:"core"`
+			Core    RateLimit `json:"core"`
 			GraphQL RateLimit `json:"graphql"`
-			Search RateLimit `json:"search"`
+			Search  RateLimit `json:"search"`
 		} `json:"resources"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {

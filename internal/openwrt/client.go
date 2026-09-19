@@ -362,16 +362,16 @@ type FirewallRule struct {
 
 // FirewallRedirect firewall redirect
 type FirewallRedirect struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Src         string `json:"src"`
-	SrcIP       string `json:"src_ip"`
-	SrcPort     string `json:"src_port"`
-	Dst         string `json:"dest"`
-	DstIP       string `json:"dest_ip"`
-	DstPort     string `json:"dest_port"`
-	Target      string `json:"target"`
-	Reflection  bool   `json:"reflection"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Src        string `json:"src"`
+	SrcIP      string `json:"src_ip"`
+	SrcPort    string `json:"src_port"`
+	Dst        string `json:"dest"`
+	DstIP      string `json:"dest_ip"`
+	DstPort    string `json:"dest_port"`
+	Target     string `json:"target"`
+	Reflection bool   `json:"reflection"`
 }
 
 // GetFirewallZones gets firewall zones

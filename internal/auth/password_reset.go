@@ -303,14 +303,14 @@ type ForgotPasswordRequest struct {
 
 // ForgotPasswordResponse 忘记密码响应
 type ForgotPasswordResponse struct {
-	Email     string `json:"email"`      // 脱敏邮箱
+	Email       string `json:"email"`        // 脱敏邮箱
 	MaskedEmail string `json:"masked_email"` // 脱敏邮箱
-	Message   string `json:"message"`
+	Message     string `json:"message"`
 }
 
 // ResetPasswordRequest 重置密码请求
 type ResetPasswordRequest struct {
 	Token       string `json:"token"`
-	Code        string `json:"code"`        // 可选，用于验证码验证
+	Code        string `json:"code"` // 可选，用于验证码验证
 	NewPassword string `json:"new_password"`
 }

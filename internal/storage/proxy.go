@@ -9,9 +9,9 @@ type Proxy struct {
 	ID          string    `gorm:"primaryKey" json:"id"`
 	Name        string    `gorm:"size:100;not null" json:"name"`
 	AgentID     string    `gorm:"size:100;index;not null" json:"agentId"`
-	ProxyType   string    `gorm:"size:10;not null" json:"proxyType"`   // tcp / udp
-	RemotePort  int       `gorm:"not null" json:"remotePort"`           // Server 监听的端口
-	Target      string    `gorm:"size:255;not null" json:"target"`      // 目标地址，如 192.168.31.1:80
+	ProxyType   string    `gorm:"size:10;not null" json:"proxyType"` // tcp / udp
+	RemotePort  int       `gorm:"not null" json:"remotePort"`        // Server 监听的端口
+	Target      string    `gorm:"size:255;not null" json:"target"`   // 目标地址，如 192.168.31.1:80
 	Description string    `gorm:"size:500" json:"description"`
 	Enabled     bool      `gorm:"default:true" json:"enabled"`
 	CreatedBy   string    `gorm:"size:100" json:"createdBy"`

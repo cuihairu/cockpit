@@ -180,11 +180,11 @@ func TestCovServiceNilReceiverBranches(t *testing.T) {
 	if got := s.TestAll(context.Background()); got != nil {
 		t.Errorf("nil service TestAll = %v", got)
 	}
-	s.SendNonBlocking(&Notification{EventType: ServiceDown})     // nil service：直接返回
-	s.SendAlertNonBlocking(&storage.Alert{Type: "error"})        // nil service：直接返回
+	s.SendNonBlocking(&Notification{EventType: ServiceDown}) // nil service：直接返回
+	s.SendAlertNonBlocking(&storage.Alert{Type: "error"})    // nil service：直接返回
 	s2 := NewService(nil)
-	s2.SendNonBlocking(nil)                                      // nil 通知：直接返回
-	s2.SendAlertNonBlocking(nil)                                 // nil 告警：直接返回
+	s2.SendNonBlocking(nil)      // nil 通知：直接返回
+	s2.SendAlertNonBlocking(nil) // nil 告警：直接返回
 }
 
 func TestCovSendNonBlockingFilteredEvent(t *testing.T) {

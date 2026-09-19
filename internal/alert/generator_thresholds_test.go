@@ -27,18 +27,18 @@ func TestCheckDiskSpaceThresholds(t *testing.T) {
 	g := NewGenerator(db, nil, nil)
 
 	high := &storage.SystemInfoSnapshot{
-		AgentID:           "agent-high",
-		Hostname:          "high-host",
-		DiskUsagePercent:  91.5,
+		AgentID:          "agent-high",
+		Hostname:         "high-host",
+		DiskUsagePercent: 91.5,
 	}
 	if err := db.UpdateSystemInfoSnapshot(high); err != nil {
 		t.Fatalf("UpdateSystemInfoSnapshot: %v", err)
 	}
 
 	low := &storage.SystemInfoSnapshot{
-		AgentID:           "agent-low",
-		Hostname:          "low-host",
-		DiskUsagePercent:  40,
+		AgentID:          "agent-low",
+		Hostname:         "low-host",
+		DiskUsagePercent: 40,
 	}
 	if err := db.UpdateSystemInfoSnapshot(low); err != nil {
 		t.Fatalf("UpdateSystemInfoSnapshot: %v", err)
@@ -66,18 +66,18 @@ func TestCheckMemoryUsageThresholds(t *testing.T) {
 	g := NewGenerator(db, nil, nil)
 
 	high := &storage.SystemInfoSnapshot{
-		AgentID:           "agent-high",
-		Hostname:          "high-host",
-		MemUsagePercent:   90,
+		AgentID:         "agent-high",
+		Hostname:        "high-host",
+		MemUsagePercent: 90,
 	}
 	if err := db.UpdateSystemInfoSnapshot(high); err != nil {
 		t.Fatalf("UpdateSystemInfoSnapshot: %v", err)
 	}
 
 	low := &storage.SystemInfoSnapshot{
-		AgentID:           "agent-low",
-		Hostname:          "low-host",
-		MemUsagePercent:   50,
+		AgentID:         "agent-low",
+		Hostname:        "low-host",
+		MemUsagePercent: 50,
 	}
 	if err := db.UpdateSystemInfoSnapshot(low); err != nil {
 		t.Fatalf("UpdateSystemInfoSnapshot: %v", err)

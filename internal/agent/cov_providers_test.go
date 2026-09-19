@@ -112,7 +112,7 @@ func TestCovRegisterStackProviderSuccess(t *testing.T) {
 	fakeBinDirCov(t, map[string]string{"docker": "exit 0"}) // `docker compose version` 退出 0
 	stacksDir := t.TempDir()
 	withEnv(t, map[string]string{
-		"DOCKER_HOST":       "",
+		"DOCKER_HOST":        "",
 		"COCKPIT_STACKS_DIR": stacksDir,
 	})
 
@@ -129,7 +129,7 @@ func TestCovRegisterStackProviderSuccess(t *testing.T) {
 }
 
 // fakeBinDirCov 创建只含 stub 可执行文件的目录并整体替换 PATH
-//（agent 包版本的 fakeBinDir，不依赖 detector 包）。
+// （agent 包版本的 fakeBinDir，不依赖 detector 包）。
 func fakeBinDirCov(t *testing.T, scripts map[string]string) {
 	t.Helper()
 	dir := t.TempDir()

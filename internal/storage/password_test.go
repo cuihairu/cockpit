@@ -7,34 +7,34 @@ import (
 
 func TestHashPassword(t *testing.T) {
 	tests := []struct {
-		name    string
+		name     string
 		password string
-		wantErr bool
+		wantErr  bool
 	}{
 		{
-			name:    "simple password",
+			name:     "simple password",
 			password: "password123",
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name:    "complex password",
+			name:     "complex password",
 			password: "C0mplex!P@ssw0rd#2024",
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name:    "empty password",
+			name:     "empty password",
 			password: "",
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name:    "long password",
+			name:     "long password",
 			password: strings.Repeat("a", 72),
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name:    "unicode password",
+			name:     "unicode password",
 			password: "密码123",
-			wantErr: false,
+			wantErr:  false,
 		},
 	}
 

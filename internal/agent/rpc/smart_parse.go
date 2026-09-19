@@ -142,9 +142,9 @@ func parseSmartctlDevice(base lsblkDisk, out []byte) smartDevice {
 			Table []interface{} `json:"table"`
 		} `json:"ata_smart_attributes"`
 		NVMeHealth struct {
-			PowerOnHours  interface{} `json:"power_on_hours"`
-			MediaErrors   interface{} `json:"media_errors"`
-			CriticalWarn  interface{} `json:"critical_warning"`
+			PowerOnHours   interface{} `json:"power_on_hours"`
+			MediaErrors    interface{} `json:"media_errors"`
+			CriticalWarn   interface{} `json:"critical_warning"`
 			PercentageUsed interface{} `json:"percentage_used"`
 		} `json:"nvme_smart_health_information_log"`
 	}

@@ -182,7 +182,7 @@ func (d *NetworkDetector) detectCloudflareTunnels() []map[string]any {
 	if err != nil {
 		// 进程存在但命令失败，仍然标记有隧道
 		tunnels = append(tunnels, map[string]any{
-			"type":  "cloudflare",
+			"type":   "cloudflare",
 			"status": "detected",
 		})
 		return tunnels

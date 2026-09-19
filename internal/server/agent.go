@@ -140,7 +140,7 @@ func (a *Agent) trySendLocked(msg *protocol.Message) (queued, closed bool) {
 	}
 }
 
-//SendMessage 发送消息给 Agent
+// SendMessage 发送消息给 Agent
 func (a *Agent) SendMessage(msg *protocol.Message) error {
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()

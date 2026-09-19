@@ -36,10 +36,10 @@ func TestContextWithUser(t *testing.T) {
 
 func TestGetUserFromContext(t *testing.T) {
 	tests := []struct {
-		name    string
-		setup   func() *http.Request
-		wantOK  bool
-		wantID  string
+		name   string
+		setup  func() *http.Request
+		wantOK bool
+		wantID string
 	}{
 		{
 			name: "user in context",

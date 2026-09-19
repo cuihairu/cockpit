@@ -212,9 +212,9 @@ func TestMaskEmail(t *testing.T) {
 	}{
 		{"test@example.com", "t***t@example.com"},
 		{"admin@example.com", "a***n@example.com"},
-		{"ab@x.com", "ab@x.com"},       // too short
-		{"invalid", "invalid"},          // no @
-		{"a@b@c.com", "a@b@c.com"},     // multiple @ -> not 2 parts
+		{"ab@x.com", "ab@x.com"},   // too short
+		{"invalid", "invalid"},     // no @
+		{"a@b@c.com", "a@b@c.com"}, // multiple @ -> not 2 parts
 	}
 	for _, tt := range tests {
 		got := MaskEmail(tt.input)

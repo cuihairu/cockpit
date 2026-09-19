@@ -84,15 +84,15 @@ func (m *mockStackDocker) Close() error { return nil }
 func composeWebContainers() []docker.ContainerInfo {
 	return []docker.ContainerInfo{
 		{
-			ID:    "c1", Name: "web-nginx-1", Image: "nginx:latest", State: "running", Status: "Up 2 hours",
+			ID: "c1", Name: "web-nginx-1", Image: "nginx:latest", State: "running", Status: "Up 2 hours",
 			Labels: map[string]string{"com.docker.compose.project": "web", "com.docker.compose.service": "nginx"},
 		},
 		{
-			ID:    "c2", Name: "web-redis-1", Image: "redis:7", State: "exited", Status: "Exited (0)",
+			ID: "c2", Name: "web-redis-1", Image: "redis:7", State: "exited", Status: "Exited (0)",
 			Labels: map[string]string{"com.docker.compose.project": "web", "com.docker.compose.service": "redis"},
 		},
 		{
-			ID:    "c3", Name: "other", Image: "busybox", State: "running",
+			ID: "c3", Name: "other", Image: "busybox", State: "running",
 			Labels: map[string]string{}, // 无 compose label，不应计入任何 stack
 		},
 	}
@@ -151,9 +151,9 @@ func TestStackProviderList(t *testing.T) {
 	root := t.TempDir()
 	writeStack(t, root, "web", "compose.yml", "services:\n  nginx:\n    image: nginx\n")
 	writeStack(t, root, "db", "docker-compose.yml", "services:\n  pg:\n    image: postgres\n")
-	writeStack(t, root, "empty-dir", "", "")                            // 无 compose 文件 → 跳过
-	writeStack(t, root, ".hidden", "compose.yml", "services: {}\n")     // 隐藏目录 → 跳过
-	os.WriteFile(filepath.Join(root, "afile.txt"), []byte("x"), 0o644)  // 普通文件 → 跳过
+	writeStack(t, root, "empty-dir", "", "")                           // 无 compose 文件 → 跳过
+	writeStack(t, root, ".hidden", "compose.yml", "services: {}\n")    // 隐藏目录 → 跳过
+	os.WriteFile(filepath.Join(root, "afile.txt"), []byte("x"), 0o644) // 普通文件 → 跳过
 	// web 有已完成的任务元数据
 	os.MkdirAll(filepath.Join(root, "web", ".cockpit"), 0o700)
 	os.WriteFile(filepath.Join(root, "web", ".cockpit", "last-task.json"),

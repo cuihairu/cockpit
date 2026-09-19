@@ -208,8 +208,8 @@ func TestConcurrentClientCreation(t *testing.T) {
 
 func TestClientImmutableConfig(t *testing.T) {
 	cfg := Config{
-		Host:  "original.example.com",
-		Port:  443,
+		Host:     "original.example.com",
+		Port:     443,
 		Username: "user1",
 	}
 
@@ -449,10 +449,10 @@ func TestListInterfacesWithServer(t *testing.T) {
 		"network.interface.dump": map[string]interface{}{
 			"interface": []interface{}{
 				map[string]interface{}{
-					"interface":     "lan",
-					"up":            true,
-					"proto":         "static",
-					"ipv4-address":  []string{"192.168.1.1"},
+					"interface":    "lan",
+					"up":           true,
+					"proto":        "static",
+					"ipv4-address": []string{"192.168.1.1"},
 				},
 			},
 		},

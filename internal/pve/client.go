@@ -116,17 +116,17 @@ func (c *Client) del(path string) ([]byte, error) {
 
 // Node 节点信息
 type Node struct {
-	Node   string `json:"node"`
-	Status string `json:"status"`
-	IP     string `json:"ip"`
-	CPU    float64
-	MaxCPU int    `json:"maxcpu"`
-	Mem    int64
-	MaxMem int64 `json:"maxmem"`
-	Disk   int64
+	Node    string `json:"node"`
+	Status  string `json:"status"`
+	IP      string `json:"ip"`
+	CPU     float64
+	MaxCPU  int `json:"maxcpu"`
+	Mem     int64
+	MaxMem  int64 `json:"maxmem"`
+	Disk    int64
 	MaxDisk int64 `json:"maxdisk"`
-	Uptime int64
-	Level  string
+	Uptime  int64
+	Level   string
 }
 
 // ListNodes 列出所有节点
@@ -167,27 +167,27 @@ func (c *Client) GetNodeStatus(node string) (*Node, error) {
 
 // VM 虚拟机信息
 type VM struct {
-	VMID       int    `json:"vmid"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	CPU        float64
-	Mem        int64
-	MaxMem     int64 `json:"maxmem"`
-	Disk       int64
-	MaxDisk    int64 `json:"maxdisk"`
-	Netout     int64
-	Netin      int64
-	DiskWrite  int64 `json:"diskwrite"`
-	DiskRead   int64 `json:"diskread"`
-	Uptime     int64
-	CPUs       int    `json:"cpus"`
-	Lock       string
-	Tag        string
-	MaxCPU     int    `json:"maxcpu"`
-	Template   int    `json:"template"`
-	QMPStatus  string `json:"qmpstatus"`
-	Agent      int
-	PoolID     string `json:"pool"`
+	VMID      int    `json:"vmid"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	CPU       float64
+	Mem       int64
+	MaxMem    int64 `json:"maxmem"`
+	Disk      int64
+	MaxDisk   int64 `json:"maxdisk"`
+	Netout    int64
+	Netin     int64
+	DiskWrite int64 `json:"diskwrite"`
+	DiskRead  int64 `json:"diskread"`
+	Uptime    int64
+	CPUs      int `json:"cpus"`
+	Lock      string
+	Tag       string
+	MaxCPU    int    `json:"maxcpu"`
+	Template  int    `json:"template"`
+	QMPStatus string `json:"qmpstatus"`
+	Agent     int
+	PoolID    string `json:"pool"`
 }
 
 // ListVMs 列出虚拟机
@@ -231,8 +231,8 @@ func (c *Client) GetVM(node string, vmid int) (*VMConfig, error) {
 
 	var statusResp struct {
 		Data struct {
-			VM       VM    `json:"vm"`
-			Lock     string
+			VM        VM `json:"vm"`
+			Lock      string
 			QMPStatus string `json:"qmpstatus"`
 		} `json:"data"`
 	}
@@ -254,33 +254,33 @@ func (c *Client) GetVM(node string, vmid int) (*VMConfig, error) {
 	}
 
 	return &VMConfig{
-		VM:     statusResp.Data.VM,
-		Config: configResp.Data,
-		Lock:   statusResp.Data.Lock,
+		VM:        statusResp.Data.VM,
+		Config:    configResp.Data,
+		Lock:      statusResp.Data.Lock,
 		QMPStatus: statusResp.Data.QMPStatus,
 	}, nil
 }
 
 // VMConfig 虚拟机完整配置
 type VMConfig struct {
-	VM         VM
-	Config     VMConfigData
-	Lock       string
-	QMPStatus  string
+	VM        VM
+	Config    VMConfigData
+	Lock      string
+	QMPStatus string
 }
 
 // VMConfigData 虚拟机配置数据
 type VMConfigData struct {
-	Cores    int    `json:"cores"`
-	CPUType  string `json:"cpu,omitempty"`
-	Memory   int    `json:"memory,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Onboot   string `json:"onboot,omitempty"`
-	BootDisk string `json:"bootdisk,omitempty"`
+	Cores     int    `json:"cores"`
+	CPUType   string `json:"cpu,omitempty"`
+	Memory    int    `json:"memory,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Onboot    string `json:"onboot,omitempty"`
+	BootDisk  string `json:"bootdisk,omitempty"`
 	BootOrder string `json:"boot,omitempty"`
-	OSType   string `json:"ostype,omitempty"`
-	SCSIHW   string `json:"scsihw,omitempty"`
-	Sockets  int    `json:"sockets,omitempty"`
+	OSType    string `json:"ostype,omitempty"`
+	SCSIHW    string `json:"scsihw,omitempty"`
+	Sockets   int    `json:"sockets,omitempty"`
 }
 
 // StartVM 启动虚拟机
@@ -361,10 +361,10 @@ type Container struct {
 	Disk      int64
 	MaxDisk   int64 `json:"maxdisk"`
 	Uptime    int64
-	MaxCPU    int    `json:"maxcpu"`
-	CPUs      int    `json:"cpus"`
+	MaxCPU    int `json:"maxcpu"`
+	CPUs      int `json:"cpus"`
 	Lock      string
-	Templates int    `json:"template"`
+	Templates int `json:"template"`
 }
 
 // ListContainers 列出容器
@@ -494,19 +494,19 @@ func (c *Client) ShutdownContainer(node string, vmid int) error {
 
 // Storage 存储信息
 type Storage struct {
-	Storage     string `json:"storage"`
-	Node        string `json:"node"`
-	Content     string `json:"content"`
-	Type        string `json:"type"`
-	Shared      int
-	Used        int64
-	Avail       int64
-	Total       int64
-	Plugin      string `json:"plugin"`
-	Active      int
-	Enabled     int
-	ReadOnly    int    `json:"read_only"`
-	Status      string
+	Storage  string `json:"storage"`
+	Node     string `json:"node"`
+	Content  string `json:"content"`
+	Type     string `json:"type"`
+	Shared   int
+	Used     int64
+	Avail    int64
+	Total    int64
+	Plugin   string `json:"plugin"`
+	Active   int
+	Enabled  int
+	ReadOnly int `json:"read_only"`
+	Status   string
 }
 
 // ListStorage 列出存储
@@ -571,7 +571,7 @@ type Snapshot struct {
 	Name        string
 	Snapshot    string
 	Digest      string
-	VmState     int     `json:"vmstate"`
+	VmState     int `json:"vmstate"`
 	Description string
 	Parent      string
 	Snaptime    int64

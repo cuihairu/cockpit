@@ -13,16 +13,16 @@ import (
 
 // Info certificate information
 type Info struct {
-	Domain      string    `json:"domain"`
-	IP          string    `json:"ip,omitempty"`
-	Subject     string    `json:"subject"`
-	Issuer      string    `json:"issuer"`
-	NotBefore   time.Time `json:"not_before"`
-	NotAfter    time.Time `json:"not_after"`
-	DaysLeft    int       `json:"days_left"`
-	IsExpired   bool      `json:"is_expired"`
-	Fingerprint string    `json:"fingerprint"`
-	SerialNumber string   `json:"serial_number"`
+	Domain       string    `json:"domain"`
+	IP           string    `json:"ip,omitempty"`
+	Subject      string    `json:"subject"`
+	Issuer       string    `json:"issuer"`
+	NotBefore    time.Time `json:"not_before"`
+	NotAfter     time.Time `json:"not_after"`
+	DaysLeft     int       `json:"days_left"`
+	IsExpired    bool      `json:"is_expired"`
+	Fingerprint  string    `json:"fingerprint"`
+	SerialNumber string    `json:"serial_number"`
 }
 
 // Monitor certificate monitor
@@ -187,7 +187,7 @@ func (m *Monitor) CheckMultiple(domains []string) map[string]*Info {
 		if err != nil {
 			// Store error info
 			results[domain] = &Info{
-				Domain: domain,
+				Domain:   domain,
 				NotAfter: time.Time{},
 				DaysLeft: -1,
 			}

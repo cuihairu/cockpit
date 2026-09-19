@@ -194,9 +194,9 @@ func TestValidateInput(t *testing.T) {
 		t.Errorf("valid input rejected: %v", err)
 	}
 	bad := []RecordInput{
-		{Type: "PTR", Name: "x", Content: "y", TTL: 1},    // 类型白名单外
-		{Type: "A", Name: " ", Content: "1.2.3.4", TTL: 1}, // name 空
-		{Type: "A", Name: "x", Content: "", TTL: 1},        // content 空
+		{Type: "PTR", Name: "x", Content: "y", TTL: 1},      // 类型白名单外
+		{Type: "A", Name: " ", Content: "1.2.3.4", TTL: 1},  // name 空
+		{Type: "A", Name: "x", Content: "", TTL: 1},         // content 空
 		{Type: "A", Name: "x", Content: "1.2.3.4", TTL: 30}, // ttl 非法区间
 		{Type: "A", Name: "x", Content: "1.2.3.4", TTL: -1}, // ttl 负
 	}

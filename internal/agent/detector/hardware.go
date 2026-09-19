@@ -114,7 +114,7 @@ func (d *HardwareDetector) hasUPS() bool {
 		entries, _ := os.ReadDir(usbDevPath)
 		for _, entry := range entries {
 			if strings.Contains(entry.Name(), "hiddev") ||
-			   strings.Contains(entry.Name(), "ups") {
+				strings.Contains(entry.Name(), "ups") {
 				return true
 			}
 		}
@@ -136,7 +136,7 @@ func GetDisks() ([]string, error) {
 	for _, entry := range entries {
 		// 跳过 loop 设备和 CD-ROM
 		if strings.HasPrefix(entry.Name(), "loop") ||
-		   strings.HasPrefix(entry.Name(), "sr") {
+			strings.HasPrefix(entry.Name(), "sr") {
 			continue
 		}
 

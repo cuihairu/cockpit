@@ -156,7 +156,7 @@ func (r *Registry) GetPendingResponse(msgID string) (chan *protocol.Message, boo
 // 错误定义
 var (
 	ErrAgentAlreadyExists = &Error{Code: "agent_exists", Message: "agent already exists"}
-	ErrAgentNotFound     = &Error{Code: "agent_not_found", Message: "agent not found"}
+	ErrAgentNotFound      = &Error{Code: "agent_not_found", Message: "agent not found"}
 )
 
 // Error 自定义错误类型

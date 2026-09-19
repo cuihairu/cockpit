@@ -220,7 +220,7 @@ func TestListInterfaces(t *testing.T) {
 									"interface": "lan",
 									"up":        true,
 									"enabled":   true,
-									"l3_device":  "br-lan",
+									"l3_device": "br-lan",
 									"metrics": map[string]interface{}{
 										"rx_bytes":   1000000,
 										"tx_bytes":   500000,
@@ -233,7 +233,7 @@ func TestListInterfaces(t *testing.T) {
 									"interface": "wan",
 									"up":        true,
 									"enabled":   true,
-									"l3_device":  "eth0",
+									"l3_device": "eth0",
 									"metrics": map[string]interface{}{
 										"rx_bytes":   5000000,
 										"tx_bytes":   1000000,
@@ -308,7 +308,7 @@ func TestGetInterface(t *testing.T) {
 							"interface": "lan",
 							"up":        true,
 							"enabled":   true,
-							"l3_device":  "br-lan",
+							"l3_device": "br-lan",
 							"metrics": map[string]interface{}{
 								"rx_bytes": 1000000,
 								"tx_bytes": 500000,

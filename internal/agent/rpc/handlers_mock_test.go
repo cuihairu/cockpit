@@ -44,7 +44,7 @@ func (m *mockDockerAPI) GetContainer(id string) (*docker.ContainerInfo, error) {
 	return m.container, nil
 }
 
-func (m *mockDockerAPI) StartContainer(id string) error            { return m.err }
+func (m *mockDockerAPI) StartContainer(id string) error              { return m.err }
 func (m *mockDockerAPI) StopContainer(id string, timeout *int) error { return m.err }
 func (m *mockDockerAPI) RestartContainer(id string, timeout *int) error {
 	return m.err
@@ -116,7 +116,7 @@ func (m *mockDockerAPI) Info() (*docker.SystemInfo, error) {
 func (m *mockDockerAPI) Version() (client.ServerVersionResult, error) {
 	return client.ServerVersionResult{}, nil
 }
-func (m *mockDockerAPI) Close() error                    { return nil }
+func (m *mockDockerAPI) Close() error { return nil }
 
 func newMockDockerProvider(api docker.DockerAPI) *DockerProvider {
 	return &DockerProvider{client: api}
@@ -656,12 +656,22 @@ func TestPVEProviderHTTPError(t *testing.T) {
 		{"SuspendVM", func() (interface{}, error) { return p.SuspendVM(map[string]interface{}{"node": "pve1", "vmid": 100}) }},
 		{"ResumeVM", func() (interface{}, error) { return p.ResumeVM(map[string]interface{}{"node": "pve1", "vmid": 100}) }},
 		{"ListContainers", func() (interface{}, error) { return p.ListContainers(map[string]interface{}{"node": "pve1"}) }},
-		{"GetContainer", func() (interface{}, error) { return p.GetContainer(map[string]interface{}{"node": "pve1", "vmid": 200}) }},
-		{"StartContainer", func() (interface{}, error) { return p.StartContainer(map[string]interface{}{"node": "pve1", "vmid": 200}) }},
-		{"StopContainer", func() (interface{}, error) { return p.StopContainer(map[string]interface{}{"node": "pve1", "vmid": 200}) }},
-		{"RestartContainer", func() (interface{}, error) { return p.RestartContainer(map[string]interface{}{"node": "pve1", "vmid": 200}) }},
+		{"GetContainer", func() (interface{}, error) {
+			return p.GetContainer(map[string]interface{}{"node": "pve1", "vmid": 200})
+		}},
+		{"StartContainer", func() (interface{}, error) {
+			return p.StartContainer(map[string]interface{}{"node": "pve1", "vmid": 200})
+		}},
+		{"StopContainer", func() (interface{}, error) {
+			return p.StopContainer(map[string]interface{}{"node": "pve1", "vmid": 200})
+		}},
+		{"RestartContainer", func() (interface{}, error) {
+			return p.RestartContainer(map[string]interface{}{"node": "pve1", "vmid": 200})
+		}},
 		{"ListStorage", func() (interface{}, error) { return p.ListStorage(map[string]interface{}{"node": "pve1"}) }},
-		{"ListSnapshots", func() (interface{}, error) { return p.ListSnapshots(map[string]interface{}{"node": "pve1", "vmid": 100}) }},
+		{"ListSnapshots", func() (interface{}, error) {
+			return p.ListSnapshots(map[string]interface{}{"node": "pve1", "vmid": 100})
+		}},
 		{"CreateSnapshot", func() (interface{}, error) {
 			return p.CreateSnapshot(map[string]interface{}{"node": "pve1", "vmid": 100, "name": "snap1"})
 		}},

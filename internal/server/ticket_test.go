@@ -50,7 +50,7 @@ func TestGenerateTicket(t *testing.T) {
 		t.Error("New ticket should not be consumed")
 	}
 
-	if time.Now().Add(4*time.Minute).After(ticket.ExpiresAt) {
+	if time.Now().Add(4 * time.Minute).After(ticket.ExpiresAt) {
 		t.Error("Ticket should expire in about 5 minutes")
 	}
 }

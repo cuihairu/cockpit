@@ -59,12 +59,12 @@ func TestDecodeHeartbeat(t *testing.T) {
 			"agentId": "agent-1",
 			"status":  "online",
 			"systemInfo": map[string]interface{}{
-				"cpuUsage":   55.5,
-				"cpuCores":   4,
-				"memTotal":   8589934592,
-				"hostname":   "host-1",
-				"osName":     "linux",
-				"load1":      0.5,
+				"cpuUsage": 55.5,
+				"cpuCores": 4,
+				"memTotal": 8589934592,
+				"hostname": "host-1",
+				"osName":   "linux",
+				"load1":    0.5,
 			},
 		},
 	}

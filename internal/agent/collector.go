@@ -8,9 +8,9 @@ import (
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
+	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/net"
-	"github.com/shirou/gopsutil/v3/load"
 )
 
 // Collector 系统信息采集器
@@ -131,11 +131,11 @@ func (c *Collector) CollectBasic() *protocol.SystemInfoPayload {
 // GetRuntimeInfo 获取运行时信息
 func GetRuntimeInfo() map[string]interface{} {
 	return map[string]interface{}{
-		"goVersion": runtime.Version(),
+		"goVersion":  runtime.Version(),
 		"goroutines": runtime.NumGoroutine(),
-		"compiler": runtime.Compiler,
-		"arch": runtime.GOARCH,
-		"os": runtime.GOOS,
+		"compiler":   runtime.Compiler,
+		"arch":       runtime.GOARCH,
+		"os":         runtime.GOOS,
 	}
 }
 

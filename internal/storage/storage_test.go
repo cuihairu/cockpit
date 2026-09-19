@@ -64,7 +64,7 @@ func TestOpenCreatesDirectory(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 
 	err = db.Close()
 	if err != nil {
@@ -92,7 +92,7 @@ func TestDBSession(t *testing.T) {
 
 func TestUpsertAgent(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	agent := &Agent{
@@ -211,7 +211,7 @@ func TestListAgentsByRegion(t *testing.T) {
 
 func TestDeleteAgent(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	agent := &Agent{ID: "agent-1", Hostname: "test"}
@@ -230,7 +230,7 @@ func TestDeleteAgent(t *testing.T) {
 
 func TestUpdateAgentStatus(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	agent := &Agent{ID: "agent-1", Hostname: "test", Status: "online"}
@@ -292,7 +292,7 @@ func TestCleanupOfflineAgents(t *testing.T) {
 
 func TestUpsertComputeInstance(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
@@ -407,7 +407,7 @@ func TestListComputeInstances(t *testing.T) {
 
 func TestDeleteComputeInstance(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
@@ -431,15 +431,15 @@ func TestDeleteComputeInstance(t *testing.T) {
 
 func TestUpsertDomain(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	domain := &Domain{
-		ID:      "domain-1",
-		Domain:  "example.com",
-		Status:  "active",
+		ID:        "domain-1",
+		Domain:    "example.com",
+		Status:    "active",
 		AutoRenew: true,
-		Labels:  map[string]string{"env": "prod"},
+		Labels:    map[string]string{"env": "prod"},
 	}
 
 	err = db.UpsertDomain(domain)
@@ -525,7 +525,7 @@ func TestListDomains(t *testing.T) {
 
 func TestDeleteDomain(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	domain := &Domain{ID: "domain-1", Domain: "test.com"}
@@ -546,7 +546,7 @@ func TestDeleteDomain(t *testing.T) {
 
 func TestUpsertCertificate(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	domain := &Domain{ID: "domain-1", Domain: "example.com"}
@@ -655,7 +655,7 @@ func TestListExpiringCertificates(t *testing.T) {
 
 func TestDeleteCertificate(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	cert := &Certificate{
@@ -681,7 +681,7 @@ func TestDeleteCertificate(t *testing.T) {
 
 func TestUpsertService(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
@@ -764,7 +764,7 @@ func TestListServices(t *testing.T) {
 
 func TestDeleteService(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	service := &Service{ID: "svc-1", Name: "test", Type: "http"}
@@ -785,7 +785,7 @@ func TestDeleteService(t *testing.T) {
 
 func TestUpsertGateway(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
@@ -867,7 +867,7 @@ func TestListGateways(t *testing.T) {
 
 func TestDeleteGateway(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
@@ -891,7 +891,7 @@ func TestDeleteGateway(t *testing.T) {
 
 func TestUpsertStorage(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
@@ -972,7 +972,7 @@ func TestListStorages(t *testing.T) {
 
 func TestDeleteStorage(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	agent := &Agent{ID: "agent-1", Hostname: "host"}
@@ -1069,7 +1069,7 @@ func TestGetStats(t *testing.T) {
 
 func TestSaveSystemMetric(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	metric := &SystemMetric{
@@ -1087,15 +1087,15 @@ func TestSaveSystemMetric(t *testing.T) {
 
 func TestUpdateSystemInfoSnapshot(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	snapshot := &SystemInfoSnapshot{
-		AgentID:    "agent-1",
-		OSName:     "Linux",
-		OSVersion:  "5.15.0",
-		Arch:       "x86_64",
-		Hostname:   "test-host",
+		AgentID:   "agent-1",
+		OSName:    "Linux",
+		OSVersion: "5.15.0",
+		Arch:      "x86_64",
+		Hostname:  "test-host",
 	}
 
 	err = db.UpdateSystemInfoSnapshot(snapshot)
@@ -1250,7 +1250,7 @@ func TestCleanupOldMetrics(t *testing.T) {
 
 func TestTransaction(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	err = db.Transaction(func(tx *DB) error {
@@ -1278,7 +1278,7 @@ func TestTransaction(t *testing.T) {
 
 func TestTransactionRollback(t *testing.T) {
 	db := testDB(t)
- var err error
+	var err error
 	defer db.Close()
 
 	expectedErr := errors.New("rollback test")
@@ -1385,4 +1385,3 @@ func RemoveTestDB(db *DB) {
 	os.Remove("cockpit.db-shm")
 	os.Remove("cockpit.db-wal")
 }
-

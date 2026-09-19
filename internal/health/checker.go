@@ -24,14 +24,14 @@ const (
 
 // Result health check result
 type Result struct {
-	Service     string        `json:"service"`
-	Type        string        `json:"type"`
-	Target      string        `json:"target"`
-	Status      Status        `json:"status"`
-	Latency     time.Duration `json:"latency"`
-	Message     string        `json:"message"`
-	StatusCode  int           `json:"status_code,omitempty"`
-	CheckedAt   time.Time     `json:"checked_at"`
+	Service    string        `json:"service"`
+	Type       string        `json:"type"`
+	Target     string        `json:"target"`
+	Status     Status        `json:"status"`
+	Latency    time.Duration `json:"latency"`
+	Message    string        `json:"message"`
+	StatusCode int           `json:"status_code,omitempty"`
+	CheckedAt  time.Time     `json:"checked_at"`
 }
 
 // Checker health checker
@@ -42,7 +42,7 @@ type Checker struct {
 
 // Config checker configuration
 type Config struct {
-	Timeout     time.Duration
+	Timeout       time.Duration
 	SkipTLSVerify bool
 }
 
@@ -272,7 +272,7 @@ func (c *Checker) CheckPing(service, target string) *Result {
 	}
 
 	// Resolve hostname
- IPs, err := net.LookupIP(host)
+	IPs, err := net.LookupIP(host)
 	if err != nil {
 		return &Result{
 			Service:   service,

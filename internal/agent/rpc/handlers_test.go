@@ -192,28 +192,28 @@ func TestJoinMethod(t *testing.T) {
 
 func TestParseMethod(t *testing.T) {
 	tests := []struct {
-		name          string
-		input         string
-		expectedProv  string
+		name           string
+		input          string
+		expectedProv   string
 		expectedAction string
-		expectError   bool
+		expectError    bool
 	}{
 		{
-			name:          "simple action",
-			input:         "status",
-			expectedProv:  "system",
+			name:           "simple action",
+			input:          "status",
+			expectedProv:   "system",
 			expectedAction: "status",
 		},
 		{
-			name:          "dotted action",
-			input:         "docker.containers.list",
-			expectedProv:  "docker",
+			name:           "dotted action",
+			input:          "docker.containers.list",
+			expectedProv:   "docker",
 			expectedAction: "containers.list",
 		},
 		{
-			name:          "triple dotted",
-			input:         "a.b.c",
-			expectedProv:  "a",
+			name:           "triple dotted",
+			input:          "a.b.c",
+			expectedProv:   "a",
 			expectedAction: "b.c",
 		},
 	}

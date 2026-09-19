@@ -13,18 +13,18 @@ import (
 type VirtualizationType string
 
 const (
-	VirtTypeNone      VirtualizationType = "none"       // 物理机
-	VirtTypeKVM       VirtualizationType = "kvm"        // KVM
-	VirtTypeVMware    VirtualizationType = "vmware"     // VMware
+	VirtTypeNone       VirtualizationType = "none"       // 物理机
+	VirtTypeKVM        VirtualizationType = "kvm"        // KVM
+	VirtTypeVMware     VirtualizationType = "vmware"     // VMware
 	VirtTypeVirtualBox VirtualizationType = "virtualbox" // VirtualBox
-	VirtTypeQEMU      VirtualizationType = "qemu"       // QEMU
-	VirtTypeXen       VirtualizationType = "xen"        // Xen
-	VirtTypeHyperV    VirtualizationType = "hyperv"     // Hyper-V
-	VirtTypeParallels VirtualizationType = "parallels"  // Parallels
-	VirtTypeContainer VirtualizationType = "container"  // 容器 (Docker/LXC)
-	VirtTypeOpenVZ    VirtualizationType = "openvz"     // OpenVZ
-	VirtTypeLXC       VirtualizationType = "lxc"        // LXC
-	VirtTypeDocker    VirtualizationType = "docker"     // Docker
+	VirtTypeQEMU       VirtualizationType = "qemu"       // QEMU
+	VirtTypeXen        VirtualizationType = "xen"        // Xen
+	VirtTypeHyperV     VirtualizationType = "hyperv"     // Hyper-V
+	VirtTypeParallels  VirtualizationType = "parallels"  // Parallels
+	VirtTypeContainer  VirtualizationType = "container"  // 容器 (Docker/LXC)
+	VirtTypeOpenVZ     VirtualizationType = "openvz"     // OpenVZ
+	VirtTypeLXC        VirtualizationType = "lxc"        // LXC
+	VirtTypeDocker     VirtualizationType = "docker"     // Docker
 )
 
 // SystemRole 系统角色

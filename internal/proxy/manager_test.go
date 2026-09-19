@@ -591,9 +591,9 @@ func TestProxyStop(t *testing.T) {
 			RemotePort: 8080,
 		},
 		listener: listener,
-		conns:     make(map[string]*ProxyConn),
-		ctx:       ctx,
-		cancel:    cancel,
+		conns:    make(map[string]*ProxyConn),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 
 	proxyConn := &ProxyConn{

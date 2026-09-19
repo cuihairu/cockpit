@@ -130,9 +130,9 @@ func TestResultShouldAlert(t *testing.T) {
 
 func TestGetOverallStatus(t *testing.T) {
 	tests := []struct {
-		name     string
-		results  []*Result
-		want     Status
+		name    string
+		results []*Result
+		want    Status
 	}{
 		{
 			name:    "empty results",

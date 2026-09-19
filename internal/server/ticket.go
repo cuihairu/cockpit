@@ -10,13 +10,13 @@ import (
 
 // Ticket 一次性短期 WebSocket 连接凭证
 type Ticket struct {
-	ID         string
-	UserID     string
-	Username   string
-	Params     map[string]string // 连接参数 (agent_id, host, port, etc.)
-	ExpiresAt  time.Time
-	Consumed   bool
-	mu         sync.RWMutex
+	ID        string
+	UserID    string
+	Username  string
+	Params    map[string]string // 连接参数 (agent_id, host, port, etc.)
+	ExpiresAt time.Time
+	Consumed  bool
+	mu        sync.RWMutex
 }
 
 // TicketManager 票据管理器

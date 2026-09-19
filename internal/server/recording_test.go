@@ -41,7 +41,12 @@ func TestCastRecorderFormat(t *testing.T) {
 	rec.WriteOutput([]byte("hello "))
 	rec.WriteOutput([]byte("world"))
 	finishCalls := 0
-	rec.finish = func(ms, b int64) { finishCalls++; if b <= 0 { t.Errorf("bytes = %d, want > 0", b) } }
+	rec.finish = func(ms, b int64) {
+		finishCalls++
+		if b <= 0 {
+			t.Errorf("bytes = %d, want > 0", b)
+		}
+	}
 	rec.Close()
 	rec.Close() // 幂等
 	if finishCalls != 1 {

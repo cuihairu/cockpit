@@ -10,36 +10,36 @@ import (
 
 // mockDockerClient implements DockerAPI for testing
 type mockDockerClient struct {
-	containers     []ContainerInfo
-	containersErr  error
+	containers      []ContainerInfo
+	containersErr   error
 	containerDetail *ContainerInfo
-	containerErr   error
-	startErr       error
-	stopErr        error
-	restartErr     error
-	removeErr      error
-	pauseErr       error
-	unpauseErr     error
-	logsResult     string
-	logsErr        error
-	statsResult    map[string]interface{}
-	statsErr       error
-	images         []ImageInfo
-	imagesErr      error
+	containerErr    error
+	startErr        error
+	stopErr         error
+	restartErr      error
+	removeErr       error
+	pauseErr        error
+	unpauseErr      error
+	logsResult      string
+	logsErr         error
+	statsResult     map[string]interface{}
+	statsErr        error
+	images          []ImageInfo
+	imagesErr       error
 	removeImgResult []string
-	removeImgErr   error
-	pullResult     string
-	pullErr        error
-	volumes        []VolumeInfo
-	volumesErr     error
-	removeVolErr   error
-	networks       []NetworkInfo
-	networksErr    error
-	sysInfo        *SystemInfo
-	sysInfoErr     error
-	versionResult  client.ServerVersionResult
-	versionErr     error
-	closeErr       error
+	removeImgErr    error
+	pullResult      string
+	pullErr         error
+	volumes         []VolumeInfo
+	volumesErr      error
+	removeVolErr    error
+	networks        []NetworkInfo
+	networksErr     error
+	sysInfo         *SystemInfo
+	sysInfoErr      error
+	versionResult   client.ServerVersionResult
+	versionErr      error
+	closeErr        error
 }
 
 func (m *mockDockerClient) ListContainers(all bool) ([]ContainerInfo, error) {
@@ -422,8 +422,8 @@ func TestMockGetLogs(t *testing.T) {
 func TestMockGetContainerStats(t *testing.T) {
 	mock := &mockDockerClient{
 		statsResult: map[string]interface{}{
-			"id":    "abc123",
-			"cpu":   25.5,
+			"id":     "abc123",
+			"cpu":    25.5,
 			"memory": 1024,
 		},
 	}
@@ -554,7 +554,7 @@ func TestMockInfo(t *testing.T) {
 func TestMockVersion(t *testing.T) {
 	mock := &mockDockerClient{
 		versionResult: client.ServerVersionResult{
-			Version: "24.0.7",
+			Version:    "24.0.7",
 			APIVersion: "1.43",
 		},
 	}
@@ -593,24 +593,24 @@ func TestMockCloseError(t *testing.T) {
 func TestMockAllErrors(t *testing.T) {
 	testErr := errors.New("test error")
 	mock := &mockDockerClient{
-		containersErr:  testErr,
-		containerErr:   testErr,
-		startErr:       testErr,
-		stopErr:        testErr,
-		restartErr:     testErr,
-		removeErr:      testErr,
-		pauseErr:       testErr,
-		unpauseErr:     testErr,
-		logsErr:        testErr,
-		statsErr:       testErr,
-		imagesErr:      testErr,
-		removeImgErr:   testErr,
-		pullErr:        testErr,
-		volumesErr:     testErr,
-		removeVolErr:   testErr,
-		networksErr:    testErr,
-		sysInfoErr:     testErr,
-		versionErr:     testErr,
+		containersErr: testErr,
+		containerErr:  testErr,
+		startErr:      testErr,
+		stopErr:       testErr,
+		restartErr:    testErr,
+		removeErr:     testErr,
+		pauseErr:      testErr,
+		unpauseErr:    testErr,
+		logsErr:       testErr,
+		statsErr:      testErr,
+		imagesErr:     testErr,
+		removeImgErr:  testErr,
+		pullErr:       testErr,
+		volumesErr:    testErr,
+		removeVolErr:  testErr,
+		networksErr:   testErr,
+		sysInfoErr:    testErr,
+		versionErr:    testErr,
 	}
 
 	if _, err := mock.ListContainers(true); err == nil {

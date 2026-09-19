@@ -239,13 +239,13 @@ func TestManagerStartLoadsEnabledProxiesFromDB(t *testing.T) {
 	db := testDB(t)
 
 	if err := db.CreateProxy(&storage.Proxy{
-		ID:        "px-db",
-		Name:      "db-proxy",
-		AgentID:   "agent-1",
-		ProxyType: "tcp",
+		ID:         "px-db",
+		Name:       "db-proxy",
+		AgentID:    "agent-1",
+		ProxyType:  "tcp",
 		RemotePort: freePort(t),
-		Target:    "127.0.0.1:12345",
-		Enabled:   true,
+		Target:     "127.0.0.1:12345",
+		Enabled:    true,
 	}); err != nil {
 		t.Fatalf("CreateProxy: %v", err)
 	}
@@ -253,13 +253,13 @@ func TestManagerStartLoadsEnabledProxiesFromDB(t *testing.T) {
 	// Note: created enabled first, then updated, because GORM applies the
 	// `default:true` tag to the zero value false on insert.
 	offCfg := &storage.Proxy{
-		ID:        "px-off",
-		Name:      "off",
-		AgentID:   "agent-1",
-		ProxyType: "tcp",
+		ID:         "px-off",
+		Name:       "off",
+		AgentID:    "agent-1",
+		ProxyType:  "tcp",
 		RemotePort: freePort(t),
-		Target:    "127.0.0.1:12345",
-		Enabled:   true,
+		Target:     "127.0.0.1:12345",
+		Enabled:    true,
 	}
 	if err := db.CreateProxy(offCfg); err != nil {
 		t.Fatalf("CreateProxy: %v", err)
@@ -293,13 +293,13 @@ func TestManagerClientDataFlow(t *testing.T) {
 	port := freePort(t)
 	m := NewManager(mockServer, db)
 	if err := m.StartProxy(&storage.Proxy{
-		ID:        "px-1",
-		Name:      "test",
-		AgentID:   "agent-1",
-		ProxyType: "tcp",
+		ID:         "px-1",
+		Name:       "test",
+		AgentID:    "agent-1",
+		ProxyType:  "tcp",
 		RemotePort: port,
-		Target:    "10.0.0.1:80",
-		Enabled:   true,
+		Target:     "10.0.0.1:80",
+		Enabled:    true,
 	}); err != nil {
 		t.Fatalf("StartProxy() error = %v", err)
 	}
@@ -386,12 +386,12 @@ func TestManagerHandleProxyDataErrors(t *testing.T) {
 
 	port := freePort(t)
 	if err := m.StartProxy(&storage.Proxy{
-		ID:        "px-1",
-		Name:      "test",
-		AgentID:   "agent-1",
-		ProxyType: "tcp",
+		ID:         "px-1",
+		Name:       "test",
+		AgentID:    "agent-1",
+		ProxyType:  "tcp",
 		RemotePort: port,
-		Target:    "10.0.0.1:80",
+		Target:     "10.0.0.1:80",
 	}); err != nil {
 		t.Fatalf("StartProxy() error = %v", err)
 	}

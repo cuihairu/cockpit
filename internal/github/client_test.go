@@ -478,7 +478,7 @@ func TestTriggerWorkflow(t *testing.T) {
 	client := NewClient(Config{Token: "test-token", BaseURL: server.URL})
 
 	err := client.TriggerWorkflow(context.Background(), "owner", "repo", "ci.yml", TriggerWorkflowOptions{
-		Ref: "main",
+		Ref:    "main",
 		Inputs: map[string]interface{}{"test": "value"},
 	})
 	if err != nil {
@@ -494,7 +494,7 @@ func TestListArtifacts(t *testing.T) {
 
 		resp := map[string]interface{}{
 			"total_count": 1,
-			"artifacts": []Artifact{{ID: 123, Name: "build", SizeInBytes: 1024}},
+			"artifacts":   []Artifact{{ID: 123, Name: "build", SizeInBytes: 1024}},
 		}
 		json.NewEncoder(w).Encode(resp)
 	}))
@@ -610,10 +610,10 @@ func TestWorkflowRunIsCompleted(t *testing.T) {
 
 func TestWorkflowRunIsSuccess(t *testing.T) {
 	tests := []struct {
-		name      string
-		status    string
+		name       string
+		status     string
 		conclusion string
-		expected  bool
+		expected   bool
 	}{
 		{"success", "completed", "success", true},
 		{"failed", "completed", "failure", false},
@@ -632,10 +632,10 @@ func TestWorkflowRunIsSuccess(t *testing.T) {
 
 func TestWorkflowRunIsFailed(t *testing.T) {
 	tests := []struct {
-		name      string
-		status    string
+		name       string
+		status     string
 		conclusion string
-		expected  bool
+		expected   bool
 	}{
 		{"failed", "completed", "failure", true},
 		{"success", "completed", "success", false},
@@ -894,11 +894,11 @@ func TestListJobsForWorkflowRunWithPagination(t *testing.T) {
 			"total_count": 1,
 			"jobs": []interface{}{
 				map[string]interface{}{
-					"id":          456,
-					"name":        "test-job",
-					"status":      "completed",
-					"conclusion":  "success",
-					"started_at":  "2024-01-01T00:00:00Z",
+					"id":           456,
+					"name":         "test-job",
+					"status":       "completed",
+					"conclusion":   "success",
+					"started_at":   "2024-01-01T00:00:00Z",
 					"completed_at": "2024-01-01T00:01:00Z",
 				},
 			},
@@ -934,12 +934,12 @@ func TestListArtifactsWithPagination(t *testing.T) {
 			"total_count": 1,
 			"artifacts": []interface{}{
 				map[string]interface{}{
-					"id":                 789,
-					"name":               "test-artifact",
-					"size_in_bytes":      1024,
-					"created_at":         "2024-01-01T00:00:00Z",
-					"expired":            false,
-					"workflow_run_id":    123,
+					"id":              789,
+					"name":            "test-artifact",
+					"size_in_bytes":   1024,
+					"created_at":      "2024-01-01T00:00:00Z",
+					"expired":         false,
+					"workflow_run_id": 123,
 				},
 			},
 		})

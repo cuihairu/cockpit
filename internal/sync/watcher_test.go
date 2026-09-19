@@ -235,7 +235,7 @@ func TestWatcherContext(t *testing.T) {
 func TestApplyInventoryNilDB(t *testing.T) {
 	w, _ := NewWatcher(Config{
 		InventoryPath: "test.yaml",
-		DB:           nil,
+		DB:            nil,
 	})
 	defer w.watcher.Close()
 
@@ -278,7 +278,7 @@ func TestStopClosesWatcher(t *testing.T) {
 func TestApplyInventoryWithNilDB(t *testing.T) {
 	w, _ := NewWatcher(Config{
 		InventoryPath: "test.yaml",
-		DB:           nil,
+		DB:            nil,
 	})
 	defer w.watcher.Close()
 

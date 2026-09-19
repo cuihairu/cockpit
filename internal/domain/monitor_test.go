@@ -636,8 +636,8 @@ func TestParseDateFormats(t *testing.T) {
 	m := NewMonitor(Config{})
 
 	dateStrings := []struct {
-		input  string
-		valid  bool
+		input string
+		valid bool
 	}{
 		{"2020-01-01", true},
 		{"2020-01-01T00:00:00Z", true},
@@ -661,13 +661,13 @@ func TestParseDateFormats(t *testing.T) {
 
 func TestDNSInfoStruct(t *testing.T) {
 	info := &DNSInfo{
-		Domain:     "example.com",
-		ARecords:   []string{"1.2.3.4"},
+		Domain:      "example.com",
+		ARecords:    []string{"1.2.3.4"},
 		AAAARecords: []string{"2001:db8::1"},
-		MXRecords:  []string{"mail.example.com"},
-		TXTRecords: []string{"v=spf1 include:_spf.example.com ~all"},
-		NSRecords:  []string{"ns1.example.com"},
-		CNAME:      "alias.example.com",
+		MXRecords:   []string{"mail.example.com"},
+		TXTRecords:  []string{"v=spf1 include:_spf.example.com ~all"},
+		NSRecords:   []string{"ns1.example.com"},
+		CNAME:       "alias.example.com",
 	}
 
 	if info.Domain != "example.com" {

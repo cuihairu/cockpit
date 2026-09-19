@@ -33,12 +33,12 @@ func TestCovSyncAllUpsertsFail(t *testing.T) {
 		t.Fatal("Sync() should return a result even when all upserts fail")
 	}
 	for name, r := range map[string]*ResourceResult{
-		"agents":     result.Agents,
-		"domains":    result.Domains,
-		"compute":    result.ComputeInstances,
-		"services":   result.Services,
-		"gateways":   result.Gateways,
-		"storages":   result.Storages,
+		"agents":   result.Agents,
+		"domains":  result.Domains,
+		"compute":  result.ComputeInstances,
+		"services": result.Services,
+		"gateways": result.Gateways,
+		"storages": result.Storages,
 	} {
 		if r == nil || r.Errors == 0 {
 			t.Errorf("%s errors = %+v, want Errors > 0 with closed DB", name, r)

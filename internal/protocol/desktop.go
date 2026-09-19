@@ -81,12 +81,12 @@ type DesktopKeyboardPayload struct {
 
 // DesktopMousePayload 鼠标输入
 type DesktopMousePayload struct {
-	SessionID   string `json:"sessionId"`
-	X           int    `json:"x"`
-	Y           int    `json:"y"`
-	Buttons     int    `json:"buttons"`    // 位标志: 1=左, 2=右, 4=中
-	WheelDelta  int    `json:"wheelDelta"` // 滚轮量
-	Action      string `json:"action"`     // move, down, up
+	SessionID  string `json:"sessionId"`
+	X          int    `json:"x"`
+	Y          int    `json:"y"`
+	Buttons    int    `json:"buttons"`    // 位标志: 1=左, 2=右, 4=中
+	WheelDelta int    `json:"wheelDelta"` // 滚轮量
+	Action     string `json:"action"`     // move, down, up
 }
 
 // DesktopClipboardPayload 剪贴板数据

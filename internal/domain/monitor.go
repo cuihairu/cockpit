@@ -13,15 +13,15 @@ import (
 
 // Info domain information
 type Info struct {
-	Domain       string    `json:"domain"`
-	Registrar    string    `json:"registrar"`
-	Registered   time.Time `json:"registered"`
-	Expires      time.Time `json:"expires"`
-	DaysLeft     int       `json:"days_left"`
-	IsExpired    bool      `json:"is_expired"`
-	NameServers  []string  `json:"name_servers"`
-	Status       []string  `json:"status"`
-	DNSSec       bool      `json:"dnssec"`
+	Domain      string    `json:"domain"`
+	Registrar   string    `json:"registrar"`
+	Registered  time.Time `json:"registered"`
+	Expires     time.Time `json:"expires"`
+	DaysLeft    int       `json:"days_left"`
+	IsExpired   bool      `json:"is_expired"`
+	NameServers []string  `json:"name_servers"`
+	Status      []string  `json:"status"`
+	DNSSec      bool      `json:"dnssec"`
 }
 
 // Monitor domain monitor
@@ -102,9 +102,9 @@ func (m *Monitor) queryWhois(domain string) (string, error) {
 // parseWhois parses whois output
 func (m *Monitor) parseWhois(domain, text string) (*Info, error) {
 	info := &Info{
-		Domain:     domain,
+		Domain:      domain,
 		NameServers: []string{},
-		Status:     []string{},
+		Status:      []string{},
 	}
 
 	lines := bufio.NewScanner(strings.NewReader(text))
@@ -244,18 +244,18 @@ func (m *Monitor) GetTLD(domain string) string {
 func (m *Monitor) GetWhoisServer(tld string) string {
 	// Common whois servers
 	servers := map[string]string{
-		"com": "whois.verisign-grs.com",
-		"net": "whois.verisign-grs.com",
-		"org": "whois.pir.org",
-		"info": "whois.afilias.net",
-		"biz": "whois.neulevel.biz",
-		"name": "whois.nic.name",
-		"io":   "whois.nic.io",
-		"co":   "whois.nic.co",
-		"ai":   "whois.nic.ai",
-		"tv":   "whois.nic.tv",
-		"me":   "whois.nic.me",
-		"xyz":  "whois.nic.xyz",
+		"com":    "whois.verisign-grs.com",
+		"net":    "whois.verisign-grs.com",
+		"org":    "whois.pir.org",
+		"info":   "whois.afilias.net",
+		"biz":    "whois.neulevel.biz",
+		"name":   "whois.nic.name",
+		"io":     "whois.nic.io",
+		"co":     "whois.nic.co",
+		"ai":     "whois.nic.ai",
+		"tv":     "whois.nic.tv",
+		"me":     "whois.nic.me",
+		"xyz":    "whois.nic.xyz",
 		"online": "whois.nic.online",
 		"site":   "whois.nic.site",
 		"club":   "whois.nic.club",
@@ -329,13 +329,13 @@ func (m *Monitor) ResolveDNS(domain string) ([]string, error) {
 
 // CheckDNS checks DNS records for domain
 type DNSInfo struct {
-	Domain     string   `json:"domain"`
-	ARecords   []string `json:"a_records"`
+	Domain      string   `json:"domain"`
+	ARecords    []string `json:"a_records"`
 	AAAARecords []string `json:"aaaa_records"`
-	MXRecords  []string `json:"mx_records"`
-	TXTRecords []string `json:"txt_records"`
-	NSRecords  []string `json:"ns_records"`
-	CNAME      string   `json:"cname"`
+	MXRecords   []string `json:"mx_records"`
+	TXTRecords  []string `json:"txt_records"`
+	NSRecords   []string `json:"ns_records"`
+	CNAME       string   `json:"cname"`
 }
 
 // CheckDNS checks DNS records

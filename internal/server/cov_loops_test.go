@@ -62,7 +62,7 @@ func TestCovAlertLoopsExitOnCancel(t *testing.T) {
 	_ = saveWait() // 生产闭包体（3 点时间计算）直接调用一次保覆盖
 
 	time.Sleep(100 * time.Millisecond) // 让循环都进入 select
-	s.cancel()                          // covNewServer 的 cleanup 也会 cancel（幂等）
+	s.cancel()                         // covNewServer 的 cleanup 也会 cancel（幂等）
 
 	covWaitExit(t, "cleanupLoop", exited1)
 	covWaitExit(t, "alertCheckLoop", exited2)
@@ -615,7 +615,7 @@ func TestCovCastRecorderInternals(t *testing.T) {
 	var nilRec *castRecorder
 	nilRec.WriteOutput([]byte("nil-safe")) // nil receiver 安全
 	rec.Close()
-	rec.Close() // 幂等
+	rec.Close()                            // 幂等
 	rec.WriteOutput([]byte("after close")) // f 已置 nil，静默丢弃
 
 	data, err := os.ReadFile(path)

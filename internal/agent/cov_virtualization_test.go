@@ -44,7 +44,7 @@ func covVirtNoContainer(t *testing.T) {
 }
 
 // covVirtResetPaths 把手动探测的所有数据源指向不存在的位置
-//（runCommand 默认实现恒返回错误，等价于 systemd-detect-virt 缺失）。
+// （runCommand 默认实现恒返回错误，等价于 systemd-detect-virt 缺失）。
 func covVirtResetPaths(t *testing.T) {
 	t.Helper()
 	covVirtNoContainer(t)
