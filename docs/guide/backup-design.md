@@ -379,14 +379,23 @@ restore 不涉及 hook（解包到独立目录，无一致性问题）。
 
 ### M3 清单
 
-- [ ] agent：backupTask 加 PreHook + runHook（sh -c + 超时 + 日志）+ 失败
+- [x] agent：backupTask 加 PreHook + runHook（sh -c + 超时 + 日志）+ 失败
       短路不打包 + 参数校验（≤1024）
-- [ ] server：下发参数透传 preHook；config 校验（长度）；view/请求体字段
-- [ ] storage：BackupConfig.PreHook 字段（AutoMigrate 零迁移）
-- [ ] web：配置 Modal「前置命令（可选）」TextArea + 占位示例 + 说明
-- [ ] 测试：agent fake hook（成功路径/sh -c 语义/失败短路不打包/超时 kill）；
+- [x] server：下发参数透传 preHook；config 校验（长度）；view/请求体字段
+- [x] storage：BackupConfig.PreHook 字段（AutoMigrate 零迁移）
+- [x] web：配置 Modal「前置命令（可选）」TextArea + 占位示例 + 说明
+- [x] 测试：agent fake hook（成功路径/sh -c 语义/失败短路不打包/超时 kill）；
       server 透传与校验
-- [ ] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] 文档收尾（本清单勾选）+ todo.md 同步
+
+✅ **M3 完成（2026-09-19）**。两处落地差异补记：
+
+1. **PreHook 承载在 RunBackup 局部变量**而非 backupTask 字段：GetTask 响应
+   无需回显 hook 命令（server 不轮询它，失败原因已在 Error 里），少一个
+   并发读写字段。
+2. **D29 整组 kill 落地为平台分文件**：`backup_hook_unix.go`（`Setpgid` +
+   `Kill(-pid)`）与 `backup_hook_other.go`（直通）——backup capability 仅
+   linux 注册，非 unix 文件只为全平台编译通过。
 
 ## 参考
 
