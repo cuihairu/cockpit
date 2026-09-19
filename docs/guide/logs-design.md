@@ -187,9 +187,15 @@ grep 超长 / tail 越界 / agents 形态）、目标筛选与 skipped 归因（
 
 ### M3 清单
 
-- [ ] server：`api_logs_search.go`（筛选 / 扇出 / 降级 / 并发闸）+ serveAPI 接入
-- [ ] web：跨机检索页（表单 / 分组卡片 / 高亮）
-- [ ] 测试 + 文档收尾（本清单勾选）+ todo.md 同步
+- [x] server：`api_logs_search.go`（筛选 / 扇出 / 降级 / 并发闸）+ serveAPI 接入
+- [x] web：跨机检索页（表单 / 分组卡片 / 高亮）
+- [x] 测试 + 文档收尾（本清单勾选）+ todo.md 同步
+
+✅ M3 完成（2026-09-19）：server 6 测试（校验 10 形态 + 405 / 扇出聚合与排序 /
+no-logs 跳过双形态 / 单机失败降级 / 全目标不可用 200 / 在途闸门 429）全绿；
+web tsc 零新增错误 + build 过。实现注记：单目标超时即 CallAgent 既有 30s 上限
+（未另设 35s）；agent 断开即从注册表注销，offline 与 not-found 归因合并为
+offline；结果按 agentId 排序保证输出稳定（registry.List 基于 map 遍历无序）。
 
 ## 不做（后续项）
 
