@@ -66,11 +66,13 @@ jobs:
         run: |
           set -euo pipefail
           docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+          echo '--- 占用 9000 的容器 ---'
+          docker ps --filter publish=9000 --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
           # 同 compose project 的旧容器
           docker compose down --remove-orphans 2>/dev/null || true
-          # 历史/手工部署的同名容器（端口 9000 被占会导致 up 失败）
-          for c in $(docker ps -aq --filter name=cockpit); do
-            echo "移除旧容器: $(docker ps -af name=cockpit --filter id=$c --format '{{.Names}} ({{.Status}})')"
+          # 精准接管：移除一切占用 9000 的遗留容器（本机为 cockpit 专用部署机）
+          for c in $(docker ps -aq --filter publish=9000); do
+            echo "移除占 9000 的旧容器: $(docker ps -a --filter id=$c --format '{{.Names}} ({{.Image}}, {{.Status}})')"
             docker rm -f "$c"
           done
 
