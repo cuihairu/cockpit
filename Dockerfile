@@ -5,7 +5,9 @@ FROM node:${NODE_VERSION} AS web-builder
 WORKDIR /src/web
 
 RUN corepack enable
-COPY web/package.json web/pnpm-lock.yaml ./
+# pnpm-workspace.yaml 必须随 lockfile 一起进镜像：overrides 定义在其中，
+# 缺了它会与 lockfile 记录不一致，frozen install 直接报 CONFIG_MISMATCH
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY web ./
