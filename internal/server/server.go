@@ -173,10 +173,13 @@ func (s *Server) Start() error {
 	// 启动自动健康探测（5 分钟间隔）
 	s.startProbeRunner()
 
-	// DNS 管理 client（token 未配置时为 nil，API 统一 503 引导）
-	s.dns = dns.NewCloudflare(s.cfg.DNS.Cloudflare.APIToken)
+	// DNS 管理 client（凭据未配置时为 nil，API 统一 503 引导；provider 按
+	// dns.provider 分派，与 ACME 共用同一套键，见 dns-design.md D11）
+	s.dns = dns.New(s.cfg.DNS.Provider,
+		s.cfg.DNS.Cloudflare.APIToken, s.cfg.DNS.DNSPod.LoginToken,
+		s.cfg.DNS.AliDNS.AccessKey, s.cfg.DNS.AliDNS.SecretKey)
 	if s.dns != nil {
-		log.Print("DNS provider enabled: cloudflare")
+		log.Print("DNS provider enabled: ", s.dnsProviderName())
 	}
 
 	// ACME 签发器（lego DNS-01，provider 按 dns.provider 分派，见 acme-design.md D4/D13）

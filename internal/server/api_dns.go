@@ -39,7 +39,7 @@ func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, http.StatusOK, map[string]interface{}{
 			"configured": s.dns != nil,
-			"provider":   "cloudflare",
+			"provider":   s.dnsProviderName(),
 		})
 	case sub == "zones":
 		s.handleDNSZones(w, r)
@@ -50,11 +50,30 @@ func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// requireDNS 未配置 token 时统一 503 + 引导（D2/D7：文案不含 token）
+// dnsProviderName 当前 dns.provider 名（空 = cloudflare 向后兼容，D11）
+func (s *Server) dnsProviderName() string {
+	if s.cfg == nil || s.cfg.DNS == nil || s.cfg.DNS.Provider == "" {
+		return "cloudflare"
+	}
+	return s.cfg.DNS.Provider
+}
+
+// requireDNS 未配置凭据时统一 503 + 引导（D2/D7/D16：按 provider 各报各的
+// 键，文案不含凭据值）
 func (s *Server) requireDNS(w http.ResponseWriter, r *http.Request) dns.Provider {
 	if s.dns == nil {
-		s.handleError(w, r, http.StatusServiceUnavailable,
-			"DNS provider not configured: set dns.cloudflare.api_token in config.yaml or CLOUDFLARE_API_TOKEN env")
+		var msg string
+		switch name := s.dnsProviderName(); name {
+		case "dnspod":
+			msg = "DNS provider not configured: set dns.dnspod.login_token in config.yaml or DNSPOD_LOGIN_TOKEN env"
+		case "alidns":
+			msg = "DNS provider not configured: set dns.alidns.access_key and secret_key in config.yaml or ALIYUN_ACCESS_KEY / ALIYUN_ACCESS_KEY_SECRET env"
+		case "cloudflare":
+			msg = "DNS provider not configured: set dns.cloudflare.api_token in config.yaml or CLOUDFLARE_API_TOKEN env"
+		default:
+			msg = fmt.Sprintf("unknown DNS provider %q: set dns.provider to cloudflare, dnspod or alidns", name)
+		}
+		s.handleError(w, r, http.StatusServiceUnavailable, msg)
 		return nil
 	}
 	return s.dns
@@ -201,7 +220,8 @@ func (s *Server) handleDNSUpstreamError(w http.ResponseWriter, r *http.Request, 
 	msg := err.Error()
 	if strings.Contains(msg, "unsupported record type") ||
 		strings.Contains(msg, "name and content are required") ||
-		strings.Contains(msg, "ttl must be") {
+		strings.Contains(msg, "ttl must be") ||
+		strings.Contains(msg, "content must have") { // MX/SRV 拆装格式错（dnspod/alidns client）
 		s.handleError(w, r, http.StatusBadRequest, msg)
 		return
 	}
