@@ -3,7 +3,6 @@ package notification
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -33,7 +32,7 @@ func (c *webhookChannel) Name() string   { return "webhook" }
 func (c *webhookChannel) Target() string { return targetHost(c.cfg.URL) }
 
 func (c *webhookChannel) Send(ctx context.Context, n *Notification) error {
-	data, err := json.Marshal(n)
+	data, err := jsonMarshal(n)
 	if err != nil {
 		return fmt.Errorf("marshal webhook payload: %w", err)
 	}

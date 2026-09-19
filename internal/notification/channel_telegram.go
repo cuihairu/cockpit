@@ -3,7 +3,6 @@ package notification
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"html"
 	"net/http"
@@ -42,7 +41,7 @@ func (c *telegramChannel) Send(ctx context.Context, n *Notification) error {
 		"text":       text,
 		"parse_mode": "HTML",
 	}
-	data, err := json.Marshal(body)
+	data, err := jsonMarshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal telegram payload: %w", err)
 	}

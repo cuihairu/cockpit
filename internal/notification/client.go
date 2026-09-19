@@ -14,6 +14,9 @@ import (
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
+// jsonMarshal 注入点：结构体序列化不会失败，错误分支仅供测试覆盖。
+var jsonMarshal = json.Marshal
+
 // Client Herald 通知客户端
 type Client struct {
 	config     *config.NotificationConfig
@@ -59,7 +62,7 @@ func (c *Client) SendEvent(ctx context.Context, event *Event) error {
 		"labels": event.Labels,
 	}
 
-	jsonData, err := json.Marshal(reqBody)
+	jsonData, err := jsonMarshal(reqBody)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}

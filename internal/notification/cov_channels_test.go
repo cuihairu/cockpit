@@ -6,6 +6,7 @@ package notification
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -219,5 +220,30 @@ func TestCovTargetHostTruncation(t *testing.T) {
 	}
 	if got := targetHost(strings.Repeat("a", 20)); got != strings.Repeat("a", 20) {
 		t.Errorf("short input should return as-is")
+	}
+}
+
+// TestCovJsonMarshalInjectFail 注入序列化失败，覆盖四个渠道/客户端的
+// json.Marshal 错误分支。
+func TestCovJsonMarshalInjectFail(t *testing.T) {
+	orig := jsonMarshal
+	t.Cleanup(func() { jsonMarshal = orig })
+	jsonMarshal = func(v interface{}) ([]byte, error) { return nil, errors.New("boom json") }
+
+	n := &Notification{Title: "x"}
+	if err := newNtfyChannel(&config.NtfyConfig{Server: "http://x", Topic: "t"}).Send(context.Background(), n); err == nil {
+		t.Error("ntfy Send with failing marshal should fail")
+	}
+	if err := newTelegramChannel(&config.TelegramConfig{BotToken: "t", ChatID: "1"}).Send(context.Background(), n); err == nil {
+		t.Error("telegram Send with failing marshal should fail")
+	}
+	if err := newWebhookChannel(&config.WebhookConfig{URL: "http://x"}).Send(context.Background(), n); err == nil {
+		t.Error("webhook Send with failing marshal should fail")
+	}
+
+	// Herald 客户端：配置齐全，仅在序列化处失败
+	cfg := &config.NotificationConfig{Herald: &config.HeraldConfig{BaseURL: "http://127.0.0.1:1"}}
+	if err := NewClient(cfg).SendEvent(context.Background(), &Event{Type: ServiceDown}); err == nil {
+		t.Error("SendEvent with failing marshal should fail")
 	}
 }

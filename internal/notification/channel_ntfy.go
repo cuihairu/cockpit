@@ -3,7 +3,6 @@ package notification
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -56,7 +55,7 @@ func (c *ntfyChannel) Send(ctx context.Context, n *Notification) error {
 		"priority": c.priority(n),
 		"tags":     []string{n.Level, "cockpit"},
 	}
-	data, err := json.Marshal(body)
+	data, err := jsonMarshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal ntfy payload: %w", err)
 	}
