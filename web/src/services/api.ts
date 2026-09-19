@@ -68,6 +68,7 @@ import type {
   OverlayStatus,
   OverlayCloudStatus,
   CronStatus,
+  CronUserEntry,
   SmartScanConfig,
   SmartStatus,
   NasScanConfig,
@@ -879,34 +880,52 @@ class ApiService {
 
   // ============ 定时任务管理（Crontab） ============
 
-  // 概览：运行用户 + 条目计数
-  async getCronStatus(agentId: string): Promise<CronStatus> {
-    return this.client.get<unknown, CronStatus>(`/agents/${encodeURIComponent(agentId)}/cron/status`)
+  // user 可选查询参数（M4 D21：空/缺省 = agent 当前运行用户）
+  private cronUserQuery(user?: string): string {
+    return user ? `?user=${encodeURIComponent(user)}` : ''
+  }
+
+  // 概览：运行用户 + 条目计数（user 指定时为该用户视角）
+  async getCronStatus(agentId: string, user?: string): Promise<CronStatus> {
+    return this.client.get<unknown, CronStatus>(
+      `/agents/${encodeURIComponent(agentId)}/cron/status${this.cronUserQuery(user)}`,
+    )
   }
 
   // cockpit 名下任务列表 + 外部条目原文（只读）
-  async getCronJobs(agentId: string): Promise<CronJobsResult> {
-    return this.client.get<unknown, CronJobsResult>(`/agents/${encodeURIComponent(agentId)}/cron/jobs`)
+  async getCronJobs(agentId: string, user?: string): Promise<CronJobsResult> {
+    return this.client.get<unknown, CronJobsResult>(
+      `/agents/${encodeURIComponent(agentId)}/cron/jobs${this.cronUserQuery(user)}`,
+    )
   }
 
-  // systemd timer 只读列表（cron-design.md M3）
+  // 系统用户枚举（M4 D22/D23：getent 优先 /etc/passwd 兜底，全量不过滤）
+  async getCronUsers(agentId: string): Promise<{ users: CronUserEntry[] }> {
+    return this.client.get<unknown, { users: CronUserEntry[] }>(
+      `/agents/${encodeURIComponent(agentId)}/cron/users`,
+    )
+  }
+
+  // systemd timer 只读列表（cron-design.md M3；systemd 全局无 user 维度）
   async getCronTimers(agentId: string): Promise<{ timers: SystemdTimer[] }> {
     return this.client.get<unknown, { timers: SystemdTimer[] }>(
       `/agents/${encodeURIComponent(agentId)}/cron/timers`,
     )
   }
 
-  // 应用任务（写回时 agent 保证外部条目逐行不变）
-  async applyCronJob(agentId: string, job: CronJob): Promise<{ name: string }> {
+  // 应用任务（写回时 agent 保证外部条目逐行不变；user 指定目标用户 crontab）
+  async applyCronJob(agentId: string, job: CronJob, user?: string): Promise<{ name: string }> {
     return this.client.put<unknown, { name: string }>(
-      `/agents/${encodeURIComponent(agentId)}/cron/jobs/${encodeURIComponent(job.name)}`,
+      `/agents/${encodeURIComponent(agentId)}/cron/jobs/${encodeURIComponent(job.name)}${this.cronUserQuery(user)}`,
       job,
     )
   }
 
   // 删除任务
-  async deleteCronJob(agentId: string, name: string): Promise<void> {
-    await this.client.delete(`/agents/${encodeURIComponent(agentId)}/cron/jobs/${encodeURIComponent(name)}`)
+  async deleteCronJob(agentId: string, name: string, user?: string): Promise<void> {
+    await this.client.delete(
+      `/agents/${encodeURIComponent(agentId)}/cron/jobs/${encodeURIComponent(name)}${this.cronUserQuery(user)}`,
+    )
   }
 
   // ============ systemd 服务管理（见 docs/guide/service-design.md） ============

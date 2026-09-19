@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
+  AutoComplete,
   Button,
   Card,
   Collapse,
@@ -77,9 +78,11 @@ const SCHEDULE_PRESETS: { value: string; label: string }[] = [
 // 定时任务管理：cockpit 只管理自己名下的任务对（meta 注释行 + 命令行），
 // 用户手写的 crontab 条目逐行原样保留（见 docs/guide/cron-design.md）。
 // crontab 是唯一事实源，server 纯转发不落库。
+// M4：可选目标用户（-u），缺省 = agent 当前运行用户。
 const Cron = () => {
   const queryClient = useQueryClient()
   const [selectedAgent, setSelectedAgent] = useState<string>()
+  const [selectedUser, setSelectedUser] = useState<string>('') // '' = 当前用户
   const [editorOpen, setEditorOpen] = useState(false)
   const [editing, setEditing] = useState<CronJob | null>(null) // null = 新建
   const [saving, setSaving] = useState(false)
@@ -103,17 +106,35 @@ const Cron = () => {
     [agents],
   )
 
-  const jobsKey = ['cron-jobs', selectedAgent]
-  const statusKey = ['cron-status', selectedAgent]
+  // 系统用户枚举（M4 D22/D24）：失败静默——下拉缺席仍可手输任意合法名
+  const { data: usersData } = useQuery({
+    queryKey: ['cron-users', selectedAgent],
+    queryFn: () => api.getCronUsers(selectedAgent!),
+    enabled: !!selectedAgent,
+    retry: false,
+  })
+  const userOptions = useMemo(
+    () => [
+      { value: '', label: '当前用户' },
+      ...(usersData?.users ?? []).map((u) => ({
+        value: u.name,
+        label: u.shell ? `${u.name}（${u.shell}）` : u.name,
+      })),
+    ],
+    [usersData],
+  )
+
+  const jobsKey = ['cron-jobs', selectedAgent, selectedUser]
+  const statusKey = ['cron-status', selectedAgent, selectedUser]
 
   const { data: status } = useQuery({
     queryKey: statusKey,
-    queryFn: () => api.getCronStatus(selectedAgent!),
+    queryFn: () => api.getCronStatus(selectedAgent!, selectedUser || undefined),
     enabled: !!selectedAgent,
   })
   const { data: jobsData, isLoading: jobsLoading } = useQuery({
     queryKey: jobsKey,
-    queryFn: () => api.getCronJobs(selectedAgent!),
+    queryFn: () => api.getCronJobs(selectedAgent!, selectedUser || undefined),
     enabled: !!selectedAgent,
   })
 
@@ -127,8 +148,8 @@ const Cron = () => {
   })
 
   const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['cron-jobs', selectedAgent] })
-    queryClient.invalidateQueries({ queryKey: ['cron-status', selectedAgent] })
+    queryClient.invalidateQueries({ queryKey: ['cron-jobs', selectedAgent, selectedUser] })
+    queryClient.invalidateQueries({ queryKey: ['cron-status', selectedAgent, selectedUser] })
   }
 
   const [form] = Form.useForm()
@@ -158,8 +179,10 @@ const Cron = () => {
     setSaving(true)
     setApplyError(undefined)
     try {
-      await api.applyCronJob(selectedAgent, job)
-      message.success(`任务 ${job.name} 已写入 crontab`)
+      await api.applyCronJob(selectedAgent, job, selectedUser || undefined)
+      message.success(
+        selectedUser ? `任务 ${job.name} 已写入 ${selectedUser} 的 crontab` : `任务 ${job.name} 已写入 crontab`,
+      )
       setEditorOpen(false)
       refresh()
     } catch (e) {
@@ -173,7 +196,7 @@ const Cron = () => {
   const toggleEnabled = async (job: CronJob, enabled: boolean) => {
     if (!selectedAgent) return
     try {
-      await api.applyCronJob(selectedAgent, { ...job, enabled })
+      await api.applyCronJob(selectedAgent, { ...job, enabled }, selectedUser || undefined)
       message.success(enabled ? `任务 ${job.name} 已启用` : `任务 ${job.name} 已停用`)
       refresh()
     } catch (e) {
@@ -184,7 +207,7 @@ const Cron = () => {
   const deleteJob = async (name: string) => {
     if (!selectedAgent) return
     try {
-      await api.deleteCronJob(selectedAgent, name)
+      await api.deleteCronJob(selectedAgent, name, selectedUser || undefined)
       message.success(`任务 ${name} 已删除`)
       refresh()
     } catch (e) {
@@ -327,10 +350,25 @@ const Cron = () => {
               style={{ minWidth: 260 }}
               options={agentOptions}
               value={selectedAgent}
-              onChange={(v) => setSelectedAgent(v)}
+              onChange={(v) => {
+                setSelectedAgent(v)
+                setSelectedUser('') // 换主机回到当前用户视角
+              }}
               placeholder="选择主机"
               showSearch
               optionFilterProp="label"
+            />
+            {/* 目标用户（M4 D24）：枚举下拉 + 可手输，空值 = agent 当前运行用户 */}
+            <AutoComplete
+              style={{ minWidth: 200 }}
+              options={userOptions}
+              value={selectedUser}
+              onChange={(v) => setSelectedUser((v ?? '').trim())}
+              placeholder="当前用户"
+              disabled={!selectedAgent}
+              filterOption={(input, option) =>
+                (option?.value as string ?? '').includes(input.toLowerCase())
+              }
             />
             <Button icon={<ReloadOutlined />} disabled={!selectedAgent} onClick={refresh} />
             <Button type="primary" icon={<PlusOutlined />} disabled={!selectedAgent} onClick={openCreate}>
@@ -349,7 +387,11 @@ const Cron = () => {
                 column={{ xs: 1, sm: 3 }}
                 style={{ marginBottom: 16 }}
                 items={[
-                  { key: 'user', label: '运行用户', children: status.user || '—' },
+                  {
+                    key: 'user',
+                    label: selectedUser ? '目标用户' : '运行用户',
+                    children: status.user || '—',
+                  },
                   { key: 'cockpit', label: 'Cockpit 任务', children: status.cockpitCount },
                   { key: 'external', label: '外部条目', children: status.externalCount },
                 ]}
@@ -359,7 +401,11 @@ const Cron = () => {
               type="info"
               showIcon
               style={{ marginBottom: 16 }}
-              message="只管理 Cockpit 下发的任务（带标记注释），用户手写的 crontab 条目逐行原样保留，写回前自动自检。"
+              message={
+                selectedUser
+                  ? `正在管理 ${selectedUser} 的 crontab（需要 agent 以 root 运行）：只管理 Cockpit 下发的任务（带标记注释），该用户手写的 crontab 条目逐行原样保留，写回前自动自检。`
+                  : '只管理 Cockpit 下发的任务（带标记注释），用户手写的 crontab 条目逐行原样保留，写回前自动自检。可在右上角输入用户名管理其他用户的 crontab。'
+              }
             />
             <Table<CronJob>
               rowKey="name"
