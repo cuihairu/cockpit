@@ -87,3 +87,37 @@ export function lineDiff(expected: string, current: string): DiffResult {
 
   return { lines, truncated }
 }
+
+// ============ 双栏对照（M5/D26）============
+
+// 一行对照：left=基线侧（del/same），right=当前侧（add/same），
+// change 行允许一侧缺位（纯增/纯删/增删数目不齐）
+export interface DiffPair {
+  type: 'same' | 'change'
+  left?: DiffLine
+  right?: DiffLine
+}
+
+// pairDiffLines 统一 diff → 双栏行对：same 直通；连续 del/add 块内按序
+// 一一配对，多出的一侧独占行（留空侧由渲染层画底纹）
+export function pairDiffLines(lines: DiffLine[]): DiffPair[] {
+  const rows: DiffPair[] = []
+  let i = 0
+  while (i < lines.length) {
+    if (lines[i].type === 'same') {
+      rows.push({ type: 'same', left: lines[i], right: lines[i] })
+      i++
+      continue
+    }
+    const dels: DiffLine[] = []
+    const adds: DiffLine[] = []
+    while (i < lines.length && lines[i].type !== 'same') {
+      ;(lines[i].type === 'del' ? dels : adds).push(lines[i])
+      i++
+    }
+    for (let k = 0; k < Math.max(dels.length, adds.length); k++) {
+      rows.push({ type: 'change', left: dels[k], right: adds[k] })
+    }
+  }
+  return rows
+}
