@@ -261,3 +261,133 @@ func TestCronAgentOfflineAndUnknownSubpath(t *testing.T) {
 		t.Fatalf("unknown subpath code = %d, want 404", rec.Code)
 	}
 }
+
+// ============ M4 多用户 crontab（?user= + users 端点） ============
+
+func TestCronUserQueryForwardAndValidation(t *testing.T) {
+	s := newBackupTestServer(t)
+	var gotParams map[string]interface{}
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotParams = params
+		return map[string]interface{}{"user": "postgres", "cockpitCount": 0, "externalCount": 0}, ""
+	})
+
+	// 合法 user 透传进 RPC params
+	rec := httptest.NewRecorder()
+	s.handleAgentCronAPI(rec, cronReq(http.MethodGet, "a1", "status?user=postgres", ""), "a1/cron/status")
+	if rec.Code != http.StatusOK || gotParams["user"] != "postgres" {
+		t.Fatalf("user forward: code=%d params=%v body=%s", rec.Code, gotParams, rec.Body.String())
+	}
+
+	// 缺省：不携带 user 键（agent 侧空值语义）
+	rec = httptest.NewRecorder()
+	s.handleAgentCronAPI(rec, cronReq(http.MethodGet, "a1", "status", ""), "a1/cron/status")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("default code = %d", rec.Code)
+	}
+	if _, ok := gotParams["user"]; ok {
+		t.Errorf("default should not carry user, params = %v", gotParams)
+	}
+
+	// 非法 user：400 且不达 agent
+	rec = httptest.NewRecorder()
+	s.handleAgentCronAPI(rec, cronReq(http.MethodGet, "a1", "status?user=BAD+USER", ""), "a1/cron/status")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid user name") {
+		t.Fatalf("bad user: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, ok := gotParams["user"]; ok {
+		t.Errorf("bad user should not reach agent, params = %v", gotParams)
+	}
+}
+
+func TestCronUsersEndpointForward(t *testing.T) {
+	// 系统用户枚举（M4 D22/D23）：纯转发不审计
+	s := newBackupTestServer(t)
+	var gotMethod string
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotMethod = method
+		return map[string]interface{}{
+			"users": []map[string]interface{}{
+				{"name": "root", "uid": 0, "shell": "/bin/bash"},
+				{"name": "www-data", "uid": 33, "shell": "/usr/sbin/nologin"},
+			},
+		}, ""
+	})
+
+	rec := httptest.NewRecorder()
+	s.handleAgentCronAPI(rec, cronReq(http.MethodGet, "a1", "users", ""), "a1/cron/users")
+	if rec.Code != http.StatusOK || gotMethod != "cron.users" {
+		t.Fatalf("users: code=%d method=%s", rec.Code, gotMethod)
+	}
+	var resp struct {
+		Users []struct {
+			Name  string `json:"name"`
+			UID   int    `json:"uid"`
+			Shell string `json:"shell"`
+		} `json:"users"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if len(resp.Users) != 2 || resp.Users[0].Name != "root" || resp.Users[1].Shell != "/usr/sbin/nologin" {
+		t.Fatalf("users resp = %+v", resp)
+	}
+
+	logs, total, err := s.db.GetAuditLogs(0, 10, nil)
+	if err != nil || total != 0 || len(logs) != 0 {
+		t.Fatalf("users must not audit, got %d logs err=%v", total, err)
+	}
+}
+
+func TestCronJobAuditWithUser(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		if params["user"] != "postgres" {
+			return nil, "user not forwarded"
+		}
+		return map[string]interface{}{"name": "t1"}, ""
+	})
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"name": "t1", "schedule": "0 3 * * *", "command": "/opt/t1.sh", "enabled": true,
+	})
+	rec := httptest.NewRecorder()
+	s.handleAgentCronAPI(rec, cronReq(http.MethodPut, "a1", "jobs/t1?user=postgres", string(body)), "a1/cron/jobs/t1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code = %d body: %s", rec.Code, rec.Body.String())
+	}
+	logs, total, err := s.db.GetAuditLogs(0, 10, map[string]interface{}{
+		"action": audit.ActionCronApply,
+	})
+	if err != nil || total != 1 || len(logs) != 1 {
+		t.Fatalf("audit missing: total=%d err=%v", total, err)
+	}
+	if !strings.Contains(logs[0].Details, `"user":"postgres"`) {
+		t.Fatalf("audit details missing user: %s", logs[0].Details)
+	}
+
+	// 缺省（无 user）：审计 details 不带 user 键（D23 保历史语义）
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		if _, ok := params["user"]; ok {
+			return nil, "default should not carry user"
+		}
+		return map[string]interface{}{"name": "t2"}, ""
+	})
+	body2, _ := json.Marshal(map[string]interface{}{
+		"name": "t2", "schedule": "@daily", "command": "/opt/t2.sh", "enabled": true,
+	})
+	rec = httptest.NewRecorder()
+	s.handleAgentCronAPI(rec, cronReq(http.MethodPut, "a2", "jobs/t2", string(body2)), "a2/cron/jobs/t2")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply2 code = %d body: %s", rec.Code, rec.Body.String())
+	}
+	logs, _, err = s.db.GetAuditLogs(0, 10, map[string]interface{}{
+		"action": audit.ActionCronApply,
+	})
+	if err != nil || len(logs) != 2 {
+		t.Fatalf("audit2 missing: %v", err)
+	}
+	for _, l := range logs {
+		if l.ResourceID == "t2" && strings.Contains(l.Details, `"user"`) {
+			t.Fatalf("default audit should not record user: %s", l.Details)
+		}
+	}
+}

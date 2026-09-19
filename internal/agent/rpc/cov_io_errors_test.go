@@ -170,7 +170,7 @@ func TestCovCronWriteViaFileFsize(t *testing.T) {
 	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 1 << 20, Max: old.Max}); err != nil {
 		t.Skipf("setrlimit: %v", err)
 	}
-	err := p.writeViaFile(strings.Repeat("# cockpit cov fsize\n", 128*1024))
+	err := p.writeViaFile(strings.Repeat("# cockpit cov fsize\n", 128*1024), "")
 	_ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &old)
 	if err == nil || !strings.Contains(err.Error(), "write temp file") {
 		t.Fatalf("fsize err = %v", err)

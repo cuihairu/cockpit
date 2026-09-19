@@ -18,15 +18,41 @@ import (
 //
 //	GET    /api/agents/{id}/cron/status        概览（运行用户 + 条目计数）
 //	GET    /api/agents/{id}/cron/jobs          cockpit 名下任务 + 外部条目原文
+//	GET    /api/agents/{id}/cron/users         系统用户枚举（cron-design M4）
 //	GET    /api/agents/{id}/cron/timers        systemd timer 只读列表（cron-design M3）
 //	PUT    /api/agents/{id}/cron/jobs/{name}   应用任务（审计 cron_apply）
 //	DELETE /api/agents/{id}/cron/jobs/{name}   删除任务（审计 cron_delete）
+//
+// 除 timers/users 外均支持可选 ?user= 多用户视角（M4 D21-D23）。
 //
 // server 纯转发不落库（D9）：crontab 为唯一事实源。参数校验与 agent
 // 同规则（双端防御）；agent 侧错误原样透传。
 
 // 与 agent 侧 CronJob.validate 完全一致的校验规则（双端同规则）
 var cronJobNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// cronUserRe 多用户 crontab 的用户名白名单（M4 D21，与 agent cronUserRe 同规则）
+var cronUserRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+// cronUserQuery 提取可选 ?user= 查询参数并校验；空 = 当前运行用户（缺省）
+func cronUserQuery(r *http.Request) (string, error) {
+	user := strings.TrimSpace(r.URL.Query().Get("user"))
+	if user == "" {
+		return "", nil
+	}
+	if !cronUserRe.MatchString(user) {
+		return "", fmt.Errorf("invalid user name %q", user)
+	}
+	return user, nil
+}
+
+// userParams 组装 RPC params：user 非空时才携带（缺省语义走 agent 侧空值）
+func userParams(user string) map[string]interface{} {
+	if user == "" {
+		return nil
+	}
+	return map[string]interface{}{"user": user}
+}
 
 // cronPayload 应用任务的请求体
 type cronPayload struct {
@@ -130,24 +156,33 @@ func (s *Server) handleAgentCronAPI(w http.ResponseWriter, r *http.Request, rest
 		return
 	}
 
+	user, err := cronUserQuery(r)
+	if err != nil {
+		s.handleError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	switch {
 	case sub == "status" && r.Method == http.MethodGet:
-		s.forwardCronRPC(w, r, agentID, "cron.status", nil, "", nil)
+		s.forwardCronRPC(w, r, agentID, "cron.status", userParams(user), "", nil)
 	case sub == "jobs" && r.Method == http.MethodGet:
-		s.forwardCronRPC(w, r, agentID, "cron.jobs", nil, "", nil)
+		s.forwardCronRPC(w, r, agentID, "cron.jobs", userParams(user), "", nil)
+	case sub == "users" && r.Method == http.MethodGet:
+		// 系统用户枚举（M4 D22/D23）：纯转发不审计，同 timers 口径
+		s.forwardCronRPC(w, r, agentID, "cron.users", nil, "", nil)
 	case sub == "timers" && r.Method == http.MethodGet:
 		// systemd timer 只读列表（M3 D20）：纯转发，只读不审计
 		s.forwardCronRPC(w, r, agentID, "cron.timers", nil, "", nil)
 	case sub == "jobs/" || strings.HasPrefix(sub, "jobs/"):
 		name := strings.TrimPrefix(sub, "jobs/")
-		s.handleCronJob(w, r, agentID, name)
+		s.handleCronJob(w, r, agentID, name, user)
 	default:
 		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 	}
 }
 
-// handleCronJob 处理 jobs/{name} 两个端点
-func (s *Server) handleCronJob(w http.ResponseWriter, r *http.Request, agentID, name string) {
+// handleCronJob 处理 jobs/{name} 两个端点（user 为已校验的可选目标用户）
+func (s *Server) handleCronJob(w http.ResponseWriter, r *http.Request, agentID, name, user string) {
 	if !cronJobNameRe.MatchString(name) {
 		s.handleError(w, r, http.StatusBadRequest, "invalid job name")
 		return
@@ -173,11 +208,23 @@ func (s *Server) handleCronJob(w http.ResponseWriter, r *http.Request, agentID, 
 			"command":  payload.Command,
 			"enabled":  payload.Enabled,
 		}
-		s.forwardCronRPC(w, r, agentID, "cron.job.apply",
-			map[string]interface{}{"job": payload}, name, details)
+		if user != "" {
+			// 审计记目标用户（D23：仅显式指定时，缺省留空保历史语义）
+			details["user"] = user
+		}
+		params := map[string]interface{}{"job": payload}
+		if user != "" {
+			params["user"] = user
+		}
+		s.forwardCronRPC(w, r, agentID, "cron.job.apply", params, name, details)
 	case http.MethodDelete:
-		s.forwardCronRPC(w, r, agentID, "cron.job.delete",
-			map[string]interface{}{"name": name}, name, map[string]interface{}{})
+		params := map[string]interface{}{"name": name}
+		details := map[string]interface{}{}
+		if user != "" {
+			params["user"] = user
+			details["user"] = user
+		}
+		s.forwardCronRPC(w, r, agentID, "cron.job.delete", params, name, details)
 	default:
 		s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}

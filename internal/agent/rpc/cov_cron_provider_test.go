@@ -127,7 +127,7 @@ func TestCovCronDeleteNotFoundWriteErrAndBaseline(t *testing.T) {
 func TestCovCronWriteSafetyCheck(t *testing.T) {
 	p := NewCronProvider((&mockCronRunner{}).run)
 	// 直调：old 与 new 的非 cockpit 段不一致 → 拒绝写回
-	if err := p.writeCrontab("line-a\n", "line-b\n"); err == nil ||
+	if err := p.writeCrontab("line-a\n", "line-b\n", ""); err == nil ||
 		!strings.Contains(err.Error(), "safety check failed") {
 		t.Errorf("safety check err = %v", err)
 	}
@@ -137,7 +137,7 @@ func TestCovCronWriteViaFileCreateTempFails(t *testing.T) {
 	// TMPDIR 指向不存在的目录 → CreateTemp 必败（与 uid 无关）
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
 	p := NewCronProvider((&mockCronRunner{}).run)
-	if err := p.writeViaFile("x\n"); err == nil || !strings.Contains(err.Error(), "create temp file") {
+	if err := p.writeViaFile("x\n", ""); err == nil || !strings.Contains(err.Error(), "create temp file") {
 		t.Errorf("create temp err = %v", err)
 	}
 }

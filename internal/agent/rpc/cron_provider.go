@@ -145,19 +145,26 @@ func NewCronProvider(run Commander) *CronProvider {
 func (p *CronProvider) Type() string { return "cron" }
 
 func (p *CronProvider) Call(action string, params map[string]interface{}) (interface{}, error) {
+	// 多用户 crontab（M4 D21）：可选 user 参数，缺省 = 当前运行用户
+	user, err := cronUserFromParams(params)
+	if err != nil {
+		return nil, err
+	}
 	switch action {
 	case "status":
-		return p.Status()
+		return p.StatusAs(user)
 	case "jobs":
-		return p.Jobs()
+		return p.JobsAs(user)
 	case "job.apply":
 		job, err := jobFromParams(params)
 		if err != nil {
 			return nil, err
 		}
-		return p.ApplyJob(job)
+		return p.ApplyJobAs(job, user)
 	case "job.delete":
-		return p.DeleteJob(paramString(params, "name"))
+		return p.DeleteJobAs(paramString(params, "name"), user)
+	case "users":
+		return p.Users()
 	case "timers":
 		return p.ListTimers()
 	default:
@@ -186,18 +193,25 @@ func DetectCron() bool {
 
 // ============ RPC 实现 ============
 
-// Status 概览：运行用户 + cockpit/外部条目计数
+// Status 概览：运行用户 + cockpit/外部条目计数（当前运行用户视角）
 func (p *CronProvider) Status() (interface{}, error) {
-	content, err := p.readCrontab()
+	return p.StatusAs("")
+}
+
+// StatusAs 指定用户视角的概览；user 为空时是当前运行用户（whoami），
+// 指定 -u 时 user 字段即目标用户（M4 D21）
+func (p *CronProvider) StatusAs(user string) (interface{}, error) {
+	content, err := p.readCrontab(user)
 	if err != nil {
 		return nil, err
 	}
 	_, cockpit, external := splitCockpit(content)
-	user := ""
-	if u, err := exec.LookPath("whoami"); err == nil {
-		out, _, err := p.run(context.Background(), u)
-		if err == nil {
-			user = strings.TrimSpace(string(out))
+	if user == "" {
+		if u, err := exec.LookPath("whoami"); err == nil {
+			out, _, err := p.run(context.Background(), u)
+			if err == nil {
+				user = strings.TrimSpace(string(out))
+			}
 		}
 	}
 	return map[string]interface{}{
@@ -207,10 +221,15 @@ func (p *CronProvider) Status() (interface{}, error) {
 	}, nil
 }
 
-// Jobs cockpit 名下任务列表 + 外部条目原文（只读展示）；next_run 为下次触发
-// 预览（cron-design.md M2，服务器本地时区；disabled/@reboot/解析失败为 0）
+// Jobs 当前运行用户视角的任务列表
 func (p *CronProvider) Jobs() (interface{}, error) {
-	content, err := p.readCrontab()
+	return p.JobsAs("")
+}
+
+// JobsAs cockpit 名下任务列表 + 外部条目原文（只读展示）；next_run 为下次触发
+// 预览（cron-design.md M2，服务器本地时区；disabled/@reboot/解析失败为 0）
+func (p *CronProvider) JobsAs(user string) (interface{}, error) {
+	content, err := p.readCrontab(user)
 	if err != nil {
 		return nil, err
 	}
@@ -237,20 +256,26 @@ func (p *CronProvider) Jobs() (interface{}, error) {
 	}, nil
 }
 
-// ApplyJob 校验 → 读全量 → 替换 cockpit 段 → 自检 → 写回（D2）
+// ApplyJob 当前运行用户视角应用任务
 func (p *CronProvider) ApplyJob(job *CronJob) (interface{}, error) {
+	return p.ApplyJobAs(job, "")
+}
+
+// ApplyJobAs 校验 → 读全量 → 替换 cockpit 段 → 自检 → 写回（D2；
+// M4 D25：cockpit 段按 (user, name) 二元组独立成立）
+func (p *CronProvider) ApplyJobAs(job *CronJob, user string) (interface{}, error) {
 	if err := job.validate(); err != nil {
 		return nil, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	old, err := p.readCrontab()
+	old, err := p.readCrontab(user)
 	if err != nil {
 		return nil, err
 	}
 	newContent := upsertJob(old, job)
-	if err := p.writeCrontab(old, newContent); err != nil {
+	if err := p.writeCrontab(old, newContent, user); err != nil {
 		return nil, err
 	}
 	// 基线只对 cockpit 任务段 hash（外部条目变更不算漂移，D2）
@@ -262,15 +287,20 @@ func (p *CronProvider) ApplyJob(job *CronJob) (interface{}, error) {
 	return map[string]interface{}{"name": job.Name}, nil
 }
 
-// DeleteJob 从 cockpit 段移除任务对 → 自检 → 写回
+// DeleteJob 当前运行用户视角删除任务
 func (p *CronProvider) DeleteJob(name string) (interface{}, error) {
+	return p.DeleteJobAs(name, "")
+}
+
+// DeleteJobAs 从指定用户 crontab 的 cockpit 段移除任务对 → 自检 → 写回
+func (p *CronProvider) DeleteJobAs(name, user string) (interface{}, error) {
 	if !cronJobNameRe.MatchString(name) {
 		return nil, fmt.Errorf("invalid job name %q", name)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	old, err := p.readCrontab()
+	old, err := p.readCrontab(user)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +308,7 @@ func (p *CronProvider) DeleteJob(name string) (interface{}, error) {
 	if !found {
 		return nil, fmt.Errorf("job not found: %s", name)
 	}
-	if err := p.writeCrontab(old, newContent); err != nil {
+	if err := p.writeCrontab(old, newContent, user); err != nil {
 		return nil, err
 	}
 	if p.baseline != nil {
@@ -291,11 +321,16 @@ func (p *CronProvider) DeleteJob(name string) (interface{}, error) {
 
 // ============ 内部：crontab 读写与段落操作 ============
 
-// readCrontab crontab -l；无 crontab（exit 1 且提示没有 crontab）视为空
-func (p *CronProvider) readCrontab() (string, error) {
+// readCrontab 读指定用户 crontab（user 空 = 当前运行用户，M4 D21）；
+// 无 crontab（exit 1 且提示没有 crontab）视为空
+func (p *CronProvider) readCrontab(user string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), nginxTestTimeout)
 	defer cancel()
-	out, stderr, err := p.run(ctx, "crontab", "-l")
+	args := []string{"-l"}
+	if user != "" {
+		args = []string{"-u", user, "-l"}
+	}
+	out, stderr, err := p.run(ctx, "crontab", args...)
 	if err != nil {
 		// 首次使用尚无 crontab 属正常，视为空表
 		msg := strings.ToLower(commandErrSummary(stderr, err))
@@ -308,18 +343,18 @@ func (p *CronProvider) readCrontab() (string, error) {
 }
 
 // writeCrontab 自检后写回；自检保证非 cockpit 行与旧内容一致（D2 兜底）
-func (p *CronProvider) writeCrontab(old, newContent string) error {
+func (p *CronProvider) writeCrontab(old, newContent, user string) error {
 	keptOld, _, _ := splitCockpit(old)
 	keptNew, _, _ := splitCockpit(newContent)
 	if keptOld != keptNew {
 		return fmt.Errorf("safety check failed: external entries would change, aborting write")
 	}
 	// crontab - 需要 stdin，Commander 只收 argv；落临时文件用 `crontab <file>` 写回，语义等价
-	return p.writeViaFile(newContent)
+	return p.writeViaFile(newContent, user)
 }
 
-// writeViaFile 经临时文件写回：crontab 接受文件参数
-func (p *CronProvider) writeViaFile(content string) error {
+// writeViaFile 经临时文件写回：crontab 接受文件参数（user 空 = 当前用户）
+func (p *CronProvider) writeViaFile(content, user string) error {
 	f, err := os.CreateTemp("", "cockpit-crontab-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
@@ -334,7 +369,11 @@ func (p *CronProvider) writeViaFile(content string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), nginxTestTimeout)
 	defer cancel()
-	_, stderr, err := p.run(ctx, "crontab", path)
+	args := []string{path}
+	if user != "" {
+		args = []string{"-u", user, path}
+	}
+	_, stderr, err := p.run(ctx, "crontab", args...)
 	if err != nil {
 		return fmt.Errorf("crontab write: %s", commandErrSummary(stderr, err))
 	}

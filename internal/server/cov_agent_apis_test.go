@@ -387,42 +387,42 @@ func TestCovCronJobBranches(t *testing.T) {
 
 	// 非法 job name → 400
 	rec := covRec()
-	s.handleCronJob(rec, covReq(http.MethodPut, "/x", nil), "a1", "Bad Name")
+	s.handleCronJob(rec, covReq(http.MethodPut, "/x", nil), "a1", "Bad Name", "")
 	covWantCode(t, "bad name", rec, http.StatusBadRequest)
 
 	// 其他方法 → 405
 	rec = covRec()
-	s.handleCronJob(rec, covReq(http.MethodGet, "/x", nil), "a1", "job1")
+	s.handleCronJob(rec, covReq(http.MethodGet, "/x", nil), "a1", "job1", "")
 	covWantCode(t, "wrong method", rec, http.StatusMethodNotAllowed)
 
 	// PUT bad json → 400
 	rec = covRec()
-	s.handleCronJob(rec, covReq(http.MethodPut, "/x", strings.NewReader("not-json")), "a1", "job1")
+	s.handleCronJob(rec, covReq(http.MethodPut, "/x", strings.NewReader("not-json")), "a1", "job1", "")
 	covWantCode(t, "bad json", rec, http.StatusBadRequest)
 
 	// URL 与 body name 不一致 → 400
 	rec = covRec()
 	s.handleCronJob(rec, covReq(http.MethodPut, "/x",
-		strings.NewReader(`{"name":"other","schedule":"0 3 * * *","command":"x"}`)), "a1", "job1")
+		strings.NewReader(`{"name":"other","schedule":"0 3 * * *","command":"x"}`)), "a1", "job1", "")
 	covWantCode(t, "name mismatch", rec, http.StatusBadRequest)
 
 	// 校验失败（schedule 非法）→ 400
 	rec = covRec()
 	s.handleCronJob(rec, covReq(http.MethodPut, "/x",
-		strings.NewReader(`{"name":"job1","schedule":"bogus","command":"x"}`)), "a1", "job1")
+		strings.NewReader(`{"name":"job1","schedule":"bogus","command":"x"}`)), "a1", "job1", "")
 	covWantCode(t, "invalid schedule", rec, http.StatusBadRequest)
 
 	// PUT 成功（带用户上下文 → 审计 username）
 	req := covAuthReq(http.MethodPut, "/x",
 		strings.NewReader(`{"name":"job1","schedule":"0 3 * * *","command":"echo hi","enabled":true}`), "1", "admin", "admin")
 	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
-		s.handleCronJob(w, r, "a1", "job1")
+		s.handleCronJob(w, r, "a1", "job1", "")
 	}, req)
 	covWantCode(t, "apply ok", rec, http.StatusOK)
 
 	// DELETE 成功（审计 cron_delete）
 	rec = covRec()
-	s.handleCronJob(rec, covReq(http.MethodDelete, "/x", nil), "a1", "job1")
+	s.handleCronJob(rec, covReq(http.MethodDelete, "/x", nil), "a1", "job1", "")
 	covWantCode(t, "delete ok", rec, http.StatusOK)
 }
 
