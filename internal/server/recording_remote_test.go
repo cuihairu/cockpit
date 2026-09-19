@@ -140,9 +140,7 @@ func TestRecordingArchiveAsyncDoesNotBlockClose(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
-	oldBin, oldWait := serverRcloneBin, serverBackupRemoteMaxWait
-	serverRcloneBin, serverBackupRemoteMaxWait = bin, 200*time.Millisecond
-	t.Cleanup(func() { serverRcloneBin, serverBackupRemoteMaxWait = oldBin, oldWait })
+	setServerRclone(t, bin, 200*time.Millisecond)
 	if err := s.db.SetSetting(RecordingRemoteDestSettingKey, "my-s3:recordings"); err != nil {
 		t.Fatal(err)
 	}

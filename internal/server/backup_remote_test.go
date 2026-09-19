@@ -74,7 +74,7 @@ func withFakeBackupAgentCap(t *testing.T, s *Server, agentID string, caps []prot
 			s.handleRPCResponse(resp)
 		}
 	}()
-	t.Cleanup(func() { close(agent.Send) })
+	t.Cleanup(func() { agent.Close() })
 }
 
 const backupRemoteDest = "my-s3:cockpit/backups"

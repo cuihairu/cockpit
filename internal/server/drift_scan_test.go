@@ -89,7 +89,7 @@ func withFakeDriftAgent(t *testing.T, s *Server, agentID string,
 			s.handleRPCResponse(resp)
 		}
 	}()
-	t.Cleanup(func() { close(agent.Send) })
+	t.Cleanup(func() { agent.Close() })
 }
 
 func TestScanDriftOnceCreatesAlert(t *testing.T) {

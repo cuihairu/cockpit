@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/notification"
@@ -48,19 +49,30 @@ const (
 var serverBackupTick = time.Hour
 
 // rclone 可执行文件与推送超时（server 备份与录制归档共用，recording M2
-// D15）。包级变量仅为测试可注入，默认值即生产取值。
+// D15）。包级变量仅为测试可注入，默认值即生产取值。读写一律持
+// serverRcloneMu：录制归档是异步 goroutine，与测试清理的注入还原并发，
+// 裸读写即数据竞争（CI -race 捕获两例）。
 var (
+	serverRcloneMu            sync.RWMutex
 	serverRcloneBin           = "rclone"
 	serverBackupRemoteMaxWait = 5 * time.Minute
 )
+
+// serverRcloneConfig 快照当前 rclone 注入值（可执行文件, 推送超时）
+func serverRcloneConfig() (string, time.Duration) {
+	serverRcloneMu.RLock()
+	defer serverRcloneMu.RUnlock()
+	return serverRcloneBin, serverBackupRemoteMaxWait
+}
 
 // rcloneCopyLocalFile rclone copy 推送单个本地文件到远端（server 备份 M2
 // D11 与录制归档 M2 D15 共用）。超时整杀 + WaitDelay 强断管道防孤儿孙进程
 // 拖住 Wait；失败错误含 stderr 摘要（exit status 无解释力）。
 func rcloneCopyLocalFile(local, remoteDest string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), serverBackupRemoteMaxWait)
+	bin, maxWait := serverRcloneConfig()
+	ctx, cancel := context.WithTimeout(context.Background(), maxWait)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, serverRcloneBin, "copy", "--transfers", "2", local, remoteDest)
+	cmd := exec.CommandContext(ctx, bin, "copy", "--transfers", "2", local, remoteDest)
 	// ctx 取消只杀 rclone 本体；继承 stdout 的孙进程（若有）会占住管道，
 	// WaitDelay 到期强断，Wait 不被孤儿拖住（rclone 官方单二进制，无此链）
 	cmd.WaitDelay = time.Second
@@ -246,7 +258,8 @@ func (s *Server) notifyServerBackupRemoteFailed(name, errMsg string) {
 // rcloneAvailable 异地推送执行前提的实时探测（server 备份 M2 D18：后装
 // rclone 免重启）
 func rcloneAvailable() bool {
-	_, err := exec.LookPath(serverRcloneBin)
+	bin, _ := serverRcloneConfig()
+	_, err := exec.LookPath(bin)
 	return err == nil
 }
 

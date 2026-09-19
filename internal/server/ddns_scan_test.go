@@ -89,7 +89,7 @@ func withFakeDDNSAgent(t *testing.T, s *Server, agentID string, ipv4, ipv6 *stri
 			s.handleRPCResponse(resp)
 		}
 	}()
-	t.Cleanup(func() { close(agent.Send) })
+	t.Cleanup(func() { agent.Close() })
 }
 
 // newDDNSTestServer 测试 server + 注入 fake provider

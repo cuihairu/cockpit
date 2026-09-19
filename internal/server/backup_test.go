@@ -138,7 +138,7 @@ func withFakeBackupAgent(t *testing.T, s *Server, agentID string, handler func(m
 			s.handleRPCResponse(resp)
 		}
 	}()
-	t.Cleanup(func() { close(agent.Send) })
+	t.Cleanup(func() { agent.Close() })
 }
 
 func validBackupReq() string {

@@ -263,7 +263,7 @@ func withFakeProxyAgent(t *testing.T, s *Server, agentID string, capTypes ...str
 			s.handleRPCResponse(resp)
 		}
 	}()
-	t.Cleanup(func() { close(agent.Send) })
+	t.Cleanup(func() { agent.Close() })
 	return seen
 }
 

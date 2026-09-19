@@ -90,7 +90,7 @@ func withFakeSmartAgent(t *testing.T, s *Server, agentID string, smart bool,
 			s.handleRPCResponse(resp)
 		}
 	}()
-	t.Cleanup(func() { close(agent.Send) })
+	t.Cleanup(func() { agent.Close() })
 }
 
 // smartDevicesPayload 构造 smart.status 应答

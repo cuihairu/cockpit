@@ -17,6 +17,31 @@ import (
 
 // ============ M2 异地传输（server 侧 rclone，见 server-backup-design.md D11-D18）============
 
+// setServerRclone 注入 rclone 路径与推送超时，cleanup 自动还原（maxWait 0
+// = 不改超时）。读写必须持 serverRcloneMu：异步归档/推送 goroutine 与测试
+// 清理并发，裸写还原即数据竞争（CI -race 捕获）。
+func setServerRclone(t *testing.T, bin string, maxWait time.Duration) {
+	t.Helper()
+	serverRcloneMu.Lock()
+	oldBin := serverRcloneBin
+	serverRcloneBin = bin
+	if maxWait > 0 {
+		oldWait := serverBackupRemoteMaxWait
+		serverBackupRemoteMaxWait = maxWait
+		t.Cleanup(func() {
+			serverRcloneMu.Lock()
+			serverBackupRemoteMaxWait = oldWait
+			serverRcloneMu.Unlock()
+		})
+	}
+	serverRcloneMu.Unlock()
+	t.Cleanup(func() {
+		serverRcloneMu.Lock()
+		serverRcloneBin = oldBin
+		serverRcloneMu.Unlock()
+	})
+}
+
 // installServerFakeRclone 注入 fake rclone：argv 记录到文件，可配置退出码
 // 与 stderr（同 agent 侧 installFakeRclone 模式）。返回 argv 文件路径。
 func installServerFakeRclone(t *testing.T, exitCode int, stderr string) string {
@@ -27,9 +52,7 @@ func installServerFakeRclone(t *testing.T, exitCode int, stderr string) string {
 	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
-	old := serverRcloneBin
-	serverRcloneBin = bin
-	t.Cleanup(func() { serverRcloneBin = old })
+	setServerRclone(t, bin, 0)
 	return argvFile
 }
 
@@ -218,9 +241,7 @@ func TestServerBackupRemoteTimeout(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
-	oldBin, oldWait := serverRcloneBin, serverBackupRemoteMaxWait
-	serverRcloneBin, serverBackupRemoteMaxWait = bin, 150*time.Millisecond
-	t.Cleanup(func() { serverRcloneBin, serverBackupRemoteMaxWait = oldBin, oldWait })
+	setServerRclone(t, bin, 150*time.Millisecond)
 	setServerRemoteDest(t, s, "my-s3:cockpit")
 
 	start := time.Now()

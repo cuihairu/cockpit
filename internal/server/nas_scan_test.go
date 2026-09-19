@@ -98,7 +98,7 @@ func withFakeNASAgent(t *testing.T, s *Server, agentID string,
 			s.handleRPCResponse(resp)
 		}
 	}()
-	t.Cleanup(func() { close(agent.Send) })
+	t.Cleanup(func() { agent.Close() })
 }
 
 // nasStatusPayload 构造 nas.status 应答

@@ -49,7 +49,7 @@ func withFakeLogsAgent(t *testing.T, s *Server, agentID, hostname string,
 			s.handleRPCResponse(resp)
 		}
 	}()
-	t.Cleanup(func() { close(agent.Send) })
+	t.Cleanup(func() { agent.Close() })
 }
 
 // newLogsSearchTestServer 最小 Server（search 仅依赖 registry）
