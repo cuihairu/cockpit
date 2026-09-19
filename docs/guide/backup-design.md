@@ -222,7 +222,8 @@ type BackupRun struct {
 
 ## 不做（后续项）
 
-- S3/对象存储异地：agent 侧 rclone 集成或 server 中转，独立立项；
+- S3/对象存储异地：~~agent 侧 rclone 集成或 server 中转，独立立项~~
+  → 已立项 M2（见下，2026-09-19），走 agent 侧 rclone 路线；
 - server 自身 DB 备份（SQLite `VACUUM INTO`）：独立小功能；
 - 数据库热备钩子（mysqldump / pg_dump / sqlite .backup 前置钩子）；
 - 增量/去重（restic/borg 级别）与备份加密（age/gpg）：个人场景全量 + retention 先够用；
@@ -255,10 +256,72 @@ type BackupRun struct {
 - [x] 测试：restore roundtrip / 非空目录拒绝 / Zip Slip 拒绝（恶意包构造）/
       分块读取边界（跨块 + EOF + 越界）/ server confirm 校验与下载流转发逐字节比对
 
+## M2：异地保留——agent 侧 rclone（2026-09-19 设计）
+
+### 痛点与范围
+
+M1 的备份产物全部落在 agent 主机本地（destDir / NAS 挂载点），todo 原文的
+「异地保留」仍是缺口：备份文件与磁盘共存亡，站点被勒索加密时备份一并没。
+M2 把「不做」清单第一项（S3/对象存储异地）落地：备份任务在打包成功后
+追加一步推送到 rclone 管理的远端（S3/B2/OneDrive/WebDAV/sftp 等几十种
+后端）。增量/去重、备份加密继续不做。
+
+### 决策
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D18 | 传输路线 | agent 侧 rclone exec（`rclone copy <file> <remoteDest>`），server 只存配置与状态，不碰数据流 | D1（数据不经 server 中转）决定传输就地发生：agent→远端直传不占 server 带宽；rclone 一个二进制覆盖全部常见后端，个人云用户大概率已装；server 中转（backup.read 拉回再推 S3）GB 级流量与 D1 矛盾、引 AWS SDK 重——否决 |
+| D19 | 凭据边界 | rclone remote 的凭据只存在 agent 主机的 rclone.conf，cockpit 不接触、不存储、不展示 | secret 不落 cockpit 的既有纪律；cockpit 只存 `remote:path` 目标串（非敏感） |
+| D20 | 配置模型 | BackupConfig 加 `RemoteDest`（`remote:path` 语法，空=不启用）；BackupRun 加 `RemoteStatus`（""/ok/failed）+ `RemoteError` | per-config 粒度（不同备份去不同远端）；AutoMigrate 自动加列，零迁移 |
+| D21 | 失败语义 | 本地打包成功即任务 success；rclone 失败只置 RemoteStatus=failed 并发独立通知，不改任务终态、不触发重跑 | 备份本体成功是事实；`remote_failed` 终态会牵连 LastStatus/通知/UI 全链；远端恢复后下轮调度自然有新文件；历史缺口用手动补传（D24）兜 |
+| D22 | 命令与安全 | `rclone copy --transfers 2 <localFile> <remoteDest>`（文件名保持）；exec.Command argv 数组不走 shell；RemoteDest 校验 `^[A-Za-z0-9][A-Za-z0-9._-]*:[^\\s]+$`（`remote:` 前段对应 rclone.conf section 名，天然不以 `-` 开头，杜绝被 rclone 误当 flag；path 段禁空白与控制字符） | 注入面只剩 flag 混淆一种，remote 名语法约束根除；本地文件名沿用既有正则白名单 |
+| D23 | capability 感知 | backup capability metadata 加 `rclone: true`（LookPath("rclone") 命中才有）；server 创建/更新 RemoteDest 非空的配置时校验目标 agent 有 rclone，否则 400 | 探测零成本；无 rclone 的 agent 在配置期拦截而非运行期才炸 |
+| D24 | 手动补传 | `POST /api/backups/configs/{id}/files/sync-remote {name}` → agent `backup.remote.sync {dir, name, remoteDest}`（与自动路径同一 rclone 阶段实现，同步 RPC 走 30s 超时内的小文件补传）；审计 `backup_remote_sync` | 自动失败通知后用户要有面板内动作闭环，否则只能 SSH；幂等（rclone copy 已存在同尺寸文件会跳过） |
+| D25 | web | 配置 Modal 加「异地目标」输入（占位 `my-s3:cockpit/backups`，说明凭据在 agent 的 rclone.conf）；运行历史 Drawer 加异地状态 Tag；文件行「同步到远端」按钮（该配置 RemoteDest 非空时显示） | 纯展示与既有交互复用，无新交互模式 |
+
+### 执行流程（agent backupTask 追加阶段）
+
+pack 完成 + retention 清理后，若 `remoteDest != ""`：
+
+1. 任务日志记 `[remote] rclone copy <file> → <remoteDest>`；
+2. exec rclone（bin 可注入便于测试），stdout/stderr 摘要进任务日志；
+3. 成功 → task.RemoteStatus="ok"；失败 → task.RemoteStatus="failed" +
+   RemoteError 摘要，任务仍 success 终态（D21）；
+4. `backup.task.get` 响应加 `remoteStatus`/`remoteError`，server
+   trackBackupTask 回填 BackupRun.RemoteStatus/RemoteError；
+5. RemoteStatus=failed → server 发 `backup.remote-failed` 通知（事件白名单
+   显式启用，同 backup.failed 机制）。
+
+`backup.remote.sync`（D24）复用同一 rclone 阶段函数：校验 name/文件存在/
+remoteDest 格式 → copy → 返回 `{synced: true}` 或错误。
+
+### 不做（M2 复确认）
+
+- 增量/去重（restic/borg 级别）与备份加密（age/gpg）——维持不做；
+- rclone remote 的创建/管理（`rclone config`）——凭据边界（D19）决定不进面板；
+- 大文件上传超时可配置——现用 backupTrackTimeout 统一窗口，出现真实
+  超时案例再立项；
+- server 中转路线、WebDAV/sftp 裸协议实现——rclone 已覆盖。
+
+### M2 清单
+
+- [ ] agent：backup provider rclone 阶段（bin 注入 + 日志 + RemoteStatus）+
+      `backup.remote.sync` RPC + capability metadata
+- [ ] server：config 校验（RemoteDest 格式 + rclone 感知）+ track 回填 +
+      `backup.remote-failed` 通知 + sync-remote 端点与审计
+- [ ] storage：BackupConfig.RemoteDest / BackupRun.RemoteStatus+RemoteError 字段
+- [ ] web：Modal 异地目标 + 历史 Tag + 文件行补传按钮 + tsc/build
+- [ ] 测试：agent fake rclone（argv 断言/成功/失败/禁用路径）、server 校验
+      与端到端、通知触发
+- [ ] 文档收尾（本清单勾选）+ todo.md 同步
+
+**真机验收（剩余）**：真实 S3/B2 远端、rclone 网盘限速场景、GB 级文件完整链。
+
 ## 参考
 
 - [Proxmox VE vzdump](https://pve.proxmox.com/wiki/Backup_and_Restore)——tar 全量 +
   保留 N 份的资源调度模式
 - [restic](https://restic.net/)——增量去重备份的标准设计（本轮不引入，后续异地化的候选）
+- [rclone](https://rclone.org/)——多云存储同步的事实标准（M2 传输层）
 - 内部：[stack-deploy-design.md](./stack-deploy-design.md)（异步任务模型来源）、
   [probe-enhance-design.md](./probe-enhance-design.md)（通知渠道集成）、`todo.md` P1 备份管理条目
