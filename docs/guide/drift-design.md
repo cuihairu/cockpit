@@ -157,10 +157,41 @@ server——转发与 400 校验；web——tsc + build。
 与端口数字 / env 键值 / JSON 键与串值 / `hunter2` 值不误染 / 行内 `#` 不猜
 注释；双栏配对 del/add 对齐、多出一侧独占行）。
 
+## M6：CMDB 一致性——inventory 声明 vs agent 实报（2026-09-19）
+
+「不做」清单的末项正式立项，也是 drift 主线（配置漂移）到 CMDB 主线
+（期望态 vs 实际态）的收口：配置漂移管「面板下发的文件有没有被改」，
+CMDB 一致性管「Git 里声明的机器还是不是那台机器」。数据事实决定形态——
+声明态只活在 inventory YAML（watcher 热加载的内存副本），实况 hostname/IP
+由注册覆写同一 DB 行（`persistRegisteredAgent` → `UpsertAgent`），声明值
+并无持久化副本。因此**不建新表、不起巡检循环**，按需读模型比对。
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D28 | 按需读模型 | `GET /api/inventory/consistency`：`watcher.GetInventory()`（声明）× `db.ListAgents()`（实报）即时比对，零新持久化、零巡检循环、不进告警框架 | 一致性是 CMDB 卫生项不是事故，「UI 高亮」即诉求（P2 原文）；inventory watcher 已保证声明态新鲜度；起循环只会产出待读状态的滞后副本 |
+| D29 | 比对语义 | 仅声明非空才比对；hostname **大小写不敏感**（DNS 语义）+ TrimSpace，IP 精确串匹配（不做 CIDR/多 IP 语义——inventory v1 就是单串）；四态：`ok` / `mismatch`（含 field 级明细）/ `unregistered`（声明了但库里没有——未上线或声明先于装机）/ `undeclared`（库里有但 YAML 没声明——CMDB 完整性缺口） | 大小写归一是唯一豁免：主机名在解析层本就不分大小写，报出来是噪声；其余宁可严格，误报比漏报有用于 CMDB |
+| D30 | API + UI | server 侧 `handleInventoryConsistency`（JWT，浏览类不审计，同 drift check 口径；`inventorySync == nil` 时 503 指名引导 `inventory.path`）；比对纯函数落 `internal/inventory`（输入 `*Inventory` + `[]*storage.Agent`，产出报告，无 IO 可全表测）；web 漂移页加 Tabs「配置漂移 / CMDB 一致性」，一致性 Tab 出汇总条 + 四态表（mismatch 行展开声明 vs 实报对照） | 纯函数与端点解耦，watcher 无关即可测；UI 挂漂移页——两者同属「期望 vs 实际」主题，不为单一报表新建页面 |
+
+### Server 侧
+
+- `internal/inventory/consistency.go`：`AgentConsistency` 纯比对 +
+  `CompareAgents(inv, agents)` 报告（summary 四态计数 + 按 id 排序明细）；
+- `internal/sync` Manager 加 `Consistency(db)` 薄封装（GetInventory + 比对）；
+- `api_inventory.go`：路由 `/inventory/consistency`。
+
+### Web 侧
+
+- `api.getInventoryConsistency()`；漂移页 Tabs 化：原内容为「配置漂移」，
+  新「CMDB 一致性」Tab（useQuery 30s staleTime，四态 Tag + mismatch 明细
+  Tooltip 对照声明/实报）。
+
+**测试**：inventory——比对纯函数表驱动（ok/hostname 大小写/IP 不符/
+多字段同报/unregistered/undeclared/声明空跳过）；server——端点 wiring
+（200 形态、nil manager 503、JWT 外校验不涉及）；web——tsc 零新增 + build。
+
 ## 不做（后续版本）
 
-- nginx 非 cockpit 片段、外部 crontab 条目、docker 卷内容检测；
-- inventory 声明字段（hostname/IP/状态）与 agent 实报的一致性高亮。
+- nginx 非 cockpit 片段、外部 crontab 条目、docker 卷内容检测。
 
 ## M1 清单
 
