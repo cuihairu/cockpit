@@ -302,12 +302,25 @@ CMDB 对照是**只读推导**：云端成员列表 × agent 上报身份，前�
 
 ## M2 清单
 
-1. `internal/agent/detector/overlay_identity.go` + 提取测试（注入假命令、失败静默、字段白名单）；
-2. 删除 `detector/network.go` + 相关测试同步清理（M2-C，独立小提交可并入 feat(agent)）；
-3. `internal/overlay`（两 client + WithBase）+ httptest 全流程/降级/白名单测试；
-4. `internal/server/api_overlay_cloud.go` + 端点测试（校验 D19/审计/未配置 503/降级/managed 对照）；
-5. `web/src/pages/Network/` 云端管理视图 + 观测视图身份 chip；
-6. `go test ./...`、`pnpm run build` 不回归；设计文档清单勾选 + todo.md 条目更新。
+1. ✅ `internal/agent/detector/overlay_identity.go` + 提取测试（注入假命令、失败静默、字段白名单）；
+2. ✅ 删除 `detector/network.go` + 相关测试同步清理（M2-C，独立小提交可并入 feat(agent)）；
+3. ✅ `internal/overlay`（两 client + WithBase）+ httptest 全流程/降级/白名单测试；
+4. ✅ `internal/server/api_overlay_cloud.go` + 端点测试（校验 D19/审计/未配置 503/降级/managed 对照）；
+5. ✅ `web/src/pages/Network/` 云端管理视图 + 观测视图身份 chip；
+6. ✅ `go test ./...`、`pnpm run build` 不回归；设计文档清单勾选 + todo.md 条目更新。
+
+## M2 落地差异补记
+
+- **未配置 provider 的读语义**：Server 侧 REST 小节写「读 503 带引导文案」，实现按 D13
+  段级语义——`GET /api/overlay/cloud` 恒 200，未配置段 `configured:false`、失败段段内
+  `error`（引导卡由 web 依 `configured` 渲染）；503 仅用于变更操作（指名缺哪个 env/yaml
+  键）。D13 是决策层、小节是实现描述，以决策为准，不回改原文。
+- **云端错误状态映射**：设计写「4xx/5xx 原样映射 HTTP 状态」，实现统一映射 **502** +
+  云端错误摘要（200 字符截断，脱 token），与 DNS M2 的上游错误处理同构；段级 `error`
+  字段承载摘要原文，状态细节不丢——上游不可达属网关语义，透传 401/403 反而误导为
+  用户对 cockpit 的认证问题。
+- **汇总条语义补强**：「云端 n 台设备，m 台未纳管」在 m=0 时显示为 info 级「全部与
+  面板 Agent 身份对上」，正向确认对照链路健康，而非仅报忧。
 
 ## 参考
 
