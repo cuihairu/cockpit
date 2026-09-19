@@ -305,17 +305,28 @@ remoteDest 格式 → copy → 返回 `{synced: true}` 或错误。
 
 ### M2 清单
 
-- [ ] agent：backup provider rclone 阶段（bin 注入 + 日志 + RemoteStatus）+
+- [x] agent：backup provider rclone 阶段（bin 注入 + 日志 + RemoteStatus）+
       `backup.remote.sync` RPC + capability metadata
-- [ ] server：config 校验（RemoteDest 格式 + rclone 感知）+ track 回填 +
+- [x] server：config 校验（RemoteDest 格式 + rclone 感知）+ track 回填 +
       `backup.remote-failed` 通知 + sync-remote 端点与审计
-- [ ] storage：BackupConfig.RemoteDest / BackupRun.RemoteStatus+RemoteError 字段
-- [ ] web：Modal 异地目标 + 历史 Tag + 文件行补传按钮 + tsc/build
-- [ ] 测试：agent fake rclone（argv 断言/成功/失败/禁用路径）、server 校验
+- [x] storage：BackupConfig.RemoteDest / BackupRun.RemoteStatus+RemoteError 字段
+- [x] web：Modal 异地目标 + 历史 Tag + 文件行补传按钮 + tsc/build
+- [x] 测试：agent fake rclone（argv 断言/成功/失败/禁用路径）、server 校验
       与端到端、通知触发
-- [ ] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] 文档收尾（本清单勾选）+ todo.md 同步
 
 **真机验收（剩余）**：真实 S3/B2 远端、rclone 网盘限速场景、GB 级文件完整链。
+
+✅ **M2 完成（2026-09-19）**。两处落地差异补记：
+
+1. **rclone 存在性探测时机（D23）**：capability metadata 的 `rclone` 字段在
+   agent 启动检测阶段经 `exec.LookPath` 探测并随注册上报，重连复用缓存不重新
+   检测——agent 主机上后装 rclone 需要**重启 agent 进程**才会刷新 metadata，
+   在此之前 server 配置异地目标会被 400 拦截（文案已提示装 rclone）。
+2. **`pollBackupTask` 签名重构**：返回值从散参数改为 `backupTaskResult`
+   结构体（新增字段 RemoteStatus/RemoteError 的承载），行为不变；前端
+   remoteDest 输入用宽松版校验（只禁空白），控制字符拦截由 server/agent
+   同款正则双端把关。
 
 ## 参考
 
