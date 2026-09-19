@@ -482,20 +482,28 @@ func TestCovSlowKeepaliveAndCleanupTicks(t *testing.T) {
 	go covDrain(conn3)
 
 	// 三会话 LastActive 拨回 31 分钟前：keepalive tick（30s）后走超时清理分支
+	// （写必须持 session.mu——keepalive loop 在该锁内读，只锁外层 map 锁
+	// 与读方不构成同步，-race 偶发报警）
 	terminalSessionsMu.Lock()
 	if ts := terminalByConn[connID1]; ts != nil {
+		ts.mu.Lock()
 		ts.LastActive = time.Now().Add(-31 * time.Minute)
+		ts.mu.Unlock()
 	}
 	terminalSessionsMu.Unlock()
 	desktopSessionsMu.Lock()
 	if ds := desktopSessions[deskSessID]; ds != nil {
+		ds.mu.Lock()
 		ds.LastActive = time.Now().Add(-31 * time.Minute)
+		ds.mu.Unlock()
 	}
 	desktopSessionsMu.Unlock()
 	vncSessionsMu.Lock()
 	for _, vs := range vncSessions {
 		if vs.ConnID == connID3 {
+			vs.mu.Lock()
 			vs.LastActive = time.Now().Add(-31 * time.Minute)
+			vs.mu.Unlock()
 		}
 	}
 	vncSessionsMu.Unlock()
