@@ -169,9 +169,46 @@ crontab 之外的第二类定时机制。只读预览：列出系统 timer unit 
 分段解析（两 unit + 错误段跳过 + 模板单元仅列名）、schedule 原文提取
 （calendar 与 monotonic 多行）；server——转发；web——tsc + build。
 
+## M4：多用户 crontab（-u）（2026-09-19）
+
+「不做」清单首项立项。动机：服务用户的定时任务（如 www-data 的清理脚本、
+postgres 的维护任务）都挂在**该用户的 crontab** 里，当前只能 SSH 上机手改；
+`-u` 是 crontab 原生语义，agent 经 argv 转发即可纳管，权限边界清晰。
+
+| 决策 | 内容 | 理由 |
+|------|------|------|
+| D21 | user 参数语义与安全边界：crontab 相关 4 action（`status`/`jobs`/`job.apply`/`job.delete`）加可选 `user` 参数——缺省空 = 当前运行用户（零破坏向后兼容）；校验 `^[a-z_][a-z0-9_-]{0,31}$`（大小写敏感、拒怪形态与超长、不收 uid 数字形态）；exec 一律 argv 数组（`crontab -u <name> -l`），绝不拼 shell；非 root agent 时 crontab 自身的 "must be privileged to use -u" 原样透出 | `-u` 不自造语义；名字白名单正则足够窄，注入面为零；权限模型 = crontab 命令自身边界（agent 以谁跑就受谁限），不另造提权 |
+| D22 | 用户枚举新 action `users`：`getent passwd` 优先（NSS 兼容，覆盖 LDAP/SSSD），命令缺失或执行失败 fallback 解析 `/etc/passwd`（行格式同构）；逐行取 `name`/`uid`/`shell` 全量返回，**不做 nologin 过滤**（服务用户常nologin 却恰是 crontab 的主人） | 枚举是下拉可用性不是安全边界（安全靠 D21 校验 + crontab 自身权限）；双路径兜底 OpenWrt busybox 无 getent |
+| D23 | server API 与审计：新增 `GET /api/agents/{id}/cron/users`（纯转发不审计，同 timers 口径）；status/jobs/PUT jobs/DELETE jobs 四端点加 `?user=` 可选查询参数（同 D21 正则双端校验，非法 400）；cron_apply/cron_delete 审计 details 记 `user`（仅显式指定时写入——缺省留空，历史审计语义不变） | 浏览类不审计；审计带 user 才能回答「谁改了 postgres 的 crontab」；缺省留空让存量审计行不变形 |
+| D24 | web UI：Cron 页 agent 选择器旁加「用户」Select——默认「当前用户」（空值），选项来自 users 枚举（showSearch 可手输任意合法名，**枚举失败不阻塞手输**）；切换用户即重查 status+jobs；timers 面板不受影响（systemd 全局无 user 维度） | 枚举是体验优化不是功能前提；面板布局与既有状态卡/任务表零冲突 |
+| D25 | cockpit 段隔离按 (user, name) 二元组成立：`readCrontab`/`writeCrontab`/`writeViaFile` 加 user 维度透传，splitCockpit/upsertJob/removeJob/**写回前自检**逻辑零改动；meta JSON 不加 user 字段（段自身挂在哪个用户的 crontab 里即是归属） | 「只管理自己名下任务对」语义对每用户独立成立；自检非 cockpit 行逐行一致的保守护栏天然跨用户复用 |
+
+### Agent 侧
+
+- `cron_provider.go`：`Call` 各 action 取 `params["user"]` → `validateCronUser`
+  → `readCrontab(user)` / `writeViaFile(content, user)`（argv 拼
+  `-u <name>`）；status 的 whoami 仅在缺省视角返回（指定 user 时该字段即 user）。
+- `cron_users.go`：`Users()`（getent 优先 → /etc/passwd fallback）+
+  `Call` 加 case `users`。
+
+### Server 侧
+
+- `api_cron.go`：`cronUserRe` 校验 + `?user=` 提取透传四端点 + `users`
+  端点 + 审计 details `user`。
+
+### Web 侧
+
+- Cron 页「用户」Select + `api.ts` 方法加 `user` 可选参数 + `cronUsers()`
+  + `CronStatus`/任务请求带 user；types 补 `CronUserEntry`。
+
+**测试**：agent——user 校验（非法形态矩阵）、`-u` argv 拼装（fake
+Commander 断言参数序列）、getent 解析与 /etc/passwd fallback、指定用户
+jobs/apply/delete 全链路；server——`?user=` 校验（非法 400/合法透传/
+缺省不传）、users 端点转发、审计 details 带 user（缺省不带）；web——
+tsc 零新增 + build。
+
 ## 不做（后续项）
 
-- 多用户 crontab（`-u`）：需要 agent 侧用户枚举与权限边界设计，等真实需求；
 - 执行历史 / 失败告警：需包装器或日志采集，属日志聚合范畴；
 - 分布式锁 / server 侧调度下发：agent 侧 crontab 已是事实源，无需中心化调度。
 
