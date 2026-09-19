@@ -29,6 +29,12 @@ type Config struct {
 	InsecureTLS bool
 }
 
+// jsonMarshal 注入点：结构体序列化不会失败，错误分支仅供测试覆盖。
+var jsonMarshal = json.Marshal
+
+// newRequest 注入点：生产即 http.NewRequest。
+var newRequest = http.NewRequest
+
 // NewClient creates OpenWrt client
 func NewClient(cfg Config) *Client {
 	scheme := "https"
@@ -38,11 +44,8 @@ func NewClient(cfg Config) *Client {
 
 	endpoint := fmt.Sprintf("%s://%s:%d/ubus", scheme, cfg.Host, cfg.Port)
 	if cfg.Port == 0 {
-		if scheme == "https" {
-			endpoint = fmt.Sprintf("https://%s/ubus", cfg.Host)
-		} else {
-			endpoint = fmt.Sprintf("http://%s/ubus", cfg.Host)
-		}
+		// Port==0 时上面已把 scheme 归一为 "http"，去掉端口直连
+		endpoint = fmt.Sprintf("http://%s/ubus", cfg.Host)
 	}
 
 	timeout := cfg.Timeout
@@ -115,12 +118,12 @@ func (c *Client) call(namespace string, procedure string, params ...interface{})
 		},
 	}
 
-	jsonData, err := json.Marshal(rpcReq)
+	jsonData, err := jsonMarshal(rpcReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.endpoint, bytes.NewReader(jsonData))
+	req, err := newRequest("POST", c.endpoint, bytes.NewReader(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -177,7 +180,7 @@ func (c *Client) login() (string, error) {
 		},
 	}
 
-	jsonData, err := json.Marshal(loginReq)
+	jsonData, err := jsonMarshal(loginReq)
 	if err != nil {
 		return "", fmt.Errorf("marshal login request: %w", err)
 	}

@@ -2,8 +2,11 @@ package openwrt
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -733,5 +736,50 @@ func TestCallHTTPErrorNew(t *testing.T) {
 	_, err := c.ListInterfaces()
 	if err == nil {
 		t.Error("expected error for HTTP 500")
+	}
+}
+
+// TestCovJsonMarshalInjectFail 注入序列化失败，覆盖请求体序列化的
+// 两个错误分支（Call 与 Login）。
+func TestCovJsonMarshalInjectFail(t *testing.T) {
+	orig := jsonMarshal
+	t.Cleanup(func() { jsonMarshal = orig })
+	jsonMarshal = func(v interface{}) ([]byte, error) { return nil, errors.New("boom json") }
+
+	c := NewClient(Config{Host: "h"})
+	if _, err := c.call("session", "list", map[string]any{}); err == nil {
+		t.Error("Call with failing marshal should fail")
+	}
+	if _, err := c.login(); err == nil {
+		t.Error("Login with failing marshal should fail")
+	}
+}
+
+// TestCovCallCreateRequestError 构造坏 endpoint（含控制字符）覆盖 call 的
+// 请求构造失败分支。
+func TestCovCallCreateRequestError(t *testing.T) {
+	c := &Client{endpoint: "http://bad\x7fhost/ubus"}
+	if _, err := c.call("session", "list"); err == nil {
+		t.Error("call with bad endpoint should fail request creation")
+	}
+}
+
+// TestCovCallCreateRequestErrorAfterLogin 借助 newRequest 注入：登录用原
+// http.NewRequest 正常放行，call 的请求构造注入失败，覆盖对应错误分支。
+func TestCovCallCreateRequestErrorAfterLogin(t *testing.T) {
+	orig := newRequest
+	t.Cleanup(func() { newRequest = orig })
+
+	ts := httptest.NewServer(openwrtTestHandler(t, map[string]interface{}{}))
+	defer ts.Close()
+	c := newTestClient(ts)
+
+	newRequest = func(method, url string, body io.Reader) (*http.Request, error) {
+		// login 内部仍用 http.NewRequest 直连；走到 newRequest 的即是 call 的请求构造
+		return nil, errors.New("boom request")
+	}
+
+	if _, err := c.call("session", "list"); err == nil || !strings.Contains(err.Error(), "create request") {
+		t.Errorf("call error = %v, want create request failure", err)
 	}
 }
