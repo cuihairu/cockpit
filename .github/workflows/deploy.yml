@@ -83,37 +83,53 @@ jobs:
           echo '--- clickhouse 端口配置 ---'
           grep -nE 'ports:|9[0-9]{3}:[0-9]{3}' docker-compose.yml | head -10 || true
           # clickhouse native 端口 9000 与 cockpit HTTP 端口 9000 结构性冲突：
-          # 宿主 9000 归 cockpit（tunnel 回源），clickhouse 宿主侧固定 19000，
+          # 宿主 9000 归 cockpit（tunnel 回源），clickhouse 宿主侧动态挑空闲
+          # 端口（e2e-clickhouse 长期占用 19000——写死的"安全端口"未必空闲），
           # 容器内仍 9000（croupier 内部走 docker 网络，不受影响）。只看
           # compose 文件内容，不看当前谁占 9000——cockpit 停机时 9000 空闲
           # 会误判"无冲突"漏改（曾因此恢复后 clickhouse 占住 9000，cockpit
           # 重启绑不上端口挂掉，公网 502）。改前备份。
-          # 幂等守卫同 Take over：19000:9000 含 9000:9000 子串、published:
+          host_port=""
+          for p in 29000 29001 29002 29190; do
+            if [ -z "$(docker ps -q --filter publish=$p)" ]; then host_port=$p; break; fi
+          done
+          if [ -z "$host_port" ]; then
+            echo "::error::候选宿主端口 29000/29001/29002/29190 均被占用，请人工分配"
+            exit 1
+          fi
+          # 幂等守卫：19000:9000 含 9000:9000 子串、published:
           # 19000 匹配 .?9000，守卫防重复执行二次改写
           if grep -q '9000:9000' docker-compose.yml && ! grep -q '19000:9000' docker-compose.yml; then
             cp docker-compose.yml docker-compose.yml.bak-pre-recover
             sed -i 's/9000:9000/19000:9000/g' docker-compose.yml
-            echo '短语法改写：9000:9000 → 19000:9000（原文件备份为 docker-compose.yml.bak-pre-recover）'
+            echo "短语法改写：9000:9000 → 19000:9000（原文件备份为 docker-compose.yml.bak-pre-recover）"
             grep -n '19000:9000' docker-compose.yml
           elif grep -Eq 'published:[[:space:]]*.?9000' docker-compose.yml && ! grep -Eq 'published:[[:space:]]*.?19000' docker-compose.yml; then
             cp docker-compose.yml docker-compose.yml.bak-pre-recover
             sed -i -E 's/(published:[[:space:]]*.?9000)([^0-9]|$)/\119000\2/' docker-compose.yml
-            echo '长语法改写：published: 9000 → published: 19000（原文件备份为 docker-compose.yml.bak-pre-recover）'
+            echo "长语法改写：published: 9000 → published: 19000（原文件备份为 docker-compose.yml.bak-pre-recover）"
             grep -nE 'published:[[:space:]]*.?19000' docker-compose.yml
           elif grep -qE '\$\{CLICKHOUSE_NATIVE_PORT:-9000\}' docker-compose.yml; then
             # 宿主侧走 .env 变量（实测 croupier compose 写法）：不动
             # compose 文件，写 .env 让 up 时生效
             if [ -f .env ] && grep -q '^CLICKHOUSE_NATIVE_PORT=' .env; then
-              sed -i 's/^CLICKHOUSE_NATIVE_PORT=.*/CLICKHOUSE_NATIVE_PORT=19000/' .env
+              sed -i "s/^CLICKHOUSE_NATIVE_PORT=.*/CLICKHOUSE_NATIVE_PORT=$host_port/" .env
             else
-              echo "CLICKHOUSE_NATIVE_PORT=19000" >> .env
+              if [ -f .env ] && [ -n "$(tail -c 1 .env 2>/dev/null || true)" ]; then
+                echo >> .env
+              fi
+              echo "CLICKHOUSE_NATIVE_PORT=$host_port" >> .env
             fi
-            echo '已设置 .env → CLICKHOUSE_NATIVE_PORT=19000（宿主侧让出 9000）'
-          elif grep -Eq '19000:9000|published:[[:space:]]*.?19000' docker-compose.yml \
-             || grep -q '^CLICKHOUSE_NATIVE_PORT=19000' .env 2>/dev/null; then
-            echo '已是 19000，无需改写'
+            echo "已设置 .env → CLICKHOUSE_NATIVE_PORT=$host_port（宿主侧让出 9000）"
+            grep -n 'CLICKHOUSE_NATIVE_PORT' .env
           else
-            echo '::warning::compose 中未识别到 9000 端口写法（短/长语法均无），请人工核对端口配置'
+            env_port=$(grep -oE '^CLICKHOUSE_NATIVE_PORT=[0-9]+' .env 2>/dev/null | tail -1 | cut -d= -f2)
+            if grep -Eq '19000:9000|published:[[:space:]]*.?19000' docker-compose.yml \
+               || { [ -n "$env_port" ] && [ "$env_port" != "9000" ]; }; then
+              echo "已协调（宿主侧非 9000），无需改写"
+            else
+              echo '::warning::compose 中未识别到 9000 端口写法（短/长语法、.env 变量均无），请人工核对端口配置'
+            fi
           fi
 
       - name: Up
@@ -200,7 +216,7 @@ jobs:
             elif [ "$name" = "croupier-clickhouse" ]; then
               dir=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$c")
               svc=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$c")
-              echo "croupier-clickhouse 占 9000 → 自动协调为 19000:9000（项目目录 $dir，服务 $svc）"
+              echo "croupier-clickhouse 占 9000 → 自动协调宿主端口（项目目录 $dir，服务 $svc）"
               if [ -z "$dir" ] || [ ! -d "$dir" ]; then
                 echo "::error::无法定位 croupier-clickhouse 的 compose 项目目录，请人工改端口"; exit 1
               fi
@@ -212,11 +228,19 @@ jobs:
                 echo "::error::$dir 下未找到 compose 文件，请人工改端口"; exit 1
               fi
               cp "$compose_file" "$compose_file.bak-port-coordinate"
-              # 端口写法不确定：短语法（9000:9000）与长语法（published: 9000）
-              # 各试一种；croupier compose 两者皆无时 dump 端口相关行与 .env
-              # 供人工定位（曾实测该文件无 9000:9000 字面量）
-              # 幂等守卫：19000:9000 含子串 9000:9000、published: 19000 匹配
-              # .?9000，不加守卫重复执行会二次改写
+              # 端口写法不确定：短语法（9000:9000）、长语法（published: 9000）、
+              # .env 变量（${CLICKHOUSE_NATIVE_PORT:-9000}）各识别一种。宿主侧
+              # 目标端口动态挑选（e2e-clickhouse 长期占用 19000 的教训——写死
+              # 的"安全端口"未必空闲），候选依次探测取第一个空闲的
+              host_port=""
+              for p in 29000 29001 29002 29190; do
+                if [ -z "$(docker ps -q --filter publish=$p)" ]; then host_port=$p; break; fi
+              done
+              if [ -z "$host_port" ]; then
+                echo "::error::候选宿主端口 29000/29001/29002/29190 均被占用，请人工分配"
+                docker ps --format '{{.Names}}\t{{.Ports}}' | grep -E '29[0-9]{3}' || true
+                exit 1
+              fi
               if grep -q '9000:9000' "$compose_file" && ! grep -q '19000:9000' "$compose_file"; then
                 sed -i 's/9000:9000/19000:9000/g' "$compose_file"
                 echo "短语法改写：9000:9000 → 19000:9000"
@@ -230,19 +254,21 @@ jobs:
                 # 不动 compose 文件，写 .env 让 up 时生效——compose 读项目
                 # 目录下的 .env，幂等且保留 croupier 的参数化设计
                 if [ -f "$dir/.env" ] && grep -q '^CLICKHOUSE_NATIVE_PORT=' "$dir/.env"; then
-                  sed -i 's/^CLICKHOUSE_NATIVE_PORT=.*/CLICKHOUSE_NATIVE_PORT=19000/' "$dir/.env"
+                  sed -i "s/^CLICKHOUSE_NATIVE_PORT=.*/CLICKHOUSE_NATIVE_PORT=$host_port/" "$dir/.env"
                 else
                   # 先补尾换行再追加：无尾换行的 .env 会把新行粘上上一行
                   if [ -f "$dir/.env" ] && [ -n "$(tail -c 1 "$dir/.env" 2>/dev/null || true)" ]; then
                     echo >> "$dir/.env"
                   fi
-                  echo "CLICKHOUSE_NATIVE_PORT=19000" >> "$dir/.env"
+                  echo "CLICKHOUSE_NATIVE_PORT=$host_port" >> "$dir/.env"
                 fi
-                echo "已设置 $dir/.env → CLICKHOUSE_NATIVE_PORT=19000（宿主侧让出 9000）"
+                echo "已设置 $dir/.env → CLICKHOUSE_NATIVE_PORT=$host_port（宿主侧让出 9000）"
                 grep -n 'CLICKHOUSE_NATIVE_PORT' "$dir/.env"
               fi
-              if ! grep -Eq '19000:9000|published:[[:space:]]*.?19000' "$compose_file" \
-                 && ! grep -q '^CLICKHOUSE_NATIVE_PORT=19000' "$dir/.env" 2>/dev/null; then
+              env_port=$(grep -oE '^CLICKHOUSE_NATIVE_PORT=[0-9]+' "$dir/.env" 2>/dev/null | tail -1 | cut -d= -f2)
+              if ! grep -q '19000:9000' "$compose_file" \
+                 && ! grep -Eq 'published:[[:space:]]*.?19000' "$compose_file" \
+                 && { [ -z "$env_port" ] || [ "$env_port" = "9000" ]; }; then
                 echo "::error::自动改写未生效，端口写法见下（人工修改后重跑 deploy）："
                 grep -nH -B 2 -A 3 '9000' "$compose_file" "$dir"/.env 2>/dev/null | head -60
                 exit 1
