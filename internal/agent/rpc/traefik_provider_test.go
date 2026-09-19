@@ -29,10 +29,7 @@ func newTraefikTestProvider(t *testing.T, dir string, run Commander) *TraefikPro
 func TestRenderTraefikSiteHTTP(t *testing.T) {
 	site := &ProxySite{Name: "blog", ServerNames: []string{"blog.example.com"},
 		Upstream: "127.0.0.1:3000", Scheme: "http"}
-	out, err := renderTraefikSite(site)
-	if err != nil {
-		t.Fatalf("render: %v", err)
-	}
+	out := renderTraefikSite(site)
 	if err := checkTraefikYAML(out); err != nil {
 		t.Fatalf("self-check: %v", err)
 	}
@@ -64,10 +61,7 @@ func TestRenderTraefikSiteHTTPS(t *testing.T) {
 	site := &ProxySite{Name: "panel", ServerNames: []string{"a.example.com", "b.example.com"},
 		Upstream: "10.0.0.5:8080", Scheme: "https",
 		TLSCert: "/etc/cockpit/certs/fullchain.pem", TLSKey: "/etc/cockpit/certs/privkey.pem"}
-	out, err := renderTraefikSite(site)
-	if err != nil {
-		t.Fatalf("render: %v", err)
-	}
+	out := renderTraefikSite(site)
 	if err := checkTraefikYAML(out); err != nil {
 		t.Fatalf("self-check: %v", err)
 	}

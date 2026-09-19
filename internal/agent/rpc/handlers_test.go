@@ -220,13 +220,13 @@ func TestParseMethod(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prov, action, err := parseMethod(tt.input)
+			prov, action, ok := parseMethod(tt.input)
 
-			if tt.expectError && err == nil {
+			if tt.expectError && ok {
 				t.Error("expected error")
 			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
+			if !tt.expectError && !ok {
+				t.Error("unexpected parse failure")
 			}
 
 			if prov != tt.expectedProv {
