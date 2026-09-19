@@ -1,0 +1,101 @@
+name: Deploy
+
+# 私有部署：在自托管 runner（pve-cockpit，label deployer）上以 docker compose
+# 构建并启动服务。首次部署自动生成 ADMIN_PASSWORD/JWT_SECRET/TOTP_ENCRYPTION_KEY
+# 并持久化在 runner 的 ~/.cockpit-deploy.env（600），后续部署复用同一组凭据，
+# 保证数据卷中已初始化的账号与 JWT 会话不因重新部署而失效。
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "部署的分支/commit/tag（默认 main）"
+        default: main
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy (self-hosted)
+    runs-on: [self-hosted, deployer]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Prepare deploy env
+        env:
+          HOME: ${{ runner.home }}
+        run: |
+          set -euo pipefail
+          if [ -f "$HOME/.cockpit-deploy.env" ]; then
+            cp "$HOME/.cockpit-deploy.env" .env
+            echo "复用 runner 本地已有部署凭据"
+          else
+            {
+              echo "ADMIN_PASSWORD=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)"
+              echo "JWT_SECRET=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 48)"
+              echo "TOTP_ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 48)"
+              echo "PRODUCTION=true"
+              echo "TZ=Asia/Shanghai"
+            } > .env
+            chmod 600 .env
+            cp .env "$HOME/.cockpit-deploy.env"
+            chmod 600 "$HOME/.cockpit-deploy.env"
+            echo "首次部署：已生成强随机凭据并持久化到 runner 本地"
+          fi
+
+      - name: Build image
+        run: |
+          set -euo pipefail
+          docker compose build --pull
+
+      - name: Up
+        run: |
+          set -euo pipefail
+          docker compose up -d --wait --wait-timeout 120
+
+      - name: Smoke check (local)
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl -fsS -m 5 http://127.0.0.1:${COCKPIT_HTTP_PORT:-9000}/ >/dev/null 2>&1; then
+              echo "本地探活通过（第 ${i} 次）"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::本地探活失败，输出容器日志"
+          docker compose logs --tail 100
+          exit 1
+
+      - name: Verify public domain
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 20 https://cockpit.cuihairu.site/login || true)
+          echo "https://cockpit.cuihairu.site/login → HTTP ${code}"
+          if [ "$code" != "200" ]; then
+            echo "::warning::公网域名返回 ${code}，请检查 Cloudflare 回源/Tunnel 配置（源站本身已探活通过）"
+          fi
+
+      - name: Status
+        run: |
+          set -euo pipefail
+          docker compose ps
+          docker image ls cockpit:local --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedSince}}'
+          echo "部署完成：$(date -Is)"
