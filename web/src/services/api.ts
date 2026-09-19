@@ -32,6 +32,7 @@ import type {
   LogsSearchQuery,
   LogsSearchResult,
   DriftCheckResult,
+  ConsistencyReport,
   DriftDiffResult,
   DriftScanConfig,
   RecordingConfig,
@@ -552,6 +553,11 @@ class ApiService {
 
   async putDriftConfig(scanIntervalSeconds: number): Promise<void> {
     await this.client.put('/drift/config', { scan_interval_seconds: scanIntervalSeconds })
+  }
+
+  // CMDB 一致性（M6）：inventory 声明 vs agent 实报按需比对（server 未启用 inventory 时 503）
+  async getInventoryConsistency(): Promise<ConsistencyReport> {
+    return this.client.get<unknown, ConsistencyReport>('/inventory/consistency')
   }
 
   // ========== 会话录制 ==========

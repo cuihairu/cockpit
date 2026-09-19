@@ -545,6 +545,39 @@ export interface DriftScanConfig {
   default: number
 }
 
+// CMDB 一致性（M6，drift-design.md D28-D30）：inventory 声明 vs agent 实报
+export type ConsistencyStatus = 'ok' | 'mismatch' | 'unregistered' | 'undeclared'
+
+export interface ConsistencyFieldMismatch {
+  field: 'hostname' | 'ip'
+  declared: string
+  actual: string
+}
+
+export interface ConsistencyAgentFacts {
+  hostname?: string
+  ip?: string
+}
+
+export interface AgentConsistency {
+  id: string
+  status: ConsistencyStatus
+  declared?: ConsistencyAgentFacts
+  actual?: ConsistencyAgentFacts
+  mismatch?: ConsistencyFieldMismatch[]
+}
+
+export interface ConsistencyReport {
+  agents: AgentConsistency[]
+  summary: {
+    total: number
+    ok: number
+    mismatch: number
+    unregistered: number
+    undeclared: number
+  }
+}
+
 // 会话录制元数据（内容在 server 侧 .cast 文件，见 recording-design.md）
 export interface TerminalRecording {
   id: number

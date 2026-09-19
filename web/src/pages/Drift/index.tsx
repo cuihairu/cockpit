@@ -10,6 +10,7 @@ import {
   Space,
   Switch,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -21,6 +22,7 @@ import { api } from '@/services/api'
 import type { DriftCheckItem, DriftCheckResult } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 import DiffModal from './DiffModal'
+import ConsistencyTab from './ConsistencyTab'
 import { KIND_COLOR, KIND_LABEL } from './shared'
 
 // 防漂移检测：面板写路径基线（nginx/cron/stack 最后一次成功保存的内容）
@@ -191,89 +193,106 @@ const Drift = () => {
       title={
         <Space>
           <SafetyCertificateOutlined />
-          漂移检测
+          漂移与一致性
         </Space>
       }
     >
-      <Space wrap style={{ marginBottom: 16 }} align="center">
-        <Typography.Text strong>自动巡检</Typography.Text>
-        <Tooltip title="开启后 server 定时对全部支持漂移检测的主机执行检查，发现漂移/丢失即产生告警（同一主机未处理期间只提醒一次）">
-          <Switch
-            checked={scanOn}
-            onChange={(on) => setScanEdit((e) => ({ ...e, on }))}
-            loading={!scanCfg}
-          />
-        </Tooltip>
-        {scanOn && (
-          <InputNumber
-            min={1}
-            max={1440}
-            value={scanMinutes}
-            onChange={(v) => setScanEdit((e) => ({ ...e, minutes: v ?? 1 }))}
-            addonAfter="分钟"
-            style={{ width: 130 }}
-          />
-        )}
-        <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
-          保存
-        </Button>
-      </Space>
-      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
-        自动巡检按间隔扫描全部支持的主机并推送漂移告警；下方为单台主机的即时检查。
-      </Typography.Text>
-
-      <Space wrap style={{ marginBottom: 16 }}>
-        <Select
-          showSearch
-          optionFilterProp="label"
-          style={{ minWidth: 240 }}
-          placeholder="选择服务器"
-          value={agentId || undefined}
-          onChange={setAgentId}
-          options={capableAgents.map((a) => ({
-            value: a.id,
-            label: a.hostname || a.id,
-          }))}
-          notFoundContent="无支持漂移检测的 Agent（需 nginx/cron/stack 任一能力）"
-        />
-        <Button type="primary" onClick={() => void runCheck()} loading={checking}>
-          检查
-        </Button>
-      </Space>
-
-      {result && (
-        <>
-          {driftedCount > 0 ? (
-            <Alert
-              type="warning"
-              showIcon
-              style={{ marginBottom: 12 }}
-              message={`发现 ${driftedCount} 项漂移/异常，请核对是否为本人操作`}
+      <Tabs
+        items={[
+          {
+            key: 'drift',
+            label: '配置漂移',
+            children: (
+              <>
+        <Space wrap style={{ marginBottom: 16 }} align="center">
+          <Typography.Text strong>自动巡检</Typography.Text>
+          <Tooltip title="开启后 server 定时对全部支持漂移检测的主机执行检查，发现漂移/丢失即产生告警（同一主机未处理期间只提醒一次）">
+            <Switch
+              checked={scanOn}
+              onChange={(on) => setScanEdit((e) => ({ ...e, on }))}
+              loading={!scanCfg}
             />
-          ) : (
-            <Alert
-              type="success"
-              showIcon
-              style={{ marginBottom: 12 }}
-              message="全部一致，未发现漂移"
+          </Tooltip>
+          {scanOn && (
+            <InputNumber
+              min={1}
+              max={1440}
+              value={scanMinutes}
+              onChange={(v) => setScanEdit((e) => ({ ...e, minutes: v ?? 1 }))}
+              addonAfter="分钟"
+              style={{ width: 130 }}
             />
           )}
-          <Table<DriftCheckItem>
-            rowKey={(it) => `${it.kind}/${it.name}`}
-            columns={columns}
-            dataSource={items}
-            pagination={false}
-            size="small"
-            locale={{ emptyText: '无可检测对象（通过反向代理/定时任务/应用部署页保存一次即产生基线）' }}
-          />
-          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-            基线 = 各管理页（反向代理/定时任务/应用部署）最后一次通过面板成功保存的内容；
-            「未登记」对象可通过面板保存一次，或直接「登记」以当前磁盘内容为准。
-          </Typography.Text>
-        </>
-      )}
+          <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
+            保存
+          </Button>
+        </Space>
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
+          自动巡检按间隔扫描全部支持的主机并推送漂移告警；下方为单台主机的即时检查。
+        </Typography.Text>
 
-      <DiffModal agentId={agentId} target={diffTarget} onClose={() => setDiffTarget(null)} />
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Select
+            showSearch
+            optionFilterProp="label"
+            style={{ minWidth: 240 }}
+            placeholder="选择服务器"
+            value={agentId || undefined}
+            onChange={setAgentId}
+            options={capableAgents.map((a) => ({
+              value: a.id,
+              label: a.hostname || a.id,
+            }))}
+            notFoundContent="无支持漂移检测的 Agent（需 nginx/cron/stack 任一能力）"
+          />
+          <Button type="primary" onClick={() => void runCheck()} loading={checking}>
+            检查
+          </Button>
+        </Space>
+
+        {result && (
+          <>
+            {driftedCount > 0 ? (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message={`发现 ${driftedCount} 项漂移/异常，请核对是否为本人操作`}
+              />
+            ) : (
+              <Alert
+                type="success"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="全部一致，未发现漂移"
+              />
+            )}
+            <Table<DriftCheckItem>
+              rowKey={(it) => `${it.kind}/${it.name}`}
+              columns={columns}
+              dataSource={items}
+              pagination={false}
+              size="small"
+              locale={{ emptyText: '无可检测对象（通过反向代理/定时任务/应用部署页保存一次即产生基线）' }}
+            />
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+              基线 = 各管理页（反向代理/定时任务/应用部署）最后一次通过面板成功保存的内容；
+              「未登记」对象可通过面板保存一次，或直接「登记」以当前磁盘内容为准。
+            </Typography.Text>
+          </>
+        )}
+
+        <DiffModal agentId={agentId} target={diffTarget} onClose={() => setDiffTarget(null)} />
+              </>
+            ),
+          },
+          {
+            key: 'cmdb',
+            label: 'CMDB 一致性',
+            children: <ConsistencyTab />,
+          },
+        ]}
+      />
     </Card>
   )
 }
