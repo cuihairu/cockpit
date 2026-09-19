@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -726,5 +727,211 @@ func TestAcmeIssueAutoDeploy(t *testing.T) {
 	if got.Status != "issued" || got.LastDeployAt == 0 || got.LastDeployError != "" {
 		t.Fatalf("after issue+deploy = status %s lastDeployAt %d err %q",
 			got.Status, got.LastDeployAt, got.LastDeployError)
+	}
+}
+
+// TestEqualDomains 域名列表相等判定（更新去重用，与顺序无关长度敏感）
+func TestEqualDomains(t *testing.T) {
+	if !equalDomains(nil, nil) || !equalDomains([]string{}, []string{}) {
+		t.Error("empty lists should be equal")
+	}
+	if !equalDomains([]string{"a.com", "b.com"}, []string{"a.com", "b.com"}) {
+		t.Error("identical lists should be equal")
+	}
+	if equalDomains([]string{"a.com"}, []string{"a.com", "b.com"}) {
+		t.Error("length mismatch should not be equal")
+	}
+	if equalDomains([]string{"a.com", "b.com"}, []string{"a.com", "c.com"}) {
+		t.Error("element mismatch should not be equal")
+	}
+	if equalDomains([]string{"a.com", "b.com"}, []string{"b.com", "a.com"}) {
+		t.Error("order matters (sequential compare)")
+	}
+}
+
+// TestAccountKeyPEMRoundtrip 账户私钥生成与回读（ensureAccount 的纯加密部分）：
+// PEM 可解析、曲线 P-256、跨 DER 序列化一致；垃圾输入报错
+func TestAccountKeyPEMRoundtrip(t *testing.T) {
+	pemStr, err := generateAccountKeyPEM()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if !strings.HasPrefix(pemStr, "-----BEGIN EC PRIVATE KEY-----") {
+		t.Errorf("pem = %q", pemStr[:40])
+	}
+	key, err := loadAccountKey(pemStr)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	ecKey, ok := key.(*ecdsa.PrivateKey)
+	if !ok || ecKey.Curve != elliptic.P256() {
+		t.Fatalf("key type/curve = %T %v", key, ecKey.Curve)
+	}
+	// 重解 DER 与原 key 一致
+	der, err := x509.MarshalECPrivateKey(ecKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode([]byte(pemStr))
+	if string(der) != string(block.Bytes) {
+		t.Error("re-marshaled DER should match PEM payload")
+	}
+
+	// 垃圾输入
+	if _, err := loadAccountKey("not a pem"); err == nil {
+		t.Error("garbage input should fail")
+	}
+}
+
+// TestLegoUserAccessors lego registration.User 三访问器透传字段
+func TestLegoUserAccessors(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := &legoUser{email: "a@b.com", key: key}
+	if u.GetEmail() != "a@b.com" {
+		t.Errorf("GetEmail = %q", u.GetEmail())
+	}
+	if u.GetRegistration() != nil {
+		t.Error("fresh user should have nil registration")
+	}
+	if u.GetPrivateKey() != crypto.PrivateKey(key) {
+		t.Error("GetPrivateKey should return the same key")
+	}
+}
+
+// TestAcmeAccountRegisteredViewAndUpdate 已注册账户的 GET 视图与 PUT 更新分支：
+// Update 路径（区别于首次 Save）、空 email 合法（清除）、坏 body 400、
+// 非 PUT/GET 405
+func TestAcmeAccountRegisteredViewAndUpdate(t *testing.T) {
+	s, _ := newAcmeTestServer(t)
+	if err := s.db.SaveAcmeAccount(&storage.AcmeAccount{
+		Email: "old@example.com", CADirectory: "staging", RegistrationURI: "https://acme.example/acct/1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// GET：registered=true 视图带 email/caDirectory/registrationURI
+	rec := httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/acme/account", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET: code=%d", rec.Code)
+	}
+	var view struct {
+		Registered      bool   `json:"registered"`
+		Email           string `json:"email"`
+		CADirectory     string `json:"caDirectory"`
+		RegistrationURI string `json:"registrationURI"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &view)
+	if !view.Registered || view.Email != "old@example.com" ||
+		view.CADirectory != "staging" || view.RegistrationURI != "https://acme.example/acct/1" {
+		t.Errorf("view = %+v", view)
+	}
+
+	// PUT：走 UpdateAcmeAccountEmail 分支（账户已存在）
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/account",
+		strings.NewReader(`{"email":"new@example.com"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT update: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	acc, _ := s.db.GetAcmeAccount()
+	if acc.Email != "new@example.com" {
+		t.Errorf("email = %q", acc.Email)
+	}
+	logs, _, _ := s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": "acme_update"})
+	if len(logs) != 1 {
+		t.Errorf("acme_update audit = %d, want 1", len(logs))
+	}
+
+	// PUT：空 email 合法（允许清除，跳过正则）
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/account",
+		strings.NewReader(`{"email":"  "}`)))
+	if rec.Code != http.StatusOK {
+		t.Errorf("PUT empty email: code=%d", rec.Code)
+	}
+	if acc, _ = s.db.GetAcmeAccount(); acc.Email != "" {
+		t.Errorf("email after clear = %q", acc.Email)
+	}
+
+	// PUT：坏 body
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/account", strings.NewReader(`{bad`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("bad body: code=%d", rec.Code)
+	}
+
+	// 其他方法 405
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodDelete, "/acme/account", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("DELETE: code=%d", rec.Code)
+	}
+}
+
+// TestAcmeConfigIntervalAPI 巡检间隔端点（与 /api/ddns/config 同构）：
+// GET 全形 / PUT 合法写入回读 / 0 关闭 / 越界与坏 body 400 / 其他方法 405
+func TestAcmeConfigIntervalAPI(t *testing.T) {
+	s, _ := newAcmeTestServer(t)
+
+	// GET：默认值 + 范围字段
+	rec := httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/acme/config", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET config: code=%d", rec.Code)
+	}
+	var cfg struct {
+		ScanIntervalSeconds int `json:"scan_interval_seconds"`
+		Min                 int `json:"min"`
+		Max                 int `json:"max"`
+		Default             int `json:"default"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &cfg)
+	if cfg.ScanIntervalSeconds != acmeDefaultInterval || cfg.Min != acmeMinIntervalSeconds ||
+		cfg.Max != acmeMaxIntervalSeconds || cfg.Default != acmeDefaultInterval {
+		t.Fatalf("GET config = %+v", cfg)
+	}
+
+	// PUT：合法值写入并回读生效
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/config",
+		strings.NewReader(`{"scan_interval_seconds":7200}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT config: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := s.GetAcmeScanInterval(); got != 7200 {
+		t.Fatalf("after PUT interval = %d, want 7200", got)
+	}
+
+	// PUT：0 = 关闭，合法
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/config",
+		strings.NewReader(`{"scan_interval_seconds":0}`)))
+	if rec.Code != http.StatusOK {
+		t.Errorf("PUT 0: code=%d", rec.Code)
+	}
+
+	// PUT：越界与坏 body
+	for _, body := range []string{
+		`{"scan_interval_seconds":299}`,
+		`{"scan_interval_seconds":90000}`,
+		`{"scan_interval_seconds":-5}`,
+		`{bad`,
+	} {
+		rec = httptest.NewRecorder()
+		s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/config", strings.NewReader(body)))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("PUT %s: code = %d, want 400", body, rec.Code)
+		}
+	}
+
+	// 其他方法 405
+	rec = httptest.NewRecorder()
+	s.handleACME(rec, httptest.NewRequest(http.MethodDelete, "/acme/config", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("DELETE config: code=%d", rec.Code)
 	}
 }
