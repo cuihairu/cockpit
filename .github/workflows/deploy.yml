@@ -40,23 +40,47 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Locate compose project
+        id: locate
         run: |
           set -euo pipefail
           docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
-          for d in /opt /srv /home /root; do
-            find "$d" -maxdepth 4 \( -iname '*croupier*' -o -name 'docker-compose.y*ml' -o -name 'compose.y*ml' \) 2>/dev/null || true
-          done | sort -u
+          echo '--- clickhouse/croupier 相关卷与网络 ---'
+          # 容器已删但数据卷/网络仍在（rm 不删卷）；compose 写入的 label
+          # 记录着项目目录，据此精准定位，不依赖目录名猜测
+          dir=""
+          for name in $(docker volume ls --format '{{.Name}}' | grep -iE 'clickhouse|croupier' || true); do
+            d=$(docker volume inspect "$name" --format '{{index .Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
+            if [ -n "$d" ]; then echo "volume $name → $d"; dir="$d"; fi
+          done
+          if [ -z "$dir" ]; then
+            for name in $(docker network ls --format '{{.Name}}' | grep -iE 'clickhouse|croupier' || true); do
+              d=$(docker network inspect "$name" --format '{{index .Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
+              if [ -n "$d" ]; then echo "network $name → $d"; dir="$d"; fi
+            done
+          fi
+          if [ -z "$dir" ]; then
+            echo '::warning::卷/网络 label 未定位到项目目录，回退 find 扫描'
+            for d in /opt /srv /home /root /data; do
+              find "$d" -maxdepth 4 -type d -iname '*croupier*' 2>/dev/null || true
+            done | sort -u
+            dir=$(for d in /opt /srv /home /root /data; do
+              find "$d" -maxdepth 4 -type d -iname '*croupier*' 2>/dev/null || true
+            done | head -1)
+          fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
       - name: Up
         run: |
           set -euo pipefail
-          proj=$(for d in /opt /srv /home /root; do
-            find "$d" -maxdepth 4 -type d -iname '*croupier*' 2>/dev/null || true
-          done | head -1)
-          if [ -n "$proj" ] && ls "$proj"/docker-compose.y*ml "$proj"/compose.y*ml >/dev/null 2>&1; then
-            cd "$proj" && docker compose up -d && docker compose ps
+          dir="${{ steps.locate.outputs.dir }}"
+          if [ -n "$dir" ] && ls "$dir"/docker-compose.y*ml "$dir"/compose.y*ml >/dev/null 2>&1; then
+            cd "$dir"
+            docker compose up -d
+            sleep 5
+            docker compose ps
           else
-            echo "::warning::未找到 croupier compose 项目目录，请按上面 find 输出手工确认"
+            echo "::error::未定位到 croupier compose 项目目录（数据卷完好，需手工恢复）"
+            exit 1
           fi
 
   deploy:
@@ -137,6 +161,13 @@ jobs:
           echo "https://cockpit.cuihairu.site/login → HTTP ${code}"
           if [ "$code" != "200" ]; then
             echo "::warning::公网域名返回 ${code}，请检查 Cloudflare 回源/Tunnel 配置（源站本身已探活通过）"
+            echo '--- cloudflared ingress 诊断（仅域名与回源地址） ---'
+            for cfg in /etc/cloudflared/config.yml "$HOME/.cloudflared/config.yml"; do
+              if [ -f "$cfg" ]; then
+                echo "[$cfg]"
+                grep -E 'ingress|hostname|service' "$cfg" || echo '(无 ingress 规则，可能由 Cloudflare 控制台远程管理)'
+              fi
+            done
           fi
 
       - name: Status
