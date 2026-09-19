@@ -79,7 +79,15 @@ jobs:
         run: |
           set -euo pipefail
           dir="${{ steps.locate.outputs.dir }}"
-          if [ -n "$dir" ] && ls "$dir"/docker-compose.y*ml "$dir"/compose.y*ml >/dev/null 2>&1; then
+          compose_file=""
+          if [ -n "$dir" ]; then
+            # 逐个检查：glob 未匹配时字面量会让 ls 整体报错，不能一次 ls 两种模式
+            for f in "$dir"/docker-compose.y*ml "$dir"/compose.y*ml; do
+              if [ -f "$f" ]; then compose_file="$f"; break; fi
+            done
+          fi
+          if [ -n "$compose_file" ]; then
+            echo "使用 compose 文件: $compose_file"
             cd "$dir"
             docker compose up -d
             sleep 5
@@ -171,9 +179,14 @@ jobs:
             for cfg in /etc/cloudflared/config.yml "$HOME/.cloudflared/config.yml"; do
               if [ -f "$cfg" ]; then
                 echo "[$cfg]"
-                grep -E 'ingress|hostname|service' "$cfg" || echo '(无 ingress 规则，可能由 Cloudflare 控制台远程管理)'
+                grep -E 'ingress|hostname|service' "$cfg" || echo '(无 ingress 规则)'
               fi
             done
+            # 本地配置文件不存在 → 大概率 token 模式（ingress 在 Cloudflare
+            # 控制台远程管理）。打印容器启动参数判断模式，token 值脱敏
+            echo '--- cloudflared 容器启动参数 ---'
+            docker inspect cloudflared --format '{{json .Config.Cmd}}' 2>/dev/null | sed 's/eyJ[A-Za-z0-9._-]*/eyJ***REDACTED***/g' || true
+            docker inspect cloudflared --format 'Compose 项目: {{index .Config.Labels "com.docker.compose.project-working_dir"}}' 2>/dev/null || true
           fi
 
       - name: Status
