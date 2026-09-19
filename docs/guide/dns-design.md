@@ -95,16 +95,23 @@ web 页面全部复用。写联动（Domain 表回写）、批量导入、分布
 
 ### M2 清单
 
-- [ ] internal/dns：`dnspod.go`（form client + name/MX/SRV 映射 + 分页）
-- [ ] internal/dns：`alidns.go`（RPC V1 签名 + 同套映射）+ `sign.go` 签名
+- [x] internal/dns：`dnspod.go`（form client + name/MX/SRV 映射 + 分页）
+- [x] internal/dns：`alidns.go`（RPC V1 签名 + 同套映射）+ `sign.go` 签名
       纯函数
-- [ ] server：requireDNS 按 provider 构造（dnspod/alidns 凭据缺失 503 各报
+- [x] server：requireDNS 按 provider 构造（dnspod/alidns 凭据缺失 503 各报
       各的键）；/api/dns/status 回显 provider
-- [ ] config：无新增键（复用 ACME D13 结构），Normalize 不动
-- [ ] web：引导卡三选一 + proxied 列 provider 分流 + tsc/build
-- [ ] 测试：两 client httptest 全操作（zones/records CRUD/分页/MX·SRV 拆装/
+- [x] config：无新增键（复用 ACME D13 结构），Normalize 不动
+- [x] web：引导卡三选一 + proxied 列 provider 分流 + tsc/build
+- [x] 测试：两 client httptest 全操作（zones/records CRUD/分页/MX·SRV 拆装/
       错误码）、签名纯函数表驱动、server provider 分流与 503 文案、审计不回归
-- [ ] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] 文档收尾（本清单勾选）+ todo.md 同步
+
+✅ M2 完成（2026-09-19）：dns 包 dnspod/alidns/sign 三文件 + server 分流 +
+web 引导卡，dns 包 21 测试 + server 3 测试全绿。实现与设计的两处落地差异：
+① DNSPod `Domain.List` 单页拉 400 条不翻页（D14 说的是 records 分页归一，
+zones 与 M1 Cloudflare 同款单页策略）；② 阿里云 `DescribeDomainRecords`
+无精确 type 过滤参数，`recordType` 在 client 侧过滤，`TotalPage` 仍按全集
+自算（可能翻到空页，页码点击无害）。
 
 **真机验收（剩余）**：DNSPod 免费版 TTL 下限与 CAA 支持、阿里云 enterprise
 版差异、两家 SRV 编辑实测。
