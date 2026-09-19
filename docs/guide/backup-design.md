@@ -225,7 +225,8 @@ type BackupRun struct {
 - S3/对象存储异地：~~agent 侧 rclone 集成或 server 中转，独立立项~~
   → 已立项 M2（见下，2026-09-19），走 agent 侧 rclone 路线；
 - server 自身 DB 备份（SQLite `VACUUM INTO`）：独立小功能；
-- 数据库热备钩子（mysqldump / pg_dump / sqlite .backup 前置钩子）；
+- 数据库热备钩子（mysqldump / pg_dump / sqlite .backup 前置钩子）：
+  ~~独立后续项~~ → 已立项 M3（见下，2026-09-19），per-config pre-hook 路线；
 - 增量/去重（restic/borg 级别）与备份加密（age/gpg）：个人场景全量 + retention 先够用；
 - openwrt/busybox 环境适配：未验证，不主动阻断但不在验收范围。
 
@@ -327,6 +328,65 @@ remoteDest 格式 → copy → 返回 `{synced: true}` 或错误。
    结构体（新增字段 RemoteStatus/RemoteError 的承载），行为不变；前端
    remoteDest 输入用宽松版校验（只禁空白），控制字符拦截由 server/agent
    同款正则双端把关。
+
+## M3：数据库热备钩子——pre-hook（2026-09-19 设计）
+
+### 痛点与范围
+
+M1 起源路径就允许直接指向 SQLite 文件（`docs/guide/backup-design.md` D6），
+但 tar 打包运行中的数据库文件拿到的可能是不一致快照——写入进行中时页与页
+不同步，恢复后 `.integrity_check` 不过、应用起不来。个人场景 SQLite 遍地
+（本面板自身就是），MySQL/PG 偶有。数据库在写入间隙被打包是数据安全链上
+最后一块静默缺口：备份"成功"但档是坏的，比失败更危险。
+
+方案：**per-config 可选 pre-hook 命令**——agent 在打包前执行用户配置的
+shell 命令（典型：`sqlite3 /data/app.db ".backup /tmp/app.db.bak"`、
+`mysqldump ... > /tmp/db.sql`），源路径指向快照产物；hook 失败即中止本次
+备份（不一致快照不如不备）。不做 post-hook（打包完没有需要通知的外部方，
+通知体系已有）。
+
+### 决策
+
+| # | 决策 | 理由 |
+|---|------|------|
+| D26 | 机制 = per-config 自由命令 `PreHook string`（空=不执行），agent 打包前 `sh -c` 执行；不做内建 mysql/pg 客户端集成 | 用户最懂自己的库（连接串/凭据/方言），自由命令同时覆盖 sqlite .backup / mysqldump / pg_dump / etcdctl snapshot 一切形态；内建集成是无穷尽的方言适配 |
+| D27 | `sh -c` 而非 argv 分词 | hook 命令需要重定向与引号语义（`.backup "path with space"`、`> /tmp/db.sql`）；cron provider 写回 crontab 同为先例，agent 本就是受信控制面 |
+| D28 | hook 失败（非零退出）→ 本次任务 failed，不打包、不推送远端、retention 不动 | 一致性是 hook 存在的唯一理由；带病继续产出坏档违背初衷。错误消息含退出码与 stderr 摘要（≤512 字节，同 pushRemote 风格） |
+| D29 | hook 超时固定 5 分钟，`exec.CommandContext` kill 整组进程 | dump 大库可能分钟级但不能无限等（任务还有打包+推送）；5min 覆盖 GB 级 pg_dump；不做成配置项（YAGNI，真实需求出现再议） |
+| D30 | 输出进任务日志 `[hook]` 行前缀；hook 在 nameLock/sem 内执行（与打包同序） | 排障看日志即可还原 hook 现场；锁内执行保证同配置两次运行 hook 产物不互踩（同一 /tmp 快照路径） |
+| D31 | 配置模型：`BackupConfig.PreHook`（size:1024）+ `BackupRun` 不加字段（hook 失败即任务 failed，Error 已承载）；AutoMigrate 零迁移 | run.Error 单字段足够定位；不引入 hook 状态机 |
+| D32 | server 下发透传 `preHook`；web 配置 Modal「前置命令（可选）」TextArea + 说明文案；无 server 侧命令校验 | agent 侧 sh -c 已是完整 shell 语义，server 校验只能是假安全；长度 1024 由 gorm size 约束 + agent 侧超长拒绝 |
+
+### 执行流程（agent backupTask 打包前追加阶段）
+
+nameLock/sem 获取后、pack 之前，若 `preHook != ""`：
+
+1. 任务日志记 `[hook] <command>`；
+2. `exec.CommandContext(ctx, "sh", "-c", preHook)`，5min 超时，
+   CombinedOutput 摘要（≤2048）进 `[hook]` 日志；
+3. 非零退出/超时 → task 直接 failed（Error=`pre-hook failed: ...`），
+   终态返回，不进 pack；
+4. 成功 → 继续 pack → retention →（M2）rclone 推送，原流程不变。
+
+restore 不涉及 hook（解包到独立目录，无一致性问题）。
+
+### 不做（M3 复确认）
+
+- post-hook、多 hook 链、hook 超时配置化——YAGNI；
+- 内建数据库 provider（感知 mysql/pg 协议）——D26 否决；
+- server 侧命令白名单/审计增强——hook 属配置内容，配置变更已有
+  backup_update 审计覆盖，命令本身不额外记审计（与 sources/destDir 同级）。
+
+### M3 清单
+
+- [ ] agent：backupTask 加 PreHook + runHook（sh -c + 超时 + 日志）+ 失败
+      短路不打包 + 参数校验（≤1024）
+- [ ] server：下发参数透传 preHook；config 校验（长度）；view/请求体字段
+- [ ] storage：BackupConfig.PreHook 字段（AutoMigrate 零迁移）
+- [ ] web：配置 Modal「前置命令（可选）」TextArea + 占位示例 + 说明
+- [ ] 测试：agent fake hook（成功路径/sh -c 语义/失败短路不打包/超时 kill）；
+      server 透传与校验
+- [ ] 文档收尾（本清单勾选）+ todo.md 同步
 
 ## 参考
 
