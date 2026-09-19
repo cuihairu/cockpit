@@ -59,13 +59,19 @@ jobs:
             done
           fi
           if [ -z "$dir" ]; then
-            echo '::warning::卷/网络 label 未定位到项目目录，回退 find 扫描'
-            for d in /opt /srv /home /root /data; do
-              find "$d" -maxdepth 4 -type d -iname '*croupier*' 2>/dev/null || true
-            done | sort -u
-            dir=$(for d in /opt /srv /home /root /data; do
-              find "$d" -maxdepth 4 -type d -iname '*croupier*' 2>/dev/null || true
-            done | head -1)
+            echo '::warning::卷/网络 label 未定位到项目目录，回退 find + compose 校验'
+            # 名字含 croupier 的目录里，只有「compose 文件中定义了
+            # clickhouse 服务」的才是部署目录（源码/构建目录会误命中名字）
+            for d in $(for root in /data /opt /srv /home /root; do
+                find "$root" -maxdepth 4 -type d -iname '*croupier*' 2>/dev/null || true
+              done | sort -u); do
+              for f in "$d"/docker-compose.y*ml "$d"/compose.y*ml; do
+                if [ -f "$f" ] && grep -qiE 'clickhouse' "$f"; then
+                  echo "候选命中: $f"
+                  if [ -z "$dir" ]; then dir="$d"; fi
+                fi
+              done
+            done
           fi
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
