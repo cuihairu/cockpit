@@ -86,15 +86,25 @@ retention 只删本地文件与记录（远端归档不清理——rclone copy �
 
 ### M2 清单
 
-- [ ] notification：`RecordingRemoteFailed = "recording.remote-failed"` 常量
-- [ ] server：`rcloneCopyLocalFile` 抽取（server 备份改调，行为不变）+
-      recording 远端推送（Close 异步）+ `recording_remote_dest` Setting
-- [ ] REST：`/api/recordings/config` GET/PUT + `/{sid}/sync-remote`（审计）
-- [ ] web：/recordings 页配置行（开关/保留/异地目标/rclone 提示）+
+- [x] notification：`RecordingRemoteFailed = "recording.remote-failed"` 常量
+- [x] server：`rcloneCopyLocalFile` 抽取（server 备份改调，行为不变）+
+      recording 远端推送（Close 异步）+ `recording.remote_dest` Setting
+- [x] REST：`/api/recordings/config` GET/PUT + `/{sid}/sync-remote`（审计）
+- [x] web：/recordings 页配置行（开关/保留/异地目标/rclone 提示）+
       列表「补推」按钮 + api/types
-- [ ] 测试：归档推送 ok/失败通知/未配置跳过/config 校验全形态/sync-remote
+- [x] 测试：归档推送 ok/失败通知/未配置跳过/config 校验全形态/sync-remote
       全路径/Close 异步不阻塞
-- [ ] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] 文档收尾（本清单勾选）+ todo.md 同步
+
+✅ M2 完成（2026-09-19）：server 6 测试全绿（fake rclone argv 注入同
+server 备份 M2 模式）。落地差异两处：① D18 设计认为「sid 是元数据主键
+天然无穿越面」，实施仍加了 UUID 严格正则（`^[0-9a-f]{8}-…`）前置 400——
+防御纵深零成本，非 UUID 形态根本到不了文件寻址；测试同时覆盖深穿越形态
+被路由分段检查挡在 404 的兜底。② D19 的 Setting 键名在清单草稿里写作
+`recording_remote_dest`，落地统一为点分风格 `recording.remote_dest`（与
+`recording.enabled` / `recording.retention_days` / `server_backup.remote_dest`
+同构）。真机剩余：rclone 真远端（如 gdrive/S3）推送验证（本地 fake rclone
+已覆盖 argv 与失败语义）。
 
 ## M1 清单
 
