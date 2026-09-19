@@ -308,29 +308,49 @@ jobs:
           exit 1
 
       - name: Verify public domain
+        id: verify
         continue-on-error: true
         run: |
           set -euo pipefail
           code=$(curl -s -o /dev/null -w '%{http_code}' -m 20 https://cockpit.cuihairu.site/login || true)
           echo "https://cockpit.cuihairu.site/login → HTTP ${code}"
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+
+      - name: Repair cloudflared origin
+        if: steps.verify.outputs.code != '200'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # 源站已探活通过而公网 502 → tunnel 回源问题。cloudflared 为
+          # token 模式（ingress 在 CF 控制台远程管理），bridge 网络下
+          # service: http://localhost:9000 指向容器自身，恒 502——以
+          # host 网络重建即可，token 原样迁移，tunnel 身份与控制台配置不变
+          mode=$(docker inspect cloudflared --format '{{.HostConfig.NetworkMode}}' 2>/dev/null || echo "missing")
+          echo "cloudflared 网络模式: ${mode}"
+          echo '--- cloudflared 日志尾部（回源错误与地址可见，token 已脱敏） ---'
+          docker logs cloudflared --tail 60 2>&1 \
+            | sed 's/eyJ[A-Za-z0-9._-]*/eyJ***REDACTED***/g' || true
+          if [ "$mode" = "host" ]; then
+            echo '已是 host 网络：请到 CF Zero Trust 控制台核对该 Public Hostname 的 service 应为 http://localhost:9000'
+            exit 0
+          fi
+          token=$(docker inspect cloudflared --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+            | grep '^TUNNEL_TOKEN=' | cut -d= -f2-)
+          if [ -z "$token" ]; then
+            echo '::warning::cloudflared 非 host 网络且无 TUNNEL_TOKEN，无法自动重建——请人工检查'
+            exit 0
+          fi
+          image=$(docker inspect cloudflared --format '{{.Config.Image}}')
+          echo "以 host 网络重建 cloudflared（镜像 ${image}，tunnel 身份不变）..."
+          docker rm -f cloudflared
+          docker run -d --name cloudflared --restart unless-stopped --network host \
+            -e TUNNEL_TOKEN="$token" "$image" tunnel --no-autoupdate run
+          sleep 12
+          docker ps --filter name=cloudflared --format 'table {{.Names}}\t{{.Status}}'
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 20 https://cockpit.cuihairu.site/login || true)
+          echo "重建后 https://cockpit.cuihairu.site/login → HTTP ${code}"
           if [ "$code" != "200" ]; then
-            echo "::warning::公网域名返回 ${code}，请检查 Cloudflare 回源/Tunnel 配置（源站本身已探活通过）"
-            echo '--- cloudflared ingress 诊断（仅域名与回源地址） ---'
-            for cfg in /etc/cloudflared/config.yml "$HOME/.cloudflared/config.yml"; do
-              if [ -f "$cfg" ]; then
-                echo "[$cfg]"
-                grep -E 'ingress|hostname|service' "$cfg" || echo '(无 ingress 规则)'
-              fi
-            done
-            # 本地配置文件不存在 → 大概率 token 模式（ingress 在 Cloudflare
-            # 控制台远程管理）。打印容器启动参数判断模式，token 值脱敏
-            echo '--- cloudflared 容器启动参数 ---'
-            docker inspect cloudflared --format '{{json .Config.Cmd}}' 2>/dev/null | sed 's/eyJ[A-Za-z0-9._-]*/eyJ***REDACTED***/g' || true
-            docker inspect cloudflared --format 'Compose 项目: {{index .Config.Labels "com.docker.compose.project-working_dir"}}' 2>/dev/null || true
-            echo '--- 容器内 ingress 配置 ---'
-            docker exec cloudflared cat /etc/cloudflared/config.yml 2>/dev/null | grep -E 'ingress|hostname|service' || echo '(容器内无 /etc/cloudflared/config.yml)'
-            echo '--- tunnel 相关环境变量（值脱敏） ---'
-            docker inspect cloudflared --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -i tunnel | sed 's/=.*/=***REDACTED***/' || echo '(无 TUNNEL 环境变量)'
+            echo '::warning::host 网络重建后仍非 200——CF 控制台 Public Hostname 的 service 配置请人工核对（应为 http://localhost:9000），诊断日志见上'
           fi
 
       - name: Status
