@@ -75,17 +75,25 @@ serverBackupLoop 到期 / POST /run
 
 ### M2 清单
 
-- [ ] notification：`ServerBackupRemoteFailed = "server_backup.remote-failed"` 常量
-- [ ] server：`server_backup.go`——remote_dest Setting 读写/校验、
+- [x] notification：`ServerBackupRemoteFailed = "server_backup.remote-failed"` 常量
+- [x] server：`server_backup.go`——remote_dest Setting 读写/校验、
       pushServerBackupRemote（超时/日志/通知）、runServerBackup 接线、
       rclone_available 探测
-- [ ] REST：config GET/PUT 加 remote_dest + rclone_available；
+- [x] REST：config GET/PUT 加 remote_dest + rclone_available；
       `POST /{name}/sync-remote`（文件名校验复用 D7 严格模式 + 审计）
-- [ ] web：ServerBackupCard 配置行加「异地目标」输入（校验同正则）+
+- [x] web：ServerBackupCard 配置行加「异地目标」输入（校验同正则）+
       rclone 未安装提示；文件操作列加「补推」按钮（配置了 remote_dest 才显示）
-- [ ] 测试：server 推送 ok/失败通知/未配置跳过/sync-remote 全路径/正则校验/
+- [x] 测试：server 推送 ok/失败通知/未配置跳过/sync-remote 全路径/正则校验/
       超时（fake rclone 脚本同 agent 模式）
-- [ ] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] 文档收尾（本清单勾选）+ todo.md 同步
+
+✅ M2 完成（2026-09-19）：server 7 新测试全绿 + notification 无回归 +
+web tsc 零新增错误（9 存量）+ build 过。实现与设计的落地差异：D15 超时
+除 `exec.CommandContext` 外补了 `cmd.WaitDelay = 1s`——测试暴露
+`CombinedOutput` 的 stdout 管道写端会被 rclone 的子进程（fake 脚本的
+sleep；真实 rclone 正常无子进程链）继承，`Wait` 等管道 EOF 被孤儿拖住
+直到孙进程退出，超时形同虚设；WaitDelay 到期强断管道即恢复语义，无需
+agent M3 D29 的进程组整杀平台分文件（server 侧无自由命令 hook 场景）。
 
 ## M1 清单
 
