@@ -3,8 +3,10 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/cuihairu/cockpit/internal/config"
@@ -71,5 +73,67 @@ func TestCovSendPasswordResetEmailDisabled(t *testing.T) {
 	SetEmailConfig(&config.EmailConfig{Enabled: false, SMTP: &config.SMTPConfig{}})
 	if err := SendPasswordResetEmail("a@b.c", "u", "123456", "t"); err != ErrEmailNotConfigured {
 		t.Errorf("disabled config error = %v, want ErrEmailNotConfigured", err)
+	}
+}
+
+// TestCovHandleLoginTokenSignFail 注入签名失败，覆盖登录处理器
+// 生成 token 失败的 500 分支（HS256 + []byte 密钥下 SignedString 不会失败）。
+func TestCovHandleLoginTokenSignFail(t *testing.T) {
+	db := testAuthDB(t)
+	InitDB(db)
+	if err := db.InitAdminUser("admin", "password123"); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := signLoginToken
+	t.Cleanup(func() { signLoginToken = orig })
+	signLoginToken = func(*Service, string, string, string) (string, error) {
+		return "", errors.New("boom sign")
+	}
+
+	body, _ := json.Marshal(LoginRequest{Username: "admin", Password: "password123"})
+	req := httptest.NewRequest("POST", "/login", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	HandleLogin(w, req)
+	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "Failed to generate token") {
+		t.Fatalf("status = %d body = %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCovGenerateTmpTokenRandFail 注入随机数失败，覆盖临时令牌的
+// 时间戳后备分支。
+func TestCovGenerateTmpTokenRandFail(t *testing.T) {
+	orig := randRead
+	t.Cleanup(func() { randRead = orig })
+	randRead = func([]byte) (int, error) { return 0, errors.New("boom rand") }
+
+	token := generateTmpToken("u1")
+	if !strings.HasPrefix(token, "tmp_") {
+		t.Errorf("fallback token = %q, want tmp_ prefix", token)
+	}
+}
+
+// TestCovGenerateResetTokenRandFail 注入随机数失败，覆盖重置令牌
+// 生成的错误分支。
+func TestCovGenerateResetTokenRandFail(t *testing.T) {
+	orig := randRead
+	t.Cleanup(func() { randRead = orig })
+	randRead = func([]byte) (int, error) { return 0, errors.New("boom rand") }
+
+	if _, _, err := GenerateResetToken("u1", "a@b.c"); err == nil {
+		t.Error("GenerateResetToken with failing rand should fail")
+	}
+}
+
+// TestCovResolveSecretRandFail 注入随机数失败，覆盖随机 JWT secret
+// 的降级分支（回退固定弱密钥）。
+func TestCovResolveSecretRandFail(t *testing.T) {
+	orig := randRead
+	t.Cleanup(func() { randRead = orig })
+	randRead = func([]byte) (int, error) { return 0, errors.New("boom rand") }
+
+	if got := resolveSecret(""); string(got) != "change-me" {
+		t.Errorf("resolveSecret fallback = %q, want change-me", got)
 	}
 }

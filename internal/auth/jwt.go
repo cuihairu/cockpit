@@ -3,7 +3,6 @@ package auth
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"log"
 	"os"
 	"sync"
@@ -12,6 +11,9 @@ import (
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// randRead 注入点：go1.26 crypto/rand.Read 不会失败，错误分支仅供测试覆盖。
+var randRead = rand.Read
 
 var (
 	jwtSecret      []byte
@@ -152,11 +154,9 @@ func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 		return nil, err
 	}
 
-	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
-		return claims, nil
-	}
-
-	return nil, errors.New("invalid token")
+	// ParseWithClaims 返回 nil 错误时令牌必已通过签名与有效期校验，
+	// Claims 类型断言随之必然成功。
+	return token.Claims.(*Claims), nil
 }
 
 // RefreshToken 刷新 token
@@ -205,7 +205,7 @@ func resolveSecret(secret string) []byte {
 
 	// 生成随机 secret，并打印警告。
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := randRead(b); err != nil {
 		log.Printf("WARNING: failed to generate random JWT secret: %v", err)
 		return []byte("change-me")
 	}

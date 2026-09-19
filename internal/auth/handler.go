@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -88,8 +87,9 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 生成 token
-	token, err := s.GenerateToken(user.ID, user.Username, user.Role)
+	// 生成 token（signLoginToken 注入点：HS256 + []byte 密钥下
+	// SignedString 不会失败，错误分支仅供测试覆盖）
+	token, err := signLoginToken(s, user.ID, user.Username, user.Role)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to generate token"}`, http.StatusInternalServerError)
 		return
@@ -163,11 +163,14 @@ type TmpTokenData struct {
 var tmpTokenStore = make(map[string]*TmpTokenData)
 var tmpTokenStoreMutex sync.RWMutex
 
+// signLoginToken 注入点：生产即 Service.GenerateToken。
+var signLoginToken = (*Service).GenerateToken
+
 // generateTmpToken 生成临时令牌
 func generateTmpToken(userID string) string {
 	// 生成 32 字节随机数
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := randRead(b); err != nil {
 		// 如果随机数生成失败，使用时间戳作为后备
 		return fmt.Sprintf("tmp_%d_%s", time.Now().UnixNano(), userID)
 	}

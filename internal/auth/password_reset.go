@@ -60,7 +60,7 @@ func generateVerificationCode() string {
 func GenerateResetToken(userID, email string) (string, string, error) {
 	// 生成32字节随机令牌
 	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
+	if _, err := randRead(tokenBytes); err != nil {
 		return "", "", err
 	}
 	token := hex.EncodeToString(tokenBytes)
