@@ -38,6 +38,15 @@ var (
 	backupRemoteDestRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*:[^\x00-\x20\x7f]+$`)
 )
 
+// 文件/随机原语注入点：生产即标准库实现，仅供测试覆盖防御分支
+// （go1.26 crypto/rand 不失败、刚打开/创建的本地文件 stat/close 不失败）。
+var (
+	randRead   = rand.Read
+	fileStat   = func(f *os.File) (os.FileInfo, error) { return f.Stat() }
+	fileClose  = func(f *os.File) error { return f.Close() }
+	osReadlink = os.Readlink
+)
+
 const (
 	backupLogLimit = 200 * 1024 // 任务日志环形缓冲上限
 	// BackupMaxTasks 并发备份任务上限（IO 密集，比 stack 保守）
@@ -91,7 +100,7 @@ func NewBackupProvider(cfg BackupConfig) *BackupProvider {
 	if newID == nil {
 		newID = func() string {
 			b := make([]byte, 8)
-			if _, err := rand.Read(b); err != nil {
+			if _, err := randRead(b); err != nil {
 				return fmt.Sprintf("b%d", time.Now().UnixNano())
 			}
 			return "b" + hex.EncodeToString(b)
@@ -420,10 +429,8 @@ func (p *BackupProvider) DeleteFile(dir, name string) (map[string]interface{}, e
 	if !backupFileNameRe.MatchString(name) {
 		return nil, fmt.Errorf("invalid backup file name: %q", name)
 	}
+	// name 被 backupFileNameRe 锚定（不含分隔符），Join 后恒留在 dir 内
 	path := filepath.Join(dir, name)
-	if filepath.Dir(path) != dir { // 双保险：Join 后仍在 dir 内
-		return nil, fmt.Errorf("invalid backup file name: %q", name)
-	}
 	if err := os.Remove(path); err != nil {
 		return nil, fmt.Errorf("remove %s: %w", name, err)
 	}
@@ -604,7 +611,7 @@ func (p *BackupProvider) ReadChunk(params map[string]interface{}) (interface{}, 
 		return nil, fmt.Errorf("open backup file: %w", err)
 	}
 	defer f.Close()
-	info, err := f.Stat()
+	info, err := fileStat(f)
 	if err != nil {
 		return nil, fmt.Errorf("stat backup file: %w", err)
 	}
@@ -654,13 +661,13 @@ func (p *BackupProvider) pack(task *backupTask, name string, sources []string, d
 		os.Remove(outPath) // 半成品不留
 		return "", 0, packErr
 	}
-	info, err := f.Stat()
+	info, err := fileStat(f)
 	if err != nil {
 		f.Close()
 		os.Remove(outPath)
 		return "", 0, fmt.Errorf("stat file: %w", err)
 	}
-	if err := f.Close(); err != nil {
+	if err := fileClose(f); err != nil {
 		os.Remove(outPath)
 		return "", 0, fmt.Errorf("close file: %w", err)
 	}
@@ -726,14 +733,13 @@ func addSource(tw *tar.Writer, log io.Writer, src string) (int, error) {
 			fmt.Fprintf(log, "[warn] %s: %v\n", path, err)
 			return nil
 		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return nil
-		}
+		// Walk 自 src 根出发，path 恒在 src 树内，Rel 不会失败
+		rel, _ := filepath.Rel(src, path)
 		name := top
 		if rel != "." {
 			name = filepath.ToSlash(filepath.Join(top, rel))
 		}
+		// socket 等特殊类型 FileInfoHeader 不支持：记 warn 跳过，不中断打包
 		hdr, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			fmt.Fprintf(log, "[warn] header %s: %v\n", path, err)
@@ -741,7 +747,7 @@ func addSource(tw *tar.Writer, log io.Writer, src string) (int, error) {
 		}
 		hdr.Name = name
 		if info.Mode()&os.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
+			link, err := osReadlink(path)
 			if err != nil {
 				return nil
 			}

@@ -60,9 +60,9 @@ func (h *Handler) Handle(msg *protocol.Message) (*protocol.Message, error) {
 
 	// 解析方法格式: <provider>.<action>
 	// 例如: pve.list_vms, docker.list_containers
-	providerType, action, err := parseMethod(req.Method)
-	if err != nil {
-		return nil, err
+	providerType, action, ok := parseMethod(req.Method)
+	if !ok {
+		return nil, fmt.Errorf("invalid method")
 	}
 
 	h.mu.RLock()
@@ -93,16 +93,19 @@ func (h *Handler) Handle(msg *protocol.Message) (*protocol.Message, error) {
 //   - "pve.list" -> provider=pve, action=list
 //   - "docker.containers.list" -> provider=docker, action=containers.list
 //   - "status" -> provider=system, action=status (默认)
-func parseMethod(method string) (string, string, error) {
+//
+// parseMethod 拆分方法名：单段回退 system provider，空段全空（"."）视为非法。
+// 返回 ok 而非 error：拆分本身无失败模式，唯一失败是拆不出任何段。
+func parseMethod(method string) (provider, action string, ok bool) {
 	parts := splitMethod(method)
+	if len(parts) == 0 {
+		return "", "", false
+	}
 	if len(parts) == 1 {
-		return "system", parts[0], nil
+		return "system", parts[0], true
 	}
 
-	providerType := parts[0]
-	action := joinMethod(parts[1:])
-
-	return providerType, action, nil
+	return parts[0], joinMethod(parts[1:]), true
 }
 
 // splitMethod 按点分隔方法字符串，忽略空段

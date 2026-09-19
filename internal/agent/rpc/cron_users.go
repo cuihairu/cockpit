@@ -20,6 +20,9 @@ var cronUserRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 // cronLookPath 可注入（测试替换）
 var cronLookPath = exec.LookPath
 
+// osReadFile 可注入（测试覆盖 /etc/passwd 不可读的兜底失败分支）
+var osReadFile = os.ReadFile
+
 // validateCronUser 空放行（缺省 = 当前运行用户），非空按白名单校验
 func validateCronUser(user string) error {
 	if user == "" {
@@ -72,7 +75,7 @@ func listCronUsers(run Commander) ([]CronUserEntry, error) {
 		}
 		// getent 失败（如 NSS 后端异常）不致命，落 fallback
 	}
-	data, err := os.ReadFile("/etc/passwd")
+	data, err := osReadFile("/etc/passwd")
 	if err != nil {
 		return nil, fmt.Errorf("enumerate users: %w", err)
 	}

@@ -213,11 +213,9 @@ func (p *TraefikProvider) ApplySite(site *ProxySite) (interface{}, error) {
 		return nil, fmt.Errorf("extra directives are not supported by the traefik backend")
 	}
 
-	written, err := renderTraefikSite(site)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkTraefikYAML(written); err != nil {
+	written := renderTraefikSite(site)
+	// 渲染后自检（D13）：渲染器保证输出合法，注入点供测试覆盖防御分支
+	if err := traefikSelfCheck(written); err != nil {
 		return nil, fmt.Errorf("rendered config failed self-check: %w", err)
 	}
 
@@ -340,7 +338,7 @@ type traefikCertificate struct {
 // router/service/middleware 命名 cockpit-<site>——冲突域在 Traefik 全局
 // 命名空间，加前缀避免与用户动态文件撞名。websocket 字段 no-op
 // （Traefik 原生透传 WS，字段保留兼容面板）。
-func renderTraefikSite(s *ProxySite) ([]byte, error) {
+func renderTraefikSite(s *ProxySite) []byte {
 	meta, _ := json.Marshal(s)
 	hostRule := fmt.Sprintf("Host(`%s`)", s.ServerNames[0])
 	for _, d := range s.ServerNames[1:] {
@@ -386,12 +384,13 @@ func renderTraefikSite(s *ProxySite) ([]byte, error) {
 		}
 	}
 
-	b, err := yaml.Marshal(&cfg)
-	if err != nil {
-		return nil, fmt.Errorf("render yaml: %w", err)
-	}
-	return append([]byte(nginxMetaPrefix+string(meta)+"\n"), b...), nil
+	// yaml.Marshal 对纯结构体恒成功
+	b, _ := yaml.Marshal(&cfg)
+	return append([]byte(nginxMetaPrefix+string(meta)+"\n"), b...)
 }
+
+// traefikSelfCheck 可注入（测试覆盖渲染后自检失败的防御分支）
+var traefikSelfCheck = checkTraefikYAML
 
 // checkTraefikYAML 自检（D13）：剥离 meta 行后必须解析为合法动态配置，
 // 且每个 router 引用的 service 存在

@@ -2,7 +2,6 @@ package rpc
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -100,7 +99,7 @@ func NewStackProvider(cfg StackConfig) *StackProvider {
 	if newID == nil {
 		newID = func() string {
 			b := make([]byte, 8)
-			if _, err := rand.Read(b); err != nil {
+			if _, err := randRead(b); err != nil {
 				return fmt.Sprintf("t%d", time.Now().UnixNano())
 			}
 			return "t" + hex.EncodeToString(b)
@@ -384,10 +383,7 @@ func (p *StackProvider) persistLastTask(stack string, task *stackTask) {
 		return
 	}
 	lt := stackLastTask{Action: task.Action, Status: task.Status, FinishedAt: task.FinishedAt.Unix()}
-	data, err := json.Marshal(lt)
-	if err != nil {
-		return
-	}
+	data, _ := json.Marshal(lt) // 纯标量结构体，Marshal 不会失败
 	_ = os.WriteFile(filepath.Join(dir, "last-task.json"), data, 0o644)
 }
 

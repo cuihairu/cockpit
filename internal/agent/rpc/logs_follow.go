@@ -17,6 +17,9 @@ import (
 // （proxy_data，proxyId="logs:<followId>"，与 terminal 前缀模式同构）；
 // 终止统一经 closer 发 proxy_close。上限防打爆 WS 与浏览器。
 
+// execCommandContext 可注入（测试覆盖 StdoutPipe 失败的防御分支）
+var execCommandContext = exec.CommandContext
+
 const (
 	// logsFollowMaxBytes 单会话累计输出上限（到达即停）
 	logsFollowMaxBytes = 4 << 20
@@ -153,10 +156,10 @@ func (p *LogsProvider) FollowStart(params map[string]interface{}) (interface{}, 
 func startFollowCmd(ctx context.Context, q *LogsQuery) (*exec.Cmd, *bufio.Reader, error) {
 	var cmd *exec.Cmd
 	if q.Type == "systemd" {
-		cmd = exec.CommandContext(ctx, "journalctl",
+		cmd = execCommandContext(ctx, "journalctl",
 			"-f", "-n", strconv.Itoa(q.Tail), "-o", "short-iso", "-q", "-u", q.Source)
 	} else {
-		cmd = exec.CommandContext(ctx, "docker",
+		cmd = execCommandContext(ctx, "docker",
 			"logs", "-f", "--tail", strconv.Itoa(q.Tail), "--timestamps", q.Source)
 	}
 	stdout, err := cmd.StdoutPipe()

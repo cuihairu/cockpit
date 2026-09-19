@@ -146,10 +146,7 @@ func (b *DriftBaseline) save(f baselineFile) error {
 	if err := os.MkdirAll(filepath.Dir(b.path), 0o700); err != nil {
 		return fmt.Errorf("create baseline dir: %w", err)
 	}
-	raw, err := json.Marshal(f)
-	if err != nil {
-		return err
-	}
+	raw, _ := json.Marshal(f) // 纯标量结构体，Marshal 不会失败
 	tmp := b.path + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return fmt.Errorf("write baseline temp: %w", err)

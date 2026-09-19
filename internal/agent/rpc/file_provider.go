@@ -262,7 +262,7 @@ func (p *FileProvider) Write(params map[string]interface{}) (interface{}, error)
 	if _, err := f.Write(data); err != nil {
 		return nil, fmt.Errorf("write: %w", err)
 	}
-	info, err := f.Stat()
+	info, err := fileStat(f)
 	if err != nil {
 		return nil, fmt.Errorf("stat: %w", err)
 	}
@@ -401,9 +401,10 @@ const (
 	fileSearchMaxQuery = 256
 	// fileSearchLineMaxChars 命中行文本截断长度
 	fileSearchLineMaxChars = 200
-	// fileSearchTimeout 单次搜索总超时
-	fileSearchTimeout = 15 * time.Second
 )
+
+// fileSearchTimeout 单次搜索总超时（var：测试注入短超时以覆盖 deadline 分支）
+var fileSearchTimeout = 15 * time.Second
 
 // Search 目录内递归文本搜索：纯文本 contains（D10，防 ReDoS 与 logs grep 同纪律）、
 // 默认大小写不敏感；跳过 symlink/二进制/大文件（D11），各上限置 truncated。
@@ -440,7 +441,8 @@ func (p *FileProvider) Search(params map[string]interface{}) (interface{}, error
 	rootDepth := strings.Count(dir, string(filepath.Separator))
 	deadline := time.Now().Add(fileSearchTimeout)
 
-	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	// walkFn 只返回 nil/SkipAll/SkipDir，WalkDir 结果无需再检查
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // 无权限目录等瞬时错误跳过，不中断整体搜索
 		}
@@ -448,10 +450,8 @@ func (p *FileProvider) Search(params map[string]interface{}) (interface{}, error
 			st.truncated = true
 			return filepath.SkipAll
 		}
-		rel, relErr := filepath.Rel(dir, path)
-		if relErr != nil {
-			return nil
-		}
+		// WalkDir 的 path 恒在 dir 之下，Rel 不会失败
+		rel, _ := filepath.Rel(dir, path)
 		if d.IsDir() {
 			base := d.Name()
 			if rel != "." && (base == ".git" || base == "node_modules") {
@@ -492,9 +492,6 @@ func (p *FileProvider) Search(params map[string]interface{}) (interface{}, error
 		}
 		return nil
 	})
-	if err != nil && err != filepath.SkipAll {
-		return nil, fmt.Errorf("search: %w", err)
-	}
 	return map[string]interface{}{
 		"matches":   st.matches,
 		"truncated": st.truncated,

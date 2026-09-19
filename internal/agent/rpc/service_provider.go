@@ -290,6 +290,14 @@ func (p *ServiceProvider) SaveUnitFile(name, content string) (interface{}, error
 }
 
 // atomicWriteFile 临时文件（同目录）+ rename 原子写，不留半截文件
+
+// 文件原语注入点：生产即真实实现，仅供测试覆盖写/权限失败的防御分支
+// （本地临时文件这两步实际不会失败）。
+var (
+	fileWrite = func(f *os.File, b []byte) (int, error) { return f.Write(b) }
+	fileChmod = func(f *os.File, m os.FileMode) error { return f.Chmod(m) }
+)
+
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".cockpit-unit-*")
@@ -302,15 +310,15 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 			_ = os.Remove(tmpName)
 		}
 	}()
-	if _, err := tmp.Write(data); err != nil {
+	if _, err := fileWrite(tmp, data); err != nil {
 		tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(perm); err != nil {
+	if err := fileChmod(tmp, perm); err != nil {
 		tmp.Close()
 		return err
 	}
-	if err := tmp.Close(); err != nil {
+	if err := fileClose(tmp); err != nil {
 		return err
 	}
 	if err := os.Rename(tmpName, path); err != nil {

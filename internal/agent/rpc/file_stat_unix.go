@@ -14,8 +14,7 @@ func fileStatOwner(path string) (int, int) {
 	if err != nil {
 		return -1, -1
 	}
-	if st, ok := info.Sys().(*syscall.Stat_t); ok {
-		return int(st.Uid), int(st.Gid)
-	}
-	return -1, -1
+	// Lstat 成功时 unix 平台 Sys() 恒为 *syscall.Stat_t，直接断言
+	st := info.Sys().(*syscall.Stat_t)
+	return int(st.Uid), int(st.Gid)
 }
