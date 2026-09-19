@@ -280,6 +280,19 @@ func (m *Manager) Reload() error {
 	return m.watcher.ForceReload()
 }
 
+// Consistency inventory 声明与库内实报的一致性比对（drift-design.md M6 D28）
+func (m *Manager) Consistency() (*inventory.ConsistencyReport, error) {
+	inv, err := m.watcher.GetInventory()
+	if err != nil {
+		return nil, err
+	}
+	agents, err := m.db.ListAgents()
+	if err != nil {
+		return nil, err
+	}
+	return inventory.CompareAgents(inv, agents), nil
+}
+
 // Validate validates inventory file
 func (m *Manager) Validate() error {
 	inv, err := m.watcher.GetInventory()

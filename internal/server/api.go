@@ -39,6 +39,9 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleAgentsList(w, r)
 	case path == "/drift/config":
 		s.handleDriftConfig(w, r)
+	case path == "/inventory/consistency":
+		// CMDB 一致性（见 api_inventory.go，drift-design.md M6 D28/D30）
+		s.handleInventoryConsistency(w, r)
 	case path == "/smart/config":
 		s.handleSmartConfig(w, r)
 	case path == "/nas/config":
