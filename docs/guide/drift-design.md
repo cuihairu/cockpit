@@ -76,7 +76,7 @@ drifted 条目从「变没变 + hash 短码」升级为「哪里变了」：基�
 | D19 | 基线存原文 | `BaselineEntry` 加 `Content string`（omitempty；`Record` 时随 hash 一并写入，单条 >256KB 只存 hash 不存原文）；旧基线无原文时 `drift.diff` 明确报「基线无原文（旧版本记录），到对应管理页重新保存一次即可」 | Record 本来就拿到 content，零额外读；写路径下次保存自动补原文，零迁移；基线文件仍 0600 本地；.env 等内容经 diff 返回与文件管理器 read 同权限面（JWT + agent 在线），无新增泄露 |
 | D20 | `drift.diff` | `{kind, name}`：kind 白名单 {nginx, cron, stack}；expected=基线原文，current=实时读（nginx 片段文件 / stack compose.yml 与 .env / cron 读 crontab 后 splitCockpit 取 jobs）；任一侧缺失或 >256KB 拒绝并报原因；**cron 两侧返回前 MarshalIndent 美化**（hash/基线层保持 compact `json.Marshal` 不动——否则升级后旧基线 hash 失配全量误报 drifted；美化只在 diff 展示层） | current 的取法与 check/Record 完全同源（同 marshal），保证 diff 与 hash 判定一致；JSON 美化让 cron 段可按行 diff |
 | D21 | server 端点 | `POST /api/agents/{id}/drift/diff`，body `{kind, name}`：kind 白名单 + name 非空 ≤128 双端同规则校验后转发 `drift.diff`；不审计（浏览性质，与 check 一致） | forwardDriftRPC 复用 |
-| D22 | Web diff 渲染 | drifted 行加「差异」按钮 → Modal：自写 LCS 行级 diff（双方先按行截断 1000 行并标注「内容过长，仅对比前 1000 行」）；统一 diff 着色（del 红=基线有当前无，add 绿=当前新增，same 灰）；页脚提示「核对后到对应管理页重新保存可消除漂移」 | 自写 LCS（整数键 + DP 全表 + 回溯，1000 行 O(n²)≤10⁶ 可接受）避免引入依赖；不做双栏对照（行级统一 diff 更适合配置段落场景） |
+| D22 | Web diff 渲染 | drifted 行加「差异」按钮 → Modal：自写 LCS 行级 diff（双方先按行截断 1000 行并标注「内容过长，仅对比前 1000 行」）；统一 diff 着色（del 红=基线有当前无，add 绿=当前新增，same 灰）；页脚提示「核对后到对应管理页重新保存可消除漂移」 | 自写 LCS（整数键 + DP 全表 + 回溯，1000 行 O(n²)≤10⁶ 可接受）避免引入依赖；不做双栏对照（行级统一 diff 更适合配置段落场景；后被 M5/D26 推翻） |
 
 ### Agent 侧
 
@@ -136,11 +136,31 @@ server——转发与 400 校验；web——tsc + build。
 以当前为准→ok 且基线原文更新、读失败报错、校验拒绝；server——转发参数、
 400 校验不达 agent、审计落库；web——tsc + build。
 
+## M5：双栏对照 diff 与配置着色（2026-09-19）
+
+推翻 D22「不做双栏对照」的范围决策（行级统一 diff 在增删交错时对照不
+直观）。纯 web 升级，零 Go 改动。
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D26 | 双栏对照视图 | DiffModal 加 Segmented「对照 / 统一」切换（默认对照）；`pairDiffLines` 把统一 diff 转行对：same 直通双栏，连续 del/add 块内按序一一配对，多出的一侧独占行；缺位半边画底纹 | 配对在渲染层完成，lineDiff 的 LCS 输出不动；统一视图保留（窄窗口与整段复制场景） |
+| D27 | 配置轻量着色 | `configHighlight.ts` 单行无状态词法：注释行 / 行首键（yaml `key:`、env `KEY=`、json `"key":` 带引号整体）/ nginx 首词指令（仅 `word …;` 与 `word … {` 形态才认）/ 引号串 / 独立数字（两侧不贴词字符或点）/ `{};` 标点；不做跨行解析状态、不猜行内 `#` 注释 | 宁缺毋错：覆盖 cockpit 下发四类内容（nginx conf、Traefik/compose YAML、cron JSON、.env）足矣；不引语法高亮依赖 |
+
+### Web 侧
+
+- `lineDiff.ts` 加 `pairDiffLines`（统一 diff → 双栏行对）；新增
+  `configHighlight.ts`（着色词法，返回 span 序列）；
+- DiffModal：Segmented 视图切换（默认对照）+ 两种视图共用着色与截断
+  提示；Modal 宽度 960→1080（双栏需要更宽）。
+
+**测试**：web——tsc + build + tsx 运行时校验（注释行 / yaml 键 / nginx 指令
+与端口数字 / env 键值 / JSON 键与串值 / `hunter2` 值不误染 / 行内 `#` 不猜
+注释；双栏配对 del/add 对齐、多出一侧独占行）。
+
 ## 不做（后续版本）
 
 - nginx 非 cockpit 片段、外部 crontab 条目、docker 卷内容检测；
-- inventory 声明字段（hostname/IP/状态）与 agent 实报的一致性高亮；
-- 双栏对照式 diff / diff 语法高亮（行级统一 diff 先覆盖配置段落场景）。
+- inventory 声明字段（hostname/IP/状态）与 agent 实报的一致性高亮。
 
 ## M1 清单
 
