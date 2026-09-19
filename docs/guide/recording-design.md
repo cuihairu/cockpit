@@ -53,7 +53,48 @@ server ← agent 双向转发），**录制挂在 server 侧的转发管道上**
 - VNC/RDP 桌面流录制（WebM/图片序列，体积大回放重）；
 - 输入事件录制（密码泄漏风险，见 D4）；
 - 实时旁观（live tail 进行中的会话）；
-- 录制文件的导出归档（S3/rclone，与备份异地同路线，等备份 M2 一起做）。
+- ~~录制文件的导出归档（S3/rclone，与备份异地同路线，等备份 M2 一起做）~~
+  → M2 立项（2026-09-19，前置路线 backup-design.md M2 与
+  server-backup-design.md M2 的 rclone 模式均已落地）。
+
+## M2：录制归档异地 + 配置入口（2026-09-19 设计）
+
+### 痛点
+
+录制是远控审计的唯一留痕，但本地 `.cast` 文件默认 7 天即被 retention
+删除，且与 cockpit.db 同盘——磁盘故障时审计记录与库一起消失。备份 M2
+（agent rclone）与 server 备份 M2 已建立完整的 remote:path 推送模式，
+录制归档复用同一条路线：录制结束即推异地，retention 只删本地，远端成为
+长期审计归档。
+
+顺手补 M1 缺口：`recording.enabled` / `recording.retention_days` 两个
+Setting 至今没有 REST/UI 写入口（只能直改库）——M2 一并补配置端点。
+
+### 决策
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D14 | 配置 | Setting `recording.remote_dest`（空=关闭），写时校验与 server 备份 M2 D13 同源（remote:path 正则 + 512 上限），读时脏值视为未配置 | 三备份/归档模块同一规则；凭据只在 server 主机 rclone.conf，零入库 |
+| D15 | 共用执行器 | 抽 `rcloneCopyLocalFile(local, remoteDest)`（exec copy --transfers 2 + 5min 超时 + WaitDelay 强断管道 + stderr 摘要），server 备份推送与录制归档共用；包级 var 改名 `serverRcloneBin` | 两处逐字同构，抽取消除漂移；WaitDelay 语义见 server-backup M2 差异补记 |
+| D16 | 时机 | 录制 `Close` 回填元数据的 finish 回调里**异步**推送（goroutine）：不拖会话出口路径；`.cast` 是已关闭的完整文件，单文件 copy 秒级 | 会话关闭路径同步 exec 会延迟 ws 清理；录制文件无需「推送失败中止」语义（D28 反例——审计留痕迟到可接受，丢失才致命） |
+| D17 | 失败语义 | 记 `[remote]` 日志 + 新事件 `recording.remote-failed`（白名单显式启用）：本地档仍在，retention 窗口内可手动补推；推送成功不通知 | 对称 backup.remote-failed / server_backup.remote-failed；retention 删除后失败档即永久丢失，通知是唯一可感知面 |
+| D18 | 手动补推 | `POST /api/recordings/{sid}/sync-remote`：按当前 remote_dest 推送，记审计 `recording sync_remote`（action=update） | 三模块对称；sid 是元数据主键天然无穿越面，文件不存在 404 |
+| D19 | 配置端点 | `GET/PUT /api/recordings/config`：enabled（bool）/ retention_days（0-365）/ remote_dest（正则校验）+ rclone_available 实时探测；web /recordings 页顶部加配置行 | 补 M1 缺口（Setting 无写入口）；配置放使用场景不进全局 Settings（drift D18 同款） |
+
+retention 只删本地文件与记录（远端归档不清理——rclone copy 幂等不删远端，
+清理远端有误删唯一归档的风险，文档说明即可）。
+
+### M2 清单
+
+- [ ] notification：`RecordingRemoteFailed = "recording.remote-failed"` 常量
+- [ ] server：`rcloneCopyLocalFile` 抽取（server 备份改调，行为不变）+
+      recording 远端推送（Close 异步）+ `recording_remote_dest` Setting
+- [ ] REST：`/api/recordings/config` GET/PUT + `/{sid}/sync-remote`（审计）
+- [ ] web：/recordings 页配置行（开关/保留/异地目标/rclone 提示）+
+      列表「补推」按钮 + api/types
+- [ ] 测试：归档推送 ok/失败通知/未配置跳过/config 校验全形态/sync-remote
+      全路径/Close 异步不阻塞
+- [ ] 文档收尾（本清单勾选）+ todo.md 同步
 
 ## M1 清单
 
