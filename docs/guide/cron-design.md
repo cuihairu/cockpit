@@ -207,6 +207,24 @@ jobs/apply/delete 全链路；server——`?user=` 校验（非法 400/合法透
 缺省不传）、users 端点转发、审计 details 带 user（缺省不带）；web——
 tsc 零新增 + build。
 
+## M4 清单
+
+- [x] agent：`cron_provider.go` user 参数（Call 入口校验即拒）+ 读写
+      user 维度 + StatusAs 指定用户不 whoami；`cron_users.go` 枚举
+      （getent 优先 / /etc/passwd 兜底）
+- [x] server：`GET /cron/users` 不审计 + 四端点 `?user=` 双端同规则校验
+      + 审计 details 记 user（仅显式指定）
+- [x] web：types + api user 参数/getCronUsers + Cron 页目标用户
+      AutoComplete（枚举下拉 + 手输）
+- [x] 测试：agent 8 新测试 + server 3 新测试全绿（agent/server 全包
+      -race 过）；web tsc 零新增（基线 9 不变）+ build 过
+- [x] 文档收尾（本清单勾选）+ todo.md 同步
+
+✅ M4 完成（2026-09-19）。落地差异补记：① D24 行文的「Select」落地为
+**AutoComplete**——枚举是建议下拉、任意合法名可直接手输，恰好满足同决策
+「枚举失败不阻塞手输」的要求；② agent 侧公共方法保留无参版本（现有调用
+点与 drift 基线挂钩零破坏），user 能力经 `*As` 变体在 Call 层分流。
+
 ## 不做（后续项）
 
 - 执行历史 / 失败告警：需包装器或日志采集，属日志聚合范畴；
