@@ -14,8 +14,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/notification"
 )
+
+// osChmod 注入点：TempDir 内 chmod 恒成功，失败告警分支仅供测试覆盖。
+var osChmod = os.Chmod
+
+// authGenerateResetToken 注入点：重置令牌生成仅 crypto/rand 失败可达，
+// 错误分支仅供测试覆盖。
+var authGenerateResetToken = auth.GenerateResetToken
+
+// serviceGenerateToken 注入点：TOTP 验证后的会话签发仅 crypto/rand 失败
+// 可达，错误分支仅供测试覆盖。
+var serviceGenerateToken = (*auth.Service).GenerateToken
 
 // Server 自身 SQLite 备份（见 docs/guide/server-backup-design.md）：
 // VACUUM INTO 在线产生紧凑副本到 <db目录>/server-backups/，目录即事实源
@@ -213,7 +225,7 @@ func (s *Server) runServerBackup() (string, error) {
 		os.Remove(path) // 半成品不留
 		return "", fmt.Errorf("vacuum into: %w", err)
 	}
-	if err := os.Chmod(path, 0600); err != nil {
+	if err := osChmod(path, 0600); err != nil {
 		log.Printf("Server backup chmod %s failed: %v", name, err)
 	}
 	log.Printf("Server DB backup created: %s", name)

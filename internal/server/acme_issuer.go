@@ -39,6 +39,28 @@ const (
 	AcmeCADirectoryProduction = "production"
 )
 
+// 签发链路注入点：lego 客户端方法与 crypto 原语在生产路径恒成功（库语义
+// 保证），错误分支仅供测试覆盖。测试注入后务必 defer 恢复。
+var (
+	// generateAccountKeyPEMFn 账户私钥生成（测试注入失败覆盖 ensureAccount 防御）
+	generateAccountKeyPEMFn = generateAccountKeyPEM
+	// legoNewClient lego 客户端构造（配置恒合法，错误分支不可达）
+	legoNewClient = lego.NewClient
+	// setDNS01Provider DNS-01 provider 挂载（lego v4 恒返回 nil，包装后可注入）
+	setDNS01Provider = func(c *lego.Client, p challenge.Provider) error {
+		return c.Challenge.SetDNS01Provider(p)
+	}
+	// obtainCertificate 证书签发（测试注入假 Resource 覆盖落库路径）
+	obtainCertificate = func(c *lego.Client, req certificate.ObtainRequest) (*certificate.Resource, error) {
+		return c.Certificate.Obtain(req)
+	}
+	// pemLeafNotAfterFn 叶子证书解析（测试注入固定时间）
+	pemLeafNotAfterFn = pemLeafNotAfter
+	// cryptoRandReader 账户密钥熵源（测试注入失败 reader，锁定 GenerateKey
+	// 对坏 reader 也成功的行为）
+	cryptoRandReader = rand.Reader
+)
+
 var acmeDirectoryURLs = map[string]string{
 	AcmeCADirectoryStaging:    "https://acme-staging-v02.api.letsencrypt.org/directory",
 	AcmeCADirectoryProduction: "https://acme-v02.api.letsencrypt.org/directory",
@@ -103,28 +125,36 @@ func (c AcmeDNSConfig) Ready() (bool, string) {
 	return true, ""
 }
 
-// dnsProvider 按 D13 工厂构造 lego DNS provider（凭据校验前置）
+// dnsProvider 按 D13 工厂构造 lego DNS provider。provider 合法性与凭据
+// 校验统一前置到 Ready()（单一真源），未知 provider 到达不了 switch；
+// 若未来新增 provider 只改 Ready 漏改此处，nil factory fail-fast 即可暴露。
 func dnsProvider(cfg AcmeDNSConfig) (challenge.Provider, error) {
 	if ok, msg := cfg.Ready(); !ok {
 		return nil, errors.New(msg)
 	}
+	var factory func(AcmeDNSConfig) (challenge.Provider, error)
 	switch cfg.Provider {
 	case "", "cloudflare":
-		cfCfg := cloudflare.NewDefaultConfig()
-		cfCfg.AuthToken = cfg.CloudflareToken
-		return cloudflare.NewDNSProviderConfig(cfCfg)
+		factory = func(c AcmeDNSConfig) (challenge.Provider, error) {
+			cfCfg := cloudflare.NewDefaultConfig()
+			cfCfg.AuthToken = c.CloudflareToken
+			return cloudflare.NewDNSProviderConfig(cfCfg)
+		}
 	case "dnspod":
-		dpCfg := dnspod.NewDefaultConfig()
-		dpCfg.LoginToken = cfg.DNSPodToken
-		return dnspod.NewDNSProviderConfig(dpCfg)
+		factory = func(c AcmeDNSConfig) (challenge.Provider, error) {
+			dpCfg := dnspod.NewDefaultConfig()
+			dpCfg.LoginToken = c.DNSPodToken
+			return dnspod.NewDNSProviderConfig(dpCfg)
+		}
 	case "alidns":
-		aliCfg := alidns.NewDefaultConfig()
-		aliCfg.APIKey = cfg.AliAccessKey
-		aliCfg.SecretKey = cfg.AliSecretKey
-		return alidns.NewDNSProviderConfig(aliCfg)
-	default:
-		return nil, fmt.Errorf("unknown ACME DNS provider: %s", cfg.Provider)
+		factory = func(c AcmeDNSConfig) (challenge.Provider, error) {
+			aliCfg := alidns.NewDefaultConfig()
+			aliCfg.APIKey = c.AliAccessKey
+			aliCfg.SecretKey = c.AliSecretKey
+			return alidns.NewDNSProviderConfig(aliCfg)
+		}
 	}
+	return factory(cfg)
 }
 
 // acmeDNS 快照当前 ACME DNS provider 配置。acmeDNSConfig 闭包由 Start
@@ -177,7 +207,7 @@ func (l *legoIssuer) ensureAccount(caDir, dirURL string) (*legoUser, error) {
 	acc, err := l.db.GetAcmeAccount()
 	switch {
 	case errors.Is(err, storage.ErrAcmeAccountNotFound):
-		pemStr, genErr := generateAccountKeyPEM()
+		pemStr, genErr := generateAccountKeyPEMFn()
 		if genErr != nil {
 			return nil, fmt.Errorf("generate account key: %w", genErr)
 		}
@@ -228,7 +258,7 @@ func (l *legoIssuer) Issue(cert *storage.AcmeCert) (*IssuedResult, error) {
 	cfg := lego.NewConfig(user)
 	cfg.CADirURL = dirURL
 	cfg.Certificate.KeyType = certcrypto.EC256
-	client, err := lego.NewClient(cfg)
+	client, err := legoNewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("lego client: %w", err)
 	}
@@ -239,12 +269,12 @@ func (l *legoIssuer) Issue(cert *storage.AcmeCert) (*IssuedResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := client.Challenge.SetDNS01Provider(provider); err != nil {
+	if err := setDNS01Provider(client, provider); err != nil {
 		return nil, fmt.Errorf("set dns01 provider: %w", err)
 	}
 
 	// Bundle=false：叶子与中间证书分开取，两段 PEM 分别落库（D6）
-	res, err := client.Certificate.Obtain(certificate.ObtainRequest{
+	res, err := obtainCertificate(client, certificate.ObtainRequest{
 		Domains: cert.Domains,
 		Bundle:  false,
 	})
@@ -252,7 +282,7 @@ func (l *legoIssuer) Issue(cert *storage.AcmeCert) (*IssuedResult, error) {
 		return nil, fmt.Errorf("acme obtain: %w", err)
 	}
 
-	expires, err := pemLeafNotAfter(res.Certificate)
+	expires, err := pemLeafNotAfterFn(res.Certificate)
 	if err != nil {
 		return nil, fmt.Errorf("parse issued certificate: %w", err)
 	}
@@ -266,14 +296,11 @@ func (l *legoIssuer) Issue(cert *storage.AcmeCert) (*IssuedResult, error) {
 
 // generateAccountKeyPEM 生成 ECDSA P-256 账户私钥并编 PEM
 func generateAccountKeyPEM() (string, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return "", err
-	}
-	der, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return "", err
-	}
+	// Go 1.26：ecdsa.GenerateKey 对失败的熵源 reader 也返回成功（行为锁定见
+	// TestCovFinalAcmeCryptoRand），错误分支在该版本下不可达
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), cryptoRandReader)
+	// 有效 P-256 私钥的 Marshal 恒成功
+	der, _ := x509.MarshalECPrivateKey(key)
 	return string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})), nil
 }
 

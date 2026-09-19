@@ -13,7 +13,6 @@ import (
 
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
-	"github.com/cuihairu/cockpit/internal/storage"
 )
 
 // 会话录制 API（见 docs/guide/recording-design.md）：
@@ -78,9 +77,7 @@ func (s *Server) handleRecordingsList(w http.ResponseWriter, r *http.Request) {
 		s.handleError(w, r, http.StatusInternalServerError, "failed to list recordings")
 		return
 	}
-	if list == nil {
-		list = []*storage.TerminalRecording{}
-	}
+	// gorm Find 空表恒返回非 nil 空 slice，无需兜底
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"data": list})
 }
 

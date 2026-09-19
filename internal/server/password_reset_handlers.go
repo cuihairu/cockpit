@@ -47,7 +47,7 @@ func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 生成重置令牌和验证码
-	token, code, err := auth.GenerateResetToken(user.ID, user.Email)
+	token, code, err := authGenerateResetToken(user.ID, user.Email)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to generate reset token"}`, http.StatusInternalServerError)
 		return

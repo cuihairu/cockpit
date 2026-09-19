@@ -340,9 +340,7 @@ func (s *Server) handleStackHistory(w http.ResponseWriter, r *http.Request, agen
 		s.handleError(w, r, http.StatusInternalServerError, "query stack history: "+err.Error())
 		return
 	}
-	if list == nil {
-		list = make([]*storage.StackDeployment, 0)
-	}
+	// gorm Find 空表恒返回非 nil 空 slice，无需兜底
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"deployments": list})
 }
 

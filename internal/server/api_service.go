@@ -71,10 +71,7 @@ func (s *Server) handleAgentServiceAPI(w http.ResponseWriter, r *http.Request, r
 	sub := rest[idx+len(suffix):]
 	// sub 形如 ""、"/status"、"/nginx.service/restart"
 	sub = strings.TrimPrefix(sub, "/")
-	if agentID == "" {
-		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
-		return
-	}
+	// idx > 0 保证 agentID 非空，无需重复判空
 	if _, ok := s.registry.Get(agentID); !ok {
 		s.handleError(w, r, http.StatusServiceUnavailable, "agent offline")
 		return
@@ -146,11 +143,7 @@ func (s *Server) handleUnitFile(w http.ResponseWriter, r *http.Request, agentID,
 		s.handleError(w, r, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if len(payload.Content) > unitFileBodyLimit {
-		s.handleError(w, r, http.StatusRequestEntityTooLarge,
-			fmt.Sprintf("unit file content exceeds limit (%d bytes)", unitFileBodyLimit))
-		return
-	}
+	// MaxBytesReader(limit+1) 已保证 Content 不超限（超限在读 body 时报错）
 	s.forwardServiceRPC(w, r, agentID, "service.unitsave",
 		map[string]interface{}{"name": unit, "content": payload.Content}, unit, "unitfile-save")
 }

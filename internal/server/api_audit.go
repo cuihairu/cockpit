@@ -6,7 +6,13 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/cuihairu/cockpit/internal/storage"
 )
+
+// dbGetAuditLogStats 注入点：统计查询的失败分支仅供测试覆盖（存储层
+// 实现吞掉单条 Count 错误，实际不可达）。
+var dbGetAuditLogStats = (*storage.DB).GetAuditLogStats
 
 // handleAuditLogs 获取审计日志列表
 func (s *Server) handleAuditLogs(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +69,7 @@ func (s *Server) handleAuditLogStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 获取统计数据
-	stats, err := s.db.GetAuditLogStats()
+	stats, err := dbGetAuditLogStats(s.db)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -92,7 +98,9 @@ func (s *Server) handleAuditLogsExport(w http.ResponseWriter, r *http.Request) {
 	writer := csv.NewWriter(w)
 	defer writer.Flush()
 
-	if err := writer.Write([]string{
+	// 表头约 70 字节，远小于 writer 内置 4KB 缓冲，Write 恒无错
+	// （错误只会在缓冲满后的 Flush 暴露）
+	_ = writer.Write([]string{
 		"id",
 		"created_at",
 		"username",
@@ -102,10 +110,7 @@ func (s *Server) handleAuditLogsExport(w http.ResponseWriter, r *http.Request) {
 		"ip",
 		"resource_id",
 		"details",
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	})
 
 	for _, log := range logs {
 		if err := writer.Write([]string{

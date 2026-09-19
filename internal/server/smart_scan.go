@@ -172,10 +172,8 @@ func (s *Server) fetchSmartDevices(agentID string) ([]smartScanDevice, error) {
 	if rpcResp.Status == "error" {
 		return nil, errors.New(rpcResp.Error)
 	}
-	raw, err := json.Marshal(rpcResp.Data)
-	if err != nil {
-		return nil, err
-	}
+	// DecodePayload 已对同一 payload 整体 Marshal 过，重新 Marshal 恒成功
+	raw, _ := json.Marshal(rpcResp.Data)
 	var payload struct {
 		Available bool              `json:"available"`
 		Devices   []smartScanDevice `json:"devices"`

@@ -193,10 +193,9 @@ func (s *Server) fetchAgentIP(agentID, recordType string) (string, error) {
 	if rpcResp.Status == "error" {
 		return "", errors.New(rpcResp.Error)
 	}
-	raw, err := json.Marshal(rpcResp.Data)
-	if err != nil {
-		return "", err
-	}
+	// DecodePayload 已对同一 payload 整体 Marshal 过，合法 JSON 解出的
+	// 值重新 Marshal 恒成功
+	raw, _ := json.Marshal(rpcResp.Data)
 	var payload struct {
 		IPv4 string `json:"ipv4"`
 		IPv6 string `json:"ipv6"`

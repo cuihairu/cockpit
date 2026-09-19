@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// randRead 注入点：crypto/rand.Read 实际不会失败，票据生成的错误分支
+// 仅供测试覆盖（api_remote 的 GenerateTicket 失败路径随之可达）。
+var randRead = rand.Read
+
 // Ticket 一次性短期 WebSocket 连接凭证
 type Ticket struct {
 	ID        string
@@ -41,7 +45,7 @@ func (tm *TicketManager) GenerateTicket(userID, username string, params map[stri
 
 	// 生成随机票据ID（16字节）
 	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := randRead(b); err != nil {
 		return nil, err
 	}
 	ticketID := hex.EncodeToString(b)

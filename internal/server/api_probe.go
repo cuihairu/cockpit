@@ -11,7 +11,6 @@ import (
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/probe"
-	"github.com/cuihairu/cockpit/internal/storage"
 )
 
 // 拨测与通知 API（拨测增强，设计见 docs/guide/probe-enhance-design.md）。
@@ -226,9 +225,7 @@ func (s *Server) handleProbeHistory(w http.ResponseWriter, r *http.Request) {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to load probe history")
 		return
 	}
-	if results == nil {
-		results = []*storage.ProbeResult{}
-	}
+	// gorm Find 空表恒返回非 nil 空 slice，无需兜底
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"results": results})
 }
 

@@ -9,6 +9,14 @@ import (
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
+// TOTP 流程注入点：备份码/加密/哈希/会话签发的错误分支仅 crypto/rand
+// 失败或存储异常可达，生产路径恒成功，仅供测试覆盖。
+var (
+	storageGenerateBackupCodes = storage.GenerateBackupCodes
+	storageEncrypt             = storage.Encrypt
+	storageHashBackupCodes     = storage.HashBackupCodes
+)
+
 // TOTPGenerateResponse TOTP 生成响应
 type TOTPGenerateResponse struct {
 	Secret      string   `json:"secret"`
@@ -79,21 +87,21 @@ func (s *Server) handleTOTPGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 生成备份码
-	backupCodes, err := storage.GenerateBackupCodes()
+	backupCodes, err := storageGenerateBackupCodes()
 	if err != nil {
 		http.Error(w, `{"error":"Failed to generate backup codes"}`, http.StatusInternalServerError)
 		return
 	}
 
 	// 加密密钥
-	encryptedSecret, err := storage.Encrypt(secret)
+	encryptedSecret, err := storageEncrypt(secret)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to encrypt secret"}`, http.StatusInternalServerError)
 		return
 	}
 
 	// 哈希备份码
-	hashedBackupCodes, err := storage.HashBackupCodes(backupCodes)
+	hashedBackupCodes, err := storageHashBackupCodes(backupCodes)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to hash backup codes"}`, http.StatusInternalServerError)
 		return
@@ -229,7 +237,7 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	auth.ConsumeTmpToken(req.TmpToken)
 
 	// 生成认证令牌
-	token, err := s.authService().GenerateToken(user.ID, user.Username, user.Role)
+	token, err := serviceGenerateToken(s.authService(), user.ID, user.Username, user.Role)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to generate token"}`, http.StatusInternalServerError)
 		return

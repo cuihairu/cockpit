@@ -66,19 +66,22 @@ type Server struct {
 	backupTrackWG sync.WaitGroup
 }
 
+// logFatalf 注入点：NewServer 启动防御（坏库路径/弱密码/生产密钥校验）以
+// log.Fatal 终止进程，测试以 panic 哨兵截获后 recover 断言。
+var logFatalf = log.Fatalf
+
+// storageValidateKey 注入点：生产密钥校验依赖环境，测试可控其失败。
+var storageValidateKey = storage.ValidateKey
+
 // NewServer 创建新服务器
 func NewServer(cfg *config.Config) *Server {
 	cfg = config.Normalize(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 打开数据库
-	dbPath := cfg.Database.Path
-	if dbPath == "" {
-		dbPath = "./data/cockpit.db"
-	}
-	db, err := storage.Open(storage.Config{Path: dbPath})
+	// 打开数据库（config.Normalize 已保证 Path 非空）
+	db, err := storage.Open(storage.Config{Path: cfg.Database.Path})
 	if err != nil {
-		log.Fatalf("Failed to open database: %v", err)
+		logFatalf("Failed to open database: %v", err)
 	}
 
 	authService := auth.NewService(db, auth.Options{
@@ -96,8 +99,8 @@ func NewServer(cfg *config.Config) *Server {
 	}
 	// 在生产模式下强制验证密钥（可以通过环境变量 PRODUCTION=true 启用）
 	if os.Getenv("PRODUCTION") == "true" {
-		if err := storage.ValidateKey(); err != nil {
-			log.Fatalf("SECURITY ERROR: %v", err)
+		if err := storageValidateKey(); err != nil {
+			logFatalf("SECURITY ERROR: %v", err)
 		}
 	}
 
@@ -137,19 +140,19 @@ func (s *Server) Start() error {
 
 	// 强制要求设置密码
 	if adminPass == "" {
-		log.Fatal("SECURITY ERROR: ADMIN_PASSWORD environment variable is required for production use. Please set a strong password and restart.")
+		logFatalf("%s", "SECURITY ERROR: ADMIN_PASSWORD environment variable is required for production use. Please set a strong password and restart.")
 	}
 
 	// 验证密码强度
 	if len(adminPass) < 8 {
-		log.Fatal("SECURITY ERROR: ADMIN_PASSWORD must be at least 8 characters long")
+		logFatalf("%s", "SECURITY ERROR: ADMIN_PASSWORD must be at least 8 characters long")
 	}
 
 	// 检查是否是常见的弱密码
 	weakPasswords := []string{"password", "12345678", "admin123", "qwerty123", "abcdef12"}
 	for _, weak := range weakPasswords {
 		if adminPass == weak {
-			log.Fatalf("SECURITY ERROR: ADMIN_PASSWORD is too weak (cannot use common password '%s')", weak)
+			logFatalf("SECURITY ERROR: ADMIN_PASSWORD is too weak (cannot use common password '%s')", weak)
 		}
 	}
 

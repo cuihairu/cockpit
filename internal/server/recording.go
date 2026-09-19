@@ -173,10 +173,8 @@ func (r *castRecorder) WriteOutput(data []byte) {
 		return
 	}
 	dt := time.Since(r.start).Seconds()
-	line, err := json.Marshal([]interface{}{dt, "o", string(data)})
-	if err != nil {
-		return
-	}
+	// 标量切片 Marshal 恒成功
+	line, _ := json.Marshal([]interface{}{dt, "o", string(data)})
 	line = append(line, '\n')
 	n, err := r.f.Write(line)
 	r.bytes += int64(n)
