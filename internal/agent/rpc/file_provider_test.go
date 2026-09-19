@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -529,5 +530,85 @@ func TestFileSearchDepthLimit(t *testing.T) {
 	}
 	if !out["truncated"].(bool) {
 		t.Error("truncated should mark depth skip")
+	}
+}
+
+// TestFileChmodChown 权限编辑（file-manager-design M4/D20）：chmod 生效
+// 回读、chown 原值改写（非 root 环境只能改回自己）、symlink/越界/缺参拒绝
+func TestFileChmodChown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission semantics")
+	}
+	p := newFileTestProvider()
+	path := filepath.Join(t.TempDir(), "f.txt")
+	mustWrite(t, path, "x")
+
+	// chmod roundtrip：0600 → 0644，返回合成八进制
+	os.Chmod(path, 0o600)
+	resp, err := callFile(t, p, "chmod", map[string]interface{}{"path": path, "mode": float64(0o644)})
+	if err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if resp.(map[string]interface{})["mode"] != "0644" {
+		t.Errorf("chmod resp = %+v", resp)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("perm after chmod = %v %v", info.Mode().Perm(), err)
+	}
+
+	// chown 改回自身 uid/gid（非 root 下同值合法；root 下任意值也合法）
+	uid, gid := fileStatOwner(path)
+	if _, err := callFile(t, p, "chown", map[string]interface{}{
+		"path": path, "uid": float64(uid), "gid": float64(gid),
+	}); err != nil {
+		t.Fatalf("chown same ids: %v", err)
+	}
+	if u2, g2 := fileStatOwner(path); u2 != uid || g2 != gid {
+		t.Errorf("owner changed: %d:%d → %d:%d", uid, gid, u2, g2)
+	}
+
+	// list 含 uid/gid（unix 上非负）
+	list, err := p.List(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := list.(map[string]interface{})["entries"].([]map[string]interface{})[0]
+	if uid < 0 || entry["uid"].(int) != uid || entry["gid"].(int) != gid {
+		t.Errorf("list uid/gid = %+v, want %d:%d", entry["uid"], uid, gid)
+	}
+
+	// symlink 拒绝（不跟随）
+	link := filepath.Join(t.TempDir(), "l.txt")
+	os.Symlink(path, link)
+	if _, err := callFile(t, p, "chmod", map[string]interface{}{"path": link, "mode": float64(0o644)}); err == nil {
+		t.Error("chmod on symlink should be rejected")
+	}
+	if _, err := callFile(t, p, "chown", map[string]interface{}{"path": link, "uid": float64(0), "gid": float64(0)}); err == nil {
+		t.Error("chown on symlink should be rejected")
+	}
+
+	// 数值校验：mode 越界 / 非整数 / 缺参；uid 越界
+	for _, tc := range []struct {
+		name   string
+		action string
+		params map[string]interface{}
+	}{
+		{"mode beyond 0777", "chmod", map[string]interface{}{"path": path, "mode": float64(0o10000)}},
+		{"mode fractional", "chmod", map[string]interface{}{"path": path, "mode": 64.5}},
+		{"mode missing", "chmod", map[string]interface{}{"path": path}},
+		{"uid beyond uint32", "chown", map[string]interface{}{"path": path, "uid": float64(1 << 32), "gid": float64(0)}},
+		{"chown missing gid", "chown", map[string]interface{}{"path": path, "uid": float64(0)}},
+	} {
+		if _, err := callFile(t, p, tc.action, tc.params); err == nil {
+			t.Errorf("%s: should be rejected", tc.name)
+		}
+	}
+
+	// 路径不存在 / 相对路径
+	if _, err := callFile(t, p, "chmod", map[string]interface{}{"path": "/nonexistent/xx", "mode": float64(0o644)}); err == nil {
+		t.Error("missing path should fail")
+	}
+	if _, err := callFile(t, p, "chown", map[string]interface{}{"path": "rel/path", "uid": float64(0), "gid": float64(0)}); err == nil {
+		t.Error("relative path should fail")
 	}
 }

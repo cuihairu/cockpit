@@ -56,6 +56,10 @@ func (p *FileProvider) Call(action string, params map[string]interface{}) (inter
 		return p.Delete(paramString(params, "path"))
 	case "rename":
 		return p.Rename(paramString(params, "path"), paramString(params, "name"))
+	case "chmod":
+		return p.Chmod(params)
+	case "chown":
+		return p.Chown(params)
 	case "search":
 		return p.Search(params)
 	default:
@@ -110,11 +114,14 @@ func (p *FileProvider) List(dir string) (interface{}, error) {
 			continue // 竞态删除等瞬时错误跳过
 		}
 		isDir := info.IsDir()
+		uid, gid := fileStatOwner(full)
 		out = append(out, map[string]interface{}{
 			"name":      e.Name(),
 			"size":      info.Size(),
 			"mode":      fmt.Sprintf("%04o", uint32(info.Mode().Perm())),
 			"mtime":     info.ModTime().Unix(),
+			"uid":       uid,
+			"gid":       gid,
 			"isDir":     isDir,
 			"isSymlink": isSymlink,
 			"target":    target,
@@ -306,6 +313,77 @@ func (p *FileProvider) Rename(path, name string) (interface{}, error) {
 		return nil, fmt.Errorf("rename: %w", err)
 	}
 	return map[string]interface{}{"path": target}, nil
+}
+
+// ============ 权限编辑（见 file-manager-design.md M4，D20-D21） ============
+
+// fileMaxID uid/gid 上限（uint32 语义）
+const fileMaxID = 1<<32 - 1
+
+// chmodChownTarget 校验路径并拒绝 symlink（D7 延伸：对链接 chmod/chown
+// 会作用到目标，给「不跟随」纪律开例外）
+func chmodChownTarget(path string) (string, os.FileInfo, error) {
+	cleaned, err := cleanAbsPath(path, "path")
+	if err != nil {
+		return "", nil, err
+	}
+	info, err := os.Lstat(cleaned)
+	if err != nil {
+		return "", nil, fmt.Errorf("path not found: %s", cleaned)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", nil, fmt.Errorf("refusing to operate on a symlink: %s", cleaned)
+	}
+	return cleaned, info, nil
+}
+
+// numParam 取数字参数（JSON number 必为 float64），要求非负整数
+func numParam(params map[string]interface{}, key string, max float64) (float64, error) {
+	raw, ok := params[key]
+	if !ok || raw == nil {
+		return 0, fmt.Errorf("%s is required", key)
+	}
+	v, ok := raw.(float64)
+	if !ok || v != float64(int64(v)) || v < 0 || v > max {
+		return 0, fmt.Errorf("%s must be an integer in [0, %d]", key, int64(max))
+	}
+	return v, nil
+}
+
+// Chmod 修改权限位（0-0o777，不碰 setuid/sticky）
+func (p *FileProvider) Chmod(params map[string]interface{}) (interface{}, error) {
+	cleaned, _, err := chmodChownTarget(paramString(params, "path"))
+	if err != nil {
+		return nil, err
+	}
+	mode, err := numParam(params, "mode", 0o777)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(cleaned, os.FileMode(mode)); err != nil {
+		return nil, fmt.Errorf("chmod: %w", err)
+	}
+	return map[string]interface{}{"mode": fmt.Sprintf("%04o", int(mode))}, nil
+}
+
+// Chown 修改属主 uid/gid（不做用户名解析——跨机用户名空间不可靠）
+func (p *FileProvider) Chown(params map[string]interface{}) (interface{}, error) {
+	cleaned, _, err := chmodChownTarget(paramString(params, "path"))
+	if err != nil {
+		return nil, err
+	}
+	uid, err := numParam(params, "uid", fileMaxID)
+	if err != nil {
+		return nil, err
+	}
+	gid, err := numParam(params, "gid", fileMaxID)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chown(cleaned, int(uid), int(gid)); err != nil {
+		return nil, fmt.Errorf("chown: %w", err)
+	}
+	return map[string]interface{}{"uid": int(uid), "gid": int(gid)}, nil
 }
 
 // ============ 文本搜索（见 file-manager-design.md M2，D10-D11） ============
