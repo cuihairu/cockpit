@@ -70,6 +70,8 @@ func (s *Server) handleBackupsAPI(w http.ResponseWriter, r *http.Request) {
 		s.withBackupConfig(w, r, parts[1], s.handleBackupFiles)
 	case len(parts) == 4 && parts[0] == "configs" && parts[2] == "files" && parts[3] == "delete" && r.Method == http.MethodPost:
 		s.withBackupConfig(w, r, parts[1], s.handleBackupFileDelete)
+	case len(parts) == 4 && parts[0] == "configs" && parts[2] == "files" && parts[3] == "sync-remote" && r.Method == http.MethodPost:
+		s.withBackupConfig(w, r, parts[1], s.handleBackupFileSyncRemote)
 	case len(parts) == 4 && parts[0] == "configs" && parts[2] == "files" && parts[3] == "download" && r.Method == http.MethodGet:
 		s.withBackupConfig(w, r, parts[1], s.handleBackupFileDownload)
 	case len(parts) == 4 && parts[0] == "configs" && parts[2] == "tasks" && r.Method == http.MethodGet:
@@ -107,6 +109,7 @@ type backupConfigView struct {
 	DestDir    string   `json:"dest_dir"`
 	Schedule   string   `json:"schedule"`
 	Retention  int      `json:"retention"`
+	RemoteDest string   `json:"remote_dest"`
 	Enabled    bool     `json:"enabled"`
 	LastRunAt  int64    `json:"last_run_at"`
 	NextRunAt  int64    `json:"next_run_at"`
@@ -123,6 +126,7 @@ func backupConfigToView(cfg *storage.BackupConfig) backupConfigView {
 		DestDir:    cfg.DestDir,
 		Schedule:   cfg.Schedule,
 		Retention:  cfg.Retention,
+		RemoteDest: cfg.RemoteDest,
 		Enabled:    cfg.Enabled,
 		LastRunAt:  cfg.LastRunAt,
 		NextRunAt:  cfg.NextRunAt,
@@ -133,13 +137,14 @@ func backupConfigToView(cfg *storage.BackupConfig) backupConfigView {
 
 // backupConfigRequest 创建/更新请求体
 type backupConfigRequest struct {
-	AgentID   string   `json:"agent_id"`
-	Name      string   `json:"name"`
-	Sources   []string `json:"sources"`
-	DestDir   string   `json:"dest_dir"`
-	Schedule  string   `json:"schedule"`
-	Retention *int     `json:"retention"`
-	Enabled   *bool    `json:"enabled"`
+	AgentID    string   `json:"agent_id"`
+	Name       string   `json:"name"`
+	Sources    []string `json:"sources"`
+	DestDir    string   `json:"dest_dir"`
+	Schedule   string   `json:"schedule"`
+	Retention  *int     `json:"retention"`
+	RemoteDest string   `json:"remote_dest"` // rclone 远端目标，空=不启用异地（M2 D20）
+	Enabled    *bool    `json:"enabled"`
 }
 
 // validateBackupConfigRequest 校验请求体（双端防御：agent 侧还有一道）
@@ -159,7 +164,27 @@ func (req *backupConfigRequest) validate() (string, bool) {
 	if !ValidBackupSchedule(req.Schedule) {
 		return "schedule must be manual, daily@HH:mm or every:Nh (1-168)", false
 	}
+	if req.RemoteDest != "" && !ValidBackupRemoteDest(req.RemoteDest) {
+		return "remote_dest must be rclone remote:path (e.g. my-s3:cockpit/backups)", false
+	}
 	return "", true
+}
+
+// requireAgentRclone 配置启用异地时校验目标 agent 有 rclone（M2 D23：
+// 配置期拦截而非运行期才炸）
+func (s *Server) requireAgentRclone(w http.ResponseWriter, r *http.Request, agentID string) bool {
+	agent, ok := s.registry.Get(agentID)
+	if !ok {
+		return true // agent 不存在的报错由调用方处理
+	}
+	cap := agent.GetCapability("backup")
+	enabled, _ := cap.Metadata["rclone"].(bool)
+	if !enabled {
+		s.handleError(w, r, http.StatusBadRequest,
+			"remote_dest requires rclone installed on the agent host (rclone not found)")
+		return false
+	}
+	return true
 }
 
 func (s *Server) handleBackupConfigsList(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +214,9 @@ func (s *Server) handleBackupConfigCreate(w http.ResponseWriter, r *http.Request
 		s.handleError(w, r, http.StatusBadRequest, "agent not found")
 		return
 	}
+	if req.RemoteDest != "" && !s.requireAgentRclone(w, r, req.AgentID) {
+		return
+	}
 	retention := 0
 	if req.Retention != nil {
 		retention = *req.Retention
@@ -204,14 +232,15 @@ func (s *Server) handleBackupConfigCreate(w http.ResponseWriter, r *http.Request
 
 	now := time.Now()
 	cfg := &storage.BackupConfig{
-		AgentID:   req.AgentID,
-		Name:      req.Name,
-		Sources:   marshalSources(req.Sources),
-		DestDir:   req.DestDir,
-		Schedule:  req.Schedule,
-		Retention: retention,
-		Enabled:   enabled,
-		NextRunAt: NextBackupRunAt(req.Schedule, now),
+		AgentID:    req.AgentID,
+		Name:       req.Name,
+		Sources:    marshalSources(req.Sources),
+		DestDir:    req.DestDir,
+		Schedule:   req.Schedule,
+		Retention:  retention,
+		RemoteDest: req.RemoteDest,
+		Enabled:    enabled,
+		NextRunAt:  NextBackupRunAt(req.Schedule, now),
 	}
 	if err := s.db.CreateBackupConfig(cfg); err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "failed to create backup config")
@@ -258,6 +287,9 @@ func (s *Server) handleBackupConfigUpdate(w http.ResponseWriter, r *http.Request
 		s.handleError(w, r, http.StatusConflict, "backup is running")
 		return
 	}
+	if req.RemoteDest != "" && !s.requireAgentRclone(w, r, req.AgentID) {
+		return
+	}
 
 	cfg.AgentID = req.AgentID
 	cfg.Name = req.Name
@@ -265,6 +297,7 @@ func (s *Server) handleBackupConfigUpdate(w http.ResponseWriter, r *http.Request
 	cfg.DestDir = req.DestDir
 	cfg.Schedule = req.Schedule
 	cfg.Retention = retention
+	cfg.RemoteDest = req.RemoteDest
 	cfg.Enabled = enabled
 	cfg.NextRunAt = NextBackupRunAt(req.Schedule, time.Now())
 	if err := s.db.UpdateBackupConfig(cfg); err != nil {
@@ -384,6 +417,53 @@ func (s *Server) handleBackupFileDelete(w http.ResponseWriter, r *http.Request, 
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// handleBackupFileSyncRemote 手动补传单个备份文件到远端（M2 D24：
+// 自动推送失败通知后的面板内动作闭环；rclone 幂等，重复调用安全）
+func (s *Server) handleBackupFileSyncRemote(w http.ResponseWriter, r *http.Request, cfg *storage.BackupConfig) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		s.handleError(w, r, http.StatusBadRequest, "name required")
+		return
+	}
+	if !backupFileNameRe.MatchString(req.Name) {
+		s.handleError(w, r, http.StatusBadRequest, "invalid file name")
+		return
+	}
+	if cfg.RemoteDest == "" {
+		s.handleError(w, r, http.StatusBadRequest, "remote_dest not configured on this backup")
+		return
+	}
+	if _, ok := s.registry.Get(cfg.AgentID); !ok {
+		s.handleError(w, r, http.StatusServiceUnavailable, "agent offline")
+		return
+	}
+	resp, err := s.CallAgent(cfg.AgentID, "backup.remote.sync", map[string]interface{}{
+		"dir": cfg.DestDir, "name": req.Name, "remoteDest": cfg.RemoteDest,
+	})
+	if err != nil {
+		s.handleError(w, r, http.StatusBadGateway, "failed to reach agent: "+err.Error())
+		return
+	}
+	rpcResp, err := protocol.DecodeRPCResponse(resp)
+	if err != nil {
+		s.handleError(w, r, http.StatusBadGateway, "failed to sync file to remote")
+		return
+	}
+	if rpcResp.Status == "error" {
+		// agent 侧错误含 rclone stderr 摘要，透传给用户
+		msg := rpcResp.Error
+		if msg == "" {
+			msg = "failed to sync file to remote"
+		}
+		s.handleError(w, r, http.StatusBadGateway, msg)
+		return
+	}
+	s.auditBackup(r, audit.ActionBackupRemoteSync, cfg.ID, cfg.Name, map[string]interface{}{"file": req.Name, "remoteDest": cfg.RemoteDest})
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "synced"})
+}
+
 // handleBackupRestore 恢复备份到独立目录（M1.5，见 backup-design.md D9-D11）。
 // 双确认：confirmName 必须与 file 完全一致（GitHub 删仓库模式），误触无法触发。
 func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request, cfg *storage.BackupConfig) {
@@ -435,7 +515,7 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request, cfg
 var backupTaskIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // handleBackupTaskGet 转发 backup.task.get，供前端轮询 restore 任务状态与日志
-//（restore 不落 BackupRun 表——那是备份运行的语义）
+// （restore 不落 BackupRun 表——那是备份运行的语义）
 func (s *Server) handleBackupTaskGet(w http.ResponseWriter, r *http.Request, cfg *storage.BackupConfig, taskID string) {
 	if !backupTaskIDRe.MatchString(taskID) {
 		s.handleError(w, r, http.StatusBadRequest, "invalid task id")

@@ -299,13 +299,13 @@ func TestCovPollBackupTaskBranches(t *testing.T) {
 	s := covLoopServer(t)
 
 	// agent 不存在 → 非终态
-	if _, _, _, _, done := s.pollBackupTask("ghost", "t"); done {
+	if _, done := s.pollBackupTask("ghost", "t"); done {
 		t.Error("missing agent should not be terminal")
 	}
 
 	// decode 失败（status 非字符串）→ 非终态
 	covBadPayloadAgent(t, s, "agent-decode")
-	if _, _, _, _, done := s.pollBackupTask("agent-decode", "t"); done {
+	if _, done := s.pollBackupTask("agent-decode", "t"); done {
 		t.Error("decode error should not be terminal")
 	}
 
@@ -313,16 +313,16 @@ func TestCovPollBackupTaskBranches(t *testing.T) {
 	covFakeAgent(t, s, "agent-lost", nil, func(method string, params map[string]interface{}) map[string]interface{} {
 		return covErrPayload("task not found")
 	})
-	st, _, _, e, done := s.pollBackupTask("agent-lost", "t")
-	if !done || st != "failed" || e != "task lost on agent" {
-		t.Fatalf("lost task = %s %s %v", st, e, done)
+	res, done := s.pollBackupTask("agent-lost", "t")
+	if !done || res.Status != "failed" || res.Error != "task lost on agent" {
+		t.Fatalf("lost task = %+v %v", res, done)
 	}
 
 	// rpc error 其他 → 非终态（agent 忙）
 	covFakeAgent(t, s, "agent-busy", nil, func(method string, params map[string]interface{}) map[string]interface{} {
 		return covErrPayload("agent busy")
 	})
-	if _, _, _, _, done := s.pollBackupTask("agent-busy", "t"); done {
+	if _, done := s.pollBackupTask("agent-busy", "t"); done {
 		t.Error("other rpc error should not be terminal")
 	}
 
@@ -330,7 +330,7 @@ func TestCovPollBackupTaskBranches(t *testing.T) {
 	covFakeAgent(t, s, "agent-nomap", nil, func(method string, params map[string]interface{}) map[string]interface{} {
 		return covOKPayload("plain-string")
 	})
-	if _, _, _, _, done := s.pollBackupTask("agent-nomap", "t"); done {
+	if _, done := s.pollBackupTask("agent-nomap", "t"); done {
 		t.Error("non-map data should not be terminal")
 	}
 
@@ -338,16 +338,16 @@ func TestCovPollBackupTaskBranches(t *testing.T) {
 	covFakeAgent(t, s, "agent-fnoerr", nil, func(method string, params map[string]interface{}) map[string]interface{} {
 		return covOKPayload(map[string]interface{}{"status": "failed"})
 	})
-	st, _, _, e, done = s.pollBackupTask("agent-fnoerr", "t")
-	if !done || st != "failed" || e != "backup failed on agent" {
-		t.Fatalf("failed no err = %s %s %v", st, e, done)
+	res, done = s.pollBackupTask("agent-fnoerr", "t")
+	if !done || res.Status != "failed" || res.Error != "backup failed on agent" {
+		t.Fatalf("failed no err = %+v %v", res, done)
 	}
 
 	// running → 非终态
 	covFakeAgent(t, s, "agent-running", nil, func(method string, params map[string]interface{}) map[string]interface{} {
 		return covOKPayload(map[string]interface{}{"status": "running"})
 	})
-	if _, _, _, _, done := s.pollBackupTask("agent-running", "t"); done {
+	if _, done := s.pollBackupTask("agent-running", "t"); done {
 		t.Error("running should not be terminal")
 	}
 }

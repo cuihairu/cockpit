@@ -247,9 +247,9 @@ func TestCovSendTimeoutErrorMapping(t *testing.T) {
 func TestCovPollBackupTaskSendTimeout(t *testing.T) {
 	s := covLoopServer(t)
 	covStuckAgent(t, s, "agent-poll") // Send 已满 → 5s send timeout → failed 终态
-	status, _, _, errMsg, done := s.pollBackupTask("agent-poll", "task-t")
-	if !done || status != "failed" || !strings.Contains(errMsg, "send timeout") {
-		t.Fatalf("poll send timeout = %s %s %v", status, errMsg, done)
+	res, done := s.pollBackupTask("agent-poll", "task-t")
+	if !done || res.Status != "failed" || !strings.Contains(res.Error, "send timeout") {
+		t.Fatalf("poll send timeout = %+v %v", res, done)
 	}
 }
 

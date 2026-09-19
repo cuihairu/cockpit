@@ -8,28 +8,28 @@ import (
 
 // Agent Agent 数据模型
 type Agent struct {
-	ID           string        `gorm:"primaryKey" json:"id"`
-	Hostname     string        `gorm:"index" json:"hostname"`
-	IP           string        `json:"ip"`
-	Region       string        `gorm:"index" json:"region"`
-	Zone         string        `gorm:"index" json:"zone"`
-	Version      string        `json:"version"`
-	Capabilities []Capability  `gorm:"serializer:json" json:"capabilities"`
-	Status       string        `gorm:"index;default:offline" json:"status"` // online, offline
-	LastSeen     time.Time     `json:"lastSeen"`
-	FirstSeen    time.Time     `json:"firstSeen"`
-	CreatedAt    time.Time     `json:"createdAt"`
-	UpdatedAt    time.Time     `json:"updatedAt"`
+	ID           string       `gorm:"primaryKey" json:"id"`
+	Hostname     string       `gorm:"index" json:"hostname"`
+	IP           string       `json:"ip"`
+	Region       string       `gorm:"index" json:"region"`
+	Zone         string       `gorm:"index" json:"zone"`
+	Version      string       `json:"version"`
+	Capabilities []Capability `gorm:"serializer:json" json:"capabilities"`
+	Status       string       `gorm:"index;default:offline" json:"status"` // online, offline
+	LastSeen     time.Time    `json:"lastSeen"`
+	FirstSeen    time.Time    `json:"firstSeen"`
+	CreatedAt    time.Time    `json:"createdAt"`
+	UpdatedAt    time.Time    `json:"updatedAt"`
 
 	// 虚拟化信息
-	VirtType     string `gorm:"index" json:"virtType"`     // kvm, vmware, docker, none
-	VirtRole     string `json:"virtRole"`                 // guest, host
+	VirtType string `gorm:"index" json:"virtType"` // kvm, vmware, docker, none
+	VirtRole string `json:"virtRole"`              // guest, host
 
 	// 标签（支持复杂类型）
-	Labels       map[string]interface{} `gorm:"serializer:json" json:"labels"`
+	Labels map[string]interface{} `gorm:"serializer:json" json:"labels"`
 
 	// 认证：SecretHash 存储 Agent 认证密钥的哈希值
-	SecretHash   string `gorm:"column:secret_hash" json:"-"`
+	SecretHash string `gorm:"column:secret_hash" json:"-"`
 
 	// 关联资源
 	ComputeInstances []ComputeInstance `gorm:"foreignKey:AgentID" json:"-"`
@@ -53,7 +53,7 @@ type ComputeInstance struct {
 	Name      string            `gorm:"index" json:"name"`
 	AgentID   string            `gorm:"index;not null" json:"agentId"`
 	Type      string            `gorm:"index" json:"type"` // vm, container, baremetal
-	Provider  string            `json:"provider"`         // pve, docker, etc
+	Provider  string            `json:"provider"`          // pve, docker, etc
 	Region    string            `gorm:"index" json:"region"`
 	Zone      string            `gorm:"index" json:"zone"`
 	Status    string            `gorm:"index" json:"status"` // running, stopped, error
@@ -84,7 +84,7 @@ type Domain struct {
 	CreatedAt time.Time         `json:"createdAt"`
 	UpdatedAt time.Time         `json:"updatedAt"`
 
-	Agent       *Agent        `gorm:"foreignKey:AgentID" json:"-"`
+	Agent        *Agent        `gorm:"foreignKey:AgentID" json:"-"`
 	Certificates []Certificate `gorm:"foreignKey:DomainID" json:"-"`
 }
 
@@ -216,14 +216,15 @@ type StackDeployment struct {
 type BackupConfig struct {
 	ID         uint      `gorm:"primarykey" json:"id"`
 	AgentID    string    `gorm:"index;size:64" json:"agentId"`
-	Name       string    `gorm:"size:64" json:"name"`   // 备份文件名前缀
+	Name       string    `gorm:"size:64" json:"name"`      // 备份文件名前缀
 	Sources    string    `gorm:"type:text" json:"sources"` // JSON 数组字符串，源路径列表
 	DestDir    string    `gorm:"size:512" json:"destDir"`
-	Schedule   string    `gorm:"size:32" json:"schedule"` // manual / daily@HH:mm / every:Nh
-	Retention  int       `json:"retention"`               // 保留份数，0=不清理
+	Schedule   string    `gorm:"size:32" json:"schedule"`    // manual / daily@HH:mm / every:Nh
+	Retention  int       `json:"retention"`                  // 保留份数，0=不清理
+	RemoteDest string    `gorm:"size:512" json:"remoteDest"` // rclone 远端目标 remote:path，空=不启用异地（M2 D20）
 	Enabled    bool      `json:"enabled"`
 	LastRunAt  int64     `json:"lastRunAt"`
-	NextRunAt  int64     `json:"nextRunAt"` // manual 恒为 0
+	NextRunAt  int64     `json:"nextRunAt"`                 // manual 恒为 0
 	LastStatus string    `gorm:"size:16" json:"lastStatus"` // "" / running / success / failed
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
@@ -232,13 +233,16 @@ type BackupConfig struct {
 // BackupRun 备份单次运行记录。下发 backup.run 时插入 running，
 // server 轮询任务终态后回填（复用 StackDeployment 模式）。
 type BackupRun struct {
-	ID         uint   `gorm:"primarykey" json:"id"`
-	ConfigID   uint   `gorm:"index" json:"configId"`
-	TaskID     string `gorm:"size:64" json:"taskId"`
-	Status     string `gorm:"size:16" json:"status"` // running / success / failed / timeout
-	File       string `gorm:"size:256" json:"file"`  // 备份文件名（不含目录）
-	Size       int64  `json:"size"`
-	Error      string `gorm:"size:512" json:"error,omitempty"`
-	StartedAt  int64  `json:"startedAt"`
-	FinishedAt int64  `json:"finishedAt"` // 0 = 尚未结束
+	ID       uint   `gorm:"primarykey" json:"id"`
+	ConfigID uint   `gorm:"index" json:"configId"`
+	TaskID   string `gorm:"size:64" json:"taskId"`
+	Status   string `gorm:"size:16" json:"status"` // running / success / failed / timeout
+	File     string `gorm:"size:256" json:"file"`  // 备份文件名（不含目录）
+	Size     int64  `json:"size"`
+	Error    string `gorm:"size:512" json:"error,omitempty"`
+	// M2 D20：本地打包成功即 success，rclone 推送失败只记在此（D21）
+	RemoteStatus string `gorm:"size:16" json:"remoteStatus,omitempty"` // ""/ok/failed
+	RemoteError  string `gorm:"size:512" json:"remoteError,omitempty"`
+	StartedAt    int64  `json:"startedAt"`
+	FinishedAt   int64  `json:"finishedAt"` // 0 = 尚未结束
 }

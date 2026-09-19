@@ -38,6 +38,7 @@ const (
 	ActionBackupRun        = "backup_run"
 	ActionBackupRestore    = "backup_restore"
 	ActionBackupDeleteFile = "backup_delete_file"
+	ActionBackupRemoteSync = "backup_remote_sync" // 手动补传备份文件到 rclone 远端（M2 D24）
 	// 反向代理管理（见 docs/guide/proxy-design.md）
 	ActionProxyApply  = "proxy_apply"
 	ActionProxyDelete = "proxy_delete"

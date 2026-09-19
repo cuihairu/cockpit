@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -29,6 +30,10 @@ var (
 	backupNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 	// backupFileNameRe backup.delete 只接受文件名（非路径），从根上杜绝穿越
 	backupFileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*\.tar\.gz$`)
+	// backupRemoteDestRe rclone 远端目标 remote:path（M2 D22）：前段对应
+	// rclone.conf 的 section 名（字母数字开头，语法上不可能以 - 开头，
+	// 杜绝 exec 时被 rclone 误当 flag）；path 段禁空白与控制字符
+	backupRemoteDestRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*:[^\x00-\x20\x7f]+$`)
 )
 
 const (
@@ -55,8 +60,9 @@ type BackupConfig struct {
 
 // BackupProvider 文件备份 Provider
 type BackupProvider struct {
-	now   func() time.Time
-	newID func() string
+	now       func() time.Time
+	newID     func() string
+	rcloneBin string // rclone 可执行文件，测试注入 fake（M2 D18）
 
 	mu    sync.Mutex
 	tasks map[string]*backupTask
@@ -84,11 +90,12 @@ func NewBackupProvider(cfg BackupConfig) *BackupProvider {
 		}
 	}
 	return &BackupProvider{
-		now:   now,
-		newID: newID,
-		tasks: make(map[string]*backupTask),
-		locks: make(map[string]*sync.Mutex),
-		sem:   make(chan struct{}, max),
+		now:       now,
+		newID:     newID,
+		rcloneBin: "rclone",
+		tasks:     make(map[string]*backupTask),
+		locks:     make(map[string]*sync.Mutex),
+		sem:       make(chan struct{}, max),
 	}
 }
 
@@ -108,6 +115,8 @@ func (p *BackupProvider) Call(action string, params map[string]interface{}) (int
 		return p.ListFiles(paramString(params, "dir"))
 	case "delete":
 		return p.DeleteFile(paramString(params, "dir"), paramString(params, "name"))
+	case "remote.sync":
+		return p.SyncRemote(params)
 	default:
 		return nil, fmt.Errorf("unknown backup action: %s", action)
 	}
@@ -115,17 +124,20 @@ func (p *BackupProvider) Call(action string, params map[string]interface{}) (int
 
 // backupTask 一次备份/恢复任务的内存态
 type backupTask struct {
-	ID         string
-	Action     string // backup / restore
-	Name       string
-	ConfigID   int64
-	Status     string
-	Error      string
-	File       string // 成功时的备份文件名（不含目录）
-	Size       int64
-	Log        *cappedBuffer
-	StartedAt  time.Time
-	FinishedAt time.Time
+	ID           string
+	Action       string // backup / restore
+	Name         string
+	ConfigID     int64
+	Status       string
+	Error        string
+	File         string // 成功时的备份文件名（不含目录）
+	Size         int64
+	RemoteDest   string // rclone 远端目标，空=不推送（M2 D20）
+	RemoteStatus string // ok / failed（RemoteDest 启用时；失败不改任务终态，D21）
+	RemoteError  string
+	Log          *cappedBuffer
+	StartedAt    time.Time
+	FinishedAt   time.Time
 }
 
 // ============ 动作实现 ============
@@ -146,6 +158,10 @@ func (p *BackupProvider) RunBackup(params map[string]interface{}) (interface{}, 
 	}
 	retention := int(paramFloat(params, "retention"))
 	configID := int64(paramFloat(params, "configId"))
+	remoteDest := paramString(params, "remoteDest")
+	if remoteDest != "" && !backupRemoteDestRe.MatchString(remoteDest) {
+		return nil, fmt.Errorf("invalid remoteDest: %q", remoteDest)
+	}
 
 	lock, ok := p.nameLock(name)
 	if !ok {
@@ -159,13 +175,14 @@ func (p *BackupProvider) RunBackup(params map[string]interface{}) (interface{}, 
 	}
 
 	task := &backupTask{
-		ID:        p.newID(),
-		Action:    "backup",
-		Name:      name,
-		ConfigID:  configID,
-		Status:    backupTaskRunning,
-		Log:       &cappedBuffer{limit: backupLogLimit},
-		StartedAt: p.now(),
+		ID:         p.newID(),
+		Action:     "backup",
+		Name:       name,
+		ConfigID:   configID,
+		Status:     backupTaskRunning,
+		RemoteDest: remoteDest,
+		Log:        &cappedBuffer{limit: backupLogLimit},
+		StartedAt:  p.now(),
 	}
 	p.mu.Lock()
 	p.tasks[task.ID] = task
@@ -177,11 +194,21 @@ func (p *BackupProvider) RunBackup(params map[string]interface{}) (interface{}, 
 		defer lock.Unlock()
 
 		file, size, err := p.pack(task, name, sources, destDir, retention)
+		// M2 D18：本地打包成功且有异地目标时追加 rclone 推送；
+		// 推送失败不改任务终态（D21），只记 RemoteStatus 供 server 通知
+		remoteStatus, remoteErr := "", error(nil)
+		if err == nil && remoteDest != "" {
+			remoteStatus, remoteErr = p.pushRemote(task, filepath.Join(destDir, file), remoteDest)
+		}
 		// 终态字段在锁内更新：GetTask 轮询（server 侧）会并发读取
 		p.mu.Lock()
 		task.FinishedAt = p.now()
 		task.File = file
 		task.Size = size
+		task.RemoteStatus = remoteStatus
+		if remoteErr != nil {
+			task.RemoteError = remoteErr.Error()
+		}
 		if err != nil {
 			task.Status = backupTaskFailed
 			task.Error = err.Error()
@@ -209,17 +236,19 @@ func (p *BackupProvider) GetTask(taskID string) (map[string]interface{}, error) 
 	// 任务字段在锁内读取：执行协程会并发写终态（cappedBuffer 自持锁
 	// 只保护日志缓冲本身）
 	return map[string]interface{}{
-		"taskId":     task.ID,
-		"action":     task.Action,
-		"name":       task.Name,
-		"configId":   task.ConfigID,
-		"status":     task.Status,
-		"error":      task.Error,
-		"file":       task.File,
-		"size":       task.Size,
-		"log":        task.Log.String(),
-		"startedAt":  task.StartedAt.Unix(),
-		"finishedAt": task.FinishedAt.Unix(),
+		"taskId":       task.ID,
+		"action":       task.Action,
+		"name":         task.Name,
+		"configId":     task.ConfigID,
+		"status":       task.Status,
+		"error":        task.Error,
+		"file":         task.File,
+		"size":         task.Size,
+		"remoteStatus": task.RemoteStatus,
+		"remoteError":  task.RemoteError,
+		"log":          task.Log.String(),
+		"startedAt":    task.StartedAt.Unix(),
+		"finishedAt":   task.FinishedAt.Unix(),
 	}, nil
 }
 
@@ -259,6 +288,64 @@ func (p *BackupProvider) ListFiles(dir string) (map[string]interface{}, error) {
 }
 
 // DeleteFile 删除目录下指定的备份文件；name 必须是纯文件名
+// pushRemote rclone copy 推送本地文件到远端（M2 D18/D24 共用）。
+// rclone 的失败原因在 stderr，摘要进日志与错误消息（exit status 无解释力）。
+func (p *BackupProvider) pushRemote(task *backupTask, localPath, remoteDest string) (string, error) {
+	fmt.Fprintf(task.Log, "[remote] rclone copy → %s\n", remoteDest)
+	out, err := exec.Command(p.rcloneBin, "copy", "--transfers", "2", localPath, remoteDest).CombinedOutput()
+	if summary := strings.TrimSpace(string(out)); summary != "" {
+		if len(summary) > 2048 {
+			summary = summary[:2048] + "…"
+		}
+		fmt.Fprintf(task.Log, "[remote] %s\n", summary)
+	}
+	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if len(detail) > 512 {
+			detail = detail[:512]
+		}
+		if detail != "" {
+			return "failed", fmt.Errorf("rclone copy: %v: %s", err, detail)
+		}
+		return "failed", fmt.Errorf("rclone copy: %v", err)
+	}
+	fmt.Fprintf(task.Log, "[remote] done\n")
+	return "ok", nil
+}
+
+// SyncRemote 手动补传：把本地已有备份文件推到远端（M2 D24）。同步执行，
+// 单文件 copy 在 RPC 超时窗口内；幂等（rclone 对已存在同尺寸文件跳过）。
+func (p *BackupProvider) SyncRemote(params map[string]interface{}) (interface{}, error) {
+	dir := paramString(params, "dir")
+	if !filepath.IsAbs(filepath.Clean(dir)) {
+		return nil, fmt.Errorf("dir must be absolute: %q", dir)
+	}
+	name := paramString(params, "name")
+	if !backupFileNameRe.MatchString(name) {
+		return nil, fmt.Errorf("invalid backup file name: %q", name)
+	}
+	remoteDest := paramString(params, "remoteDest")
+	if !backupRemoteDestRe.MatchString(remoteDest) {
+		return nil, fmt.Errorf("invalid remoteDest: %q", remoteDest)
+	}
+	local := filepath.Join(filepath.Clean(dir), name)
+	if info, err := os.Stat(local); err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("backup file not found: %s", name)
+	}
+	task := &backupTask{Log: &cappedBuffer{limit: backupLogLimit}}
+	if _, err := p.pushRemote(task, local, remoteDest); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"synced": true}, nil
+}
+
+// RcloneAvailable 异地推送的执行前提（capability metadata 感知，M2 D23）
+func RcloneAvailable() bool {
+	_, err := exec.LookPath("rclone")
+	return err == nil
+}
+
+// DeleteFile 删除目录内指定备份文件
 func (p *BackupProvider) DeleteFile(dir, name string) (map[string]interface{}, error) {
 	dir = filepath.Clean(dir)
 	if !filepath.IsAbs(dir) {

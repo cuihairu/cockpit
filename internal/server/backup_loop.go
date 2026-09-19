@@ -35,12 +35,19 @@ var (
 	backupTrackInterval = 5 * time.Second
 	// backupNameRe 备份名约束（与 agent 侧一致）
 	backupNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+	// backupRemoteDestRe rclone 远端目标 remote:path（M2 D22，与 agent 侧同规则：
+	// remote 名语法上不以 - 开头防 flag 混淆，path 段禁空白与控制字符）
+	backupRemoteDestRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*:[^\x00-\x20\x7f]+$`)
 	// backupFileNameRe 删除文件时的文件名校验（与 agent 侧一致）
 	backupFileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*\.tar\.gz$`)
 )
 
 // ValidBackupName 校验备份名
 func ValidBackupName(name string) bool { return backupNameRe.MatchString(name) }
+
+// ValidBackupRemoteDest 校验 rclone 远端目标（M2 D22；空值由调用方按
+// 「不启用异地」处理）
+func ValidBackupRemoteDest(dest string) bool { return backupRemoteDestRe.MatchString(dest) }
 
 // ValidBackupSchedule 校验 schedule 形态：manual / daily@HH:mm / every:Nh
 func ValidBackupSchedule(s string) bool {
@@ -200,11 +207,12 @@ func (s *Server) startBackupRun(cfg *storage.BackupConfig, trigger string) (uint
 
 	// agent 离线等下发失败：记录失败终态，不置 running
 	resp, err := s.CallAgent(cfg.AgentID, "backup.run", map[string]interface{}{
-		"configId":  float64(cfg.ID),
-		"name":      cfg.Name,
-		"sources":   sourcesToIface(sources),
-		"destDir":   destDir,
-		"retention": float64(cfg.Retention),
+		"configId":   float64(cfg.ID),
+		"name":       cfg.Name,
+		"sources":    sourcesToIface(sources),
+		"destDir":    destDir,
+		"retention":  float64(cfg.Retention),
+		"remoteDest": cfg.RemoteDest, // 空=不推送（M2 D18）
 	})
 	if err != nil {
 		run.Status = "failed"
@@ -236,16 +244,23 @@ func (s *Server) startBackupRun(cfg *storage.BackupConfig, trigger string) (uint
 	return run.ID, nil
 }
 
+// backupTaskResult agent 任务终态快照（M2 扩 Remote*：rclone 推送结果）
+type backupTaskResult struct {
+	Status       string
+	File         string
+	Size         int64
+	Error        string
+	RemoteStatus string // ok / failed（RemoteDest 未启用为空）
+	RemoteError  string
+}
+
 // trackBackupTask 轮询 agent 任务状态直到终态/超时/server 关闭，回填历史并通知
 func (s *Server) trackBackupTask(configID uint, agentID, taskID string, runID uint) {
 	deadline := time.Now().Add(backupTrackTimeout)
 	// 轮询间隔启动时读到局部量：后台 goroutine 不再反复读包级变量，
 	// 测试注入/恢复默认值与之并发安全（退出由 backupTrackWG 可观测）
 	poll := backupTrackInterval
-	status := "failed"
-	var file string
-	var size int64
-	var errMsg string
+	result := backupTaskResult{Status: "failed"}
 	finishedAt := time.Now().Unix()
 
 	for {
@@ -255,75 +270,92 @@ func (s *Server) trackBackupTask(configID uint, agentID, taskID string, runID ui
 		case <-time.After(poll):
 		}
 
-		st, f, sz, e, done := s.pollBackupTask(agentID, taskID)
+		res, done := s.pollBackupTask(agentID, taskID)
 		if !done {
 			if time.Now().After(deadline) {
-				status, finishedAt, errMsg = "failed", time.Now().Unix(), "backup task timed out"
+				result.Status, finishedAt, result.Error = "failed", time.Now().Unix(), "backup task timed out"
 			} else {
 				continue
 			}
 		} else {
-			status, file, size, errMsg = st, f, sz, e
+			result = res
 			finishedAt = time.Now().Unix()
 		}
 
 		if run, err := s.db.GetBackupRun(runID); err == nil {
-			run.Status = status
-			run.File = file
-			run.Size = size
-			run.Error = errMsg
+			run.Status = result.Status
+			run.File = result.File
+			run.Size = result.Size
+			run.Error = result.Error
+			run.RemoteStatus = result.RemoteStatus
+			run.RemoteError = result.RemoteError
 			run.FinishedAt = finishedAt
 			_ = s.db.UpdateBackupRun(run)
 		}
 		if cfg, err := s.db.GetBackupConfig(configID); err == nil {
-			cfg.LastStatus = status
+			cfg.LastStatus = result.Status
 			_ = s.db.UpdateBackupConfig(cfg)
-			if status == "failed" {
-				s.notifyBackupFailed(cfg, errMsg)
+			if result.Status == "failed" {
+				s.notifyBackupFailed(cfg, result.Error)
+			}
+			// M2 D21：本地成功但异地推送失败 → 独立通知，不改任务终态
+			if result.Status == "success" && result.RemoteStatus == "failed" {
+				s.notifyBackupRemoteFailed(cfg, result.RemoteError)
 			}
 		}
-		log.Printf("Backup task finished: config=%d task=%s status=%s file=%s size=%d",
-			configID, taskID, status, file, size)
+		log.Printf("Backup task finished: config=%d task=%s status=%s file=%s size=%d remote=%s",
+			configID, taskID, result.Status, result.File, result.Size, result.RemoteStatus)
 		return
 	}
 }
 
-// pollBackupTask 查询一次任务状态，返回 (status, file, size, err, 是否终态)。
+// pollBackupTask 查询一次任务状态，返回 (终态快照, 是否终态)。
 // agent 离线保持非终态等待重连；unknown task（agent 重启丢内存态）视为 failed。
-func (s *Server) pollBackupTask(agentID, taskID string) (string, string, int64, string, bool) {
+func (s *Server) pollBackupTask(agentID, taskID string) (backupTaskResult, bool) {
 	resp, err := s.CallAgent(agentID, "backup.task.get", map[string]interface{}{"taskId": taskID})
 	if err == ErrAgentNotFound {
 		// agent 离线：任务态未知，保持 running 等待重连
-		return "", "", 0, "", false
+		return backupTaskResult{}, false
 	}
 	if err != nil {
-		return "failed", "", 0, truncateErr(err), true
+		return backupTaskResult{Status: "failed", Error: truncateErr(err)}, true
 	}
 	rpcResp, err := protocol.DecodeRPCResponse(resp)
 	if err != nil {
-		return "", "", 0, "", false
+		return backupTaskResult{}, false
 	}
 	if rpcResp.Status == "error" {
 		if strings.Contains(rpcResp.Error, "not found") {
-			return "failed", "", 0, "task lost on agent", true
+			return backupTaskResult{Status: "failed", Error: "task lost on agent"}, true
 		}
-		return "", "", 0, "", false
+		return backupTaskResult{}, false
 	}
 	data, ok := rpcResp.Data.(map[string]interface{})
 	if !ok {
-		return "", "", 0, "", false
+		return backupTaskResult{}, false
 	}
 	switch mapString(data, "status") {
 	case "success":
-		return "success", mapString(data, "file"), mapInt64(data, "size"), "", true
+		return backupTaskResult{
+			Status:       "success",
+			File:         mapString(data, "file"),
+			Size:         mapInt64(data, "size"),
+			RemoteStatus: mapString(data, "remoteStatus"),
+			RemoteError:  mapString(data, "remoteError"),
+		}, true
 	case "failed":
 		errMsg := mapString(data, "error")
 		if errMsg == "" {
 			errMsg = "backup failed on agent"
 		}
-		return "failed", mapString(data, "file"), mapInt64(data, "size"), errMsg, true
+		return backupTaskResult{
+			Status: "failed",
+			File:   mapString(data, "file"),
+			Size:   mapInt64(data, "size"),
+			Error:  errMsg,
+		}, true
 	default: // running / 未知状态
-		return "", "", 0, "", false
+		return backupTaskResult{}, false
 	}
 }
 
@@ -332,6 +364,23 @@ func (s *Server) notifyBackupFailed(cfg *storage.BackupConfig, errMsg string) {
 	s.notifier.SendNonBlocking(&notification.Notification{
 		EventType:    notification.BackupFailed,
 		Title:        fmt.Sprintf("备份失败: %s", cfg.Name),
+		Message:      errMsg,
+		Level:        "error",
+		ResourceType: "backup",
+		ResourceID:   fmt.Sprintf("%d", cfg.ID),
+		Time:         time.Now(),
+	})
+}
+
+// notifyBackupRemoteFailed 异地推送失败通知（M2 D21：本地备份已成功，
+// 仅远端链路断；走独立事件白名单）
+func (s *Server) notifyBackupRemoteFailed(cfg *storage.BackupConfig, errMsg string) {
+	if errMsg == "" {
+		errMsg = "rclone copy failed"
+	}
+	s.notifier.SendNonBlocking(&notification.Notification{
+		EventType:    notification.BackupRemoteFailed,
+		Title:        fmt.Sprintf("备份异地推送失败: %s", cfg.Name),
 		Message:      errMsg,
 		Level:        "error",
 		ResourceType: "backup",

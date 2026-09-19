@@ -265,12 +265,16 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		}
 	}
 
-	// backup capability：Linux 文件打包零外部依赖，无需专门 detector
+	// backup capability：Linux 文件打包零外部依赖，无需专门 detector；
+	// metadata 带 rclone 存在性（M2 D23：异地推送的执行前提）
 	if runtime.GOOS == "linux" {
 		capabilities = append(capabilities, protocol.Capability{
-			Type:     "backup",
-			Version:  "1",
-			Metadata: map[string]interface{}{"maxTasks": rpc.BackupMaxTasks},
+			Type:    "backup",
+			Version: "1",
+			Metadata: map[string]interface{}{
+				"maxTasks": rpc.BackupMaxTasks,
+				"rclone":   rpc.RcloneAvailable(),
+			},
 		})
 	}
 
