@@ -213,6 +213,7 @@ func (s *Server) startBackupRun(cfg *storage.BackupConfig, trigger string) (uint
 		"destDir":    destDir,
 		"retention":  float64(cfg.Retention),
 		"remoteDest": cfg.RemoteDest, // 空=不推送（M2 D18）
+		"preHook":    cfg.PreHook,    // 空=不执行（M3 D26）
 	})
 	if err != nil {
 		run.Status = "failed"

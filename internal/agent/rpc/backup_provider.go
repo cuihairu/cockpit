@@ -2,7 +2,9 @@ package rpc
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -43,7 +45,13 @@ const (
 	// backupReadChunkLimit backup.read 单块字节上限（server 侧实际用更小分块）
 	backupReadChunkLimit = 1024 * 1024
 	backupTimeFormat     = "20060102-150405"
+	// backupHookMaxLen pre-hook 命令长度上限（与 BackupConfig.PreHook gorm size 一致）
+	backupHookMaxLen = 1024
 )
+
+// backupHookTimeout pre-hook 单次执行上限（M3 D29：dump 大库可能分钟级，
+// 但任务后面还有打包+推送）；var 便于测试注入
+var backupHookTimeout = 5 * time.Minute
 
 const (
 	backupTaskRunning = "running"
@@ -162,6 +170,10 @@ func (p *BackupProvider) RunBackup(params map[string]interface{}) (interface{}, 
 	if remoteDest != "" && !backupRemoteDestRe.MatchString(remoteDest) {
 		return nil, fmt.Errorf("invalid remoteDest: %q", remoteDest)
 	}
+	preHook := paramString(params, "preHook")
+	if len(preHook) > backupHookMaxLen {
+		return nil, fmt.Errorf("preHook too long: %d bytes (max %d)", len(preHook), backupHookMaxLen)
+	}
 
 	lock, ok := p.nameLock(name)
 	if !ok {
@@ -193,7 +205,14 @@ func (p *BackupProvider) RunBackup(params map[string]interface{}) (interface{}, 
 		defer func() { <-p.sem }()
 		defer lock.Unlock()
 
-		file, size, err := p.pack(task, name, sources, destDir, retention)
+		// M3 D26-D28：打包前执行数据库热备命令；失败即中止（不一致快照
+		// 不如不备），不进 pack、不推送远端、retention 不动
+		err := p.runHook(task, preHook)
+		var file string
+		var size int64
+		if err == nil {
+			file, size, err = p.pack(task, name, sources, destDir, retention)
+		}
 		// M2 D18：本地打包成功且有异地目标时追加 rclone 推送；
 		// 推送失败不改任务终态（D21），只记 RemoteStatus 供 server 通知
 		remoteStatus, remoteErr := "", error(nil)
@@ -311,6 +330,53 @@ func (p *BackupProvider) pushRemote(task *backupTask, localPath, remoteDest stri
 	}
 	fmt.Fprintf(task.Log, "[remote] done\n")
 	return "ok", nil
+}
+
+// runHook 执行打包前置的数据库热备命令（M3 D26-D29）。sh -c 保留重定向与
+// 引号语义（cron 写回同为先例，agent 本就是受信控制面）；空命令快速返回。
+// 非零退出/超时返回错误，由调用方短路本次任务（D28：不一致快照不如不备）。
+func (p *BackupProvider) runHook(task *backupTask, command string) error {
+	if command == "" {
+		return nil
+	}
+	fmt.Fprintf(task.Log, "[hook] %s\n", command)
+	ctx, cancel := context.WithTimeout(context.Background(), backupHookTimeout)
+	defer cancel()
+
+	cmd := hookCmd(command)
+	out := &bytes.Buffer{}
+	cmd.Stdout = out
+	cmd.Stderr = out
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("pre-hook start: %w", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	var err error
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		killHookGroup(cmd) // 整组杀：CommandContext 只杀 sh，dump 孙进程会变孤儿
+		<-done
+		return fmt.Errorf("pre-hook timed out after %s", backupHookTimeout)
+	}
+	if summary := strings.TrimSpace(out.String()); summary != "" {
+		if len(summary) > 2048 {
+			summary = summary[:2048] + "…"
+		}
+		fmt.Fprintf(task.Log, "[hook] %s\n", summary)
+	}
+	if err != nil {
+		detail := strings.TrimSpace(out.String())
+		if len(detail) > 512 {
+			detail = detail[:512]
+		}
+		if detail != "" {
+			return fmt.Errorf("pre-hook failed: %v: %s", err, detail)
+		}
+		return fmt.Errorf("pre-hook failed: %v", err)
+	}
+	return nil
 }
 
 // SyncRemote 手动补传：把本地已有备份文件推到远端（M2 D24）。同步执行，

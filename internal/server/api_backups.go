@@ -110,6 +110,7 @@ type backupConfigView struct {
 	Schedule   string   `json:"schedule"`
 	Retention  int      `json:"retention"`
 	RemoteDest string   `json:"remote_dest"`
+	PreHook    string   `json:"pre_hook"`
 	Enabled    bool     `json:"enabled"`
 	LastRunAt  int64    `json:"last_run_at"`
 	NextRunAt  int64    `json:"next_run_at"`
@@ -127,6 +128,7 @@ func backupConfigToView(cfg *storage.BackupConfig) backupConfigView {
 		Schedule:   cfg.Schedule,
 		Retention:  cfg.Retention,
 		RemoteDest: cfg.RemoteDest,
+		PreHook:    cfg.PreHook,
 		Enabled:    cfg.Enabled,
 		LastRunAt:  cfg.LastRunAt,
 		NextRunAt:  cfg.NextRunAt,
@@ -144,6 +146,7 @@ type backupConfigRequest struct {
 	Schedule   string   `json:"schedule"`
 	Retention  *int     `json:"retention"`
 	RemoteDest string   `json:"remote_dest"` // rclone 远端目标，空=不启用异地（M2 D20）
+	PreHook    string   `json:"pre_hook"`    // 打包前执行的数据库热备命令，空=不执行（M3 D26）
 	Enabled    *bool    `json:"enabled"`
 }
 
@@ -166,6 +169,9 @@ func (req *backupConfigRequest) validate() (string, bool) {
 	}
 	if req.RemoteDest != "" && !ValidBackupRemoteDest(req.RemoteDest) {
 		return "remote_dest must be rclone remote:path (e.g. my-s3:cockpit/backups)", false
+	}
+	if len(req.PreHook) > 1024 {
+		return "pre_hook too long (max 1024 bytes)", false
 	}
 	return "", true
 }
@@ -239,6 +245,7 @@ func (s *Server) handleBackupConfigCreate(w http.ResponseWriter, r *http.Request
 		Schedule:   req.Schedule,
 		Retention:  retention,
 		RemoteDest: req.RemoteDest,
+		PreHook:    req.PreHook,
 		Enabled:    enabled,
 		NextRunAt:  NextBackupRunAt(req.Schedule, now),
 	}
@@ -298,6 +305,7 @@ func (s *Server) handleBackupConfigUpdate(w http.ResponseWriter, r *http.Request
 	cfg.Schedule = req.Schedule
 	cfg.Retention = retention
 	cfg.RemoteDest = req.RemoteDest
+	cfg.PreHook = req.PreHook
 	cfg.Enabled = enabled
 	cfg.NextRunAt = NextBackupRunAt(req.Schedule, time.Now())
 	if err := s.db.UpdateBackupConfig(cfg); err != nil {

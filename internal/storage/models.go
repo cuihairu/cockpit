@@ -222,6 +222,7 @@ type BackupConfig struct {
 	Schedule   string    `gorm:"size:32" json:"schedule"`    // manual / daily@HH:mm / every:Nh
 	Retention  int       `json:"retention"`                  // 保留份数，0=不清理
 	RemoteDest string    `gorm:"size:512" json:"remoteDest"` // rclone 远端目标 remote:path，空=不启用异地（M2 D20）
+	PreHook    string    `gorm:"size:1024" json:"preHook,omitempty"` // 打包前执行的数据库热备命令，空=不执行（M3 D26）
 	Enabled    bool      `json:"enabled"`
 	LastRunAt  int64     `json:"lastRunAt"`
 	NextRunAt  int64     `json:"nextRunAt"`                 // manual 恒为 0
