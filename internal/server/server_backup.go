@@ -47,11 +47,42 @@ const (
 // serverBackupLoop 醒来节奏。包级变量仅为测试可注入，默认值即生产取值。
 var serverBackupTick = time.Hour
 
-// rclone 可执行文件与推送超时。包级变量仅为测试可注入（M2 D15）。
+// rclone 可执行文件与推送超时（server 备份与录制归档共用，recording M2
+// D15）。包级变量仅为测试可注入，默认值即生产取值。
 var (
-	serverBackupRcloneBin     = "rclone"
+	serverRcloneBin           = "rclone"
 	serverBackupRemoteMaxWait = 5 * time.Minute
 )
+
+// rcloneCopyLocalFile rclone copy 推送单个本地文件到远端（server 备份 M2
+// D11 与录制归档 M2 D15 共用）。超时整杀 + WaitDelay 强断管道防孤儿孙进程
+// 拖住 Wait；失败错误含 stderr 摘要（exit status 无解释力）。
+func rcloneCopyLocalFile(local, remoteDest string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), serverBackupRemoteMaxWait)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, serverRcloneBin, "copy", "--transfers", "2", local, remoteDest)
+	// ctx 取消只杀 rclone 本体；继承 stdout 的孙进程（若有）会占住管道，
+	// WaitDelay 到期强断，Wait 不被孤儿拖住（rclone 官方单二进制，无此链）
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if summary := strings.TrimSpace(string(out)); summary != "" {
+		if len(summary) > 2048 {
+			summary = summary[:2048] + "…"
+		}
+		log.Printf("[remote] %s", summary)
+	}
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(out))
+	if len(detail) > 512 {
+		detail = detail[:512]
+	}
+	if detail != "" {
+		return fmt.Errorf("rclone copy: %v: %s", err, detail)
+	}
+	return fmt.Errorf("rclone copy: %v", err)
+}
 
 // serverBackupRemoteDest 读异地目标 Setting；空=关闭。脏值（写入口之后
 // 被手改）视为未配置并记日志，不阻塞本地备份（D13 读宽松）。
@@ -187,34 +218,12 @@ func (s *Server) pushServerBackupRemote(name string) {
 	}
 	local := filepath.Join(s.serverBackupDir(), name)
 	log.Printf("[remote] rclone copy %s → %s", name, remoteDest)
-	ctx, cancel := context.WithTimeout(context.Background(), serverBackupRemoteMaxWait)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, serverBackupRcloneBin, "copy", "--transfers", "2", local, remoteDest)
-	// ctx 取消只杀 rclone 本体；继承 stdout 的孙进程（若有）会占住管道，
-	// WaitDelay 到期强断，Wait 不被孤儿拖住（rclone 官方单二进制，无此链）
-	cmd.WaitDelay = time.Second
-	out, err := cmd.CombinedOutput()
-	if summary := strings.TrimSpace(string(out)); summary != "" {
-		if len(summary) > 2048 {
-			summary = summary[:2048] + "…"
-		}
-		log.Printf("[remote] %s", summary)
-	}
-	if err == nil {
-		log.Printf("[remote] server backup pushed: %s", name)
+	if err := rcloneCopyLocalFile(local, remoteDest); err != nil {
+		log.Printf("[remote] server backup push failed: %v", err)
+		s.notifyServerBackupRemoteFailed(name, err.Error())
 		return
 	}
-	detail := strings.TrimSpace(string(out))
-	if len(detail) > 512 {
-		detail = detail[:512]
-	}
-	if detail != "" {
-		err = fmt.Errorf("rclone copy: %v: %s", err, detail)
-	} else {
-		err = fmt.Errorf("rclone copy: %v", err)
-	}
-	log.Printf("[remote] server backup push failed: %v", err)
-	s.notifyServerBackupRemoteFailed(name, err.Error())
+	log.Printf("[remote] server backup pushed: %s", name)
 }
 
 // notifyServerBackupRemoteFailed 推送失败通知（M2 D16：本地已成功，仅远端
@@ -234,9 +243,10 @@ func (s *Server) notifyServerBackupRemoteFailed(name, errMsg string) {
 	})
 }
 
-// rcloneAvailable 异地推送执行前提的实时探测（M2 D18：后装 rclone 免重启）
+// rcloneAvailable 异地推送执行前提的实时探测（server 备份 M2 D18：后装
+// rclone 免重启）
 func rcloneAvailable() bool {
-	_, err := exec.LookPath(serverBackupRcloneBin)
+	_, err := exec.LookPath(serverRcloneBin)
 	return err == nil
 }
 

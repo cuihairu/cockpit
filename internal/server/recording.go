@@ -6,27 +6,76 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
 // 远控终端会话录制（见 docs/guide/recording-design.md）：server 侧挂在
 // agent→浏览器的转发管道上（HandleTerminalData），asciinema v2 格式落盘，
 // 元数据入 TerminalRecording 表。agent 零变更。只录输出（D4：输入含密码）。
+// M2：录制结束异步 rclone 归档异地（remote:path），失败只通知不改本地行为。
 
-// Setting 键：开关与保留天数（每轮读取免缓存）
+// Setting 键：开关、保留天数与异地归档目标（每轮读取免缓存）
 const (
-	RecordingEnabledSettingKey   = "recording.enabled"
-	RecordingRetentionSettingKey = "recording.retention_days"
+	RecordingEnabledSettingKey    = "recording.enabled"
+	RecordingRetentionSettingKey  = "recording.retention_days"
+	RecordingRemoteDestSettingKey = "recording.remote_dest"
 )
+
+// sessionID 严格形态（uuid.NewString()）：cast 文件按 sid 寻址，防穿越
+var recordingSessionIDRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 const (
 	recordingDefaultRetentionDays = 7
 	recordingMaxRetentionDays     = 365
 	recordingCleanupInterval      = time.Hour // 清理执行节流（挂 30s cleanupLoop）
 )
+
+// recordingRemoteDest 异地归档目标；空=关闭。脏值（写入口之后被手改）
+// 视为未配置并记日志（与 server 备份 M2 D13 同规则同源正则）。
+func (s *Server) recordingRemoteDest() string {
+	v, err := s.db.GetSetting(RecordingRemoteDestSettingKey)
+	if err != nil || v == "" {
+		return ""
+	}
+	if len(v) > serverBackupRemoteDestMaxLen ||
+		!regexp.MustCompile(serverBackupRemoteDestRe).MatchString(v) {
+		log.Printf("Recording remote_dest invalid, treating as unset: %q", v)
+		return ""
+	}
+	return v
+}
+
+// pushRecordingRemote 录制结束后的异地归档（M2 D16 异步调用：不拖会话
+// 出口路径）。remote_dest 未配置时静默跳过；失败发 recording.remote-failed。
+func (s *Server) pushRecordingRemote(sessionID string) {
+	remoteDest := s.recordingRemoteDest()
+	if remoteDest == "" {
+		return
+	}
+	local := filepath.Join(s.recordingsDir(), sessionID+".cast")
+	log.Printf("[remote] rclone copy %s.cast → %s", sessionID, remoteDest)
+	if err := rcloneCopyLocalFile(local, remoteDest); err != nil {
+		log.Printf("[remote] recording archive push failed: %v", err)
+		if s.notifier != nil {
+			s.notifier.SendNonBlocking(&notification.Notification{
+				EventType:    notification.RecordingRemoteFailed,
+				Title:        "会话录制异地归档失败",
+				Message:      fmt.Sprintf("%s.cast: %v", sessionID, err),
+				Level:        "warning",
+				ResourceType: "recording",
+				ResourceID:   sessionID,
+				Time:         time.Now(),
+			})
+		}
+		return
+	}
+	log.Printf("[remote] recording archived: %s.cast", sessionID)
+}
 
 // recordingEnabled 录制开关，默认开启
 func (s *Server) recordingEnabled() bool {
@@ -184,6 +233,8 @@ func (s *Server) startRecording(session *TerminalSession) *castRecorder {
 		if err := s.db.FinishTerminalRecording(session.ID, durationMs, bytes); err != nil {
 			log.Printf("Recording finish failed for session %s: %v", session.ID, err)
 		}
+		// M2 D16：回填后异步归档，不拖会话出口路径（.cast 已关闭完整可推）
+		go s.pushRecordingRemote(session.ID)
 	}
 	return rec
 }

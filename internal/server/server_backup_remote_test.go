@@ -27,9 +27,9 @@ func installServerFakeRclone(t *testing.T, exitCode int, stderr string) string {
 	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
-	old := serverBackupRcloneBin
-	serverBackupRcloneBin = bin
-	t.Cleanup(func() { serverBackupRcloneBin = old })
+	old := serverRcloneBin
+	serverRcloneBin = bin
+	t.Cleanup(func() { serverRcloneBin = old })
 	return argvFile
 }
 
@@ -218,9 +218,9 @@ func TestServerBackupRemoteTimeout(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
-	oldBin, oldWait := serverBackupRcloneBin, serverBackupRemoteMaxWait
-	serverBackupRcloneBin, serverBackupRemoteMaxWait = bin, 150*time.Millisecond
-	t.Cleanup(func() { serverBackupRcloneBin, serverBackupRemoteMaxWait = oldBin, oldWait })
+	oldBin, oldWait := serverRcloneBin, serverBackupRemoteMaxWait
+	serverRcloneBin, serverBackupRemoteMaxWait = bin, 150*time.Millisecond
+	t.Cleanup(func() { serverRcloneBin, serverBackupRemoteMaxWait = oldBin, oldWait })
 	setServerRemoteDest(t, s, "my-s3:cockpit")
 
 	start := time.Now()

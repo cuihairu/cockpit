@@ -26,6 +26,8 @@ const (
 	BackupRemoteFailed  = "backup.remote-failed" // 本地成功但 rclone 推送失败（M2 D21，白名单显式启用）
 
 	ServerBackupRemoteFailed = "server_backup.remote-failed" // 面板库本地备份成功但 rclone 推送失败（server-backup M2 D16，白名单显式启用）
+
+	RecordingRemoteFailed = "recording.remote-failed" // 录制文件归档推送失败（本地档在，retention 窗口内可补推；recording M2 D17，白名单显式启用）
 )
 
 // getAlertEventType 根据 Alert 获取对应的事件类型
