@@ -569,6 +569,8 @@ export interface ServerBackupFile {
 export interface ServerBackupConfig {
   interval_hours: number
   retention_days: number
+  remote_dest?: string // rclone remote:path（空 = 不推送异地）
+  rclone_available?: boolean // server 主机是否装了 rclone（实时探测）
   max_interval_hours: number
   max_retention_days: number
 }

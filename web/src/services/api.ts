@@ -592,13 +592,24 @@ class ApiService {
     return this.client.get<unknown, ServerBackupConfig>('/server-backups/config')
   }
 
-  async putServerBackupConfig(input: { interval_hours?: number; retention_days?: number }): Promise<void> {
+  async putServerBackupConfig(input: {
+    interval_hours?: number
+    retention_days?: number
+    remote_dest?: string
+  }): Promise<void> {
     await this.client.put('/server-backups/config', input)
   }
 
   // 立即备份，返回产物文件名
   async runServerBackup(): Promise<{ name: string }> {
     return this.client.post<unknown, { name: string }>('/server-backups/run')
+  }
+
+  // 手动补推指定备份到已配置的异地目标（server-backup M2 D17）
+  async syncServerBackupRemote(name: string): Promise<{ status: string }> {
+    return this.client.post<unknown, { status: string }>(
+      `/server-backups/${encodeURIComponent(name)}/sync-remote`,
+    )
   }
 
   async downloadServerBackup(name: string): Promise<Blob> {
