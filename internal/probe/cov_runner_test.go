@@ -251,3 +251,59 @@ func TestCovProbeCertificateStatuses(t *testing.T) {
 		}
 	}
 }
+
+// fakeHealthChecker 注入用假检查器：可指定 DNS/HTTP/-port 各自的返回。
+type fakeHealthChecker struct {
+	dns  *health.Result
+	http *health.Result
+	tcp  *health.Result
+}
+
+func (f *fakeHealthChecker) CheckDNS(service, target string) *health.Result {
+	if f.dns != nil {
+		return f.dns
+	}
+	return &health.Result{Service: service, Type: "dns", Target: target, Status: health.StatusHealthy}
+}
+
+func (f *fakeHealthChecker) CheckHTTP(service, target string, expectedStatus int) *health.Result {
+	if f.http != nil {
+		return f.http
+	}
+	return &health.Result{Service: service, Type: "http", Target: target, Status: health.StatusHealthy}
+}
+
+func (f *fakeHealthChecker) CheckTCP(service, addr string) *health.Result {
+	if f.tcp != nil {
+		return f.tcp
+	}
+	return &health.Result{Service: service, Type: "tcp", Target: addr, Status: health.StatusHealthy}
+}
+
+// TestCovProbeDomainActive 注入 DNS 与 HTTP 均健康的组合，覆盖
+// probeDomain 的 active 分支（HTTPS 与 HTTP 两次调用）。
+func TestCovProbeDomainActive(t *testing.T) {
+	r, _ := newTestRunner(t)
+	r.healthChecker = &fakeHealthChecker{}
+
+	pr := r.probeDomain(&storage.Domain{ID: "d-ok", Domain: "ok.example.com"})
+	if pr.Status != "active" {
+		t.Errorf("status = %q message = %q, want active", pr.Status, pr.Message)
+	}
+	if pr.Message != "DNS resolves, HTTP reachable" {
+		t.Errorf("message = %q", pr.Message)
+	}
+}
+
+// TestCovParseHostPortDefaults 覆盖无端口目标统一回退 80 端口的行为
+// （协议前缀在切分后已不可能出现，443 分支为死代码已移除）。
+func TestCovParseHostPortDefaults(t *testing.T) {
+	host, port := parseHostPort("https://example.com/path")
+	if host != "example.com" || port != "80" {
+		t.Errorf("parseHostPort = %s:%s, want example.com:80", host, port)
+	}
+	host, port = parseHostPort("plainhost")
+	if host != "plainhost" || port != "80" {
+		t.Errorf("parseHostPort = %s:%s, want plainhost:80", host, port)
+	}
+}

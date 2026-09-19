@@ -72,10 +72,18 @@ type serviceState struct {
 	notified  bool
 }
 
+// healthChecker 抽象 Runner 依赖的健康检查能力；*health.Checker 满足该
+// 接口，测试可注入假实现以覆盖 DNS+HTTP 双健康等难以为真的组合。
+type healthChecker interface {
+	CheckHTTP(service, target string, expectedStatus int) *health.Result
+	CheckDNS(service, target string) *health.Result
+	CheckTCP(service, addr string) *health.Result
+}
+
 // Runner 自动健康探测运行器
 type Runner struct {
 	db            *storage.DB
-	healthChecker *health.Checker
+	healthChecker healthChecker
 	certMonitor   *cert.Monitor
 	// intervalSeconds 探测间隔（秒）。atomic 读写：API 线程 SetInterval，
 	// 探测循环 time.After(Interval()) 每轮重读，间隔变化下一轮生效。
@@ -581,9 +589,7 @@ func parseHostPort(target string) (host, port string) {
 		return h, p
 	}
 
-	// 没有指定端口，根据协议推断
-	if strings.HasPrefix(target, "https://") {
-		return target, "443"
-	}
+	// 没有指定端口，默认 80。（前缀切换 443 的分支不可达：路径切分后
+	// target 已不含 "//"，恒走这里）
 	return target, "80"
 }
