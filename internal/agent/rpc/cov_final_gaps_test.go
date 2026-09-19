@@ -185,3 +185,23 @@ func TestCovProviderTypes(t *testing.T) {
 		t.Errorf("service type = %q", p)
 	}
 }
+
+// TestNasKBtoGB mdstat 1k 块数单位换算
+func TestNasKBtoGB(t *testing.T) {
+	cases := []struct {
+		n    float64
+		unit string
+		want float64
+	}{
+		{1, "k", 1024 / 1e9},
+		{1, "m", 1024 * 1024 / 1e9},
+		{1, "g", 1024 * 1024 * 1024 / 1e9},
+		{1024 * 1024, "k", 1024 * 1024 * 1024 / 1e9}, // 1G 的 k 块数
+		{500, "G", 500 * 1024 * 1024 * 1024 / 1e9},   // 大写单位
+	}
+	for _, c := range cases {
+		if got := nasKBtoGB(c.n, c.unit); got != c.want {
+			t.Errorf("nasKBtoGB(%v, %q) = %v, want %v", c.n, c.unit, got, c.want)
+		}
+	}
+}

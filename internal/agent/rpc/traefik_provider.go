@@ -35,6 +35,9 @@ const (
 // traefikFileRe 片段文件名（与 nginx 同构，扩展名 .yml）
 var traefikFileRe = regexp.MustCompile(`^cockpit-site-([a-z0-9][a-z0-9_-]{0,63})\.yml$`)
 
+// traefikStaticConfigs 静态配置候选路径（测试注入用）
+var traefikStaticConfigs = []string{traefikStaticConfig, traefikStaticConfigYaml}
+
 // TraefikProvider Traefik 动态配置管理 Provider
 type TraefikProvider struct {
 	dir      string // file provider 动态目录
@@ -92,7 +95,7 @@ func DetectTraefik() (dir string, ok bool) {
 		}
 		return "", false
 	}
-	dir = traefikDirFromStatic([]string{traefikStaticConfig, traefikStaticConfigYaml})
+	dir = traefikDirFromStatic(traefikStaticConfigs)
 	if dir == "" {
 		dir = traefikDynamicDirDefault
 	}

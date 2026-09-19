@@ -347,3 +347,48 @@ func TestDriftTraefikSection(t *testing.T) {
 		}
 	}
 }
+
+// TestTraefikProviderType provider 注册键（providers map 以 Type() 为 key）
+func TestTraefikProviderType(t *testing.T) {
+	p := NewTraefikProvider("", nil)
+	if p.Type() != "traefik" {
+		t.Errorf("Type = %q, want traefik", p.Type())
+	}
+	if NewTraefikProvider("", nil).dir != traefikDynamicDirDefault {
+		t.Errorf("empty dir should fall back to default")
+	}
+}
+
+// TestDetectTraefikStaticConfig 静态配置路径分支（注入候选路径，真实
+// /etc/traefik 不可写）：解析出 directory → 目录存在即探测通过；目录
+// 不存在则失败；静态配置无 file 段回缺省目录
+func TestDetectTraefikStaticConfig(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := filepath.Join(root, "traefik.yml")
+	dynDir := filepath.Join(root, "dyn")
+	os.WriteFile(cfgPath, []byte("providers:\n  file:\n    directory: "+dynDir+"\n"), 0o644)
+
+	t.Setenv("COCKPIT_TRAEFIK_DIR", "")
+	orig := traefikStaticConfigs
+	traefikStaticConfigs = []string{cfgPath}
+	t.Cleanup(func() { traefikStaticConfigs = orig })
+
+	// 目录不存在 → 探测失败（静态配置有值但落空）
+	if _, ok := DetectTraefik(); ok {
+		t.Error("missing dynamic dir should fail detection")
+	}
+
+	// 目录存在 → 通过且返回该目录
+	os.Mkdir(dynDir, 0o755)
+	got, ok := DetectTraefik()
+	if !ok || got != dynDir {
+		t.Fatalf("DetectTraefik = %q %v, want %q true", got, ok, dynDir)
+	}
+
+	// 静态配置无 file 段 → 回缺省目录（不存在即失败，仅验证不解析出 dynDir）
+	os.WriteFile(cfgPath, []byte("log:\n  level: INFO\n"), 0o644)
+	os.Remove(dynDir)
+	if _, ok := DetectTraefik(); ok {
+		t.Error("default dir should not exist in test root")
+	}
+}

@@ -3,6 +3,8 @@ package rpc
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -249,5 +251,52 @@ func TestOverlayItoa(t *testing.T) {
 		if got := itoa(c.in); got != c.want {
 			t.Errorf("itoa(%d) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// TestFetchFRPAdminTunnelCount frp admin API /api/status 计数（httptest 桩）：
+// 按类型分组的行数求和、非 200 与坏 JSON 报错、连接失败报错
+func TestFetchFRPAdminTunnelCount(t *testing.T) {
+	doc := `{
+		"tcp": [{"name":"ssh"},{"name":"web"},{"name":"db"}],
+		"udp": [{"name":"dns"}],
+		"version": "0.51.0"
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/status" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(doc))
+	}))
+	defer srv.Close()
+
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	n, err := fetchFRPAdminTunnelCount(addr)
+	if err != nil || n != 4 {
+		t.Fatalf("count = %d err = %v, want 4", n, err)
+	}
+
+	// 非 200 显式覆盖：自定义 handler 返回 500
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv2.Close()
+	if _, err := fetchFRPAdminTunnelCount(strings.TrimPrefix(srv2.URL, "http://")); err == nil {
+		t.Error("500 should error")
+	}
+
+	// 坏 JSON
+	srv3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("not json"))
+	}))
+	defer srv3.Close()
+	if _, err := fetchFRPAdminTunnelCount(strings.TrimPrefix(srv3.URL, "http://")); err == nil {
+		t.Error("bad json should error")
+	}
+
+	// 连接失败
+	if _, err := fetchFRPAdminTunnelCount("127.0.0.1:1"); err == nil {
+		t.Error("connection refused should error")
 	}
 }
