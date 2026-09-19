@@ -237,10 +237,13 @@ func (s *Server) startBackupRun(cfg *storage.BackupConfig, trigger string) (uint
 
 	log.Printf("Backup dispatched: config=%d name=%s agent=%s task=%s trigger=%s",
 		cfg.ID, cfg.Name, cfg.AgentID, taskID, trigger)
+	// 参数在 go 语句前取值：track goroutine 不再读 *cfg，调用方随后对
+	// 同一配置对象的更新（如 LastStatus 回写）不构成数据竞争（CI -race 捕获）
+	configID, agentID := cfg.ID, cfg.AgentID
 	s.backupTrackWG.Add(1)
 	go func() {
 		defer s.backupTrackWG.Done()
-		s.trackBackupTask(cfg.ID, cfg.AgentID, taskID, run.ID)
+		s.trackBackupTask(configID, agentID, taskID, run.ID)
 	}()
 	return run.ID, nil
 }
