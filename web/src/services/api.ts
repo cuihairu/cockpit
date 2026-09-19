@@ -65,6 +65,7 @@ import type {
   ServiceListResult,
   ServiceStatus,
   OverlayStatus,
+  OverlayCloudStatus,
   CronStatus,
   SmartScanConfig,
   SmartStatus,
@@ -948,6 +949,38 @@ class ApiService {
   // 组网工具快照（ZeroTier/Tailscale/WireGuard/frp，只读纯转发）
   async getOverlayStatus(agentId: string): Promise<OverlayStatus> {
     return this.client.get<unknown, OverlayStatus>(`/agents/${encodeURIComponent(agentId)}/overlay/status`)
+  }
+
+  // ============ Overlay 云管理面（M2，server 直连云控制面） ============
+
+  // 云端成员/设备列表 + managed 对照（浏览不审计）
+  async getOverlayCloud(): Promise<OverlayCloudStatus> {
+    return this.client.get<unknown, OverlayCloudStatus>('/overlay/cloud')
+  }
+
+  // ZeroTier 成员授权/取消授权（审计 overlay_authz）
+  async setOverlayZTMemberAuthorized(networkId: string, memberId: string, authorized: boolean): Promise<void> {
+    await this.client.post(
+      `/overlay/cloud/zerotier/networks/${encodeURIComponent(networkId)}/members/${encodeURIComponent(memberId)}`,
+      { authorized },
+    )
+  }
+
+  // ZeroTier 成员除名（审计 overlay_remove；重新 join 可再授权）
+  async removeOverlayZTMember(networkId: string, memberId: string): Promise<void> {
+    await this.client.delete(
+      `/overlay/cloud/zerotier/networks/${encodeURIComponent(networkId)}/members/${encodeURIComponent(memberId)}`,
+    )
+  }
+
+  // Tailscale 设备授权（审计 overlay_authz）
+  async authorizeOverlayTSDevice(deviceId: string): Promise<void> {
+    await this.client.post(`/overlay/cloud/tailscale/devices/${encodeURIComponent(deviceId)}/authorize`)
+  }
+
+  // Tailscale 设备删除（审计 overlay_remove；破坏性高于 ZT，UI 侧输入名称确认）
+  async removeOverlayTSDevice(deviceId: string): Promise<void> {
+    await this.client.delete(`/overlay/cloud/tailscale/devices/${encodeURIComponent(deviceId)}`)
   }
 
   // ========== 磁盘健康（SMART，见 disk-health-design.md） ==========

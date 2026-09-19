@@ -878,6 +878,59 @@ export interface OverlayStatus {
   tools: OverlayTool[]
 }
 
+// ========== Overlay 云管理面（M2，见 overlay-design.md D13/D17） ==========
+
+// agent 上报的虚拟网身份（overlay capability metadata.identity，D15/D16）
+export interface OverlayAgentIdentity {
+  // zerotier 段
+  nodeId?: string
+  networks?: { id: string; name?: string; status?: string; addresses?: string[] }[]
+  // tailscale 段
+  id?: string
+  hostName?: string
+  dnsName?: string
+  addresses?: string[]
+}
+
+// 云端成员（ZeroTier Central）；managed = 面板内有 agent 上报同 id 身份（D17）
+export interface OverlayCloudMember {
+  id: string
+  name?: string
+  authorized: boolean
+  online: boolean
+  ips?: string[]
+  version?: string
+  lastSeen?: string
+  managed: boolean
+}
+
+// 云端网络及其成员
+export interface OverlayCloudNetwork {
+  id: string
+  name?: string
+  members: OverlayCloudMember[]
+}
+
+// 云端设备（Tailscale）
+export interface OverlayCloudDevice {
+  id: string
+  name?: string
+  addresses?: string[]
+  user?: string
+  os?: string
+  authorized: boolean
+  online: boolean
+  keyExpiry?: string
+  lastSeen?: string
+  managed: boolean
+}
+
+// GET /api/overlay/cloud 返回（未配置段 configured:false，失败段 error 非空）
+export interface OverlayCloudStatus {
+  zerotier: { configured: boolean; error?: string; networks?: OverlayCloudNetwork[] }
+  tailscale: { configured: boolean; tailnet?: string; error?: string; devices?: OverlayCloudDevice[] }
+}
+
 // ========== 磁盘健康（SMART，见 disk-health-design.md） ==========
 
 // smart.status devices[] 元素（白名单字段，取不到的省略）
