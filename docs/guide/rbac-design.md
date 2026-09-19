@@ -1,0 +1,78 @@
+# 方案设计：多账号与细粒度权限控制（RBAC）
+
+> 2026-09-19。多账号权限控制首期设计。需求原文：「账号权限控制，支持多账号」。
+> 本文只做设计决策与接口定义，实现按 P0/P1 分期。
+
+## 现状与痛点
+
+多账号基础已存在：`User` 表（用户名/密码/TOTP/部门）、用户 CRUD API、JWT 携带
+`Role`。缺的是权限模型——判定全靠散落的字符串比较：
+
+| 痛点 | 现状 | 后果 |
+|------|------|------|
+| 只有两级角色 | `Role` 字段硬编码 `admin` / `user` 两种取值 | 想给运维同事「能操作但不能管用户」做不到 |
+| 判定散落 | 10+ 处 handler 手写 `user.Role != "admin"`（`api.go` 394/703/802/844/850/893/911…） | 新增模块容易漏判；审计「谁能干什么」要人肉 grep |
+| 无权限语义 | 「admin」同时意味着用户管理、证书签发、文件读写、终端接入 | 无法回答「这个账号能碰生产文件吗」 |
+| user 角色无定义 | 非 admin 除改自己资料外几乎什么都做不了，但这是隐式约定 | 前端菜单与后端判定各自为政 |
+
+## 架构总览
+
+RBAC-lite：**用户 → 角色 → 权限点**。权限判定收敛为 server 侧一个中间件，
+agent 与 websocket 通道零改动（权限在 server 收口，agent 只接受 server 单向调用）。
+
+```
+┌─ web ─────────────────┐      ┌─ server ──────────────────────────────────┐
+│ 路由守卫 + v-perm 指令 │─JWT─▶│ auth middleware：验签 → UserInfo{Role}     │
+│                       │      │   ↓                                        │
+│ /api/me 返回          │      │ requirePermission(perm)：按 Role 查角色表   │
+│ permissions[]         │      │   ↓（SQLite 本地读，微秒级，不做缓存）      │
+│ 菜单/按钮按权限裁剪    │      │ handler：删除散落的 Role != "admin"         │
+└───────────────────────┘      └────────────────────────────────────────────┘
+```
+
+## 关键决策
+
+| # | 决策 | 选择 | 理由 |
+|---|------|------|------|
+| D1 | 权限模型 | RBAC（角色→权限点集合），不做 ABAC/ACL | 管理面用户量个位数，按岗位授权足够；ABAC 的属性条件无处取值 |
+| D2 | 权限点粒度 | `<resource>:<action>`，action ∈ `read` / `write` / `admin` | 模块级足够（如 `files:write`、`acme:admin`）；按钮级授权成本高收益低 |
+| D3 | resource 清单 | 与现有 API 模块一一对应：`inventory` `files` `logs` `terminal` `docker` `stack` `cron` `backup` `acme` `dns` `ddns` `proxy` `overlay` `drift` `nas` `alerts` `audit` `users` `roles` `settings` | 后端已有路由前缀就是天然 resource，不发明新分类 |
+| D4 | 角色存储 | 新增 `Role` 表（`name` 主键、`permissions` JSON、`builtin` 标记）；`User.role` 沿用字符串存角色名 | GORM AutoMigrate 一张表搞定；User 不需要外键约束，角色名即软引用 |
+| D5 | 权限校验位置 | auth middleware 之后加 `requirePermission(perm)`；`admin` 权限点隐含该 resource 的 read/write | 中间件链一处收口；「admin 隐含读写」让内置 admin 角色不用枚举全部权限点 |
+| D6 | 每请求查库 | 校验时直接查 `roles` 表，不做内存缓存 | 管理面 QPS 个位数；缓存失效逻辑（角色改了要踢在线用户）比省的那点查询贵得多 |
+| D7 | JWT 内容 | 沿用现状：token 只带角色名 | 角色定义变更对已发 token **立即生效**（好性质）；把权限点塞进 token 反而要处理「token 未过期但权限已收窄」 |
+| D8 | 内置角色 | `admin`（全量含 `users:admin`/`roles:admin`）、`operator`（全部模块 read+write，无 users/roles/settings）、`viewer`（全模块 read） | 覆盖 90% 场景；自定义角色兜剩余 10% |
+| D9 | 存量迁移 | `role=admin` → admin；`role=user` → viewer，首次启动 seed 内置角色 | 保持现状语义（现在 user 就没有写权限），要放宽管理员手工升 operator |
+| D10 | agent 侧 | 零改动 | agent 无用户概念；RPC 由 server 发起，权限在 REST 层拦截即等效拦截 RPC |
+| D11 | websocket/终端 | 连接建立时校验 `terminal:write`，会话期内不复查 | 终端会话中途断权易产生半截命令；重连即按新权限判定 |
+| D12 | 角色管理 API | 仅 `roles:admin`（内置 admin）：CRUD 自定义角色；内置角色不可改删 | 防止自锁；自定义角色权限点必须落在 D3 清单内（后端校验） |
+| D13 | 自我保护 | 不可删除/降级最后一个有效 admin；不可修改自己的角色 | 常规多租户系统事故教训，一条校验省一次数据卷救援 |
+| D14 | 审计 | 角色增改、授权变更、越权拒绝（403）全部入审计日志 | 「谁给谁提了权」必须可追溯；403 记录用于发现权限配置不足 |
+
+## 权限点清单（D3 展开）
+
+```
+inventory:read/write    files:read/write       logs:read           terminal:write
+docker:read/write       stack:read/write       cron:read/write     backup:read/write
+acme:read/write/admin   dns:read/write         ddns:read/write     proxy:read/write
+overlay:read/write      drift:read/write       nas:read/write      alerts:read/write
+audit:read              users:admin            roles:admin         settings:admin
+```
+
+约定：`<r>:write` 隐含 `<r>:read`；`<r>:admin` 隐含 write（如 acme 的签发/吊销/
+CA 目录切换归 `acme:admin`，查看证书列表 `acme:read`）。
+
+## 分期
+
+| 期 | 内容 | 验收 |
+|----|------|------|
+| P0（后端） | Role 表 + 内置角色 seed + `requirePermission` 中间件 + 存量 handler 判定收敛 + 权限点清单常量 + D13/D14 校验 | 全部 API 在三内置角色下的 200/403 矩阵有测试覆盖 |
+| P1（前端+管理） | 用户/角色管理页、`/api/me` 返回 permissions、路由守卫与菜单裁剪、v-perm 按钮指令 | viewer 登录看不到任何写操作入口 |
+| P2（按需） | 自定义角色 UI 完善、权限模板、部门级授权（Department 字段已有，暂不参与判定） | 按实际需求排期 |
+
+## 不做的事
+
+- 不引入 casban/ory 类权限框架——依赖重量与本项目体量不匹配
+- 不做行级权限（某个 agent 只对某部门可见）——现有部署是个人/小团队自托管，
+  行级隔离等真实需求出现再议
+- 不改 agent 协议——权限是 server 职责，agent 保持「被调用即执行」的信任模型
