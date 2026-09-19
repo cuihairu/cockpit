@@ -758,6 +758,16 @@ class ApiService {
     await this.client.post(`/agents/${encodeURIComponent(agentId)}/files/rename`, { path, name })
   }
 
+  // 改权限位（0-0o777，file-manager-design M4/D22）
+  async chmodFile(agentId: string, path: string, mode: number): Promise<void> {
+    await this.client.post(`/agents/${encodeURIComponent(agentId)}/files/chmod`, { path, mode })
+  }
+
+  // 改属主 uid/gid（数字，不做用户名解析）
+  async chownFile(agentId: string, path: string, uid: number, gid: number): Promise<void> {
+    await this.client.post(`/agents/${encodeURIComponent(agentId)}/files/chown`, { path, uid, gid })
+  }
+
   // 目录内递归文本搜索（file-manager-design.md D10-D12：纯文本 contains，
   // 默认大小写不敏感；agent 侧有深度/文件数/命中数/超时多重上限）
   async searchFiles(

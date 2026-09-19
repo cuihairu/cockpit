@@ -638,6 +638,8 @@ export interface FileEntry {
   name: string
   size: number
   mode: string // 八进制权限，如 "0644"
+  uid?: number // 属主 uid（unix；windows/旧 agent 无为 -1 或缺省）
+  gid?: number
   mtime: number
   isDir: boolean
   isSymlink: boolean

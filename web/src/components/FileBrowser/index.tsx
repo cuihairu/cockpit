@@ -4,9 +4,11 @@ import {
   Alert,
   Breadcrumb,
   Button,
+  Checkbox,
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Progress,
@@ -30,6 +32,7 @@ import {
   FolderOutlined,
   LinkOutlined,
   RedoOutlined,
+  SafetyOutlined,
   SearchOutlined,
   SwapOutlined,
   UploadOutlined,
@@ -139,7 +142,15 @@ const readFullText = async (agentId: string, path: string): Promise<string> => {
   }
 }
 
-// 远程文件浏览器：按 agent 作用域，浏览/编辑/上传/下载/重命名/删除
+// 权限九宫格：三组（属主/属组/其他）× r/w/x 的位
+const PERM_GRID: Array<{ label: string; bits: [number, number, number] }> = [
+  { label: '属主', bits: [0o400, 0o200, 0o100] },
+  { label: '属组', bits: [0o040, 0o020, 0o010] },
+  { label: '其他', bits: [0o004, 0o002, 0o001] },
+]
+const PERM_HEADS = ['读', '写', '执行']
+
+// 远程文件浏览器：按 agent 作用域，浏览/编辑/上传/下载/重命名/删除/权限
 // （见 docs/guide/file-manager-design.md；全文件系统可见，安全靠双端路径校验）
 const FileBrowser = ({ agentId }: { agentId: string }) => {
   const queryClient = useQueryClient()
@@ -152,6 +163,12 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
   const [editSaving, setEditSaving] = useState(false)
   const [deleteDir, setDeleteDir] = useState<FileEntry | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState('')
+  // 权限编辑（file-manager-design.md M4 D22）：permBits 是九宫格合成的权限位
+  const [permTarget, setPermTarget] = useState<FileEntry | null>(null)
+  const [permBits, setPermBits] = useState(0)
+  const [permUid, setPermUid] = useState<number>()
+  const [permGid, setPermGid] = useState<number>()
+  const [permSaving, setPermSaving] = useState(false)
   // 文本搜索（file-manager-design.md M2 D13）：以打开时的目录为根
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -246,6 +263,41 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
       message.error(getApiErrorMessage(err, '下载失败'))
     } finally {
       setDownloading(null)
+    }
+  }
+
+  // ---- 权限编辑（file-manager-design.md M4 D22）----
+  // 打开时从八进制 mode 反解权限位；uid/gid 为 -1（windows）或缺失时显示空
+  const openPerm = (f: FileEntry) => {
+    setPermBits(parseInt(f.mode, 8) || 0)
+    setPermUid(typeof f.uid === 'number' && f.uid >= 0 ? f.uid : undefined)
+    setPermGid(typeof f.gid === 'number' && f.gid >= 0 ? f.gid : undefined)
+    setPermTarget(f)
+  }
+
+  // 应用时按变化分流：权限位变调 chmod；uid/gid 变调 chown（两者需同时有值）
+  const applyPerm = async () => {
+    if (!permTarget) return
+    const origBits = parseInt(permTarget.mode, 8) || 0
+    const origUid = typeof permTarget.uid === 'number' && permTarget.uid >= 0 ? permTarget.uid : undefined
+    const origGid = typeof permTarget.gid === 'number' && permTarget.gid >= 0 ? permTarget.gid : undefined
+    const ownerChanged = permUid !== origUid || permGid !== origGid
+    if (ownerChanged && (permUid === undefined || permGid === undefined)) {
+      message.warning('uid 与 gid 需同时填写才能修改归属')
+      return
+    }
+    setPermSaving(true)
+    try {
+      const path = joinPath(cwd, permTarget.name)
+      if (permBits !== origBits) await api.chmodFile(agentId, path, permBits)
+      if (ownerChanged) await api.chownFile(agentId, path, permUid!, permGid!)
+      message.success('权限已更新')
+      setPermTarget(null)
+      invalidate()
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '权限修改失败'))
+    } finally {
+      setPermSaving(false)
     }
   }
 
@@ -525,6 +577,14 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
             <Button
               type="link"
               size="small"
+              icon={<SafetyOutlined />}
+              title={f.isSymlink ? '符号链接不支持权限编辑' : '权限'}
+              disabled={f.isSymlink}
+              onClick={() => openPerm(f)}
+            />
+            <Button
+              type="link"
+              size="small"
               icon={<SwapOutlined />}
               title="重命名"
               onClick={() => {
@@ -674,6 +734,81 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
             } />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={`权限：${permTarget?.name ?? ''}`}
+        open={!!permTarget}
+        onCancel={() => setPermTarget(null)}
+        onOk={applyPerm}
+        okText="应用"
+        confirmLoading={permSaving}
+        width={460}
+        destroyOnClose
+      >
+        {permTarget && (
+          <>
+            <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
+              当前 {permTarget.mode}
+              {typeof permTarget.uid === 'number' && permTarget.uid >= 0
+                ? ` · ${permTarget.uid}:${permTarget.gid}`
+                : ''}
+              ；应用后合成八进制 {(permBits & 0o777).toString(8).padStart(4, '0')}
+            </Typography.Paragraph>
+            <div style={{ marginBottom: 4, display: 'flex' }}>
+              <span style={{ width: 44 }} />
+              {PERM_HEADS.map((h) => (
+                <span key={h} style={{ width: 64, fontSize: 13, color: 'rgba(128,128,128,0.85)' }}>
+                  {h}
+                </span>
+              ))}
+            </div>
+            {PERM_GRID.map((g) => (
+              <div key={g.label} style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ width: 44, fontSize: 13 }}>{g.label}</span>
+                {g.bits.map((bit, i) => (
+                  <Checkbox
+                    key={i}
+                    checked={(permBits & bit) !== 0}
+                    onChange={() => setPermBits((b) => b ^ bit)}
+                    style={{ width: 64 }}
+                  >
+                    {PERM_HEADS[i]}
+                  </Checkbox>
+                ))}
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
+              <span>
+                属主 UID{' '}
+                <InputNumber
+                  size="small"
+                  min={0}
+                  max={4294967295}
+                  precision={0}
+                  value={permUid}
+                  placeholder="—"
+                  onChange={(v) => setPermUid(v ?? undefined)}
+                />
+              </span>
+              <span>
+                属组 GID{' '}
+                <InputNumber
+                  size="small"
+                  min={0}
+                  max={4294967295}
+                  precision={0}
+                  value={permGid}
+                  placeholder="—"
+                  onChange={(v) => setPermGid(v ?? undefined)}
+                />
+              </span>
+            </div>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+              仅权限位变化时执行 chmod；uid/gid 变化时执行 chown（需 agent 主机权限，失败原因原样提示）。
+            </Typography.Text>
+          </>
+        )}
       </Modal>
 
       <Modal
