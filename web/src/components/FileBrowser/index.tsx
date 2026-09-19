@@ -64,6 +64,61 @@ const IMAGE_MIME: Record<string, string> = {
   avif: 'image/avif',
 }
 
+// 跨刷新断点续传（file-manager-design.md M5 D23-D25）：挂起上传登记在
+// localStorage（单浏览器语义，per-viewer 便利），续传游标仍以远端文件实际
+// size 为准（D16 探测同源）——服务端零新状态、零新端点
+interface PendingUpload {
+  agentId: string
+  dir: string
+  name: string
+  size: number
+  lastModified: number
+  uploaded: number
+  ts: number
+}
+const PENDING_UPLOADS_KEY = 'cockpit-pending-uploads'
+const PENDING_UPLOADS_MAX = 10 // FIFO 容量
+const PENDING_UPLOADS_TTL_MS = 7 * 24 * 3600 * 1000
+
+const readPendingUploads = (): PendingUpload[] => {
+  try {
+    const raw = localStorage.getItem(PENDING_UPLOADS_KEY)
+    if (!raw) return []
+    const now = Date.now()
+    return (JSON.parse(raw) as PendingUpload[]).filter((e) => now - e.ts < PENDING_UPLOADS_TTL_MS)
+  } catch {
+    return []
+  }
+}
+
+const writePendingUploads = (list: PendingUpload[]) => {
+  try {
+    localStorage.setItem(PENDING_UPLOADS_KEY, JSON.stringify(list.slice(-PENDING_UPLOADS_MAX)))
+  } catch {
+    // 隐私窗口/存储禁用：续传登记静默缺席，主上传流程不受影响
+  }
+}
+
+const persistPendingUpload = (e: PendingUpload) => {
+  const list = readPendingUploads().filter(
+    (x) => !(x.agentId === e.agentId && x.dir === e.dir && x.name === e.name),
+  )
+  list.push(e)
+  writePendingUploads(list)
+}
+
+const removePendingUpload = (agentId: string, dir: string, name: string) => {
+  writePendingUploads(
+    readPendingUploads().filter((x) => !(x.agentId === agentId && x.dir === dir && x.name === name)),
+  )
+}
+
+// Modal.confirm 的 Promise 封装（续传校验矩阵里语义模糊处交用户裁决）
+const confirmAsync = (title: string, content: string): Promise<boolean> =>
+  new Promise((resolve) => {
+    Modal.confirm({ title, content, onOk: () => resolve(true), onCancel: () => resolve(false) })
+  })
+
 const imageExt = (name: string): string | null => {
   const idx = name.lastIndexOf('.')
   if (idx < 0) return null
@@ -412,11 +467,29 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
     return hit ? hit.size : null
   }
 
-  const uploadChunked = async (raw: File, path: string, token: number) => {
-    const dir = cwd
-    let uploaded = 0
-    let first = true
+  // dir 显式传入（挂起续传时来自登记而非当前 cwd）；resume 为跨刷新续传的
+  // 起始偏移（M5 D24）。登记生命周期归本函数：起始 upsert、每块更新进度、
+  // 成功移除；重试耗尽的最终失败保留记录（D23——断网关页面正是要续传的场景）
+  const uploadChunked = async (
+    raw: File,
+    dir: string,
+    token: number,
+    resume?: { uploaded: number; first: boolean },
+  ) => {
+    const path = joinPath(dir, raw.name)
+    let uploaded = resume?.uploaded ?? 0
+    let first = resume?.first ?? true
     let retries = 0
+    const entry = (): PendingUpload => ({
+      agentId,
+      dir,
+      name: raw.name,
+      size: raw.size,
+      lastModified: raw.lastModified,
+      uploaded,
+      ts: Date.now(),
+    })
+    persistPendingUpload(entry())
     while (uploaded < raw.size) {
       if (token !== uploadTokenRef.current) throw new Error('cancelled')
       const end = Math.min(uploaded + UPLOAD_CHUNK_BYTES, raw.size)
@@ -429,6 +502,7 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
         uploaded = end
         first = false
         retries = 0
+        persistPendingUpload(entry())
       } catch (err) {
         if (token !== uploadTokenRef.current) throw new Error('cancelled')
         if (err instanceof Error && err.message === 'size-mismatch') throw err
@@ -439,23 +513,90 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
         if (remote === uploaded || remote === uploaded + UPLOAD_CHUNK_BYTES) {
           uploaded = remote // 响应丢失时该块可能已落盘，跳过
           first = false
+          persistPendingUpload(entry())
         } else if (remote === null || remote === 0) {
           uploaded = 0 // 目标丢失/为空 → 首块重建
           first = true
+          persistPendingUpload(entry())
         } else {
           throw err // 其他大小（并发写入）→ 不覆盖别人的改动
         }
       }
     }
+    removePendingUpload(agentId, dir, raw.name)
   }
 
   const cancelUpload = () => {
     uploadTokenRef.current++
     const cur = uploading
     setUploading(null)
-    // 清理半成品（分块留下的截断文件），失败静默
+    // 清理半成品（分块留下的截断文件）与挂起登记，失败静默
     if (cur && cur.uploaded > 0) {
       api.deleteRemoteFile(agentId, joinPath(cwd, cur.name)).catch(() => {})
+    }
+    if (cur) {
+      removePendingUpload(agentId, cwd, cur.name)
+      refreshPendingUploads()
+    }
+  }
+
+  // 挂起上传（跨刷新续传，M5 D24）：同 agent 的未完成上传，Alert 呈现
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
+  const refreshPendingUploads = () =>
+    setPendingUploads(readPendingUploads().filter((e) => e.agentId === agentId))
+  useEffect(() => {
+    refreshPendingUploads()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId])
+
+  // 续传校验矩阵（D24）：size 一致才续；mtime 不符确认混合内容风险；远端
+  // 对齐则从游标续、已完整清记录、不符确认覆盖重传
+  const resumeUpload = async (entry: PendingUpload, raw: File) => {
+    if (raw.size !== entry.size) {
+      message.error(
+        `${raw.name} 与记录大小不一致（${formatBytes(raw.size)} ≠ ${formatBytes(entry.size)}），无法续传`,
+      )
+      return
+    }
+    if (raw.lastModified !== entry.lastModified) {
+      const ok = await confirmAsync(
+        '本地文件已修改？',
+        `${raw.name} 的修改时间与上传记录不同，续传将产出新旧混合内容，建议重新上传整文件。仍要继续吗？`,
+      )
+      if (!ok) return
+    }
+    let resume: { uploaded: number; first: boolean } = { uploaded: 0, first: true }
+    try {
+      const remote = await probeUploadedSize(entry.dir, entry.name)
+      if (remote === entry.size) {
+        removePendingUpload(agentId, entry.dir, entry.name)
+        refreshPendingUploads()
+        invalidate()
+        message.success(`${entry.name} 远端已完整（${formatBytes(remote)}），已清除续传记录`)
+        return
+      }
+      if (remote !== null && remote > 0 && remote < entry.size && remote % UPLOAD_CHUNK_BYTES === 0) {
+        resume = { uploaded: remote, first: false }
+      } else if (remote !== null && remote > 0) {
+        // 非对齐（半块截断）或超出记录大小 → 语义模糊，交用户裁决
+        const ok = await confirmAsync(
+          '远端文件与记录不符',
+          `${entry.name} 远端大小 ${formatBytes(remote)} 与续传记录不符（可能不完整或被改动）。从头重传将覆盖该文件，是否继续？`,
+        )
+        if (!ok) return
+      }
+    } catch {
+      // 探测失败：从 truncate 幂等重来（首块清空旧内容）
+    }
+    try {
+      await uploadChunked(raw, entry.dir, uploadTokenRef.current, resume)
+      message.success(`${raw.name} 已上传`)
+      refreshPendingUploads()
+      invalidate()
+    } catch (err) {
+      if (err instanceof Error && err.message === 'cancelled') return
+      // 记录保留（D23）：断网/失败后仍可刷新页面继续
+      message.error(getApiErrorMessage(err, `续传 ${raw.name} 失败`))
     }
   }
 
@@ -474,7 +615,7 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
           const bytes = new Uint8Array(await raw.arrayBuffer())
           await api.writeFile(agentId, path, toBase64(bytes), true)
         } else {
-          await uploadChunked(raw, path, uploadTokenRef.current)
+          await uploadChunked(raw, cwd, uploadTokenRef.current)
         }
         message.success(`${raw.name} 已上传`)
         invalidate()
@@ -484,6 +625,7 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
       }
     }
     invalidate()
+    refreshPendingUploads()
   }
 
   const entries = useMemo(
@@ -693,6 +835,60 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
         style={{ marginBottom: 12 }}
         message="符号链接不支持在线打开；删除直接作用于 Agent 主机且不可恢复"
       />
+
+      {/* 挂起上传（跨刷新续传，M5 D24）：进度以远端文件为准，重选本地文件继续 */}
+      {!uploading && pendingUploads.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="有未完成的上传——可重选本地文件继续（进度以远端文件为准）"
+          description={
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              {pendingUploads.map((e) => (
+                <Space key={`${e.dir}/${e.name}`} size={8} wrap>
+                  <Progress
+                    percent={Math.floor((e.uploaded * 100) / Math.max(e.size, 1))}
+                    size="small"
+                    style={{ width: 90, marginBottom: 0 }}
+                  />
+                  <Typography.Text style={{ fontSize: 12 }}>
+                    {e.name}
+                    <Typography.Text type="secondary">
+                      {' '}
+                      · {e.dir} · {formatBytes(e.uploaded)}/{formatBytes(e.size)}
+                    </Typography.Text>
+                  </Typography.Text>
+                  <Upload
+                    showUploadList={false}
+                    beforeUpload={() => false}
+                    onChange={({ file }) => {
+                      const raw = file.originFileObj as File | undefined
+                      if (raw) resumeUpload(e, raw)
+                    }}
+                  >
+                    <Button size="small" icon={<UploadOutlined />}>
+                      继续
+                    </Button>
+                  </Upload>
+                  <Popconfirm
+                    title="放弃续传记录？"
+                    description="远端半成品不删除，可手动清理或重新上传覆盖。"
+                    onConfirm={() => {
+                      removePendingUpload(agentId, e.dir, e.name)
+                      refreshPendingUploads()
+                    }}
+                  >
+                    <Button size="small" type="text" danger>
+                      放弃
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              ))}
+            </Space>
+          }
+        />
+      )}
 
       {filesQuery.isLoading ? null : filesQuery.isError ? (
         <Empty description={`目录不可访问：${getApiErrorMessage(filesQuery.error, '未知错误')}`} />
