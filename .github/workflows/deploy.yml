@@ -11,6 +11,13 @@ on:
       ref:
         description: "部署的分支/commit/tag（默认 main）"
         default: main
+      mode:
+        description: "deploy = 部署 cockpit；recover-clickhouse = 恢复误删的 croupier-clickhouse"
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - recover-clickhouse
   push:
     branches: [main]
     paths-ignore:
@@ -26,7 +33,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  recover-clickhouse:
+    if: inputs.mode == 'recover-clickhouse'
+    name: Recover croupier-clickhouse
+    runs-on: [self-hosted, deployer]
+    timeout-minutes: 10
+    steps:
+      - name: Locate compose project
+        run: |
+          set -euo pipefail
+          docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+          for d in /opt /srv /home /root; do
+            find "$d" -maxdepth 4 \( -iname '*croupier*' -o -name 'docker-compose.y*ml' -o -name 'compose.y*ml' \) 2>/dev/null || true
+          done | sort -u
+
+      - name: Up
+        run: |
+          set -euo pipefail
+          proj=$(for d in /opt /srv /home /root; do
+            find "$d" -maxdepth 4 -type d -iname '*croupier*' 2>/dev/null || true
+          done | head -1)
+          if [ -n "$proj" ] && ls "$proj"/docker-compose.y*ml "$proj"/compose.y*ml >/dev/null 2>&1; then
+            cd "$proj" && docker compose up -d && docker compose ps
+          else
+            echo "::warning::未找到 croupier compose 项目目录，请按上面 find 输出手工确认"
+          fi
+
   deploy:
+    if: inputs.mode != 'recover-clickhouse'
     name: Deploy (self-hosted)
     runs-on: [self-hosted, deployer]
     timeout-minutes: 30
