@@ -3,10 +3,12 @@ package cli
 import (
 	"errors"
 	"flag"
-	"fmt"
 	"log"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/cuihairu/cockpit/internal/agent"
 )
@@ -87,11 +89,19 @@ func (c *AgentStartCmd) Run() error {
 	}
 
 	a := agent.NewAgent(cfg)
-	if err := a.Start(); err != nil {
-		return fmt.Errorf("agent error: %w", err)
-	}
 
-	return nil
+	// SIGTERM/SIGINT 优雅退出：systemd/容器停止时发 SIGTERM，Stop 取消
+	// agent 内部上下文，Start 随之返回 nil，进程以 0 正常退出
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, os.Interrupt)
+	defer signal.Stop(sigCh)
+	go func() {
+		<-sigCh
+		a.Stop()
+	}()
+
+	// agent.Start 阻塞至上下文取消，返回值直接透传
+	return a.Start()
 }
 
 // parseLabels parses labels from a comma-separated key=value string.

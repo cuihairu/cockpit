@@ -68,8 +68,8 @@ func TestCovAgentStartRunAgentConnectError(t *testing.T) {
 	if err == nil {
 		t.Fatal("unreachable server should error")
 	}
-	if !strings.Contains(err.Error(), "agent error") {
-		t.Errorf("err = %v, want agent error wrapper", err)
+	if !strings.Contains(err.Error(), "connect failed") {
+		t.Errorf("err = %v, want transparent connect error", err)
 	}
 }
 

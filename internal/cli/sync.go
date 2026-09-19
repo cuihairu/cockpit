@@ -23,13 +23,11 @@ func (c *SyncCmd) Run() error {
 	// Load config
 	cfg := loadConfigOrDefault(c.Config)
 
-	// Determine database path
+	// Determine database path：优先 CLI 参数，其次配置文件
+	// （applyDefaults 已保证 cfg.Database.Path 非空，无需再兜底）
 	dbPath := c.DBPath
-	if dbPath == "" && cfg.Database != nil {
-		dbPath = cfg.Database.Path
-	}
 	if dbPath == "" {
-		dbPath = "./data/cockpit.db"
+		dbPath = cfg.Database.Path
 	}
 
 	// Open database
@@ -61,10 +59,7 @@ func (c *SyncCmd) Run() error {
 
 	// Execute sync
 	syncer := inventory.NewSyncer(db)
-	result, err := syncer.Sync(context.Background(), inv)
-	if err != nil {
-		return fmt.Errorf("sync failed: %w", err)
-	}
+	result := syncer.Sync(context.Background(), inv)
 
 	// Print result
 	fmt.Println("\nSync completed:")
