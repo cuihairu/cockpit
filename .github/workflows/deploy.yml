@@ -75,6 +75,25 @@ jobs:
           fi
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
+      - name: Coordinate ports
+        run: |
+          set -euo pipefail
+          dir="${{ steps.locate.outputs.dir }}"
+          cd "$dir"
+          echo '--- clickhouse 端口配置 ---'
+          grep -nE 'ports:|9[0-9]{3}:[0-9]{3}' docker-compose.yml | head -10 || true
+          # clickhouse native 端口 9000 与 cockpit HTTP 端口 9000 结构性冲突：
+          # 宿主 9000 归 cockpit（tunnel 回源），clickhouse 宿主侧改 19000，
+          # 容器内仍 9000（croupier 内部走 docker 网络，不受影响）。改前备份。
+          if docker ps --filter publish=9000 --format '{{.Names}}' | grep -qv '^croupier'; then
+            cp docker-compose.yml docker-compose.yml.bak-pre-recover
+            sed -i 's/\b9000:9000\b/19000:9000/' docker-compose.yml
+            echo '宿主 9000 被 cockpit 占用：clickhouse 映射改为 19000:9000（原文件备份为 docker-compose.yml.bak-pre-recover）'
+            grep -n '19000:9000' docker-compose.yml || echo '::warning::未找到 9000:9000 字面量，请人工核对端口写法'
+          else
+            echo '宿主 9000 无冲突，保持原配置'
+          fi
+
       - name: Up
         run: |
           set -euo pipefail
@@ -92,6 +111,8 @@ jobs:
             docker compose up -d
             sleep 5
             docker compose ps
+            echo '--- croupier-clickhouse 状态 ---'
+            docker compose ps clickhouse || true
           else
             echo "::error::未定位到 croupier compose 项目目录（数据卷完好，需手工恢复）"
             exit 1
@@ -142,10 +163,19 @@ jobs:
           docker ps --filter publish=9000 --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
           # 同 compose project 的旧容器
           docker compose down --remove-orphans 2>/dev/null || true
-          # 精准接管：移除一切占用 9000 的遗留容器（本机为 cockpit 专用部署机）
+          # 白名单接管：只移除本项目（compose project=cockpit 或镜像
+          # cockpit:local）占 9000 的残留容器；其他项目的容器一律不碰
+          # （历史上曾误删 croupier-clickhouse——native 端口同为 9000）
           for c in $(docker ps -aq --filter publish=9000); do
-            echo "移除占 9000 的旧容器: $(docker ps -a --filter id=$c --format '{{.Names}} ({{.Image}}, {{.Status}})')"
-            docker rm -f "$c"
+            img=$(docker inspect -f '{{.Config.Image}}' "$c")
+            proj=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$c")
+            if [ "$proj" = "cockpit" ] || [ "$img" = "cockpit:local" ]; then
+              echo "移除本项目占 9000 的旧容器: $(docker ps -a --filter id=$c --format '{{.Names}}')"
+              docker rm -f "$c"
+            else
+              echo "::error::端口 9000 被非本项目容器占用: $(docker ps -a --filter id=$c --format '{{.Names}} ({{.Image}})')。不自动删除——请为 clickhouse 类服务改用 19000 等宿主端口后重试"
+              exit 1
+            fi
           done
 
       - name: Up
