@@ -108,11 +108,11 @@ func startServer(configPath string, stdout io.Writer) int {
 	}
 	s := server.NewServer(cfg)
 
+	// Start 仅在出错时返回（ListenAndServe 语义），正常路径阻塞至进程终止
 	if err := s.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
-		return 1
 	}
-	return 0
+	return 1
 }
 
 func printUsage(w io.Writer) {
