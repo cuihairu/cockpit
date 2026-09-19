@@ -31,7 +31,7 @@
 | # | 决策 | 选择 | 理由 |
 |---|------|------|------|
 | D1 | 可见范围 | Agent 全文件系统自由导航，不设根目录白名单 | Agent 本有终端（等价 root 能力），白名单制造虚假安全感还挡住合法场景 |
-| D2 | M1 能力边界 | 浏览 / 读 / 编辑保存 / 删除 / 重命名 / 新建目录 / 上传（≤10MB）/ 下载（不限大小）；不做 chmod/chown、搜索、目录大小统计 | 高频运维动作优先；权限修改风险大场景少，后补容易 |
+| D2 | M1 能力边界 | 浏览 / 读 / 编辑保存 / 删除 / 重命名 / 新建目录 / 上传（≤10MB）/ 下载（不限大小）；不做 chmod/chown、搜索、目录大小统计 | 高频运维动作优先；权限修改风险大场景少，后补容易（chmod/chown 已由 M4 补齐，搜索已由 M2 补齐） |
 | D3 | 传输通道 | `file.read` / `file.write` 分块 base64 RPC，复用出站 WebSocket | 与 `backup.read` 同构，协议零扩展，server 不落盘 |
 | D4 | 读通道分工 | 浏览器**编辑器**走 `read`（≤1MB 文本，超出拒绝）；**下载**走 server 循环 read 256KB 流转发（无总大小限制，断开即停） | 编辑大文本卡 UI 无意义；下载流式天然支持 GB 级日志 |
 | D5 | 写/上传 | `file.write {path, data, truncate}`：truncate=true 覆盖（编辑保存/新建），false 追加（上传分块续传）；单块 ≤1MB，客户端整文件 ≤10MB | M1 不做断点续传，10MB 覆盖配置/证书/小日志场景 |
@@ -198,11 +198,42 @@ append 通道（M1 D5 预留）正式启用，agent 零改动。
 **测试**：server——truncate=true 审计、truncate=false 不审计；web——tsc +
 build；agent 零改动零回归。
 
+## M4：chmod / chown 权限编辑（2026-09-19）
+
+D2 划出 M1 的「chmod/chown 后补」项正式补齐。纯权限位与归属修改，
+不碰内容——复用既有通道（分块 RPC 同构、路径校验、审计模式）。
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D20 | agent RPC | `file.chmod {path, mode}` / `file.chown {path, uid, gid}`：path 走既有 `cleanAbsPath`；**symlink 拒绝**（D7 延伸——对链接 chmod/chown 会作用到目标，给「不跟随」纪律开例外）；`mode` 数字 0–0o777（只管 perm 位，不碰 setuid/sticky）；`uid`/`gid` 数字 0–4294967295，**不做用户名解析**（跨机用户名空间不可靠，`nobody` 在两台机器不是同一个人）；不做平台门禁——Windows 上 Chmod 只有效只读位、Chown 报错，诚实透出 | 权限修改是低频动作，参数面小；错误信息原样回 UI（EPERM 等）即运维所需 |
+| D21 | list 增补归属 | list 条目加 `uid`/`gid`（int）；取自 `syscall.Stat_t`（unix 专属）→ 按 GOOS 拆文件 `file_stat_unix.go` / `file_stat_windows.go`（恒 -1，UI 显示「—」） | 改之前必须看到现状；CI 交叉编译 darwin/windows，类型断言目标必须存在 |
+| D22 | server + web | `POST /api/agents/{id}/files/chmod {path, mode}`、`/files/chown {path, uid, gid}`：双端同规则校验（绝对路径 + 数值范围）；**审计** `file_chmod`/`file_chown`（detail 记 mode/uid/gid）——chown 改归属直接影响访问控制，必须可追溯；web 行操作加「权限」→ Modal：当前 mode/uid/gid 只读展示 + rwx 九宫格（属主/组/其他）+ uid/gid 数字输入；应用时按变化分流——mode 变调 chmod、uid/gid 变调 chown、都没变提示无变更 | 单 Modal 收口两个动作；九宫格比裸填八进制直观防错，同时显示合成八进制供核对 |
+
+### Agent 侧
+
+- `file_provider.go` 加 `Chmod`/`Chown`（lstat → symlink 拒绝 → 数值校验 →
+  `os.Chmod`/`os.Chown`）+ Call 分发；`file_stat_*.go` 提供
+  `fileStatOwner(path) (uid, gid int)`（Lstat 语义，不跟随）。
+
+### Server 侧
+
+- `api_files.go`：action 白名单加 chmod/chown；`fileRPRequest` 加
+  `Mode/UID/GID *float64`（JSON number）；校验后转发 + 审计。
+
+### Web 侧
+
+- `api.chmodFile/chownFile`；`FileEntry` 加 `uid?/gid?`；FileBrowser 行操作
+  加「权限」按钮（symlink 禁用）→ PermissionModal（九宫格 + 归属输入）。
+
+**测试**：agent——chmod roundtrip（0600→0644 回读）、symlink 拒绝、mode/uid/gid
+越界拒绝、不存在路径报错、list 含 uid/gid；server——转发参数、双端校验
+（路径/mode 范围/uid 范围）、审计落库、agent 失败不记审计；web——tsc + build。
+
 ## 不做（后续项）
 
 - 跨刷新断点续传（服务端上传会话状态）；
 - 目录大小统计/回收站；
-- chmod/chown/权限编辑：风险与 UI 复杂度都高，等真实需求；
+- 递归 chmod/chown（目录树批量改权限——误伤面大，等真实需求）；
 - 二进制 hex 预览：编辑器/图片预览先覆盖文本与图片主场景。
 
 ## M1 清单
