@@ -100,7 +100,17 @@ jobs:
             sed -i -E 's/(published:[[:space:]]*.?9000)([^0-9]|$)/\119000\2/' docker-compose.yml
             echo '长语法改写：published: 9000 → published: 19000（原文件备份为 docker-compose.yml.bak-pre-recover）'
             grep -nE 'published:[[:space:]]*.?19000' docker-compose.yml
-          elif grep -Eq '19000:9000|published:[[:space:]]*.?19000' docker-compose.yml; then
+          elif grep -qE '\$\{CLICKHOUSE_NATIVE_PORT:-9000\}' docker-compose.yml; then
+            # 宿主侧走 .env 变量（实测 croupier compose 写法）：不动
+            # compose 文件，写 .env 让 up 时生效
+            if [ -f .env ] && grep -q '^CLICKHOUSE_NATIVE_PORT=' .env; then
+              sed -i 's/^CLICKHOUSE_NATIVE_PORT=.*/CLICKHOUSE_NATIVE_PORT=19000/' .env
+            else
+              echo "CLICKHOUSE_NATIVE_PORT=19000" >> .env
+            fi
+            echo '已设置 .env → CLICKHOUSE_NATIVE_PORT=19000（宿主侧让出 9000）'
+          elif grep -Eq '19000:9000|published:[[:space:]]*.?19000' docker-compose.yml \
+             || grep -q '^CLICKHOUSE_NATIVE_PORT=19000' .env 2>/dev/null; then
             echo '已是 19000，无需改写'
           else
             echo '::warning::compose 中未识别到 9000 端口写法（短/长语法均无），请人工核对端口配置'
@@ -213,8 +223,19 @@ jobs:
               elif grep -Eq 'published:[[:space:]]*.?9000' "$compose_file" && ! grep -Eq 'published:[[:space:]]*.?19000' "$compose_file"; then
                 sed -i -E 's/(published:[[:space:]]*.?9000)([^0-9]|$)/\119000\2/' "$compose_file"
                 echo "长语法改写：published: 9000 → published: 19000"
+              elif grep -qE '\$\{CLICKHOUSE_NATIVE_PORT:-9000\}' "$compose_file"; then
+                # 实测 croupier compose 写法：宿主侧走 .env 变量（默认 9000）。
+                # 不动 compose 文件，写 .env 让 up 时生效——compose 读项目
+                # 目录下的 .env，幂等且保留 croupier 的参数化设计
+                if [ -f "$dir/.env" ] && grep -q '^CLICKHOUSE_NATIVE_PORT=' "$dir/.env"; then
+                  sed -i 's/^CLICKHOUSE_NATIVE_PORT=.*/CLICKHOUSE_NATIVE_PORT=19000/' "$dir/.env"
+                else
+                  echo "CLICKHOUSE_NATIVE_PORT=19000" >> "$dir/.env"
+                fi
+                echo "已设置 $dir/.env → CLICKHOUSE_NATIVE_PORT=19000（宿主侧让出 9000）"
               fi
-              if ! grep -Eq '19000:9000|published:[[:space:]]*.?19000' "$compose_file"; then
+              if ! grep -Eq '19000:9000|published:[[:space:]]*.?19000' "$compose_file" \
+                 && ! grep -q '^CLICKHOUSE_NATIVE_PORT=19000' "$dir/.env" 2>/dev/null; then
                 echo "::error::自动改写未生效，端口写法见下（人工修改后重跑 deploy）："
                 grep -nH -B 2 -A 3 '9000' "$compose_file" "$dir"/.env 2>/dev/null | head -60
                 exit 1
