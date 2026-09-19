@@ -95,10 +95,7 @@ func TestSyncerSyncBasic(t *testing.T) {
 	s := NewSyncer(db)
 	inv := testInventory()
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 	if result == nil {
 		t.Fatal("Sync() result should not be nil")
 	}
@@ -112,10 +109,7 @@ func TestSyncerAgents(t *testing.T) {
 	s := NewSyncer(db)
 	inv := testInventory()
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 
 	// 第一次同步：两个 agent 都是新创建
 	if result.Agents.Created != 2 {
@@ -152,10 +146,7 @@ func TestSyncerDomains(t *testing.T) {
 	s := NewSyncer(db)
 	inv := testInventory()
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 
 	if result.Domains.Created != 2 {
 		t.Errorf("Domains.Created = %d, want 2", result.Domains.Created)
@@ -182,10 +173,7 @@ func TestSyncerCertificates(t *testing.T) {
 	s := NewSyncer(db)
 	inv := testInventory()
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 
 	if result.Certificates.Created != 1 {
 		t.Errorf("Certificates.Created = %d, want 1", result.Certificates.Created)
@@ -217,10 +205,7 @@ func TestSyncerEmptyInventory(t *testing.T) {
 		Metadata: Metadata{Name: "empty"},
 	}
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 
 	if result.Agents.Created != 0 {
 		t.Errorf("Agents.Created = %d, want 0", result.Agents.Created)
@@ -245,10 +230,7 @@ func TestSyncerNilDomains(t *testing.T) {
 		},
 	}
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 	if result.Domains.Created != 0 {
 		t.Errorf("Domains.Created = %d, want 0 for nil domain", result.Domains.Created)
 	}
@@ -260,16 +242,10 @@ func TestSyncerReSync(t *testing.T) {
 	inv := testInventory()
 
 	// First sync
-	_, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("First Sync() error = %v", err)
-	}
+	_ = s.Sync(context.Background(), inv)
 
 	// Second sync should update, not create
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Second Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 
 	// Agents should be updated now
 	if result.Agents.Updated != 2 {
@@ -317,10 +293,7 @@ domains:
 	}
 
 	s := NewSyncer(db)
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 
 	if result.Agents.Created != 1 {
 		t.Errorf("Agents.Created = %d, want 1", result.Agents.Created)
@@ -377,10 +350,7 @@ func TestSyncerCertWithoutDomainInInventory(t *testing.T) {
 		},
 	}
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 	if result.Certificates.Created != 1 {
 		t.Errorf("Certificates.Created = %d, want 1", result.Certificates.Created)
 	}
@@ -411,10 +381,7 @@ func TestSyncerDomainWithoutAgent(t *testing.T) {
 		},
 	}
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 	if result.Domains.Created != 1 {
 		t.Errorf("Domains.Created = %d, want 1", result.Domains.Created)
 	}
@@ -449,10 +416,7 @@ func TestSyncerCertWithAgent(t *testing.T) {
 		},
 	}
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 	if result.Certificates.Created != 1 {
 		t.Errorf("Certificates.Created = %d, want 1", result.Certificates.Created)
 	}
@@ -489,9 +453,7 @@ func TestSyncerComputeServiceGatewayStorageReSync(t *testing.T) {
 			},
 		},
 	}
-	if _, err := s.Sync(context.Background(), agentInv); err != nil {
-		t.Fatalf("prepare agent sync: %v", err)
-	}
+	s.Sync(context.Background(), agentInv)
 
 	inv := &Inventory{
 		Version: "v1",
@@ -510,10 +472,7 @@ func TestSyncerComputeServiceGatewayStorageReSync(t *testing.T) {
 	}
 
 	// 第一次 sync：全部为新建
-	first, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("first Sync() error = %v", err)
-	}
+	first := s.Sync(context.Background(), inv)
 	if first.ComputeInstances.Created != 1 || first.ComputeInstances.Updated != 0 {
 		t.Errorf("first ComputeInstances = created:%d updated:%d, want created:1 updated:0", first.ComputeInstances.Created, first.ComputeInstances.Updated)
 	}
@@ -528,10 +487,7 @@ func TestSyncerComputeServiceGatewayStorageReSync(t *testing.T) {
 	}
 
 	// 第二次 sync：全部为更新
-	second, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("second Sync() error = %v", err)
-	}
+	second := s.Sync(context.Background(), inv)
 	if second.ComputeInstances.Updated != 1 || second.ComputeInstances.Created != 0 {
 		t.Errorf("second ComputeInstances = created:%d updated:%d, want created:0 updated:1", second.ComputeInstances.Created, second.ComputeInstances.Updated)
 	}

@@ -25,10 +25,7 @@ func TestCovSyncAllUpsertsFail(t *testing.T) {
 	}
 
 	s := NewSyncer(db)
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() should tolerate per-resource upsert failures, got %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 	if result == nil {
 		t.Fatal("Sync() should return a result even when all upserts fail")
 	}
@@ -60,10 +57,7 @@ func TestCovSyncCertificatesDomainMatch(t *testing.T) {
 		{ID: "cert-1", Domain: "matched.example.com", Provider: "letsencrypt"},
 	}
 
-	result, err := NewSyncer(db).Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := NewSyncer(db).Sync(context.Background(), inv)
 	if result.Certificates.Created != 1 {
 		t.Fatalf("Certificates.Created = %d, want 1", result.Certificates.Created)
 	}
@@ -93,10 +87,7 @@ func TestCovSyncAgentWithCapabilities(t *testing.T) {
 		},
 	}
 
-	result, err := NewSyncer(db).Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := NewSyncer(db).Sync(context.Background(), inv)
 	if result.Agents.Created != 1 {
 		t.Fatalf("Agents.Created = %d, want 1", result.Agents.Created)
 	}
@@ -143,10 +134,7 @@ func TestCovSyncComputeInstancesWithLabels(t *testing.T) {
 		},
 	}
 
-	result, err := NewSyncer(db).Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := NewSyncer(db).Sync(context.Background(), inv)
 	if result.ComputeInstances.Created != 1 {
 		t.Fatalf("ComputeInstances.Created = %d, want 1", result.ComputeInstances.Created)
 	}
@@ -169,10 +157,7 @@ func TestCovSyncNilCertificate(t *testing.T) {
 		},
 	}
 
-	result, err := NewSyncer(db).Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := NewSyncer(db).Sync(context.Background(), inv)
 	if result.Certificates.Created != 1 {
 		t.Errorf("Certificates.Created = %d, want 1 (nil cert skipped)", result.Certificates.Created)
 	}

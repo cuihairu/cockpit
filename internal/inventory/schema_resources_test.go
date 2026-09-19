@@ -114,10 +114,7 @@ func TestSyncerNilResourceEntriesAreSkipped(t *testing.T) {
 		Storages:         map[string]*Storage{"st-1": nil},
 	}
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 	if result.Agents.Created != 0 || result.Domains.Created != 0 ||
 		result.ComputeInstances.Created != 0 || result.Services.Created != 0 ||
 		result.Gateways.Created != 0 || result.Storages.Created != 0 {
@@ -145,10 +142,7 @@ func TestSyncerResourcesWithRegionZoneLabels(t *testing.T) {
 		},
 	}
 
-	result, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	result := s.Sync(context.Background(), inv)
 	if result.Services.Created != 1 || result.Gateways.Created != 1 || result.Storages.Created != 1 || result.ComputeInstances.Created != 1 {
 		t.Fatalf("unexpected created counts: %+v", result)
 	}
@@ -186,10 +180,7 @@ func TestSyncerResourcesWithRegionZoneLabels(t *testing.T) {
 	}
 
 	// Second sync reports updates, not creates
-	result2, err := s.Sync(context.Background(), inv)
-	if err != nil {
-		t.Fatalf("second Sync() error = %v", err)
-	}
+	result2 := s.Sync(context.Background(), inv)
 	if result2.Services.Updated != 1 || result2.Gateways.Updated != 1 || result2.Storages.Updated != 1 || result2.ComputeInstances.Updated != 1 {
 		t.Errorf("second sync should report updates, got %+v", result2)
 	}
@@ -255,9 +246,7 @@ func TestSyncerAgentAutoCapabilities(t *testing.T) {
 		},
 	}
 
-	if _, err := s.Sync(context.Background(), inv); err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	s.Sync(context.Background(), inv)
 
 	agent, err := db.GetAgent("a1")
 	if err != nil {
@@ -283,9 +272,7 @@ func TestSyncerServiceWithAgentReference(t *testing.T) {
 		},
 	}
 
-	if _, err := s.Sync(context.Background(), inv); err != nil {
-		t.Fatalf("Sync() error = %v", err)
-	}
+	s.Sync(context.Background(), inv)
 
 	svc, err := db.GetService("svc-1")
 	if err != nil {

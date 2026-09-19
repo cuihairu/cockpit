@@ -2,7 +2,6 @@ package inventory
 
 import (
 	"context"
-	"fmt"
 	"log"
 
 	"github.com/cuihairu/cockpit/internal/storage"
@@ -19,57 +18,29 @@ func NewSyncer(db *storage.DB) *Syncer {
 }
 
 // Sync syncs inventory to database
-func (s *Syncer) Sync(ctx context.Context, inv *Inventory) (*SyncResult, error) {
+func (s *Syncer) Sync(ctx context.Context, inv *Inventory) *SyncResult {
 	result := &SyncResult{}
 
 	// Sync agents
-	agents, err := s.syncAgents(inv)
-	if err != nil {
-		return nil, fmt.Errorf("sync agents: %w", err)
-	}
-	result.Agents = agents
+	result.Agents = s.syncAgents(inv)
 
 	// Sync domains
-	domains, err := s.syncDomains(inv)
-	if err != nil {
-		return nil, fmt.Errorf("sync domains: %w", err)
-	}
-	result.Domains = domains
+	result.Domains = s.syncDomains(inv)
 
 	// Sync certificates
-	certs, err := s.syncCertificates(inv)
-	if err != nil {
-		return nil, fmt.Errorf("sync certificates: %w", err)
-	}
-	result.Certificates = certs
+	result.Certificates = s.syncCertificates(inv)
 
 	// Sync compute instances
-	compute, err := s.syncComputeInstances(inv)
-	if err != nil {
-		return nil, fmt.Errorf("sync compute instances: %w", err)
-	}
-	result.ComputeInstances = compute
+	result.ComputeInstances = s.syncComputeInstances(inv)
 
 	// Sync services
-	services, err := s.syncServices(inv)
-	if err != nil {
-		return nil, fmt.Errorf("sync services: %w", err)
-	}
-	result.Services = services
+	result.Services = s.syncServices(inv)
 
 	// Sync gateways
-	gateways, err := s.syncGateways(inv)
-	if err != nil {
-		return nil, fmt.Errorf("sync gateways: %w", err)
-	}
-	result.Gateways = gateways
+	result.Gateways = s.syncGateways(inv)
 
 	// Sync storages
-	storages, err := s.syncStorages(inv)
-	if err != nil {
-		return nil, fmt.Errorf("sync storages: %w", err)
-	}
-	result.Storages = storages
+	result.Storages = s.syncStorages(inv)
 
 	log.Printf("Sync completed: agents=%d domains=%d certificates=%d compute=%d services=%d gateways=%d storages=%d",
 		result.Agents.Created+result.Agents.Updated,
@@ -80,10 +51,10 @@ func (s *Syncer) Sync(ctx context.Context, inv *Inventory) (*SyncResult, error) 
 		result.Gateways.Created+result.Gateways.Updated,
 		result.Storages.Created+result.Storages.Updated)
 
-	return result, nil
+	return result
 }
 
-func (s *Syncer) syncAgents(inv *Inventory) (*ResourceResult, error) {
+func (s *Syncer) syncAgents(inv *Inventory) *ResourceResult {
 	result := &ResourceResult{}
 	agents := inv.GetAgents()
 
@@ -126,7 +97,7 @@ func (s *Syncer) syncAgents(inv *Inventory) (*ResourceResult, error) {
 		}
 	}
 
-	return result, nil
+	return result
 }
 
 // detectCapabilities 从 agent.Config 的键推断 capability 类型
@@ -144,7 +115,7 @@ func detectCapabilities(config map[string]any) []string {
 	return caps
 }
 
-func (s *Syncer) syncDomains(inv *Inventory) (*ResourceResult, error) {
+func (s *Syncer) syncDomains(inv *Inventory) *ResourceResult {
 	result := &ResourceResult{}
 
 	for id, domain := range inv.Domains {
@@ -177,16 +148,13 @@ func (s *Syncer) syncDomains(inv *Inventory) (*ResourceResult, error) {
 		}
 	}
 
-	return result, nil
+	return result
 }
 
-func (s *Syncer) syncCertificates(inv *Inventory) (*ResourceResult, error) {
+func (s *Syncer) syncCertificates(inv *Inventory) *ResourceResult {
 	result := &ResourceResult{}
 
 	for _, cert := range inv.GetCertificates() {
-		if cert == nil {
-			continue
-		}
 
 		var domainID *string
 		for domainIDValue, domain := range inv.Domains {
@@ -223,10 +191,10 @@ func (s *Syncer) syncCertificates(inv *Inventory) (*ResourceResult, error) {
 		}
 	}
 
-	return result, nil
+	return result
 }
 
-func (s *Syncer) syncComputeInstances(inv *Inventory) (*ResourceResult, error) {
+func (s *Syncer) syncComputeInstances(inv *Inventory) *ResourceResult {
 	result := &ResourceResult{}
 
 	for id, inst := range inv.ComputeInstances {
@@ -263,10 +231,10 @@ func (s *Syncer) syncComputeInstances(inv *Inventory) (*ResourceResult, error) {
 		}
 	}
 
-	return result, nil
+	return result
 }
 
-func (s *Syncer) syncServices(inv *Inventory) (*ResourceResult, error) {
+func (s *Syncer) syncServices(inv *Inventory) *ResourceResult {
 	result := &ResourceResult{}
 
 	for id, svc := range inv.Services {
@@ -313,10 +281,10 @@ func (s *Syncer) syncServices(inv *Inventory) (*ResourceResult, error) {
 		}
 	}
 
-	return result, nil
+	return result
 }
 
-func (s *Syncer) syncGateways(inv *Inventory) (*ResourceResult, error) {
+func (s *Syncer) syncGateways(inv *Inventory) *ResourceResult {
 	result := &ResourceResult{}
 
 	for id, gw := range inv.Gateways {
@@ -360,10 +328,10 @@ func (s *Syncer) syncGateways(inv *Inventory) (*ResourceResult, error) {
 		}
 	}
 
-	return result, nil
+	return result
 }
 
-func (s *Syncer) syncStorages(inv *Inventory) (*ResourceResult, error) {
+func (s *Syncer) syncStorages(inv *Inventory) *ResourceResult {
 	result := &ResourceResult{}
 
 	for id, st := range inv.Storages {
@@ -405,7 +373,7 @@ func (s *Syncer) syncStorages(inv *Inventory) (*ResourceResult, error) {
 		}
 	}
 
-	return result, nil
+	return result
 }
 
 // SyncResult sync result
