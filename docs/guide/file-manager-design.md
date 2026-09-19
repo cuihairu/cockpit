@@ -229,9 +229,33 @@ D2 划出 M1 的「chmod/chown 后补」项正式补齐。纯权限位与归属�
 越界拒绝、不存在路径报错、list 含 uid/gid；server——转发参数、双端校验
 （路径/mode 范围/uid 范围）、审计落库、agent 失败不记审计；web——tsc + build。
 
+## M5：跨刷新断点续传（2026-09-19）
+
+M3 D16 预留的「后续项」。关键观察：续传游标（目标文件实际 size）agent 侧
+早已有探测机制（D16 失败续传同源），刷新真正丢的只有**上传坐标的记忆**
+——本地 File 对象与「传到哪了」的关联。这恰是 localStorage 的适用场景
+（单浏览器单用户语义），**不需要服务端上传会话状态**——推翻「不做」条目
+括号里的原设想，机制降维后改动面收敛为纯 web。
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D23 | 挂起登记 | 分块上传每块成功后 upsert `{agentId, dir, name, size, lastModified, uploaded, ts}` 进 localStorage `cockpit-pending-uploads`（数组，容量 10 FIFO，载入时清 7 天前过期项）；上传成功/取消移除；**重试耗尽的最终失败保留**——网络断了关页面正是要续传的场景；≤10MB 单块路径不登记（重传成本低） | localStorage 是 per-viewer 便利存储的既定用法（SettingsContext 先例）；读写全 try/catch，隐私窗口/禁用存储时功能静默缺席，主上传流程零影响 |
+| D24 | 续传交互 | FileBrowser 挂载时按 agentId 读挂起条目，列表上方 Alert 呈现（文件名/目录/进度/继续/放弃，上传进行中隐藏）。「继续」→ 用户重选本地文件（File 句柄浏览器不可恢复，必须人工重选）→ 校验矩阵：size 不一致报错保留记录；mtime 不一致 Modal 确认（混合内容风险）；随后探测远端——null/0 从头；1MB 整块对齐且 < size 从该偏移续传；=== size 视为已传完（清记录刷新）；非对齐或 > size Modal 确认覆盖重传 | 校验矩阵逐级放权：机器能判的自动判（size/对齐），语义模糊的交用户（mtime/覆盖）；对齐校验复用分块协议不变量（除末块外恒 1MB） |
+| D25 | 边界 | 纯 web 零 Go 改动；续传复用 uploadChunked（参数化起始偏移），size-mismatch 与并发写保护原样生效；「放弃」只清本地记录**不删远端半成品**（刷新后远端状态可能已变，自动删除有误伤面，Tooltip 引导手动清理或重新上传覆盖） | 远端文件 size 即游标的 D16 哲学不变；服务端零新状态、零新端点、零审计变化 |
+
+### Web 侧
+
+- `readPendingUploads` / `persistPendingUpload` / `removePendingUpload`
+  （localStorage try/catch + TTL + FIFO）；
+- `uploadChunked(raw, path, token, resume?)` 加可选起始偏移，每块成功落
+  登记进度；
+- 工具栏下挂起上传 Alert（每行 Upload 重选文件 + 放弃 Popconfirm），
+  `confirmAsync` 封装 Modal.confirm 为 Promise。
+
+**测试**：web——tsc 零新增（9 存量）+ build；server/agent 零改动零回归。
+
 ## 不做（后续项）
 
-- 跨刷新断点续传（服务端上传会话状态）；
 - 目录大小统计/回收站；
 - 递归 chmod/chown（目录树批量改权限——误伤面大，等真实需求）；
 - 二进制 hex 预览：编辑器/图片预览先覆盖文本与图片主场景。
