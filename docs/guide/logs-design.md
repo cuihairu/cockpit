@@ -117,11 +117,87 @@ tail -f 式流式查看：agent 侧跟随进程持续推 chunk，server 经 HTTP
 
 **测试**：agent follow 会话（mock Commander 输出逐行推、grep 过滤、4MB 上限停、stop 杀进程、followId 覆盖）；server 端点（校验 400、上限 429、NDJSON 帧序列、客户端断开触发 stop RPC、ProxyClose 收尾）；web build。
 
+## M3：跨机联邦检索（设计，2026-09-19）
+
+todo 原文「推送式采集与跨机检索、结构化解析」。设计期先回答路线问题——「跨机检索」
+不必依赖「推送式采集先行」：
+
+| 路线 | 形态 | 量级 | 结论 |
+|------|------|------|------|
+| (a) 联邦扇出检索 | server 并行向在线 agent 转发**既有** `logs.query`，按主机分组返回 | 小：1 个 server 端点 + 1 个 web 页，agent 零改动、零存储 | ✅ 选为 M3 本体 |
+| (b) 推送式采集 + 服务端索引 | agent 常驻 tail → 推送 → server SQLite 落库 → 全文检索 | 独立量级：采集会话、断线补采、背压丢弃、保留清理、查询分页 | 维持不做，触发条件见「不做」清单 |
+
+选 (a) 的理由：
+
+- D1「查询频率低，实时执行即可闭环」在跨机维度同样成立——排障的高频动作是
+  「同时在所有机器上 grep 同一条错误」，不是「对全量历史建索引」；
+- 原判断「跨机统一检索：依赖采集管道先行」被联邦路线打破：零采集零存储同样
+  闭环，且完整保持 D1/D8 纯转发哲学（server 依旧不落盘）；
+- 离线机器的日志本来就无法访问（agent 是唯一通道），采集管道在个人云场景
+  买不回「离线机器历史可查」这个能力；
+- server 虽有 SQLite 先例（probe_results/alert），但 3-10 台机器的日志量撑不起
+  索引收益，运维负担（容量/清理/迁移）先行到来。
+
+结构化解析（journalctl -o json 字段提取）维持不做：docker 源无对应语义，做了要
+双轨解析，文本形态 + grep + 前端着色（M1）已够用。
+
+| D | 决策 | 理由 |
+|---|------|------|
+| D11 | 全局端点 `POST /api/logs/search`（不挂在 `/api/agents/{id}` 下）：对每个目标 agent 转发既有 `logs.query`，每机单源单查询；tail 收窄 ≤500/机 | 复用 M1 全部积木与安全边界（源白名单/1MB 截断/30s 超时/argv 直传）；扇出是放大器，10 机 × 500 行渲染与传输均可控 |
+| D12 | 目标 = 在线且带 `logs` capability 的 agent；body.agents 指定子集时取交集；被排除目标回 `skipped` 并归因（offline / no-logs / not-found）；server 扇出并发上限 4，端点全局同时 ≤2 个在途请求，超出 429 | `Registry.List` + capability 过滤现成；双重闸门防扇出放大；个人场景 2 个并发检索富余 |
+| D13 | 单 agent 失败/超时不整体失败：该机结果 `ok=false` + error 文本；全部目标不可用 → 200 空结果 + skipped 说明（不 5xx）；单目标超时 35s（agent 30s + 余量） | 与 NAS 单数据源降级（D8）、logs 多源降级（D2）同纪律；检索是浏览性质，部分成功仍是有效结果 |
+| D14 | 结果按 agent 分组返回，**不做跨机时间归并**；每机 `{agentId, hostname, ok, truncated, output}`，output 与 `logs.query` 同形态 | 各机时钟不可信，跨机归并是伪精度；分组卡片内单机时间线自然有序 |
+| D15 | 参数校验 server 侧镜像 M1 同规则：type 枚举、source 必填过白名单转发校验、grep ≤256 无换行、since_minutes 1-1440、tail 1-500（收窄于单机的 2000）；浏览性质不记审计（D9 同纪律） | 双端防御一致；扇出无写路径，审计只会刷屏 |
+| D16 | web 独立「日志检索」页（新路由 + 菜单项）：表单（type / source 手填 AutoComplete / tail / since / grep / agent 多选默认全选）→ 按主机分组卡片 + grep 命中高亮；Workbench 单机「日志」Tab 保留（深查 + 实时尾随动线） | 跨机检索与单机深查是两条动线；source 跨机下拉需 N 次 sources 枚举（又一个扇出放大器），手填 AutoComplete 回避；着色与高亮复用 LogsPanel 既有实现 |
+
+API 形态：
+
+```
+POST /api/logs/search
+{"type": "systemd", "source": "nginx.service", "grep": "ERROR",
+ "since_minutes": 60, "tail": 200, "agents": ["a1", "a2"]}   // agents 缺省 = 全部
+
+200 →
+{"results": [
+   {"agentId": "a1", "hostname": "web-1", "ok": true,
+    "truncated": false, "output": "...同 logs.query 形态..."},
+   {"agentId": "a2", "hostname": "db-1", "ok": false, "error": "timeout"}],
+ "skipped": [{"agentId": "a3", "reason": "offline"}]}
+```
+
+### Server 侧
+
+- 新文件 `api_logs_search.go`：目标筛选（capability 过滤 / agents 交集 / skipped
+  归因）→ 信号量并发 4 扇出 `CallAgent("logs.query", …)` → 单机结果透传 +
+  hostname 标注；serveAPI 挂独立 `/api/logs/search` 分支（非 `/agents/` 前缀）；
+- 端点级在途计数（atomic）≤2，超出 429；每目标 `context.WithTimeout(35s)`，
+  单目标失败不传染。
+
+### Web 侧
+
+- 新路由 + 菜单「日志检索」页：`api.ts` 加 `searchLogs(payload)`；表单提交后
+  按 `results` 顺序渲染主机卡片（ok=false 红色 error 态、skipped 灰色折叠行），
+  卡片内复用 LogsPanel 的日志行着色与 grep 命中高亮；
+- 表单校验与 D15 同规则前置（source 必填、grep 长度、tail/since 范围）。
+
+**测试**：server `api_logs_search_test.go`——参数校验表驱动（type 非法 / source 空 /
+grep 超长 / tail 越界 / agents 形态）、目标筛选与 skipped 归因（离线 / 无 capability /
+不存在 id）、扇出成功（注册 2 个假 agent 各返结果）、单 agent 失败降级（整体仍 200）、
+在途上限 429；web `npx tsc --noEmit` 零错误 + `pnpm build` + 表单交互手验。
+
+### M3 清单
+
+- [ ] server：`api_logs_search.go`（筛选 / 扇出 / 降级 / 并发闸）+ serveAPI 接入
+- [ ] web：跨机检索页（表单 / 分组卡片 / 高亮）
+- [ ] 测试 + 文档收尾（本清单勾选）+ todo.md 同步
+
 ## 不做（后续项）
 
-- 推送式采集与服务端存储聚合（Loki 对接或自研索引）：独立量级，M2 立项；
-- 跨机统一检索：依赖采集管道先行；
-- 日志级别结构化解析（journalctl -o json 的字段提取）：当前文本形态已够用；
+- 推送式采集与服务端存储聚合（agent 常驻采集 → server 落库索引，或 Loki 对接）：
+  独立量级；M3 联邦检索已闭环跨机排障，仅当出现历史趋势检索 / 合规留存类需求
+  时再立项；
+- 日志级别结构化解析（journalctl -o json 的字段提取）：当前文本形态已够用，且
+  docker 源无对应语义（M3 设计复确认）；
 - `--all` 历史对象枚举、多 unit 联合查询、PCRE 过滤：按需后补。
 
 ## M1 清单
