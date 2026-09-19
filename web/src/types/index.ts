@@ -612,6 +612,7 @@ export interface BackupConfig {
   schedule: string // manual / daily@HH:mm / every:Nh
   retention: number // 保留份数，0 = 不清理
   remote_dest?: string // rclone 远端目标 remote:path，空 = 不启用异地（M2 D20）
+  pre_hook?: string // 打包前执行的数据库热备命令，空 = 不执行（M3 D26）
   enabled: boolean
   last_run_at: number
   next_run_at: number // manual 恒为 0
@@ -628,6 +629,7 @@ export interface BackupConfigInput {
   schedule: string
   retention: number
   remote_dest?: string // 空 = 不启用异地
+  pre_hook?: string // 打包前执行的数据库热备命令，空 = 不执行
   enabled: boolean
 }
 

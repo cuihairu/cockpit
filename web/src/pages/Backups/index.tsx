@@ -95,6 +95,7 @@ const Backups = () => {
     sources: string[]
     destDir: string
     remoteDest: string
+    preHook: string
     scheduleType: 'manual' | 'daily' | 'every'
     dailyTime: dayjs.Dayjs | null
     everyHours: number
@@ -149,6 +150,7 @@ const Backups = () => {
       sources: [],
       destDir: '',
       remoteDest: '',
+      preHook: '',
       scheduleType: 'daily',
       dailyTime: dayjs('03:00', 'HH:mm'),
       everyHours: 6,
@@ -168,6 +170,7 @@ const Backups = () => {
       sources: cfg.sources,
       destDir: cfg.dest_dir,
       remoteDest: cfg.remote_dest ?? '',
+      preHook: cfg.pre_hook ?? '',
       scheduleType: daily ? 'daily' : every ? 'every' : 'manual',
       dailyTime: daily ? dayjs(cfg.schedule.slice(6), 'HH:mm') : null,
       everyHours: every ? parseInt(cfg.schedule.slice(6), 10) : 6,
@@ -192,6 +195,7 @@ const Backups = () => {
         sources: values.sources,
         dest_dir: values.destDir,
         remote_dest: values.remoteDest ?? '',
+        pre_hook: values.preHook ?? '',
         schedule,
         retention: values.retention ?? 0,
         enabled: values.enabled,
@@ -587,6 +591,16 @@ const Backups = () => {
             extra="填写后每次备份自动经 Agent 侧 rclone 推送到对象存储/网盘；远端凭据在 Agent 主机的 rclone.conf 中配置，控制台不经手。留空不启用"
           >
             <Input placeholder="my-s3:cockpit/backups" />
+          </Form.Item>
+          <Form.Item
+            name="preHook"
+            label="前置命令（可选）"
+            extra="打包前在 Agent 主机经 sh 执行，用于数据库一致性快照（失败即中止本次备份，超时 5 分钟）。源路径填快照产物路径"
+          >
+            <Input.TextArea
+              rows={2}
+              placeholder={'sqlite3 /data/app.db ".backup /tmp/app.db.bak"'}
+            />
           </Form.Item>
           <Form.Item name="scheduleType" label="计划" initialValue="daily">
             <Radio.Group
