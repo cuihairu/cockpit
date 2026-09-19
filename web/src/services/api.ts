@@ -701,6 +701,11 @@ class ApiService {
     await this.client.post(`/backups/configs/${id}/files/delete`, { name })
   }
 
+  // 手动补传单个备份文件到 rclone 远端（M2 D24；rclone 幂等可重复调用）
+  async syncBackupFileRemote(id: number, name: string): Promise<{ status: string }> {
+    return this.client.post<unknown, { status: string }>(`/backups/configs/${id}/files/sync-remote`, { name })
+  }
+
   // 恢复备份到独立目录（双确认：confirm_name 必须与 file 一致）
   async restoreBackup(
     id: number,

@@ -611,6 +611,7 @@ export interface BackupConfig {
   dest_dir: string
   schedule: string // manual / daily@HH:mm / every:Nh
   retention: number // 保留份数，0 = 不清理
+  remote_dest?: string // rclone 远端目标 remote:path，空 = 不启用异地（M2 D20）
   enabled: boolean
   last_run_at: number
   next_run_at: number // manual 恒为 0
@@ -626,6 +627,7 @@ export interface BackupConfigInput {
   dest_dir: string
   schedule: string
   retention: number
+  remote_dest?: string // 空 = 不启用异地
   enabled: boolean
 }
 
@@ -638,6 +640,8 @@ export interface BackupRun {
   file: string
   size: number
   error?: string
+  remoteStatus?: '' | 'ok' | 'failed' // 异地推送结果，空 = 未启用（M2 D20）
+  remoteError?: string
   startedAt: number
   finishedAt: number
 }

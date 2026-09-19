@@ -24,6 +24,7 @@ import {
 } from 'antd'
 import {
   CaretRightOutlined,
+  CloudUploadOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
@@ -93,6 +94,7 @@ const Backups = () => {
     name: string
     sources: string[]
     destDir: string
+    remoteDest: string
     scheduleType: 'manual' | 'daily' | 'every'
     dailyTime: dayjs.Dayjs | null
     everyHours: number
@@ -146,6 +148,7 @@ const Backups = () => {
       name: '',
       sources: [],
       destDir: '',
+      remoteDest: '',
       scheduleType: 'daily',
       dailyTime: dayjs('03:00', 'HH:mm'),
       everyHours: 6,
@@ -164,6 +167,7 @@ const Backups = () => {
       name: cfg.name,
       sources: cfg.sources,
       destDir: cfg.dest_dir,
+      remoteDest: cfg.remote_dest ?? '',
       scheduleType: daily ? 'daily' : every ? 'every' : 'manual',
       dailyTime: daily ? dayjs(cfg.schedule.slice(6), 'HH:mm') : null,
       everyHours: every ? parseInt(cfg.schedule.slice(6), 10) : 6,
@@ -187,6 +191,7 @@ const Backups = () => {
         name: values.name,
         sources: values.sources,
         dest_dir: values.destDir,
+        remote_dest: values.remoteDest ?? '',
         schedule,
         retention: values.retention ?? 0,
         enabled: values.enabled,
@@ -326,6 +331,18 @@ const Backups = () => {
     onError: (err) => message.error(getApiErrorMessage(err, '删除备份文件失败')),
   })
 
+  // 手动补传（M2 D24）：自动推送失败通知后的面板内动作；rclone 幂等可重复点击
+  const [syncingRemote, setSyncingRemote] = useState<string | null>(null)
+  const syncRemoteMutation = useMutation({
+    mutationFn: ({ configId, name }: { configId: number; name: string }) => {
+      setSyncingRemote(name)
+      return api.syncBackupFileRemote(configId, name)
+    },
+    onSuccess: () => message.success('已同步到远端'),
+    onError: (err) => message.error(getApiErrorMessage(err, '同步到远端失败')),
+    onSettled: () => setSyncingRemote(null),
+  })
+
   // 下载：axios blob 带 JWT（window.open 带不上 Authorization），createObjectURL 触发保存
   const [downloading, setDownloading] = useState<string | null>(null)
   const downloadFile = async (configId: number, name: string) => {
@@ -399,6 +416,22 @@ const Backups = () => {
     },
     { title: '文件', dataIndex: 'file', key: 'file', ellipsis: true, render: (f: string) => f || '—' },
     { title: '大小', dataIndex: 'size', key: 'size', width: 90, render: (n: number) => (n ? formatBytes(n) : '—') },
+    {
+      title: '异地',
+      dataIndex: 'remoteStatus',
+      key: 'remoteStatus',
+      width: 90,
+      // 空 = 该次运行未启用异地推送（D20/D21：失败不改本地终态，仅独立提示）
+      render: (st: string | undefined, run) => {
+        if (!st) return <Typography.Text type="secondary">—</Typography.Text>
+        if (st === 'ok') return <Tag color="success">已推送</Tag>
+        return (
+          <Tooltip title={run.remoteError || 'rclone 推送失败'}>
+            <Tag color="error">推送失败</Tag>
+          </Tooltip>
+        )
+      },
+    },
     { title: '开始', dataIndex: 'startedAt', key: 'startedAt', width: 160, render: formatTime },
     { title: '结束', dataIndex: 'finishedAt', key: 'finishedAt', width: 160, render: formatTime },
     {
@@ -432,7 +465,7 @@ const Backups = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 190,
+      width: filesFor?.remote_dest ? 250 : 190,
       render: (_, f) => (
         <Space size={0}>
           <Button
@@ -452,6 +485,19 @@ const Backups = () => {
           >
             恢复
           </Button>
+          {filesFor?.remote_dest && (
+            <Tooltip title={`同步到远端：${filesFor.remote_dest}`}>
+              <Button
+                type="link"
+                size="small"
+                icon={<CloudUploadOutlined />}
+                loading={syncingRemote === f.name}
+                onClick={() => filesFor && syncRemoteMutation.mutate({ configId: filesFor.id, name: f.name })}
+              >
+                补传
+              </Button>
+            </Tooltip>
+          )}
           <Popconfirm
             title="删除该备份文件？"
             description="此操作不可恢复"
@@ -481,7 +527,8 @@ const Backups = () => {
         )}
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
           备份在 Agent 主机本地打包为 tar.gz 落到目标目录（可直接指向 NAS 挂载点），控制台只记录调度与历史；
-          失败时会通过已配置的通知渠道发送 backup.failed 事件。
+          失败时会通过已配置的通知渠道发送 backup.failed 事件。配置「异地目标」后备份完成即自动经 rclone
+          推送到远端，推送失败单独通知（backup.remote-failed），可在备份文件里手动补传。
         </Typography.Text>
       </Card>
 
@@ -527,6 +574,19 @@ const Backups = () => {
             extra="建议指向第二块盘或 NAS 挂载点"
           >
             <Input placeholder="/mnt/backup" />
+          </Form.Item>
+          <Form.Item
+            name="remoteDest"
+            label="异地目标（可选）"
+            rules={[
+              {
+                pattern: /^[A-Za-z0-9][A-Za-z0-9._-]*:[^\s]+$/,
+                message: '格式：rclone 远端名:路径，如 my-s3:cockpit/backups',
+              },
+            ]}
+            extra="填写后每次备份自动经 Agent 侧 rclone 推送到对象存储/网盘；远端凭据在 Agent 主机的 rclone.conf 中配置，控制台不经手。留空不启用"
+          >
+            <Input placeholder="my-s3:cockpit/backups" />
           </Form.Item>
           <Form.Item name="scheduleType" label="计划" initialValue="daily">
             <Radio.Group
