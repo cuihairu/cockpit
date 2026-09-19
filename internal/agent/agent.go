@@ -56,6 +56,16 @@ var (
 	reconnectRetryDelay = 10 * time.Second
 )
 
+// goos 运行平台快照，默认 runtime.GOOS，生产行为与直接读 runtime.GOOS
+// 完全一致。var 化是覆盖率最小手术：detectCapabilities 的 windows/darwin
+// 分支与 registerStackProvider 的非 linux/darwin 跳过分支由编译期 GOOS
+// 决定，在 Linux CI 上永远不可达；改为未导出包级 var 后同包测试可注入
+// 平台值覆盖这些分支。风险评估：变量仅在包初始化时赋值一次，运行期只有
+// 测试写入；读方 detectCapabilities / registerStackProvider 均由测试
+// goroutine 同步调用（agent 后台循环不读它），同包测试串行执行（无
+// t.Parallel），注入前后用 defer 恢复，无数据竞争。
+var goos = runtime.GOOS
+
 // Config Agent 配置
 type Config struct {
 	ServerURL string                 `json:"server_url"`
@@ -348,7 +358,7 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 	// 其余平台沿用 systemd 探测（systemctl + /run/systemd/system，见
 	// service-design.md D2），容器与非 systemd 平台自动跳过
 	switch {
-	case runtime.GOOS == "windows":
+	case goos == "windows": // goos：平台快照（见其注释），默认 runtime.GOOS
 		capabilities = append(capabilities, protocol.Capability{
 			Type:    "service",
 			Version: "2",
@@ -356,7 +366,7 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 				"backend": "windows-scm",
 			},
 		})
-	case runtime.GOOS == "darwin":
+	case goos == "darwin":
 		capabilities = append(capabilities, protocol.Capability{
 			Type:    "service",
 			Version: "2",

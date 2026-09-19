@@ -171,7 +171,9 @@ func (a *Agent) registerStackProvider(cap protocol.Capability, baseline rpc.Base
 		log.Printf("Skip stack provider: no endpoint detected")
 		return
 	}
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+	// goos：平台快照（见 agent.go 注释），默认 runtime.GOOS，测试可注入
+	// 非 linux/darwin 平台覆盖此跳过分支
+	if goos != "linux" && goos != "darwin" {
 		log.Printf("Skip stack provider: unsupported OS %s", runtime.GOOS)
 		return
 	}

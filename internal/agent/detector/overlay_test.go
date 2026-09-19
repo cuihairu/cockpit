@@ -33,6 +33,7 @@ func TestOverlayDetectorNoneInstalled(t *testing.T) {
 func TestOverlayDetectorPartialTools(t *testing.T) {
 	covEmptyPATH(t)
 	overlayFakeBin(t, "zerotier-cli")
+	overlayFakeBin(t, "wg")
 	overlayFakeBin(t, "frpc")
 
 	d := &OverlayDetector{}
@@ -45,6 +46,9 @@ func TestOverlayDetectorPartialTools(t *testing.T) {
 	}
 	if cap.Metadata["zerotier"] != true || cap.Metadata["frp"] != true {
 		t.Errorf("metadata = %v, want zerotier+frp", cap.Metadata)
+	}
+	if cap.Metadata["wireguard"] != true {
+		t.Error("wireguard should be detected")
 	}
 	if _, ok := cap.Metadata["tailscale"]; ok {
 		t.Error("tailscale should not be detected")
