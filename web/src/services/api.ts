@@ -34,6 +34,7 @@ import type {
   DriftCheckResult,
   DriftDiffResult,
   DriftScanConfig,
+  RecordingConfig,
   TerminalRecording,
   ServerBackupFile,
   ServerBackupConfig,
@@ -579,6 +580,26 @@ class ApiService {
   // 删除录制（文件+元数据）
   async deleteRecording(sessionId: string): Promise<void> {
     await this.client.delete(`/recordings/${encodeURIComponent(sessionId)}`)
+  }
+
+  // 录制配置：开关/保留天数/异地归档目标（recording M2 D19）
+  async getRecordingsConfig(): Promise<RecordingConfig> {
+    return this.client.get<unknown, RecordingConfig>('/recordings/config')
+  }
+
+  async putRecordingsConfig(input: {
+    enabled?: boolean
+    retention_days?: number
+    remote_dest?: string
+  }): Promise<void> {
+    await this.client.put('/recordings/config', input)
+  }
+
+  // 手动补推指定录制归档到异地（recording M2 D18）
+  async syncRecordingRemote(sessionId: string): Promise<{ status: string }> {
+    return this.client.post<unknown, { status: string }>(
+      `/recordings/${encodeURIComponent(sessionId)}/sync-remote`,
+    )
   }
 
   // ========== Server 自身数据库备份 ==========

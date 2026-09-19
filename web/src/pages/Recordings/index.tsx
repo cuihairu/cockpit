@@ -3,16 +3,25 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
   Card,
+  Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Segmented,
   Space,
+  Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
-import { VideoCameraOutlined, DownloadOutlined, PlayCircleOutlined } from '@ant-design/icons'
+import {
+  VideoCameraOutlined,
+  DownloadOutlined,
+  PlayCircleOutlined,
+  CloudUploadOutlined,
+} from '@ant-design/icons'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { ColumnsType } from 'antd/es/table'
@@ -24,6 +33,7 @@ import '@xterm/xterm/css/xterm.css'
 // 会话录制：远控终端输出流的 asciinema v2 落盘（server 侧录制，见
 // docs/guide/recording-design.md）。列表 + 轻量回放器（按事件时间差调度
 // term.write）+ 下载/删除。只录输出不录输入（输入含密码）。
+// M2：配置行（开关/保留/异地目标，D19 补 M1 缺口）+ 归档补推按钮（D18）。
 
 const PROTOCOL_COLOR: Record<string, string> = {
   ssh: 'green',
@@ -195,15 +205,74 @@ const PlaybackModal = ({ recording, onClose }: PlayerProps) => {
   )
 }
 
+// 与后端 serverBackupRemoteDestRe 同源：remote:path，remote 名不以 - 开头
+const remoteDestPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*:[^\s]+$/
+
 // Recordings 会话录制列表页
 const Recordings = () => {
   const queryClient = useQueryClient()
   const [playing, setPlaying] = useState<TerminalRecording | null>(null)
+  const [enabledInput, setEnabledInput] = useState<boolean | null>(null)
+  const [retentionInput, setRetentionInput] = useState<number | null>(null)
+  const [remoteDest, setRemoteDest] = useState<string | null>(null)
+  const [savingCfg, setSavingCfg] = useState(false)
+  const [syncingRemote, setSyncingRemote] = useState<string | null>(null)
 
   const { data: recordings = [], isLoading } = useQuery({
     queryKey: ['recordings'],
     queryFn: () => api.getRecordings(),
   })
+
+  const { data: cfg } = useQuery({
+    queryKey: ['recordings-config'],
+    queryFn: () => api.getRecordingsConfig(),
+  })
+
+  // 编辑态：未改动时从服务端配置派生
+  const effEnabled = enabledInput ?? (cfg?.enabled ?? true)
+  const effRetention = retentionInput ?? (cfg?.retention_days ?? 7)
+  const effRemoteDest = remoteDest ?? (cfg?.remote_dest || '')
+  const rcloneReady = cfg?.rclone_available !== false
+
+  const invalidateCfg = () =>
+    queryClient.invalidateQueries({ queryKey: ['recordings-config'] })
+
+  const saveConfig = async () => {
+    const dest = effRemoteDest.trim()
+    if (dest && !remoteDestPattern.test(dest)) {
+      message.error('异地目标需为 remote:path 形态（如 gdrive:recordings）')
+      return
+    }
+    setSavingCfg(true)
+    try {
+      await api.putRecordingsConfig({
+        enabled: effEnabled,
+        retention_days: effRetention,
+        remote_dest: dest,
+      })
+      setEnabledInput(null)
+      setRetentionInput(null)
+      setRemoteDest(null)
+      await invalidateCfg()
+      message.success('录制配置已保存')
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '保存失败'))
+    } finally {
+      setSavingCfg(false)
+    }
+  }
+
+  const syncRemote = async (rec: TerminalRecording) => {
+    setSyncingRemote(rec.sessionId)
+    try {
+      await api.syncRecordingRemote(rec.sessionId)
+      message.success('已推送到异地')
+    } catch (err) {
+      message.error(getApiErrorMessage(err, '推送失败'))
+    } finally {
+      setSyncingRemote(null)
+    }
+  }
 
   const handleDelete = async (rec: TerminalRecording) => {
     try {
@@ -248,7 +317,7 @@ const Recordings = () => {
     { title: '大小', dataIndex: 'bytes', width: 90, render: fmtBytes },
     {
       title: '操作',
-      width: 200,
+      width: effRemoteDest ? 250 : 200,
       render: (_, rec) => (
         <Space>
           <Button
@@ -260,6 +329,16 @@ const Recordings = () => {
             回放
           </Button>
           <Button size="small" icon={<DownloadOutlined />} onClick={() => void handleDownload(rec)} />
+          {effRemoteDest && (
+            <Tooltip title={`补推到 ${effRemoteDest}`}>
+              <Button
+                size="small"
+                icon={<CloudUploadOutlined />}
+                loading={syncingRemote === rec.sessionId}
+                onClick={() => void syncRemote(rec)}
+              />
+            </Tooltip>
+          )}
           <Popconfirm title="删除该录制？" onConfirm={() => void handleDelete(rec)}>
             <Button size="small" danger>
               删除
@@ -279,6 +358,39 @@ const Recordings = () => {
         </Space>
       }
     >
+      <Space wrap style={{ marginBottom: 16 }} align="center">
+        <Typography.Text>录制</Typography.Text>
+        <Switch checked={effEnabled} onChange={(v) => setEnabledInput(v)} />
+        <Typography.Text>保留</Typography.Text>
+        <InputNumber
+          min={0}
+          max={cfg?.max_retention_days ?? 365}
+          value={effRetention}
+          onChange={(v) => setRetentionInput(v ?? 7)}
+          addonAfter="天"
+          style={{ width: 110 }}
+        />
+        <Typography.Text type="secondary">（0 = 永久）</Typography.Text>
+        <Typography.Text>异地目标</Typography.Text>
+        <Tooltip title="rclone remote:path（如 gdrive:recordings）；录制结束后自动推送，凭据取 server 主机 rclone.conf，留空 = 不推送">
+          <Input
+            value={effRemoteDest}
+            onChange={(e) => setRemoteDest(e.target.value)}
+            placeholder="gdrive:recordings"
+            style={{ width: 200 }}
+            allowClear
+            status={effRemoteDest.trim() && !remoteDestPattern.test(effRemoteDest.trim()) ? 'error' : undefined}
+          />
+        </Tooltip>
+        {effRemoteDest.trim() && !rcloneReady && (
+          <Typography.Text type="warning" style={{ fontSize: 12 }}>
+            server 主机未检测到 rclone，推送将失败
+          </Typography.Text>
+        )}
+        <Button size="small" loading={savingCfg} onClick={() => void saveConfig()}>
+          保存
+        </Button>
+      </Space>
       <Table<TerminalRecording>
         rowKey="sessionId"
         columns={columns}

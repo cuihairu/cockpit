@@ -559,6 +559,15 @@ export interface TerminalRecording {
   bytes: number
 }
 
+// 录制配置（recording M2 D19：开关/保留/异地归档目标；remote_dest 空 = 不推送）
+export interface RecordingConfig {
+  enabled: boolean
+  retention_days: number // 0 = 永久
+  remote_dest?: string // rclone remote:path
+  rclone_available?: boolean // server 主机是否装了 rclone（实时探测）
+  max_retention_days: number
+}
+
 // Server 自身数据库备份（VACUUM INTO 产物，目录即事实源，见 server-backup-design.md）
 export interface ServerBackupFile {
   name: string
