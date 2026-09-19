@@ -217,6 +217,10 @@ jobs:
             echo '--- cloudflared 容器启动参数 ---'
             docker inspect cloudflared --format '{{json .Config.Cmd}}' 2>/dev/null | sed 's/eyJ[A-Za-z0-9._-]*/eyJ***REDACTED***/g' || true
             docker inspect cloudflared --format 'Compose 项目: {{index .Config.Labels "com.docker.compose.project-working_dir"}}' 2>/dev/null || true
+            echo '--- 容器内 ingress 配置 ---'
+            docker exec cloudflared cat /etc/cloudflared/config.yml 2>/dev/null | grep -E 'ingress|hostname|service' || echo '(容器内无 /etc/cloudflared/config.yml)'
+            echo '--- tunnel 相关环境变量（值脱敏） ---'
+            docker inspect cloudflared --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -i tunnel | sed 's/=.*/=***REDACTED***/' || echo '(无 TUNNEL 环境变量)'
           fi
 
       - name: Status
