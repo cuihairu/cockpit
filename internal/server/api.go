@@ -139,11 +139,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := s.db.GetStats()
-	if err != nil {
-		s.handleError(w, r, http.StatusInternalServerError, "Failed to get stats")
-		return
-	}
+	stats := s.db.GetStats()
 
 	status := map[string]interface{}{
 		"services": map[string]interface{}{
@@ -760,12 +756,7 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 
 // handleUserActions 处理用户操作
 func (s *Server) handleUserActions(w http.ResponseWriter, r *http.Request, path string) {
-	parts := strings.Split(path, "/")
-
-	if len(parts) == 0 {
-		s.handleError(w, r, http.StatusNotFound, "User not specified")
-		return
-	}
+	parts := strings.Split(path, "/") // strings.Split 结果至少含一个元素
 
 	userID := parts[0]
 	action := ""
@@ -989,12 +980,7 @@ func (s *Server) handleAlertActions(w http.ResponseWriter, r *http.Request, path
 		return
 	}
 
-	parts := strings.Split(path, "/")
-
-	if len(parts) == 0 {
-		s.handleError(w, r, http.StatusNotFound, "Alert not specified")
-		return
-	}
+	parts := strings.Split(path, "/") // strings.Split 结果至少含一个元素
 
 	alertID := parts[0]
 	action := ""

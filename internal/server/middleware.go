@@ -151,22 +151,14 @@ func (s *Server) getResourceFromPath(path string) string {
 		return "unknown"
 	}
 
-	// 移除 /api/ 前缀
-	parts := strings.Split(strings.TrimPrefix(path, "/api/"), "/")
-	if len(parts) > 0 {
-		return parts[0]
-	}
-
-	return "unknown"
+	// 移除 /api/ 前缀（strings.Split 结果至少含一个元素，无需判空）
+	return strings.Split(strings.TrimPrefix(path, "/api/"), "/")[0]
 }
 
 // getResourceIDFromPath 从路径获取资源ID
 func (s *Server) getResourceIDFromPath(path string) string {
 	parts := strings.Split(path, "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
-	}
-	return ""
+	return parts[len(parts)-1]
 }
 
 // getClientIP 获取客户端IP
