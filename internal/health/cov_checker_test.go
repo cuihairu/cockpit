@@ -1,8 +1,10 @@
 package health
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -177,5 +179,72 @@ func TestCovBatchCheckUDP(t *testing.T) {
 	}
 	if results[0].Status != StatusUnhealthy {
 		t.Errorf("Status = %v, want unhealthy", results[0].Status)
+	}
+}
+
+// TestCovCheckUDPWriteFail 注入写入失败，覆盖 UDP 写测的 degraded 分支。
+func TestCovCheckUDPWriteFail(t *testing.T) {
+	origDial, origWrite := healthDial, healthWrite
+	t.Cleanup(func() { healthDial, healthWrite = origDial, origWrite })
+
+	healthDial = func(network, addr string, timeout time.Duration) (net.Conn, error) {
+		client, server := net.Pipe()
+		t.Cleanup(func() { client.Close(); server.Close() })
+		return client, nil
+	}
+	healthWrite = func(net.Conn, []byte) (int, error) { return 0, errors.New("boom write") }
+
+	c := NewChecker(Config{Timeout: time.Second})
+	res := c.CheckUDP("svc", "127.0.0.1:53", time.Second)
+	if res.Status != StatusDegraded || !strings.Contains(res.Message, "write test") {
+		t.Errorf("status = %s message = %s, want degraded write test", res.Status, res.Message)
+	}
+}
+
+// TestCovCheckPingEmptyIPs 注入 LookupIP 成功但返回空列表，覆盖
+// ping 的 "no IP addresses" 分支。
+func TestCovCheckPingEmptyIPs(t *testing.T) {
+	orig := healthLookupIP
+	t.Cleanup(func() { healthLookupIP = orig })
+	healthLookupIP = func(string) ([]net.IP, error) { return nil, nil }
+
+	c := NewChecker(Config{Timeout: time.Second})
+	res := c.CheckPing("svc", "empty.invalid")
+	if res.Status != StatusUnhealthy || !strings.Contains(res.Message, "no IP addresses") {
+		t.Errorf("status = %s message = %s", res.Status, res.Message)
+	}
+}
+
+// TestCovCheckDNSEmptyIPs 注入 LookupIP 成功但返回空列表，覆盖
+// dns 检查的 "no IP addresses" 分支。
+func TestCovCheckDNSEmptyIPs(t *testing.T) {
+	orig := healthLookupIP
+	t.Cleanup(func() { healthLookupIP = orig })
+	healthLookupIP = func(string) ([]net.IP, error) { return nil, nil }
+
+	c := NewChecker(Config{Timeout: time.Second})
+	res := c.CheckDNS("svc", "empty.invalid")
+	if res.Status != StatusUnhealthy || !strings.Contains(res.Message, "no IP addresses") {
+		t.Errorf("status = %s message = %s", res.Status, res.Message)
+	}
+}
+
+// TestCovCheckPingReachable 注入 DialTimeout 成功，覆盖 ping 经 IP 直连
+// 成功的 healthy 分支。
+func TestCovCheckPingReachable(t *testing.T) {
+	origLookup, origDial := healthLookupIP, healthDial
+	t.Cleanup(func() { healthLookupIP, healthDial = origLookup, origDial })
+
+	healthLookupIP = func(string) ([]net.IP, error) { return []net.IP{net.IPv4(127, 0, 0, 1)}, nil }
+	healthDial = func(network, addr string, timeout time.Duration) (net.Conn, error) {
+		client, server := net.Pipe()
+		go server.Close() // 立即释放，连接对象仍有效
+		return client, nil
+	}
+
+	c := NewChecker(Config{Timeout: time.Second})
+	res := c.CheckPing("svc", "host.example")
+	if res.Status != StatusHealthy || !strings.Contains(res.Message, "reachable via") {
+		t.Errorf("status = %s message = %s, want healthy reachable", res.Status, res.Message)
 	}
 }

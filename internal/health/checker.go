@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// 网络原语注入点：生产即标准库实现，仅供测试注入以覆盖防御分支
+// （如 DNS 解析成功但返回空列表、已连接 socket 写入失败等不可自然触发的路径）。
+var (
+	healthLookupIP = net.LookupIP
+	healthDial     = net.DialTimeout
+	healthWrite    = func(c net.Conn, b []byte) (int, error) { return c.Write(b) }
+)
+
 // Status health check status
 type Status string
 
@@ -216,7 +224,7 @@ func (c *Checker) CheckUDP(service, target string, timeout time.Duration) *Resul
 		port = "53"
 	}
 
-	conn, err := net.DialTimeout("udp", net.JoinHostPort(host, port), timeout)
+	conn, err := healthDial("udp", net.JoinHostPort(host, port), timeout)
 	if err != nil {
 		return &Result{
 			Service:   service,
@@ -234,7 +242,7 @@ func (c *Checker) CheckUDP(service, target string, timeout time.Duration) *Resul
 	conn.SetWriteDeadline(time.Now().Add(timeout))
 
 	// Try to write data
-	_, err = conn.Write([]byte(""))
+	_, err = healthWrite(conn, []byte(""))
 	if err != nil {
 		return &Result{
 			Service:   service,
@@ -272,7 +280,7 @@ func (c *Checker) CheckPing(service, target string) *Result {
 	}
 
 	// Resolve hostname
-	IPs, err := net.LookupIP(host)
+	IPs, err := healthLookupIP(host)
 	if err != nil {
 		return &Result{
 			Service:   service,
@@ -301,7 +309,7 @@ func (c *Checker) CheckPing(service, target string) *Result {
 	ip := IPs[0].String()
 
 	// Try to connect (simple check)
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "80"), 2*time.Second)
+	conn, err := healthDial("tcp", net.JoinHostPort(ip, "80"), 2*time.Second)
 	if err == nil {
 		conn.Close()
 		return &Result{
@@ -331,7 +339,7 @@ func (c *Checker) CheckPing(service, target string) *Result {
 func (c *Checker) CheckDNS(service, target string) *Result {
 	start := time.Now()
 
-	IPs, err := net.LookupIP(target)
+	IPs, err := healthLookupIP(target)
 	if err != nil {
 		return &Result{
 			Service:   service,
@@ -405,7 +413,7 @@ func (c *Checker) CheckPort(service, target string) *Result {
 	_, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 
-	conn, err := net.DialTimeout("tcp", target, c.timeout)
+	conn, err := healthDial("tcp", target, c.timeout)
 	if err != nil {
 		return &Result{
 			Service:   service,
