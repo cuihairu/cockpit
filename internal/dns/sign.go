@@ -52,10 +52,13 @@ func aliSignQuery(secret string, params url.Values) string {
 	return canonical + "&Signature=" + aliPercentEncode(aliSign(stringToSign, secret))
 }
 
+// aliRandRead 注入点：go1.26 crypto/rand.Read 不会失败，错误分支仅供测试覆盖。
+var aliRandRead = rand.Read
+
 // aliNonce 签名唯一数：crypto/rand 16 字节 hex；失败退化纳秒时间戳
 func aliNonce() string {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	if _, err := aliRandRead(b[:]); err != nil {
 		return strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
 	return hex.EncodeToString(b[:])

@@ -6,8 +6,10 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -241,5 +243,18 @@ func TestDNSPodValidationAndPaging(t *testing.T) {
 	}
 	if out.Page != 1 || out.TotalPage != 1 {
 		t.Fatalf("page/total = %d/%d, want 1/1", out.Page, out.TotalPage)
+	}
+}
+
+// TestCovAliNonceRandFail 注入随机数失败，覆盖签名唯一数的
+// 纳秒时间戳后备分支。
+func TestCovAliNonceRandFail(t *testing.T) {
+	orig := aliRandRead
+	t.Cleanup(func() { aliRandRead = orig })
+	aliRandRead = func([]byte) (int, error) { return 0, errors.New("boom rand") }
+
+	nonce := aliNonce()
+	if _, err := strconv.Atoi(nonce); err != nil {
+		t.Errorf("fallback nonce = %q, want numeric timestamp", nonce)
 	}
 }
