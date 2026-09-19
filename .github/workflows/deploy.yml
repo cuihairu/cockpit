@@ -38,8 +38,6 @@ jobs:
           persist-credentials: false
 
       - name: Prepare deploy env
-        env:
-          HOME: ${{ runner.home }}
         run: |
           set -euo pipefail
           if [ -f "$HOME/.cockpit-deploy.env" ]; then
