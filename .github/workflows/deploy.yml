@@ -83,15 +83,20 @@ jobs:
           echo '--- clickhouse 端口配置 ---'
           grep -nE 'ports:|9[0-9]{3}:[0-9]{3}' docker-compose.yml | head -10 || true
           # clickhouse native 端口 9000 与 cockpit HTTP 端口 9000 结构性冲突：
-          # 宿主 9000 归 cockpit（tunnel 回源），clickhouse 宿主侧改 19000，
-          # 容器内仍 9000（croupier 内部走 docker 网络，不受影响）。改前备份。
-          if docker ps --filter publish=9000 --format '{{.Names}}' | grep -qv '^croupier'; then
+          # 宿主 9000 归 cockpit（tunnel 回源），clickhouse 宿主侧固定 19000，
+          # 容器内仍 9000（croupier 内部走 docker 网络，不受影响）。只看
+          # compose 文件内容，不看当前谁占 9000——cockpit 停机时 9000 空闲
+          # 会误判"无冲突"漏改（曾因此恢复后 clickhouse 占住 9000，cockpit
+          # 重启绑不上端口挂掉，公网 502）。改前备份。
+          if grep -qE '\b9000:9000\b' docker-compose.yml; then
             cp docker-compose.yml docker-compose.yml.bak-pre-recover
             sed -i 's/\b9000:9000\b/19000:9000/' docker-compose.yml
-            echo '宿主 9000 被 cockpit 占用：clickhouse 映射改为 19000:9000（原文件备份为 docker-compose.yml.bak-pre-recover）'
-            grep -n '19000:9000' docker-compose.yml || echo '::warning::未找到 9000:9000 字面量，请人工核对端口写法'
+            echo 'clickhouse 映射改为 19000:9000（原文件备份为 docker-compose.yml.bak-pre-recover）'
+            grep -n '19000:9000' docker-compose.yml
+          elif grep -q '19000:9000' docker-compose.yml; then
+            echo '已是 19000:9000，无需改写'
           else
-            echo '宿主 9000 无冲突，保持原配置'
+            echo '::warning::compose 中既无 9000:9000 也无 19000:9000，请人工核对端口写法'
           fi
 
       - name: Up
@@ -163,20 +168,49 @@ jobs:
           docker ps --filter publish=9000 --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
           # 同 compose project 的旧容器
           docker compose down --remove-orphans 2>/dev/null || true
-          # 白名单接管：只移除本项目（compose project=cockpit 或镜像
-          # cockpit:local）占 9000 的残留容器；其他项目的容器一律不碰
-          # （历史上曾误删 croupier-clickhouse——native 端口同为 9000）
+          # 白名单接管：只动两类占 9000 的容器——
+          # ① 本项目（compose project=cockpit 或镜像 cockpit:local）残留：移除
+          # ② croupier-clickhouse（native 端口同为 9000，历史曾误删）：自动
+          #    协调——宿主侧让出 9000 改 19000，数据卷不动，容器重建
+          # 其他项目的容器一律不碰，报错要求人工处理
           for c in $(docker ps -aq --filter publish=9000); do
             img=$(docker inspect -f '{{.Config.Image}}' "$c")
             proj=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$c")
+            name=$(docker inspect -f '{{.Name}}' "$c" | sed 's#^/##')
             if [ "$proj" = "cockpit" ] || [ "$img" = "cockpit:local" ]; then
-              echo "移除本项目占 9000 的旧容器: $(docker ps -a --filter id=$c --format '{{.Names}}')"
+              echo "移除本项目占 9000 的旧容器: $name"
               docker rm -f "$c"
+            elif [ "$name" = "croupier-clickhouse" ]; then
+              dir=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$c")
+              svc=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$c")
+              echo "croupier-clickhouse 占 9000 → 自动协调为 19000:9000（项目目录 $dir，服务 $svc）"
+              if [ -z "$dir" ] || [ ! -d "$dir" ]; then
+                echo "::error::无法定位 croupier-clickhouse 的 compose 项目目录，请人工改端口"; exit 1
+              fi
+              compose_file=""
+              for f in "$dir"/docker-compose.y*ml "$dir"/compose.y*ml; do
+                if [ -f "$f" ]; then compose_file="$f"; break; fi
+              done
+              if [ -z "$compose_file" ]; then
+                echo "::error::$dir 下未找到 compose 文件，请人工改端口"; exit 1
+              fi
+              cp "$compose_file" "$compose_file.bak-port-coordinate"
+              sed -i 's/\b9000:9000\b/19000:9000/' "$compose_file"
+              grep -n '19000:9000' "$compose_file" || { echo "::error::改写后未见 19000:9000，请人工核对端口写法"; exit 1; }
+              docker compose -f "$compose_file" up -d "$svc"
+              echo '已重建 croupier-clickhouse（数据卷保留）'
             else
-              echo "::error::端口 9000 被非本项目容器占用: $(docker ps -a --filter id=$c --format '{{.Names}} ({{.Image}})')。不自动删除——请为 clickhouse 类服务改用 19000 等宿主端口后重试"
+              echo "::error::端口 9000 被非本项目容器占用: $(docker ps -a --filter id=$c --format '{{.Names}} ({{.Image}})')。不自动删除——请人工处理"
               exit 1
             fi
           done
+          # 协调/移除后宿主 9000 必须已让出（后续 Up 要绑它）
+          left=$(docker ps -q --filter publish=9000 | wc -l)
+          if [ "$left" -gt 0 ]; then
+            echo "::error::处理后 9000 仍被占用:"; docker ps --filter publish=9000 --format '{{.Names}} ({{.Image}})'
+            exit 1
+          fi
+          echo '宿主 9000 已让出'
 
       - name: Up
         run: |
