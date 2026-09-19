@@ -24,6 +24,8 @@ const (
 	DomainExpired       = "domain.expired"
 	BackupFailed        = "backup.failed"        // 备份任务失败（backup 调度循环，需在 events 白名单显式启用）
 	BackupRemoteFailed  = "backup.remote-failed" // 本地成功但 rclone 推送失败（M2 D21，白名单显式启用）
+
+	ServerBackupRemoteFailed = "server_backup.remote-failed" // 面板库本地备份成功但 rclone 推送失败（server-backup M2 D16，白名单显式启用）
 )
 
 // getAlertEventType 根据 Alert 获取对应的事件类型

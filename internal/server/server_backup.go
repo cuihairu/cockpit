@@ -1,25 +1,32 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cuihairu/cockpit/internal/notification"
 )
 
 // Server 自身 SQLite 备份（见 docs/guide/server-backup-design.md）：
 // VACUUM INTO 在线产生紧凑副本到 <db目录>/server-backups/，目录即事实源
 // （不建 DB 表）。恢复 = 停服替换文件（D8）。
+// M2：本地备份成功后 rclone copy 推送异地（remote:path，凭据只在
+// server 主机 rclone.conf），推送失败不影响本地成果（D14/D16）。
 
 // Setting 键：备份间隔（小时）与保留天数（每轮读取免缓存）
 const (
-	ServerBackupIntervalSettingKey  = "server_backup.interval_hours"
-	ServerBackupRetentionSettingKey = "server_backup.retention_days"
+	ServerBackupIntervalSettingKey   = "server_backup.interval_hours"
+	ServerBackupRetentionSettingKey  = "server_backup.retention_days"
+	ServerBackupRemoteDestSettingKey = "server_backup.remote_dest"
 )
 
 const (
@@ -28,12 +35,38 @@ const (
 	serverBackupDefaultRetentionDays = 7
 	serverBackupMaxRetentionDays     = 365
 
+	// 异地目标上限与形态校验（M2 D13，与 agent 侧 backupRemoteDestRe 同源：
+	// remote 名不以 - 开头根除 flag 混淆）
+	serverBackupRemoteDestMaxLen = 512
+	serverBackupRemoteDestRe     = `^[A-Za-z0-9][A-Za-z0-9._-]*:[^\x00-\x20\x7f]+$`
+
 	// 文件名严格模式：cockpit-YYYYMMDD-HHMMSS.db（D7，防穿越/任意删除）
 	serverBackupNameRe = `^cockpit-\d{8}-\d{6}\.db$`
 )
 
 // serverBackupLoop 醒来节奏。包级变量仅为测试可注入，默认值即生产取值。
 var serverBackupTick = time.Hour
+
+// rclone 可执行文件与推送超时。包级变量仅为测试可注入（M2 D15）。
+var (
+	serverBackupRcloneBin     = "rclone"
+	serverBackupRemoteMaxWait = 5 * time.Minute
+)
+
+// serverBackupRemoteDest 读异地目标 Setting；空=关闭。脏值（写入口之后
+// 被手改）视为未配置并记日志，不阻塞本地备份（D13 读宽松）。
+func (s *Server) serverBackupRemoteDest() string {
+	v, err := s.db.GetSetting(ServerBackupRemoteDestSettingKey)
+	if err != nil || v == "" {
+		return ""
+	}
+	if len(v) > serverBackupRemoteDestMaxLen ||
+		!regexp.MustCompile(serverBackupRemoteDestRe).MatchString(v) {
+		log.Printf("Server backup remote_dest invalid, treating as unset: %q", v)
+		return ""
+	}
+	return v
+}
 
 // serverBackupIntervalHours 备份间隔；0=关闭；非法回默认
 func (s *Server) serverBackupIntervalHours() int {
@@ -141,7 +174,70 @@ func (s *Server) runServerBackup() (string, error) {
 		log.Printf("Server backup chmod %s failed: %v", name, err)
 	}
 	log.Printf("Server DB backup created: %s", name)
+	s.pushServerBackupRemote(name)
 	return name, nil
+}
+
+// pushServerBackupRemote 本地备份成功后的异地推送（M2 D14：失败不影响本地
+// 成果与调用方返回）。remote_dest 未配置时静默跳过。
+func (s *Server) pushServerBackupRemote(name string) {
+	remoteDest := s.serverBackupRemoteDest()
+	if remoteDest == "" {
+		return
+	}
+	local := filepath.Join(s.serverBackupDir(), name)
+	log.Printf("[remote] rclone copy %s → %s", name, remoteDest)
+	ctx, cancel := context.WithTimeout(context.Background(), serverBackupRemoteMaxWait)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, serverBackupRcloneBin, "copy", "--transfers", "2", local, remoteDest)
+	// ctx 取消只杀 rclone 本体；继承 stdout 的孙进程（若有）会占住管道，
+	// WaitDelay 到期强断，Wait 不被孤儿拖住（rclone 官方单二进制，无此链）
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if summary := strings.TrimSpace(string(out)); summary != "" {
+		if len(summary) > 2048 {
+			summary = summary[:2048] + "…"
+		}
+		log.Printf("[remote] %s", summary)
+	}
+	if err == nil {
+		log.Printf("[remote] server backup pushed: %s", name)
+		return
+	}
+	detail := strings.TrimSpace(string(out))
+	if len(detail) > 512 {
+		detail = detail[:512]
+	}
+	if detail != "" {
+		err = fmt.Errorf("rclone copy: %v: %s", err, detail)
+	} else {
+		err = fmt.Errorf("rclone copy: %v", err)
+	}
+	log.Printf("[remote] server backup push failed: %v", err)
+	s.notifyServerBackupRemoteFailed(name, err.Error())
+}
+
+// notifyServerBackupRemoteFailed 推送失败通知（M2 D16：本地已成功，仅远端
+// 链路断；走独立事件白名单，notifier 未启用时 SendNonBlocking 自身跳过）。
+func (s *Server) notifyServerBackupRemoteFailed(name, errMsg string) {
+	if s.notifier == nil {
+		return
+	}
+	s.notifier.SendNonBlocking(&notification.Notification{
+		EventType:    notification.ServerBackupRemoteFailed,
+		Title:        "面板数据库异地推送失败",
+		Message:      fmt.Sprintf("%s: %s", name, errMsg),
+		Level:        "error",
+		ResourceType: "server_backup",
+		ResourceID:   name,
+		Time:         time.Now(),
+	})
+}
+
+// rcloneAvailable 异地推送执行前提的实时探测（M2 D18：后装 rclone 免重启）
+func rcloneAvailable() bool {
+	_, err := exec.LookPath(serverBackupRcloneBin)
+	return err == nil
 }
 
 // cleanupServerBackups 按保留天数清理过期备份（0=永久）
