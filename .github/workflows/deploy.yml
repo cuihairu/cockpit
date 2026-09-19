@@ -220,9 +220,11 @@ jobs:
               if grep -q '9000:9000' "$compose_file" && ! grep -q '19000:9000' "$compose_file"; then
                 sed -i 's/9000:9000/19000:9000/g' "$compose_file"
                 echo "短语法改写：9000:9000 → 19000:9000"
+                grep -n '19000:9000' "$compose_file" || true
               elif grep -Eq 'published:[[:space:]]*.?9000' "$compose_file" && ! grep -Eq 'published:[[:space:]]*.?19000' "$compose_file"; then
                 sed -i -E 's/(published:[[:space:]]*.?9000)([^0-9]|$)/\119000\2/' "$compose_file"
                 echo "长语法改写：published: 9000 → published: 19000"
+                grep -nE 'published:[[:space:]]*.?19000' "$compose_file" || true
               elif grep -qE '\$\{CLICKHOUSE_NATIVE_PORT:-9000\}' "$compose_file"; then
                 # 实测 croupier compose 写法：宿主侧走 .env 变量（默认 9000）。
                 # 不动 compose 文件，写 .env 让 up 时生效——compose 读项目
@@ -230,9 +232,14 @@ jobs:
                 if [ -f "$dir/.env" ] && grep -q '^CLICKHOUSE_NATIVE_PORT=' "$dir/.env"; then
                   sed -i 's/^CLICKHOUSE_NATIVE_PORT=.*/CLICKHOUSE_NATIVE_PORT=19000/' "$dir/.env"
                 else
+                  # 先补尾换行再追加：无尾换行的 .env 会把新行粘上上一行
+                  if [ -f "$dir/.env" ] && [ -n "$(tail -c 1 "$dir/.env" 2>/dev/null || true)" ]; then
+                    echo >> "$dir/.env"
+                  fi
                   echo "CLICKHOUSE_NATIVE_PORT=19000" >> "$dir/.env"
                 fi
                 echo "已设置 $dir/.env → CLICKHOUSE_NATIVE_PORT=19000（宿主侧让出 9000）"
+                grep -n 'CLICKHOUSE_NATIVE_PORT' "$dir/.env"
               fi
               if ! grep -Eq '19000:9000|published:[[:space:]]*.?19000' "$compose_file" \
                  && ! grep -q '^CLICKHOUSE_NATIVE_PORT=19000' "$dir/.env" 2>/dev/null; then
@@ -240,7 +247,6 @@ jobs:
                 grep -nH -B 2 -A 3 '9000' "$compose_file" "$dir"/.env 2>/dev/null | head -60
                 exit 1
               fi
-              grep -nH '19000' "$compose_file"
               docker compose -f "$compose_file" up -d "$svc"
               echo '已重建 croupier-clickhouse（数据卷保留）'
             else
