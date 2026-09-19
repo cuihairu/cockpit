@@ -1,0 +1,74 @@
+# 方案设计：服务域名绑定（Domain Binding）
+
+> 2026-09-19。服务域名配置首期设计。需求原文：「可以配置指向服务的域名，这样
+> agent 中可以方便使用域名来配置」。本文只做设计决策与接口定义。
+
+## 现状与痛点
+
+一个「域名对外提供服务」的事实分散在四个互不知情的模块里：
+
+| 模块 | 现状 | 配的东西 |
+|------|------|----------|
+| DNS 管理 | `dns` provider 建 A/CNAME 记录 | 域名 → 服务器 IP |
+| 反向代理 | traefik `ProxySite{ServerNames, Upstream}` | 域名 → host:port |
+| 证书 | `cert` 监控按域名列表轮询到期时间 | 域名清单（手工维护，与上两处重复） |
+| 探针 | `probe` 目标按 URL 配置 | 域名 URL（同样重复） |
+
+| 痛点 | 后果 |
+|------|------|
+| 开一个新服务要跑 3-4 处配置 | 漏一处就是「解析没建/证书过期/探针没盯」三类经典事故 |
+| 域名与服务的关系只存在于人脑 | 半年后不知道 blog.example.com 指向哪台机器哪个端口 |
+| agent 侧配置只能手抄域名 | 换域名/加域名要逐台 agent 手改 |
+
+## 架构总览
+
+**DomainBinding 一等资源**：登记「域名 → agent 上的目标服务」，一次申请，
+三个下游（DNS / 反代 / 证书监控）自动联动；agent 侧按需引用域名清单。
+
+```
+┌─ server ────────────────────────────────────────┐
+│ DomainBinding{domain, agent, target, auto*}     │
+│   apply() ──┬─▶ dns provider：A/CNAME 建改记录   │
+│             ├─▶ agent RPC：traefik 站点下发      │
+│             └─▶ cert monitor：自动纳入监控       │
+│ GET /api/agents/{id}/domains  ← agent 按需拉取  │
+└─────────────────────────────────────────────────┘
+```
+
+## 关键决策
+
+| # | 决策 | 选择 | 理由 |
+|---|------|------|------|
+| D1 | 资源模型 | `DomainBinding{domain(唯一), agentID, target(host:port \| docker://服务名), enabled, autoDNS, autoProxy, autoCert}` | 三个 auto 开关解耦联动：只想登记关系不开自动化也合法 |
+| D2 | target 语义 | 统一为「agent 可达地址」：host:port（host 可为 127.0.0.1/容器名/内网 IP）；`docker://name` 解析为该 agent 上 docker 网络内的服务名 | 反代上游就在 agent 本机网络，域名解析记录指向的是 agent 主机 IP，两者分层不混淆 |
+| D3 | DNS 记录 | `autoDNS` 开时经 dns provider 写 A 记录（IP = agent 注册上报的主地址）；CNAME/多级域名首期不做 | agent 主地址已有注册链路，不新增配置；CNAME 场景等真实需求 |
+| D4 | 反代下发 | `autoProxy` 开时复用既有 traefik `ApplySite`（ServerNames=[domain], Upstream=target），server 纯转发、agent 本地渲染+自检 | 完全复用 P1 反代通道，零新协议 |
+| D5 | 证书联动 | `autoCert` 开时域名自动进入 cert 监控清单；反向：Binding 删除时提示（不自动删）监控项 | 监控宁可多盯不可漏盯；自动删除监控是危险默认 |
+| D6 | 一致性检查 | Binding 列表页展示「漂移」：DNS 实际记录 ≠ 期望、站点未下发、监控缺失，逐项标记 | 登记了不等于生效了；漂移可见是自助排障第一步 |
+| D7 | agent 引用 | 新增只读 RPC `domains.list`（server 从库下发该 agent 的域名清单）；probe 目标、未来任何 agent 侧配置可直接引用域名 | 换域名只改 Binding，agent 配置拉取即新 |
+| D8 | 删除语义 | 删 Binding 只删登记，不动已下发的 DNS/站点/监控项（提示手工清理） | 删除自动化连锁是危险操作；先可见后清理 |
+| D9 | 权限 | 增删改需 `dns:write` + `proxy:write`（联动了谁就要谁的权限）；只读沿用 `dns:read` | 与 RBAC 设计（rbac-design.md）权限点清单衔接 |
+| D10 | 存储 | 复用 settings/inventory 现有 SQLite，GORM 单表 `domain_bindings` | 无新依赖；量级（个位数到几十条）不值得独立存储 |
+
+## API（server 侧，agent 零协议变更除 D7 新增只读方法）
+
+```
+GET    /api/domains?agent=xxx     列表（含漂移状态）
+POST   /api/domains               登记/更新
+DELETE /api/domains/{domain}      删登记（D8）
+POST   /api/domains/{domain}/apply   执行联动（DNS/反代/证书按 auto* 开关）
+```
+
+## 分期
+
+| 期 | 内容 | 验收 |
+|----|------|------|
+| P0 | Binding CRUD + apply 联动 DNS/反代/证书 + 漂移检查 | 登记一个域名到 apply 完成全自动，dashboard 可见 |
+| P1 | agent `domains.list` RPC + probe 目标引用域名 + 一键生成安装/配置片段 | agent 侧配置不再手抄域名 |
+| P2（按需） | CNAME/泛域名、批量 apply、cert 监控自动移除 | 按实际需求排期 |
+
+## 不做的事
+
+- 不做 DNS 托管全量管理（zones/NS/SOA）——dns provider 已管记录，Binding 只管「服务视角」的那一条
+- 不做内置 DNS server——域名解析始终落在用户已有 DNS 商
+- 不做证书签发的自动触发链（ACME 签发仍由 acme 模块独立决策）——Binding 只保证「被监控」
