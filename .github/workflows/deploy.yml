@@ -88,15 +88,22 @@ jobs:
           # compose 文件内容，不看当前谁占 9000——cockpit 停机时 9000 空闲
           # 会误判"无冲突"漏改（曾因此恢复后 clickhouse 占住 9000，cockpit
           # 重启绑不上端口挂掉，公网 502）。改前备份。
-          if grep -qE '\b9000:9000\b' docker-compose.yml; then
+          # 幂等守卫同 Take over：19000:9000 含 9000:9000 子串、published:
+          # 19000 匹配 .?9000，守卫防重复执行二次改写
+          if grep -q '9000:9000' docker-compose.yml && ! grep -q '19000:9000' docker-compose.yml; then
             cp docker-compose.yml docker-compose.yml.bak-pre-recover
-            sed -i 's/\b9000:9000\b/19000:9000/' docker-compose.yml
-            echo 'clickhouse 映射改为 19000:9000（原文件备份为 docker-compose.yml.bak-pre-recover）'
+            sed -i 's/9000:9000/19000:9000/g' docker-compose.yml
+            echo '短语法改写：9000:9000 → 19000:9000（原文件备份为 docker-compose.yml.bak-pre-recover）'
             grep -n '19000:9000' docker-compose.yml
-          elif grep -q '19000:9000' docker-compose.yml; then
-            echo '已是 19000:9000，无需改写'
+          elif grep -Eq 'published:[[:space:]]*.?9000' docker-compose.yml && ! grep -Eq 'published:[[:space:]]*.?19000' docker-compose.yml; then
+            cp docker-compose.yml docker-compose.yml.bak-pre-recover
+            sed -i -E 's/(published:[[:space:]]*.?9000)([^0-9]|$)/\119000\2/' docker-compose.yml
+            echo '长语法改写：published: 9000 → published: 19000（原文件备份为 docker-compose.yml.bak-pre-recover）'
+            grep -nE 'published:[[:space:]]*.?19000' docker-compose.yml
+          elif grep -Eq '19000:9000|published:[[:space:]]*.?19000' docker-compose.yml; then
+            echo '已是 19000，无需改写'
           else
-            echo '::warning::compose 中既无 9000:9000 也无 19000:9000，请人工核对端口写法'
+            echo '::warning::compose 中未识别到 9000 端口写法（短/长语法均无），请人工核对端口配置'
           fi
 
       - name: Up
@@ -195,8 +202,24 @@ jobs:
                 echo "::error::$dir 下未找到 compose 文件，请人工改端口"; exit 1
               fi
               cp "$compose_file" "$compose_file.bak-port-coordinate"
-              sed -i 's/\b9000:9000\b/19000:9000/' "$compose_file"
-              grep -n '19000:9000' "$compose_file" || { echo "::error::改写后未见 19000:9000，请人工核对端口写法"; exit 1; }
+              # 端口写法不确定：短语法（9000:9000）与长语法（published: 9000）
+              # 各试一种；croupier compose 两者皆无时 dump 端口相关行与 .env
+              # 供人工定位（曾实测该文件无 9000:9000 字面量）
+              # 幂等守卫：19000:9000 含子串 9000:9000、published: 19000 匹配
+              # .?9000，不加守卫重复执行会二次改写
+              if grep -q '9000:9000' "$compose_file" && ! grep -q '19000:9000' "$compose_file"; then
+                sed -i 's/9000:9000/19000:9000/g' "$compose_file"
+                echo "短语法改写：9000:9000 → 19000:9000"
+              elif grep -Eq 'published:[[:space:]]*.?9000' "$compose_file" && ! grep -Eq 'published:[[:space:]]*.?19000' "$compose_file"; then
+                sed -i -E 's/(published:[[:space:]]*.?9000)([^0-9]|$)/\119000\2/' "$compose_file"
+                echo "长语法改写：published: 9000 → published: 19000"
+              fi
+              if ! grep -Eq '19000:9000|published:[[:space:]]*.?19000' "$compose_file"; then
+                echo "::error::自动改写未生效，端口写法见下（人工修改后重跑 deploy）："
+                grep -nH -B 2 -A 3 '9000' "$compose_file" "$dir"/.env 2>/dev/null | head -60
+                exit 1
+              fi
+              grep -nH '19000' "$compose_file"
               docker compose -f "$compose_file" up -d "$svc"
               echo '已重建 croupier-clickhouse（数据卷保留）'
             else
