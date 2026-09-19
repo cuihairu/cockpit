@@ -12,12 +12,13 @@ on:
         description: "部署的分支/commit/tag（默认 main）"
         default: main
       mode:
-        description: "deploy = 部署 cockpit；recover-clickhouse = 恢复误删的 croupier-clickhouse"
+        description: "deploy = 部署 cockpit；recover-clickhouse = 恢复误删的 croupier-clickhouse；show-credentials = 查看管理员账号密码"
         default: deploy
         type: choice
         options:
           - deploy
           - recover-clickhouse
+          - show-credentials
   push:
     branches: [main]
     paths-ignore:
@@ -33,6 +34,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  show-credentials:
+    if: inputs.mode == 'show-credentials'
+    name: Show admin credentials
+    runs-on: [self-hosted, deployer]
+    timeout-minutes: 2
+    steps:
+      - name: Read persisted deploy env
+        run: |
+          set -euo pipefail
+          if [ -f "$HOME/.cockpit-deploy.env" ]; then
+            echo '管理员账号密码（默认用户名 admin）：'
+            grep -E '^(ADMIN_USERNAME|ADMIN_PASSWORD)=' "$HOME/.cockpit-deploy.env" || echo 'ADMIN_PASSWORD=(未找到，检查凭据文件)'
+          else
+            echo "::error::runner 本地未找到 $HOME/.cockpit-deploy.env"
+            exit 1
+          fi
+
   recover-clickhouse:
     if: inputs.mode == 'recover-clickhouse'
     name: Recover croupier-clickhouse
@@ -157,7 +175,7 @@ jobs:
           fi
 
   deploy:
-    if: inputs.mode != 'recover-clickhouse'
+    if: inputs.mode != 'recover-clickhouse' && inputs.mode != 'show-credentials'
     name: Deploy (self-hosted)
     runs-on: [self-hosted, deployer]
     timeout-minutes: 30
