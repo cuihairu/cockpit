@@ -8,6 +8,8 @@ import type {
   Service,
   Gateway,
   Storage,
+  ManagedUser,
+  RoleInfo,
   ContainerInfo,
   ImageInfo,
   PaginatedResponse,
@@ -154,6 +156,47 @@ class ApiService {
   // 获取当前用户信息
   async getCurrentUser(): Promise<UserInfo> {
     return this.client.get<unknown, UserInfo>('/me')
+  }
+
+  // ========== 访问控制（RBAC，users:admin / roles:admin） ==========
+
+  async listUsers(): Promise<ManagedUser[]> {
+    return this.client.get<unknown, ManagedUser[]>('/users')
+  }
+
+  async createUser(data: { username: string; password: string; email?: string; role?: string }): Promise<ManagedUser> {
+    return this.client.post<unknown, ManagedUser>('/users', data)
+  }
+
+  async updateUser(id: string, data: { email?: string; role?: string }): Promise<ManagedUser> {
+    return this.client.put<unknown, ManagedUser>(`/users/${encodeURIComponent(id)}`, data)
+  }
+
+  async deleteUser(id: string): Promise<{ message: string }> {
+    return this.client.delete<unknown, { message: string }>(`/users/${encodeURIComponent(id)}`)
+  }
+
+  async changeUserPassword(id: string, newPassword: string): Promise<{ message: string }> {
+    return this.client.post<unknown, { message: string }>(
+      `/users/${encodeURIComponent(id)}/password`,
+      { new_password: newPassword }
+    )
+  }
+
+  async listRoles(): Promise<RoleInfo[]> {
+    return this.client.get<unknown, RoleInfo[]>('/roles')
+  }
+
+  async createRole(data: { name: string; permissions: string[] }): Promise<RoleInfo> {
+    return this.client.post<unknown, RoleInfo>('/roles', data)
+  }
+
+  async updateRole(name: string, permissions: string[]): Promise<RoleInfo> {
+    return this.client.put<unknown, RoleInfo>(`/roles/${encodeURIComponent(name)}`, { permissions })
+  }
+
+  async deleteRole(name: string): Promise<{ message: string }> {
+    return this.client.delete<unknown, { message: string }>(`/roles/${encodeURIComponent(name)}`)
   }
 
   // 更新当前用户信息

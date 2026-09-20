@@ -353,6 +353,26 @@ export interface UserInfo {
   totp_setup_at?: string
 }
 
+// ========== 访问控制（RBAC P1 笔 7） ==========
+
+// 用户管理列表项（GET /users 返回的 storage.User，密码永不返回）
+export interface ManagedUser {
+  id: string
+  username: string
+  email?: string
+  role: string
+  totp_enabled: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+// 角色定义（GET /roles 返回的 storage.Role）
+export interface RoleInfo {
+  name: string
+  permissions: string[]
+  builtin?: boolean
+}
+
 // ========== 应用部署（Compose Stack） ==========
 // Stack 内单个服务的信息
 export interface StackService {

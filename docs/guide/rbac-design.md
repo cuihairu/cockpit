@@ -88,7 +88,7 @@ CA 目录切换归 `acme:admin`，查看证书列表 `acme:read`）。
 |----|------|------|
 | 5 | server：`/api/me` 返回 `permissions`（查角色表展开；幽灵角色 → 空清单，与判定层 fail-closed 一致） | ✅ |
 | 6 | web 权限基础设施：UserContext 启动拉 `/api/me` 存 permissions（D7 语义：动态拉取而非 login 固化，角色变更刷新即生效）+ `usePerm`/`PermGuard`（前端复刻 write⊇read、admin⊇write 隐含规则）+ 菜单按权限标注与裁剪 + 路由守卫（无 read 权限 → 403 页；后端 RBAC 仍是权威，守卫纯 UX）。落地决策：permissions 不落 localStorage（刷新即重拉，避免陈旧判定）；未加载/加载失败一律 fail-closed 全裁剪；菜单项 perm 与后端 requiredPerms 的 GET 语义一一对齐（monitor→inventory、disk→smart、域名绑定→dns:read）；设置菜单全员可见（含个人 TOTP），Tab 级裁剪笔 8 | ✅ |
-| 7 | web 用户/角色管理页：「访问控制」菜单组（用户管理 users:admin、角色管理 roles:admin），用户 CRUD/改角色/改密，角色 CRUD/权限点矩阵编辑（内置角色只读展示） | 未开工 |
+| 7 | web 用户/角色管理页：「访问控制」菜单组（用户管理 users:admin、角色管理 roles:admin），用户 CRUD/改角色/改密，角色 CRUD/权限点矩阵编辑（内置角色只读展示）。落地决策：合法权限点全集从内置 admin 角色的 permissions 推导（seed 恒全量，零后端改动）；用户表内联 Select 改角色（自己那行禁用——D13 前端预拦）；D13 后端拦截的错误信息经 message 透出 | ✅ |
 | 8 | web 页面写操作入口逐页裁剪：写按钮/危险操作包 `PermGuard`（v-perm 的 React 等价物），满足 viewer 无写入口验收 | 未开工 |
 
 两个实现决策（设计阶段未写死，落地时定）：

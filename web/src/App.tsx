@@ -26,6 +26,7 @@ import {
   LinkOutlined,
   VideoCameraOutlined,
   FileSearchOutlined,
+  TeamOutlined,
 } from '@ant-design/icons'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
@@ -61,6 +62,8 @@ const Recordings = lazy(() => import('./pages/Recordings'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Profile = lazy(() => import('./pages/Profile'))
 const AuditLogs = lazy(() => import('./pages/AuditLogs'))
+const Users = lazy(() => import('./pages/Users'))
+const Roles = lazy(() => import('./pages/Roles'))
 const Monitor = lazy(() => import('./pages/Monitor'))
 
 const queryClient = new QueryClient({
@@ -240,6 +243,23 @@ const routeConfig: PermRouteItem = {
       path: '/settings',
       name: '设置',
       icon: <SettingOutlined />,
+    },
+    {
+      path: '/access',
+      name: '访问控制',
+      icon: <TeamOutlined />,
+      routes: [
+        {
+          path: '/access/users',
+          name: '用户管理',
+          perm: 'users:admin',
+        },
+        {
+          path: '/access/roles',
+          name: '角色管理',
+          perm: 'roles:admin',
+        },
+      ],
     },
   ],
 }
@@ -461,6 +481,8 @@ const MainLayout = () => {
             <Route path="/monitor" element={<Monitor />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/audit-logs" element={<AuditLogs />} />
+            <Route path="/access/users" element={<Users />} />
+            <Route path="/access/roles" element={<Roles />} />
             <Route path="/profile" element={<Profile />} />
           </Routes>
           )}
