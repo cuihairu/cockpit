@@ -220,7 +220,10 @@ func TestSeedRolesWriteFailures(t *testing.T) {
 		t.Fatalf("seed should fail on create error, got %v", err)
 	}
 
-	// Save 失败：已存在的 builtin 走覆盖 Save，注入 update 回调失败
+	// Save 失败：制造与代码不一致（覆盖 Save 分支），注入 update 回调失败
+	admin, _ := db.GetRole("admin")
+	admin.Permissions = []string{"dns:read"}
+	db.db.Save(admin)
 	db.db.Callback().Update().Before("gorm:update").Register("test/boom", func(tx *gorm.DB) {
 		tx.AddError(boom)
 	})

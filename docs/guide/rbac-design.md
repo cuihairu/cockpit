@@ -36,7 +36,7 @@ agent 与 websocket 通道零改动（权限在 server 收口，agent 只接受 
 |---|------|------|------|
 | D1 | 权限模型 | RBAC（角色→权限点集合），不做 ABAC/ACL | 管理面用户量个位数，按岗位授权足够；ABAC 的属性条件无处取值 |
 | D2 | 权限点粒度 | `<resource>:<action>`，action ∈ `read` / `write` / `admin` | 模块级足够（如 `files:write`、`acme:admin`）；按钮级授权成本高收益低 |
-| D3 | resource 清单 | 与现有 API 模块一一对应：`inventory` `files` `logs` `terminal` `docker` `stack` `cron` `backup` `acme` `dns` `ddns` `proxy` `overlay` `drift` `nas` `alerts` `audit` `users` `roles` `settings` | 后端已有路由前缀就是天然 resource，不发明新分类 |
+| D3 | resource 清单 | 与现有 API 模块一一对应：`inventory` `files` `logs` `terminal` `docker` `stack` `cron` `backup` `acme` `dns` `ddns` `proxy` `overlay` `drift` `nas` `alerts` `audit` `users` `roles` `settings`，实现时对账补全 `services` `smart` `recordings` | 后端已有路由前缀就是天然 resource，不发明新分类 |
 | D4 | 角色存储 | 新增 `Role` 表（`name` 主键、`permissions` JSON、`builtin` 标记）；`User.role` 沿用字符串存角色名 | GORM AutoMigrate 一张表搞定；User 不需要外键约束，角色名即软引用 |
 | D5 | 权限校验位置 | auth middleware 之后加 `requirePermission(perm)`；`admin` 权限点隐含该 resource 的 read/write | 中间件链一处收口；「admin 隐含读写」让内置 admin 角色不用枚举全部权限点 |
 | D6 | 每请求查库 | 校验时直接查 `roles` 表，不做内存缓存 | 管理面 QPS 个位数；缓存失效逻辑（角色改了要踢在线用户）比省的那点查询贵得多 |
@@ -75,7 +75,7 @@ CA 目录切换归 `acme:admin`，查看证书列表 `acme:read`）。
 | 笔 | 内容 | 状态 |
 |----|------|------|
 | 1 | storage：`Role` 表（name 主键 / permissions JSON / builtin）+ 权限点常量与内置角色定义（admin/operator/viewer）+ seed（幂等，内置角色 permissions 以代码为准覆盖更新）+ CRUD（自定义角色权限点白名单校验；删除时拒内置、拒被引用）+ D9 存量迁移 `role=user → viewer` | ✅ |
-| 2 | server：路由权限表（path 前缀 × method → 权限点，支持 AND 语义，domain-binding 增删改要求 `dns:write`+`proxy:write`）+ `authorize` 判定层（auth 后、serveAPI 分发前；每请求查库，角色缺失 fail-closed 403）+ 隐含规则（write⊇read、admin⊇write）+ 三角色矩阵测试。**不删存量判定**——authorize 拦在前，散落 `Role != "admin"` 暂成双保险 | 未开工 |
+| 2 | server：路由权限表（path 前缀 × method → 权限点，支持 AND 语义，domain-binding 增删改要求 `dns:write`+`proxy:write`）+ `authorize` 判定层（auth 后、serveAPI 分发前；每请求查库，角色缺失 fail-closed 403）+ 隐含规则（write⊇read、admin⊇write）+ 三角色矩阵测试。**不删存量判定**——authorize 拦在前，散落 `Role != "admin"` 暂成双保险 | ✅ |
 | 3 | 收敛：删 10 处散落 `Role != "admin"`（api.go ×7、api_proxy.go ×3），users/settings 端点改走权限表 | 未开工 |
 | 4 | 角色/用户管理 API：`/api/roles` CRUD（仅 `roles:admin`）+ D13 自我保护（最后一个有效 admin 不可删/降级、不可改自己角色）+ D14 403 入审计 | 未开工 |
 | P1 | web：用户/角色管理页、`/api/me` permissions、菜单裁剪 | 未开工 |
@@ -84,8 +84,27 @@ CA 目录切换归 `acme:admin`，查看证书列表 `acme:read`）。
 
 - **内置角色 seed 覆盖策略**：已存在的 builtin 角色 permissions 以代码为准覆盖更新
   （内置角色用户不可改——D12，因此版本升级调整内置清单必须能生效）；自定义角色不动。
+  稳态（角色已一致、无存量 user）零写——只读库 reopen（server 测试的 DB 错误注入
+  手法）不触发写。
 - **自定义角色删除**：被任何用户引用时拒绝删除（软引用删除会让这些用户 fail-closed
   全拒，等价于锁号）。
+
+笔 2 追加的实现决策：
+
+- **判定层形态**：不是逐 handler 包 requirePermission，而是全局 `RBACMiddleware`
+  挂在 AuditMiddleware 内层（403 也进审计链）、各 auth 挂点外层。自身解析 Bearer
+  取角色；无/坏 token 放行给内层 auth 出 401（认证优先于鉴权）。一处挂载，
+  serveAPI 与十个独立注册点（docker/stacks/backups/probe/proxies/metrics/
+  audit/remote/desktop/vnc）零改动，`/ws`（agent 通道，非用户请求）不在 `/api/`
+  前缀自动豁免。
+- **子路径归并**：probe/notification → `alerts`（拨测配置含告警阈值）、metrics →
+  `inventory`、proxies → `proxy`、server-backups → `backup`、remote/desktop/vnc
+  → `terminal`。
+- **固定 action**：audit/logs 的动作全是读（导出/检索也是 POST，恒映射 `:read`）；
+  terminal 只有 write（GET 列表同样按 `terminal:write` 门禁，D11 语义）。
+- **acme 签发/部署**（POST `.../issue`、`.../deploy`）恒 `acme:admin`。
+- **未登记 /api/ 路径放行**（handler 404 兜底）——缺省拒绝与缺省 404 无安全差，
+  新端点忘登记不会把 404 变 403 暴露路径存在性。
 
 ## 不做的事
 

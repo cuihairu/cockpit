@@ -208,7 +208,8 @@ func (s *Server) Start() error {
 	s.registerRoutes(mux)
 
 	// 预检请求必须先于认证处理，否则跨域 OPTIONS 会被 JWT 中间件拒绝。
-	handler := s.CORSMiddleware(s.AuditMiddleware(mux))
+	// RBAC 在 Audit 内层：403 也进审计链（rbac-design.md 笔 2）
+	handler := s.CORSMiddleware(s.AuditMiddleware(s.RBACMiddleware(mux)))
 
 	server := &http.Server{
 		Addr:    s.addr,

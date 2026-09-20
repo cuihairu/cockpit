@@ -47,6 +47,10 @@ var resourceActions = map[string][]string{
 	"users":     {"admin"},
 	"roles":     {"admin"},
 	"settings":  {"admin"},
+	// 笔 2 补齐：systemd 服务/SMART 磁盘/会话录制（D3 清单实现时对账补全）
+	"services":    {"read", "write"},
+	"smart":       {"read", "write"},
+	"recordings":  {"read", "write"},
 }
 
 // PermissionValid 权限点是否落在 D3 清单内
@@ -71,6 +75,7 @@ func allPermissions() []string {
 		"inventory", "files", "logs", "terminal", "docker", "stack", "cron",
 		"backup", "acme", "dns", "ddns", "proxy", "overlay", "drift", "nas",
 		"alerts", "audit", "users", "roles", "settings",
+		"services", "smart", "recordings",
 	} {
 		for _, a := range resourceActions[res] {
 			out = append(out, res+":"+a)
@@ -194,23 +199,28 @@ func (d *DB) DeleteRole(name string) error {
 	return d.db.Delete(&Role{}, "name = ?", name).Error
 }
 
-// SeedRoles 幂等 seed 内置角色（Open 时自动执行）：不存在的创建；已存在的
-// builtin 角色按代码定义覆盖 permissions（内置角色用户不可改——D12，版本
-// 升级调整内置清单必须能生效；撞名的自定义角色同样收编为 builtin）。
-// 随后执行 D9 存量迁移：role=user → viewer（现状 user 即无写权限，语义保持）。
+// SeedRoles 幂等 seed 内置角色（Open 时自动执行）：不存在的创建；与代码
+// 定义不一致的按代码覆盖 permissions（内置角色用户不可改——D12，版本升级
+// 调整内置清单必须能生效；撞名的自定义角色同样收编为 builtin）。
+// 稳态（角色已一致、无存量 user）零写——只读库 reopen 场景（server 测试
+// 的 DB 错误注入手法）不触发写。随后执行 D9 存量迁移：role=user → viewer
+// （现状 user 即无写权限，语义保持）。
 func (d *DB) SeedRoles() error {
 	for _, b := range builtinRoles {
-		role := &Role{Name: b.name, Permissions: b.permissions, Builtin: true}
 		var existing Role
 		err := d.db.First(&existing, "name = ?", b.name).Error
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
+			role := &Role{Name: b.name, Permissions: b.permissions, Builtin: true}
 			if err := d.db.Create(role).Error; err != nil {
 				return err
 			}
 		case err != nil:
 			return err
 		default:
+			if existing.Builtin && samePermissions(existing.Permissions, b.permissions) {
+				continue
+			}
 			existing.Permissions = b.permissions
 			existing.Builtin = true
 			if err := d.db.Save(&existing).Error; err != nil {
@@ -218,7 +228,31 @@ func (d *DB) SeedRoles() error {
 			}
 		}
 	}
+	var legacy int64
+	if err := d.db.Model(&User{}).Where("role = ?", "user").Count(&legacy).Error; err != nil {
+		return err
+	}
+	if legacy == 0 {
+		return nil
+	}
 	return d.db.Model(&User{}).Where("role = ?", "user").Update("role", "viewer").Error
+}
+
+// samePermissions 权限清单无序相等
+func samePermissions(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]bool, len(a))
+	for _, p := range a {
+		set[p] = true
+	}
+	for _, p := range b {
+		if !set[p] {
+			return false
+		}
+	}
+	return true
 }
 
 // validateCustomRole 新建校验：名字非空、不撞内置角色名（防冒名顶替）、权限点合法
