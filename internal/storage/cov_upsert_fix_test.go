@@ -6,6 +6,7 @@ package storage
 
 import (
 	"testing"
+	"time"
 )
 
 func TestUpsertAgentUpdatesExisting(t *testing.T) {
@@ -66,6 +67,22 @@ func TestUpsertAgentUpdatesExisting(t *testing.T) {
 	if got.SecretHash != "hash-v2" {
 		t.Errorf("explicit SecretHash should be written, got %q", got.SecretHash)
 	}
+
+	// 全字段 upsert：region/zone/version/status/last_seen/virt/labels 均落库
+	seen := time.Unix(1700000000, 0)
+	if err := db.UpsertAgent(&Agent{
+		ID: "a1", Region: "cn-bj", Zone: "z1", Version: "0.2.0",
+		Status: "online", LastSeen: seen, VirtType: "kvm", VirtRole: "host",
+		Labels: map[string]interface{}{"tier": "web"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = db.GetAgent("a1")
+	if got.Region != "cn-bj" || got.Zone != "z1" || got.Version != "0.2.0" ||
+		got.Status != "online" || !got.LastSeen.Equal(seen) ||
+		got.VirtType != "kvm" || got.VirtRole != "host" || got.Labels["tier"] != "web" {
+		t.Errorf("full-field upsert lost fields: %+v", got)
+	}
 }
 
 func TestUpsertDomainUpdatesExisting(t *testing.T) {
@@ -115,5 +132,24 @@ func TestUpsertDomainUpdatesExisting(t *testing.T) {
 	got, _ = db.GetDomainByName("blog.example.com")
 	if got.Provider != provider2 {
 		t.Errorf("zero-field upsert should not touch data, provider=%q", got.Provider)
+	}
+
+	// 全字段 upsert：domain/expires_at/tags/labels（serializer 手动 JSON 路径）均落库
+	exp := time.Unix(1800000000, 0)
+	if err := db.UpsertDomain(&Domain{
+		ID: "blog.example.com", Domain: "blog.example.com", ExpiresAt: &exp,
+		Tags: []string{"prod"}, Labels: map[string]string{"owner": "me"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = db.GetDomainByName("blog.example.com")
+	if got.ExpiresAt == nil || !got.ExpiresAt.Equal(exp) {
+		t.Errorf("expires_at lost: %v", got.ExpiresAt)
+	}
+	if len(got.Tags) != 1 || got.Tags[0] != "prod" {
+		t.Errorf("tags lost: %v", got.Tags)
+	}
+	if got.Labels["owner"] != "me" {
+		t.Errorf("labels lost: %v", got.Labels)
 	}
 }
