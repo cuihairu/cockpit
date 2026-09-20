@@ -237,12 +237,14 @@ const LogsPanel = ({ agentId, initialSource }: LogsPanelProps) => {
     }
   }
 
-  // 外部预选源：logs.status 就绪后自动首查一次（useRef 守卫防重复）
+  // 外部预选源：logs.status 就绪后自动首查一次（useRef 守卫防重复）。
+  // runQuery 含同步 setState，effect 体内直接触发违反 set-state-in-effect，
+  // 延后一拍调用；不配 cleanup——守卫已置位，若清掉定时器首查就永远不触发
   const autoQueried = useRef(false)
   useEffect(() => {
     if (!initialSource || autoQueried.current || !status) return
     autoQueried.current = true
-    if (typeAvailable.systemd && source) void runQuery()
+    if (typeAvailable.systemd && source) setTimeout(() => void runQuery(), 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, initialSource, source, typeAvailable])
 

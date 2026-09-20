@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Alert, Button, Modal, Segmented, Spin, Typography } from 'antd'
 import dayjs from 'dayjs'
 import { api } from '@/services/api'
-import type { DriftCheckItem, DriftDiffResult } from '@/types'
+import type { DriftCheckItem } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 import { highlightConfigLine } from '@/utils/configHighlight'
 import type { DiffLine, DiffPair } from '@/utils/lineDiff'
@@ -95,32 +96,17 @@ const Half = ({ l, right }: { l?: DiffLine; right: boolean }) => (
 // 行级 LCS diff，统一 / 双栏对照两种视图 + 配置轻量着色。
 // 失败透出 agent 原因（无基线 / 基线无原文 / 两侧过大）。
 const DiffModal = ({ agentId, target, onClose }: DiffModalProps) => {
-  const [data, setData] = useState<DriftDiffResult | null>(null)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
   const [view, setView] = useState<'side' | 'unified'>('side')
 
-  useEffect(() => {
-    if (!target) return
-    let cancelled = false
-    setLoading(true)
-    setError('')
-    setData(null)
-    api
-      .driftDiff(agentId, target.kind, target.name)
-      .then((res) => {
-        if (!cancelled) setData(res)
-      })
-      .catch((err) => {
-        if (!cancelled) setError(getApiErrorMessage(err, '获取差异失败'))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [agentId, target])
+  // 弹窗打开（target 非空）才拉取；失败透出 agent 原因
+  // （无基线 / 基线无原文 / 两侧过大）。retry:false 保持与原手写链一致
+  const { data, error, isLoading: loading } = useQuery({
+    queryKey: ['drift-diff', agentId, target?.kind, target?.name],
+    queryFn: () => api.driftDiff(agentId, target!.kind, target!.name),
+    enabled: !!target,
+    retry: false,
+  })
+  const errorText = error ? getApiErrorMessage(error, '获取差异失败') : ''
 
   const diff = useMemo(() => (data ? lineDiff(data.expected, data.current) : null), [data])
   const pairs = useMemo(
@@ -145,20 +131,20 @@ const DiffModal = ({ agentId, target, onClose }: DiffModalProps) => {
           <Spin tip="正在读取两侧内容…" />
         </div>
       )}
-      {!loading && error && (
+      {!loading && errorText && (
         <Alert
           type="error"
           showIcon
           message="获取差异失败"
           description={
             <>
-              {error}
-              {error.includes('no content') && ' 到对应管理页重新保存一次即可补全基线原文。'}
+              {errorText}
+              {errorText.includes('no content') && ' 到对应管理页重新保存一次即可补全基线原文。'}
             </>
           }
         />
       )}
-      {!loading && !error && diff && (
+      {!loading && !errorText && diff && (
         <>
           <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
             <Segmented
