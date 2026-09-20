@@ -22,7 +22,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/overlay"
 	"github.com/cuihairu/cockpit/internal/probe"
 	"github.com/cuihairu/cockpit/internal/protocol"
-	"github.com/cuihairu/cockpit/internal/proxy"
+	"github.com/cuihairu/cockpit/internal/proxy/mgr"
 	"github.com/cuihairu/cockpit/internal/storage"
 	inventorysync "github.com/cuihairu/cockpit/internal/sync"
 	"github.com/gorilla/websocket"
@@ -43,7 +43,7 @@ type Server struct {
 	db             *storage.DB
 	auth           *auth.Service
 	audit          *audit.Logger
-	proxyMgr       *proxy.Manager
+	proxyMgr       *mgr.Manager
 	notifier       *notification.Service
 	remoteSessions *RemoteSessionManager
 	ticketMgr      *TicketManager
@@ -114,7 +114,7 @@ func NewServer(cfg *config.Config) *Server {
 		db:             db,
 		auth:           authService,
 		audit:          audit.NewLogger(db),
-		proxyMgr:       proxy.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
+		proxyMgr:       mgr.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
 		notifier:       notifier,
 		remoteSessions: NewRemoteSessionManager(),
 		ticketMgr:      NewTicketManager(),
@@ -165,7 +165,7 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
 	// 设置代理管理器的 ServerInterface
-	s.proxyMgr = proxy.NewManager(s, s.db)
+	s.proxyMgr = mgr.NewManager(s, s.db)
 
 	// 启动代理管理器（启动已启用的代理）
 	if err := s.proxyMgr.Start(); err != nil {
@@ -523,7 +523,7 @@ func (s *Server) SendToAgent(agentID string, msg *protocol.Message) error {
 }
 
 // GetAgentConn 获取 Agent 连接
-func (s *Server) GetAgentConn(agentID string) (proxy.AgentConn, bool) {
+func (s *Server) GetAgentConn(agentID string) (mgr.AgentConn, bool) {
 	agent, exists := s.registry.Get(agentID)
 	if !exists {
 		return nil, false

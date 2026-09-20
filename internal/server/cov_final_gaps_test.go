@@ -19,7 +19,7 @@ import (
 
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/protocol"
-	"github.com/cuihairu/cockpit/internal/proxy"
+	"github.com/cuihairu/cockpit/internal/proxy/mgr"
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/pquerna/otp/totp"
 )
@@ -277,7 +277,7 @@ func TestCovProxyAPIHandlers(t *testing.T) {
 		t.Error("filter should exclude other agents' proxies")
 	}
 	// proxyMgr 挂上后附加 stopped 状态
-	s.proxyMgr = proxy.NewManager(s, s.db)
+	s.proxyMgr = mgr.NewManager(s, s.db)
 	rec = admin(s.handleProxies, http.MethodGet, "/api/proxies", "")
 	covWantCode(t, "proxies with status", rec, http.StatusOK)
 	if !strings.Contains(rec.Body.String(), `"status":"stopped"`) {
@@ -324,7 +324,7 @@ func TestCovProxyCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { blocker.Close() })
-	s.proxyMgr = proxy.NewManager(s, s.db)
+	s.proxyMgr = mgr.NewManager(s, s.db)
 	rec = create("admin", full(18500, true, "agent-px"))
 	covWantCode(t, "create start failed", rec, http.StatusAccepted)
 }
@@ -356,7 +356,7 @@ func TestCovProxyUpdateDeleteStatus(t *testing.T) {
 		t.Fatalf("updated proxy = %+v", got)
 	}
 	// ReloadProxy 分支
-	s.proxyMgr = proxy.NewManager(s, s.db)
+	s.proxyMgr = mgr.NewManager(s, s.db)
 	rec = update(http.MethodPut, `{"id":"p1","enabled":true}`)
 	covWantCode(t, "update reload", rec, http.StatusOK)
 
@@ -397,14 +397,14 @@ func TestCovProxyUpdateDeleteStatus(t *testing.T) {
 	s3.handleProxyStatus(rec, covReq(http.MethodPost, "/x", nil))
 	covWantCode(t, "status 405", rec, http.StatusMethodNotAllowed)
 	covWantCode(t, "status no mgr", status("/api/proxies/status"), http.StatusServiceUnavailable)
-	s3.proxyMgr = proxy.NewManager(s3, s3.db)
+	s3.proxyMgr = mgr.NewManager(s3, s3.db)
 	covWantCode(t, "status all", status("/api/proxies/status"), http.StatusOK)
 	covWantCode(t, "status missing", status("/api/proxies/status?id=ghost"), http.StatusNotFound)
 }
 
 func TestCovRegisterProxyAPIRoutes(t *testing.T) {
 	s := covLoopServer(t)
-	s.proxyMgr = proxy.NewManager(s, s.db)
+	s.proxyMgr = mgr.NewManager(s, s.db)
 	token, err := s.authService().GenerateToken("1", "covadmin", "admin")
 	if err != nil {
 		t.Fatal(err)

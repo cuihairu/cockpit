@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
-	"github.com/cuihairu/cockpit/internal/proxy"
+	"github.com/cuihairu/cockpit/internal/proxy/mgr"
 	"github.com/gorilla/websocket"
 )
 
@@ -305,7 +305,7 @@ func TestCovHandleWebSocketDBErrorRejected(t *testing.T) {
 
 func TestCovHandleMessageDispatch(t *testing.T) {
 	s := covNewServer(t)
-	s.proxyMgr = proxy.NewManager(s, s.db)
+	s.proxyMgr = mgr.NewManager(s, s.db)
 	agent := NewAgent("agent-dispatch", nil)
 
 	cases := []*protocol.Message{
@@ -425,7 +425,7 @@ func TestCovHandleProxyMessages(t *testing.T) {
 		"proxyId": "p", "connId": "c",
 	}))
 
-	s.proxyMgr = proxy.NewManager(s, s.db)
+	s.proxyMgr = mgr.NewManager(s, s.db)
 
 	// 解码失败（payload 为 nil）
 	s.handleProxyData(agent, protocol.NewMessage(protocol.MessageTypeProxyData, nil))

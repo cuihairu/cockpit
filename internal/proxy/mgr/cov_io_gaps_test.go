@@ -1,4 +1,4 @@
-package proxy
+package mgr
 
 // cov_io_gaps_test.go 覆盖 handleConnection 的"等待 agent 超时"与
 // "proxy ctx 取消"分支（注入短超时），以及 cleanupLoop 的 tick 分支。

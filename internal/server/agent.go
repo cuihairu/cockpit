@@ -121,7 +121,7 @@ func (a *Agent) Close() {
 	}
 }
 
-// AgentID 实现 proxy.AgentConn 接口
+// AgentID 实现 mgr.AgentConn 接口
 func (a *Agent) AgentID() string {
 	return a.ID
 }

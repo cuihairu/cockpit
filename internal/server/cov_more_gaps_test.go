@@ -17,7 +17,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/protocol"
-	"github.com/cuihairu/cockpit/internal/proxy"
+	"github.com/cuihairu/cockpit/internal/proxy/mgr"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
@@ -259,7 +259,7 @@ func TestCovProxyRunningStatus(t *testing.T) {
 	s := covLoopServer(t)
 	covSeedProxyAgent(t, s, "agent-px")
 	covSeedProxy(t, s, "prun", 18600)
-	s.proxyMgr = proxy.NewManager(s, s.db)
+	s.proxyMgr = mgr.NewManager(s, s.db)
 	cfg, err := s.db.GetProxy("prun")
 	if err != nil {
 		t.Fatal(err)

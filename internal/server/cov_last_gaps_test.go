@@ -21,7 +21,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/protocol"
-	"github.com/cuihairu/cockpit/internal/proxy"
+	"github.com/cuihairu/cockpit/internal/proxy/mgr"
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/gorilla/websocket"
 	"github.com/pquerna/otp/totp"
@@ -282,7 +282,7 @@ func covDeadWS(t *testing.T, s *Server) *websocket.Conn {
 func TestCovProxyDataErrorLogs(t *testing.T) {
 	defer covClearSessions()
 	s := covRemoteSetup(t)
-	s.proxyMgr = proxy.NewManager(s, s.db)
+	s.proxyMgr = mgr.NewManager(s, s.db)
 	covRegisterBareAgent(t, s, "agent-pxdata")
 	agent := NewAgent("agent-pxdata", nil)
 
