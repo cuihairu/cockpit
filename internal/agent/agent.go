@@ -112,11 +112,19 @@ func (a *Agent) Start() error {
 
 	// 2. 连接 Server
 	if err := a.connect(); err != nil {
+		// SIGTERM 落在连接/注册窗口时 Stop 已 cancel ctx：此时的失败
+		// 是退出过程的一部分，不是错误（否则 systemd stop 偶发记 failed）
+		if a.ctx.Err() != nil {
+			return nil
+		}
 		return fmt.Errorf("connect failed: %w", err)
 	}
 
 	// 3. 注册
 	if err := a.register(); err != nil {
+		if a.ctx.Err() != nil {
+			return nil
+		}
 		a.closeCurrentConn()
 		return fmt.Errorf("register failed: %w", err)
 	}
