@@ -169,9 +169,32 @@ func TestCovHandleCurrentUserBranches(t *testing.T) {
 	rec = covCallAuth(s, s.handleCurrentUser, covAuthReq(http.MethodGet, "/api/me", nil, "ghost", "ghost", "admin"))
 	covWantCode(t, "user not found", rec, http.StatusNotFound)
 
-	// 正常
+	// 正常（P1 笔 5：permissions 查角色表展开）
 	rec = covCallAuth(s, s.handleCurrentUser, covAuthReq(http.MethodGet, "/api/me", nil, admin.ID, "admin", "admin"))
 	covWantCode(t, "ok", rec, http.StatusOK)
+	if !strings.Contains(rec.Body.String(), `"permissions"`) || !strings.Contains(rec.Body.String(), `"users:admin"`) {
+		t.Errorf("me body missing permissions expansion: %s", rec.Body.String())
+	}
+
+	// 幽灵角色用户 → permissions 空清单（fail-closed 一致）
+	covSeedUser(t, s, "weird", "weird-pass-1", "ghost-role")
+	weirdID := mustUserID(t, s, "weird")
+	rec = covCallAuth(s, s.handleCurrentUser, covAuthReq(http.MethodGet, "/api/me", nil, weirdID, "weird", "ghost-role"))
+	covWantCode(t, "ghost role", rec, http.StatusOK)
+	if !strings.Contains(rec.Body.String(), `"permissions":[]`) {
+		t.Errorf("ghost role permissions should be empty: %s", rec.Body.String())
+	}
+
+	// 空权限自定义角色 → 空数组（null 会破坏前端 string[] 类型）
+	if err := s.db.CreateRole(&storage.Role{Name: "no-op", Permissions: nil}); err != nil {
+		t.Fatal(err)
+	}
+	covSeedUser(t, s, "nobody", "nobody-pass", "no-op")
+	rec = covCallAuth(s, s.handleCurrentUser, covAuthReq(http.MethodGet, "/api/me", nil, mustUserID(t, s, "nobody"), "nobody", "no-op"))
+	covWantCode(t, "empty role", rec, http.StatusOK)
+	if !strings.Contains(rec.Body.String(), `"permissions":[]`) {
+		t.Errorf("empty role permissions should be []: %s", rec.Body.String())
+	}
 }
 
 // ============ handleCurrentUserPassword 分支 ============

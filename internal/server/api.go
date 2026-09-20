@@ -197,7 +197,14 @@ func (s *Server) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 返回用户信息（不包含密码）
+	// 返回用户信息（不包含密码）。permissions 查角色表展开（P1 笔 5：
+	// 前端菜单裁剪与按钮显隐的数据源）；幽灵角色/库故障 → 空清单，
+	// 与判定层 fail-closed 语义一致（前端全裁剪，不会多显示出入口）
+	permissions := make([]string, 0)
+	if role, err := s.db.GetRole(user.Role); err == nil && len(role.Permissions) > 0 {
+		permissions = role.Permissions
+	}
+
 	response := map[string]interface{}{
 		"id":            user.ID,
 		"username":      user.Username,
@@ -205,6 +212,7 @@ func (s *Server) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 		"phone":         user.Phone,
 		"department":    user.Department,
 		"role":          user.Role,
+		"permissions":   permissions,
 		"totp_enabled":  user.TOTPEnabled,
 		"totp_setup_at": user.TOTPSetupAt,
 		"created_at":    user.CreatedAt,

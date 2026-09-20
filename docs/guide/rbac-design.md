@@ -78,7 +78,18 @@ CA 目录切换归 `acme:admin`，查看证书列表 `acme:read`）。
 | 2 | server：路由权限表（path 前缀 × method → 权限点，支持 AND 语义，domain-binding 增删改要求 `dns:write`+`proxy:write`）+ `authorize` 判定层（auth 后、serveAPI 分发前；每请求查库，角色缺失 fail-closed 403）+ 隐含规则（write⊇read、admin⊇write）+ 三角色矩阵测试。**不删存量判定**——authorize 拦在前，散落 `Role != "admin"` 暂成双保险 | ✅ |
 | 3 | 收敛：删 10 处散落 `Role != "admin"`（api.go ×7、api_proxy.go ×3），users/settings 端点改走权限表。落地时追加两项：创建/更新用户时校验角色名在角色表存在（幽灵角色 fail-closed 会锁号，`errors.Is(ErrNotFound)` 才 400、库故障放行 500）；创建用户默认角色 user→viewer（D9 迁移后 user 已不存在）。改密免验旧密码条件从 admin 字符串改为 `userHasPerm(users:admin)` | ✅ |
 | 4 | 角色/用户管理 API：`/api/roles` CRUD（仅 `roles:admin`）+ D13 自我保护（最后一个有效 admin 不可删/降级、不可改自己角色）+ D14 403 入审计。落地时追加三项：**「有效 admin」= 角色在角色表存在且覆盖 `users:admin`**（幽灵角色不算）；D13 计数出错时同样拒绝（fail-safe，库故障不做保护性变更）；RBAC 403 短路不经过内层 auth 挂点，审计层在请求前做可选认证（有效 Bearer 先塞 ctx）保证能记到「谁」被拒——内层 auth 幂等重复解析无害 | ✅ |
-| P1 | web：用户/角色管理页、`/api/me` permissions、菜单裁剪 | 未开工 |
+| P1 | web：用户/角色管理页、`/api/me` permissions、菜单裁剪（拆笔见下表） | 拆 4 笔 |
+
+## 实现状态（P1 拆笔）
+
+验收标准（设计阶段 P1 行）：viewer 登录看不到任何写操作入口。
+
+| 笔 | 内容 | 状态 |
+|----|------|------|
+| 5 | server：`/api/me` 返回 `permissions`（查角色表展开；幽灵角色 → 空清单，与判定层 fail-closed 一致） | ✅ |
+| 6 | web 权限基础设施：UserContext 启动拉 `/api/me` 存 permissions（D7 语义：动态拉取而非 login 固化，角色变更刷新即生效）+ `usePerm`/`PermGuard`（前端复刻 write⊇read、admin⊇write 隐含规则）+ 菜单按权限标注与裁剪 + 路由守卫（无 read 权限 → 403 页；后端 RBAC 仍是权威，守卫纯 UX） | 未开工 |
+| 7 | web 用户/角色管理页：「访问控制」菜单组（用户管理 users:admin、角色管理 roles:admin），用户 CRUD/改角色/改密，角色 CRUD/权限点矩阵编辑（内置角色只读展示） | 未开工 |
+| 8 | web 页面写操作入口逐页裁剪：写按钮/危险操作包 `PermGuard`（v-perm 的 React 等价物），满足 viewer 无写入口验收 | 未开工 |
 
 两个实现决策（设计阶段未写死，落地时定）：
 
