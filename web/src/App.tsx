@@ -1,7 +1,7 @@
-import { useEffect, lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, lazy, Suspense, useMemo } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, matchRoutes, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { App as AntdApp, Grid, Spin, theme as antdTheme } from 'antd'
+import { App as AntdApp, Grid, Result, Spin, theme as antdTheme } from 'antd'
 import ProLayout, { ProLayoutProps } from '@ant-design/pro-layout'
 import { Button, Dropdown, Avatar, Space, Input, ConfigProvider } from 'antd'
 import {
@@ -34,6 +34,7 @@ import { SettingsProvider } from './contexts/SettingsContext'
 import { UserProvider } from './contexts/UserContext'
 import { useSettingsContext } from './contexts/useSettingsContext'
 import { useUser } from './contexts/useUser'
+import { permAll } from '@/utils/perm'
 import { logger } from '@/utils/logger'
 import logo from '@/assets/logo.svg'
 import './App.less'
@@ -78,8 +79,18 @@ const PageLoading = () => (
   </div>
 )
 
-// 路由配置
-const routeConfig: ProLayoutProps['route'] = {
+// 路由配置。perm：进入所需权限点（read 级，与后端 requiredPerms 的 GET
+// 语义对齐）；缺省 = 登录即可（总览/设置——设置页含个人安全 Tab，模块级
+// 裁剪在页面内做）。数组为 AND 语义。
+interface PermRouteItem {
+  path: string
+  name?: string
+  icon?: React.ReactNode
+  perm?: string | string[]
+  routes?: PermRouteItem[]
+}
+
+const routeConfig: PermRouteItem = {
   path: '/',
   routes: [
     {
@@ -95,30 +106,37 @@ const routeConfig: ProLayoutProps['route'] = {
         {
           path: '/resources/compute',
           name: '计算实例',
+          perm: 'inventory:read',
         },
         {
           path: '/resources/domains',
           name: '域名',
+          perm: 'inventory:read',
         },
         {
           path: '/resources/certificates',
           name: '证书',
+          perm: 'inventory:read',
         },
         {
           path: '/acme',
           name: '证书签发',
+          perm: 'acme:read',
         },
         {
           path: '/resources/services',
           name: '服务',
+          perm: 'services:read',
         },
         {
           path: '/resources/gateways',
           name: '网关',
+          perm: 'proxy:read',
         },
         {
           path: '/resources/storages',
           name: '存储',
+          perm: 'nas:read',
         },
       ],
     },
@@ -126,81 +144,97 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/workbench',
       name: '工作台',
       icon: <ApiOutlined />,
+      perm: 'inventory:read',
     },
     {
       path: '/logsearch',
       name: '日志检索',
       icon: <FileSearchOutlined />,
+      perm: 'logs:read',
     },
     {
       path: '/docker',
       name: '容器管理',
       icon: <ContainerOutlined />,
+      perm: 'docker:read',
     },
     {
       path: '/stacks',
       name: '应用部署',
       icon: <RocketOutlined />,
+      perm: 'stack:read',
     },
     {
       path: '/backups',
       name: '备份管理',
       icon: <CloudUploadOutlined />,
+      perm: 'backup:read',
     },
     {
       path: '/proxy',
       name: '反向代理',
       icon: <DeploymentUnitOutlined />,
+      perm: 'proxy:read',
     },
     {
       path: '/cron',
       name: '定时任务',
       icon: <ClockCircleOutlined />,
+      perm: 'cron:read',
     },
     {
       path: '/services',
       name: '服务管理',
       icon: <ThunderboltOutlined />,
+      perm: 'services:read',
     },
     {
       path: '/network',
       name: '组网观测',
       icon: <ClusterOutlined />,
+      perm: 'overlay:read',
     },
     {
       path: '/disk',
       name: '磁盘健康',
       icon: <HddOutlined />,
+      perm: 'smart:read',
     },
     {
       path: '/nas',
       name: '存储池',
       icon: <DatabaseOutlined />,
+      perm: 'nas:read',
     },
     {
       path: '/drift',
       name: '漂移检测',
       icon: <SafetyCertificateOutlined />,
+      perm: 'drift:read',
     },
     {
       path: '/dns',
       name: 'DNS 管理',
       icon: <GlobalOutlined />,
+      perm: 'dns:read',
     },
     {
       path: '/domains',
       name: '域名绑定',
       icon: <LinkOutlined />,
+      perm: 'dns:read',
     },
     {
       path: '/monitor',
       name: '系统监控',
       icon: <DashboardOutlined />,
+      perm: 'inventory:read',
     },
     {
       path: '/recordings',
       name: '会话录制',
       icon: <VideoCameraOutlined />,
+      perm: 'recordings:read',
     },
     {
       path: '/settings',
@@ -219,20 +253,63 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>
 }
 
+// 菜单裁剪（RBAC P1 笔 6）：无权限项不渲染；分组的子项全裁则分组也藏。
+// permissions 未加载（undefined）时全裁——等 /api/me 就绪再出菜单
+const filterMenuRoutes = (routes: PermRouteItem[], granted: string[] | undefined): PermRouteItem[] => {
+  if (!granted) return []
+  return routes
+    .map((r) => ({ ...r, routes: r.routes ? filterMenuRoutes(r.routes, granted) : undefined }))
+    .filter((r) => (!r.perm || permAll(granted, r.perm)) && (!r.routes || r.routes.length > 0))
+}
+
+// 扁平化 (path → perm) 供路由守卫 matchRoutes 匹配
+const flattenPermRoutes = (routes: PermRouteItem[]): { path: string; perm?: string | string[] }[] =>
+  routes.flatMap((r) => [{ path: r.path, perm: r.perm }, ...flattenPermRoutes(r.routes ?? [])])
+
+const allPermRoutes = flattenPermRoutes(routeConfig.routes ?? [])
+
+// 403 页（路由守卫拒绝时；后端 RBAC 仍是权威，守卫纯 UX——直接敲 URL
+// 到无权限页面在这里拦下，页面内的 API 调用由后端 403）
+const ForbiddenPage = () => (
+  <Result
+    status="403"
+    title="403"
+    subTitle="抱歉，您没有访问此页面的权限。"
+  />
+)
+
 // 主布局组件
 const MainLayout = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const { settings, resolvedTheme } = useSettingsContext()
-  const { user, logout } = useUser()
+  const { user, logout, permissionsReady } = useUser()
   // 窄屏（< 768px）：mix 的顶部菜单会溢出，强制切 side；
   // side 布局下 ProLayout 自带窄屏 Drawer 抽屉菜单（见 mobile-design.md D3）
   const screens = Grid.useBreakpoint()
   const isMobile = !screens.md
 
+  // RBAC P1 笔 6：菜单按权限裁剪；路由守卫对当前 path 判权限
+  const granted = user?.permissions
+  const visibleRoutes = useMemo(
+    () => filterMenuRoutes(routeConfig.routes ?? [], granted),
+    [granted]
+  )
+  const permDenied = useMemo(() => {
+    const matches = matchRoutes(allPermRoutes, { pathname: location.pathname })
+    const perm = matches?.[matches.length - 1]?.route.perm
+    return !!perm && !(granted && permAll(granted, perm))
+  }, [location.pathname, granted])
+
   useEffect(() => {
     document.title = settings.siteName
   }, [settings.siteName])
+
+  // /api/me 未回来前不出菜单与路由（fail-closed，避免闪现无权限内容）。
+  // 放在全部 hooks 之后（rules-of-hooks）
+  if (!permissionsReady) {
+    return <PageLoading />
+  }
 
   const handleLogout = () => {
     logout()
@@ -312,7 +389,7 @@ const MainLayout = () => {
       navTheme={resolvedTheme}
       contentWidth="Fluid"
       location={{ pathname: location.pathname }}
-      route={routeConfig}
+      route={{ path: '/', routes: visibleRoutes } as ProLayoutProps['route']}
       fixedHeader
       siderWidth={208}
       headerContentRender={HeaderContent}
@@ -359,6 +436,7 @@ const MainLayout = () => {
     >
       <div className={settings.compactMode ? 'app-density-compact' : undefined}>
         <Suspense fallback={<PageLoading />}>
+          {permDenied ? <ForbiddenPage /> : (
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/resources" element={<Resources />} />
@@ -385,6 +463,7 @@ const MainLayout = () => {
             <Route path="/settings/audit-logs" element={<AuditLogs />} />
             <Route path="/profile" element={<Profile />} />
           </Routes>
+          )}
         </Suspense>
       </div>
     </ProLayout>

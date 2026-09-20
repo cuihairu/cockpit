@@ -30,6 +30,7 @@ export const useSettings = () => {
             id: localStorage.getItem('userId') || '',
             username,
             role: localStorage.getItem('role') || 'user',
+            permissions: [],
             totp_enabled: false,
           })
         }

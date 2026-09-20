@@ -1,4 +1,4 @@
-import { useCallback, useState, ReactNode } from 'react'
+import { useCallback, useEffect, useState, ReactNode } from 'react'
 import { api } from '@/services/api'
 import type { LoginResponse } from '@/types'
 import { TOTPRequiredError, type User } from './userTypes'
@@ -20,12 +20,40 @@ const getStoredUser = (): User | null => {
     phone: localStorage.getItem('phone') || undefined,
     department: localStorage.getItem('department') || undefined,
     role: storedRole || 'user',
+    // permissions 不落 localStorage（D7：动态拉取，角色变更刷新即生效）
   }
 }
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(() => getStoredUser())
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'))
+  // 无 token 无需拉取即就绪；有 token 时等 /api/me 回来（菜单/守卫用）
+  const [permissionsReady, setPermissionsReady] = useState(() => !localStorage.getItem('token'))
+
+  // 启动/换 token 时拉 /api/me 刷新用户资料与权限清单（失败静默：
+  // 401 由 axios 拦截器跳登录，其余错误保持 permissions undefined，
+  // 前端判定 fail-closed 全裁剪——与后端 RBAC 语义一致）
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    api
+      .getCurrentUser()
+      .then((me) => {
+        if (cancelled) return
+        setUser((prev) =>
+          prev
+            ? { ...prev, ...me, permissions: me.permissions ?? [] }
+            : { ...me, permissions: me.permissions ?? [] }
+        )
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setPermissionsReady(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token])
 
   const login = async (username: string, password: string): Promise<LoginResponse> => {
     const res = await api.login(username, password)
@@ -56,6 +84,15 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       role: res.role || 'user',
     })
 
+    // 登录即拉一次权限清单（不等启动 effect——token 变化触发的那次）
+    try {
+      const me = await api.getCurrentUser()
+      setUser((prev) => (prev ? { ...prev, ...me, permissions: me.permissions ?? [] } : prev))
+    } catch {
+      // 失败保持 undefined，启动 effect 的拉取会补上
+    }
+    setPermissionsReady(true)
+
     return res
   }
 
@@ -69,6 +106,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem('role')
     setToken(null)
     setUser(null)
+    setPermissionsReady(true)
   }, [])
 
   const updateUser = useCallback((updatedUser: User) => {
@@ -80,7 +118,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   }, [])
 
   return (
-    <UserContext.Provider value={{ user, token, login, logout, updateUser }}>
+    <UserContext.Provider value={{ user, token, permissionsReady, login, logout, updateUser }}>
       {children}
     </UserContext.Provider>
   )

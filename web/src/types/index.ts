@@ -347,6 +347,8 @@ export interface UserInfo {
   phone?: string
   department?: string
   role: string
+  /** 角色表展开的权限点（RBAC P1 笔 5）；幽灵角色/库故障为空数组 */
+  permissions: string[]
   totp_enabled: boolean
   totp_setup_at?: string
 }
