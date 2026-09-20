@@ -87,3 +87,4 @@ dist/
 
 # Web build output (served via STATIC_DIR at runtime)
 web/dist/
+web/coverage/
