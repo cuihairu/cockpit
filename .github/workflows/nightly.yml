@@ -107,14 +107,12 @@ jobs:
         run: |
           mkdir -p dist
           go build -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o "dist/cockpit${{ matrix.ext }}" ./cmd/cockpit
-          go build -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o "dist/cockpit-agent${{ matrix.ext }}" ./cmd/cockpit-agent
 
       - name: Package binaries
         shell: bash
         run: |
           cd dist
           tar czf "cockpit-${{ matrix.target }}-nightly.tar.gz" "cockpit${{ matrix.ext }}"
-          tar czf "cockpit-agent-${{ matrix.target }}-nightly.tar.gz" "cockpit-agent${{ matrix.ext }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -122,7 +120,73 @@ jobs:
           name: cockpit-${{ matrix.target }}
           path: |
             dist/cockpit-${{ matrix.target }}-nightly.tar.gz
-            dist/cockpit-agent-${{ matrix.target }}-nightly.tar.gz
+          retention-days: 7
+
+  # agent 拆包后依赖闭包零 sqlite，全部目标在 ubuntu 交叉编译 CGO=0
+  # 全静态（OpenWrt job 同理），不再占用 windows/macos 原生 runner；
+  # 顺带补齐 linux-arm64 与 darwin-amd64。Windows 出 zip（平台惯例）。
+  build-agent:
+    name: Build Agent (${{ matrix.target }})
+    needs: check-activity
+    if: needs.check-activity.outputs.should-build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: linux-amd64
+            goos: linux
+            goarch: amd64
+            ext: ""
+          - target: linux-arm64
+            goos: linux
+            goarch: arm64
+            ext: ""
+          - target: windows-amd64
+            goos: windows
+            goarch: amd64
+            ext: ".exe"
+          - target: darwin-amd64
+            goos: darwin
+            goarch: amd64
+            ext: ""
+          - target: darwin-arm64
+            goos: darwin
+            goarch: arm64
+            ext: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+
+      - name: Build agent (pure static, CGO off)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o "dist/cockpit-agent${{ matrix.ext }}" ./cmd/cockpit-agent
+
+      - name: Package agent (tar.gz / zip)
+        run: |
+          cd dist
+          if [ -n "${{ matrix.ext }}" ]; then
+            zip "cockpit-agent-${{ matrix.target }}-nightly.zip" "cockpit-agent${{ matrix.ext }}"
+          else
+            tar czf "cockpit-agent-${{ matrix.target }}-nightly.tar.gz" "cockpit-agent"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: cockpit-agent-${{ matrix.target }}
+          path: |
+            dist/cockpit-agent-${{ matrix.target }}-nightly.*
           retention-days: 7
 
   build-openwrt:
@@ -222,7 +286,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: [check-activity, build, build-openwrt, build-web]
+    needs: [check-activity, build, build-agent, build-openwrt, build-web]
     if: needs.check-activity.outputs.should-build == 'true'
     steps:
       - name: Checkout code
@@ -261,19 +325,17 @@ jobs:
           | File | Platform | Arch |
           |------|----------|------|
           | \`cockpit-linux-amd64-nightly.tar.gz\` | Linux | x86_64 |
-          | \`cockpit-agent-linux-amd64-nightly.tar.gz\` | Linux Agent | x86_64 |
           | \`cockpit-windows-amd64-nightly.tar.gz\` | Windows | x86_64 |
-          | \`cockpit-agent-windows-amd64-nightly.tar.gz\` | Windows Agent | x86_64 |
           | \`cockpit-darwin-arm64-nightly.tar.gz\` | macOS | Apple Silicon |
-          | \`cockpit-agent-darwin-arm64-nightly.tar.gz\` | macOS Agent | Apple Silicon |
+          | \`cockpit-agent-*-nightly.tar.gz\` | Agent (纯静态) | linux amd64/arm64 · darwin amd64/arm64 |
+          | \`cockpit-agent-windows-amd64-nightly.zip\` | Windows Agent (纯静态) | x86_64 |
           | \`cockpit-agent_*.ipk / cockpit-agent-openwrt-*.tar.gz\` | OpenWrt Agent | mipsel/mips/aarch64_generic/arm_cortex-a7/x86_64 |
           | \`cockpit-web-nightly.tar.gz\` | Web UI | cross-platform |" \
             dist/cockpit-linux-amd64-nightly.tar.gz \
-            dist/cockpit-agent-linux-amd64-nightly.tar.gz \
             dist/cockpit-windows-amd64-nightly.tar.gz \
-            dist/cockpit-agent-windows-amd64-nightly.tar.gz \
             dist/cockpit-darwin-arm64-nightly.tar.gz \
-            dist/cockpit-agent-darwin-arm64-nightly.tar.gz \
+            dist/cockpit-agent-*-nightly.tar.gz \
+            dist/cockpit-agent-*-nightly.zip \
             dist/cockpit-agent_*.ipk \
             dist/cockpit-agent-openwrt-*.tar.gz \
             dist/cockpit-web-nightly.tar.gz
