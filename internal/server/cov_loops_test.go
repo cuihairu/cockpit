@@ -519,9 +519,20 @@ func TestCovServerBackup(t *testing.T) {
 		t.Error("latest backup time should be parsed")
 	}
 
-	// 同秒再备 → already exists
-	if _, err := s.runServerBackup(); err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("second same-second backup err = %v", err)
+	// 同秒再备 → already exists（CI 慢机器上两次调用可能恰好跨秒、
+	// 真建出新备份：删掉重试，保证目录里始终只有第一个备份——后续
+	// 数量断言的前提；连续三次都跨秒的概率近似为零）
+	var dupErr error
+	for i := 0; i < 3; i++ {
+		name2, err := s.runServerBackup()
+		if err != nil {
+			dupErr = err
+			break
+		}
+		os.Remove(filepath.Join(s.serverBackupDir(), name2))
+	}
+	if dupErr == nil || !strings.Contains(dupErr.Error(), "already exists") {
+		t.Fatalf("second same-second backup err = %v", dupErr)
 	}
 
 	// 伪造同名文件让 isValidServerBackupName 过滤失效路径：放一个坏名字文件
