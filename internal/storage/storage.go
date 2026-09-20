@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -130,11 +131,69 @@ func (d *DB) Session() *gorm.DB {
 
 // ============ Agent 操作 ============
 
-// UpsertAgent 插入或更新 Agent
+// UpsertAgent 插入或更新 Agent。
+// 已存在时显式 Updates 非零字段：GORM 的 Assign(struct) 对已存在记录
+// 不落库（只在新建时生效），长期掩盖「重连更新」；零值字段跳过，
+// 调用方未构造的字段（FirstSeen/SecretHash 等）保留库内原值。
 func (d *DB) UpsertAgent(agent *Agent) error {
-	return d.db.Where("id = ?", agent.ID).
-		Assign(agent).
-		FirstOrCreate(agent).Error
+	if _, err := d.GetAgent(agent.ID); err != nil {
+		return d.db.Create(agent).Error
+	}
+	fields := agentUpdateFields(agent)
+	if len(fields) == 0 {
+		return nil
+	}
+	return d.db.Model(&Agent{}).
+		Where("id = ?", agent.ID).
+		Updates(fields).Error
+}
+
+// agentUpdateFields 提取非零字段；SecretHash 仅在调用方显式提供时写入。
+// serializer:json 字段（Capabilities/Labels）不走 Updates(map) 的 schema
+// 序列化，需手动 JSON 后以 string 写入，否则驱动收到裸 struct 报错。
+func agentUpdateFields(a *Agent) map[string]interface{} {
+	u := map[string]interface{}{}
+	if a.Hostname != "" {
+		u["hostname"] = a.Hostname
+	}
+	if a.IP != "" {
+		u["ip"] = a.IP
+	}
+	if a.Region != "" {
+		u["region"] = a.Region
+	}
+	if a.Zone != "" {
+		u["zone"] = a.Zone
+	}
+	if a.Version != "" {
+		u["version"] = a.Version
+	}
+	if len(a.Capabilities) > 0 {
+		if b, err := json.Marshal(a.Capabilities); err == nil {
+			u["capabilities"] = string(b)
+		}
+	}
+	if a.Status != "" {
+		u["status"] = a.Status
+	}
+	if !a.LastSeen.IsZero() {
+		u["last_seen"] = a.LastSeen
+	}
+	if a.VirtType != "" {
+		u["virt_type"] = a.VirtType
+	}
+	if a.VirtRole != "" {
+		u["virt_role"] = a.VirtRole
+	}
+	if len(a.Labels) > 0 {
+		if b, err := json.Marshal(a.Labels); err == nil {
+			u["labels"] = string(b)
+		}
+	}
+	if a.SecretHash != "" {
+		u["secret_hash"] = a.SecretHash
+	}
+	return u
 }
 
 // GetAgent 获取单个 Agent
@@ -274,11 +333,52 @@ func (d *DB) DeleteComputeInstance(id string) error {
 
 // ============ Domain 操作 ============
 
-// UpsertDomain 插入或更新域名
+// UpsertDomain 插入或更新域名（同 UpsertAgent：Assign(struct) 对已存在
+// 记录不落库，改显式 Updates 非零字段）。注意 bool 型 AutoRenew 无法
+// 区分「未设置」与 false——false 不写，保持库内原值；换绑 AgentID 走
+// UpdateDomainAgentID。
 func (d *DB) UpsertDomain(domain *Domain) error {
-	return d.db.Where("id = ?", domain.ID).
-		Assign(domain).
-		FirstOrCreate(domain).Error
+	if _, err := d.GetDomain(domain.ID); err != nil {
+		return d.db.Create(domain).Error
+	}
+	fields := domainUpdateFields(domain)
+	if len(fields) == 0 {
+		return nil
+	}
+	return d.db.Model(&Domain{}).
+		Where("id = ?", domain.ID).
+		Updates(fields).Error
+}
+
+// domainUpdateFields 提取非零字段（serializer 字段同 agentUpdateFields 手动 JSON）
+func domainUpdateFields(dm *Domain) map[string]interface{} {
+	u := map[string]interface{}{}
+	if dm.Domain != "" {
+		u["domain"] = dm.Domain
+	}
+	if dm.AgentID != nil {
+		u["agent_id"] = *dm.AgentID
+	}
+	if dm.Provider != "" {
+		u["provider"] = dm.Provider
+	}
+	if dm.Status != "" {
+		u["status"] = dm.Status
+	}
+	if dm.ExpiresAt != nil {
+		u["expires_at"] = *dm.ExpiresAt
+	}
+	if len(dm.Tags) > 0 {
+		if b, err := json.Marshal(dm.Tags); err == nil {
+			u["tags"] = string(b)
+		}
+	}
+	if len(dm.Labels) > 0 {
+		if b, err := json.Marshal(dm.Labels); err == nil {
+			u["labels"] = string(b)
+		}
+	}
+	return u
 }
 
 // UpdateDomainAgentID 校准域名监控项归属（domain-binding D5 换绑用）。

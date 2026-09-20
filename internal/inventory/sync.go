@@ -65,7 +65,9 @@ func (s *Syncer) syncAgents(inv *Inventory) *ResourceResult {
 			IP:       agentLoc.IP,
 			Region:   agentLoc.Region,
 			Zone:     agentLoc.Zone,
-			Status:   "offline",
+			// Status 留空：新建时落列默认 offline；已存在（可能已被
+			// websocket 注册标 online）不刷状态——UpsertAgent 只写非零字段
+
 		}
 
 		caps := agentLoc.Capabilities
