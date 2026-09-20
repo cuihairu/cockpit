@@ -190,6 +190,9 @@ const VNCModal: React.FC<VNCModalProps> = ({
             <Input.Password placeholder="(可选) VNC 密码" autoFocus />
           </Form.Item>
         </Form>
+        {/* RFB 宿主预挂载：凭据阶段 ref 即有值，点连接后进入 connecting 分支
+            由第二分支的容器接管（否则 vncContainerRef.current 为 null，连接被静默吞掉） */}
+        <div ref={vncContainerRef} style={{ display: 'none' }} />
       </Modal>
     );
   }
