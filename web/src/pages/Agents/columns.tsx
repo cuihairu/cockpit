@@ -70,15 +70,15 @@ export const buildAgentColumns = ({ onShowDetail }: ColumnOptions): ColumnsType<
     dataIndex: 'capabilities',
     key: 'capabilities',
     width: 200,
-    render: (capabilities: string[]) => (
+    render: (capabilities: Agent['capabilities']) => (
       <Space size="small" wrap>
         {(capabilities || []).slice(0, 3).map((cap) => (
-          <Tag key={cap} color="blue">
-            {cap}
+          <Tag key={cap.type} color="blue">
+            {cap.type}
           </Tag>
         ))}
         {(capabilities || []).length > 3 && (
-          <Tooltip title={capabilities.slice(3).join(', ')}>
+          <Tooltip title={capabilities.slice(3).map((c) => c.type).join(', ')}>
             <Tag>+{(capabilities || []).length - 3}</Tag>
           </Tooltip>
         )}
