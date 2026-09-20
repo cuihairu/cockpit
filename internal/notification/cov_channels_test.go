@@ -226,9 +226,10 @@ func TestCovTargetHostTruncation(t *testing.T) {
 // TestCovJsonMarshalInjectFail 注入序列化失败，覆盖四个渠道/客户端的
 // json.Marshal 错误分支。
 func TestCovJsonMarshalInjectFail(t *testing.T) {
-	orig := jsonMarshal
-	t.Cleanup(func() { jsonMarshal = orig })
-	jsonMarshal = func(v interface{}) ([]byte, error) { return nil, errors.New("boom json") }
+	orig := *jsonMarshalFn.Load()
+	t.Cleanup(func() { jsonMarshalFn.Store(&orig) })
+	boom := func(v interface{}) ([]byte, error) { return nil, errors.New("boom json") }
+	jsonMarshalFn.Store(&boom)
 
 	n := &Notification{Title: "x"}
 	if err := newNtfyChannel(&config.NtfyConfig{Server: "http://x", Topic: "t"}).Send(context.Background(), n); err == nil {

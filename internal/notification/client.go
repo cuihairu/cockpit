@@ -8,14 +8,27 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
+// jsonMarshalFn 序列化注入点存储。用 atomic.Pointer 而非裸 var：
+// dispatch/SendNonBlocking 的后台 goroutine 并发读，测试注入时写，
+// 裸全局曾与迟到的 goroutine 在 -race 下竞争（CI Test 失败根因）。
+var jsonMarshalFn atomic.Pointer[func(v interface{}) ([]byte, error)]
+
+func init() {
+	m := json.Marshal
+	jsonMarshalFn.Store(&m)
+}
+
 // jsonMarshal 注入点：结构体序列化不会失败，错误分支仅供测试覆盖。
-var jsonMarshal = json.Marshal
+func jsonMarshal(v interface{}) ([]byte, error) {
+	return (*jsonMarshalFn.Load())(v)
+}
 
 // Client Herald 通知客户端
 type Client struct {
