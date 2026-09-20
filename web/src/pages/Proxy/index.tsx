@@ -30,6 +30,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { ProxySite } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
 const DOMAIN_PATTERN = /^[A-Za-z0-9*.\-]{1,253}$/
@@ -215,20 +216,22 @@ const Proxy = () => {
           <Button type="link" size="small" icon={<FileTextOutlined />} onClick={() => viewConfig(record.name)}>
             配置
           </Button>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="删除站点"
-            description={`将从 ${backendName} 移除 ${record.name}，确认？`}
-            okText="删除"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => deleteSite(record.name)}
-          >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-              删除
+          <PermGuard perm="proxy:write">
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
+              编辑
             </Button>
-          </Popconfirm>
+            <Popconfirm
+              title="删除站点"
+              description={`将从 ${backendName} 移除 ${record.name}，确认？`}
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => deleteSite(record.name)}
+            >
+              <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          </PermGuard>
         </Space>
       ),
     },
@@ -256,9 +259,11 @@ const Proxy = () => {
               disabled={!selectedAgent}
               onClick={refresh}
             />
-            <Button type="primary" icon={<PlusOutlined />} disabled={!selectedAgent} onClick={openCreate}>
-              新建站点
-            </Button>
+            <PermGuard perm="proxy:write">
+              <Button type="primary" icon={<PlusOutlined />} disabled={!selectedAgent} onClick={openCreate}>
+                新建站点
+              </Button>
+            </PermGuard>
           </Space>
         }
       >

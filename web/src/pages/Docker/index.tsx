@@ -6,6 +6,7 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { api } from '@/services/api'
 import type { Agent, ContainerInfo, ImageInfo } from '@/types'
+import { usePerm } from '@/hooks/usePerm'
 
 const PAGE_SIZE = 20
 
@@ -97,6 +98,9 @@ const Docker = () => {
   const [logContainer, setLogContainer] = useState<ContainerInfo | null>(null)
   const [logTail, setLogTail] = useState('100')
   const logContainerRef = useRef<HTMLDivElement>(null)
+
+  // 写操作入口裁剪（RBAC 笔 8a）：无 docker:write 只留查看日志
+  const canWrite = usePerm('docker:write')
 
   // 在线 agent 列表
   const { data: agents = [], isFetching: agentsLoading } = useQuery({
@@ -273,7 +277,9 @@ const Docker = () => {
       key: 'actions',
       width: 300,
       render: (_, record) => {
-        const actions = getAvailableActions(record.State)
+        const actions = canWrite
+          ? getAvailableActions(record.State)
+          : getAvailableActions(record.State).filter((a) => a === 'logs')
         return (
           <Space size="small">
             {actions.map((action) => {

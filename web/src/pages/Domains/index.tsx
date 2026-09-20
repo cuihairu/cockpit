@@ -36,6 +36,7 @@ import type {
   DomainDriftReport,
 } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 
 // 服务域名绑定（domain-binding-design.md）：「域名 → agent 目标服务」唯一
 // 事实源。列表 + 登记/编辑 + apply 三联动 + D6 漂移检查 + D7 配置片段。
@@ -271,29 +272,31 @@ const DomainsPage = () => {
       key: 'actions',
       width: 200,
       render: (_, b) => (
-        <Space size={0}>
-          <Button
-            type="link"
-            size="small"
-            icon={<ThunderboltOutlined />}
-            loading={applyMutation.isPending && applyMutation.variables === b.domain}
-            onClick={() => applyMutation.mutate(b.domain)}
-          >
-            Apply
-          </Button>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(b)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="删除登记？"
-            description="只删登记，已下发的 DNS/站点/监控项保留"
-            onConfirm={() => deleteMutation.mutate(b.domain)}
-          >
-            <Button type="link" size="small" danger>
-              删除
+        <PermGuard perm={['dns:write', 'proxy:write']}>
+          <Space size={0}>
+            <Button
+              type="link"
+              size="small"
+              icon={<ThunderboltOutlined />}
+              loading={applyMutation.isPending && applyMutation.variables === b.domain}
+              onClick={() => applyMutation.mutate(b.domain)}
+            >
+              Apply
             </Button>
-          </Popconfirm>
-        </Space>
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(b)}>
+              编辑
+            </Button>
+            <Popconfirm
+              title="删除登记？"
+              description="只删登记，已下发的 DNS/站点/监控项保留"
+              onConfirm={() => deleteMutation.mutate(b.domain)}
+            >
+              <Button type="link" size="small" danger>
+                删除
+              </Button>
+            </Popconfirm>
+          </Space>
+        </PermGuard>
       ),
     },
   ]
@@ -311,16 +314,18 @@ const DomainsPage = () => {
             options={agents.map((a: Agent) => ({ value: a.id, label: a.hostname || a.id }))}
             allowClear
           />
-          <Button
-            icon={<SafetyCertificateOutlined />}
-            loading={driftMutation.isPending}
-            onClick={() => driftMutation.mutate()}
-          >
-            漂移检查
-          </Button>
-          <Button icon={<PlusOutlined />} type="primary" onClick={openCreate}>
-            登记绑定
-          </Button>
+          <PermGuard perm={['dns:write', 'proxy:write']}>
+            <Button
+              icon={<SafetyCertificateOutlined />}
+              loading={driftMutation.isPending}
+              onClick={() => driftMutation.mutate()}
+            >
+              漂移检查
+            </Button>
+            <Button icon={<PlusOutlined />} type="primary" onClick={openCreate}>
+              登记绑定
+            </Button>
+          </PermGuard>
           <Button icon={<ReloadOutlined />} onClick={() => invalidate()} />
         </Space>
       }

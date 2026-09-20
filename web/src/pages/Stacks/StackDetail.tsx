@@ -31,6 +31,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { StackService, StackView } from '@/types'
+import { PermGuard } from '@/components/PermGuard'
 import TerminalBlock from './TerminalBlock'
 import {
   extractApiError,
@@ -327,39 +328,41 @@ const StackDetail = ({
       children: (
         <>
           <Space style={{ marginBottom: 16 }} wrap>
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              disabled={taskPending}
-              loading={actionMutation.isPending && actionMutation.variables?.action === 'up'}
-              onClick={() => actionMutation.mutate({ action: 'up' })}
-            >
-              启动
-            </Button>
-            <Button
-              icon={<PoweroffOutlined />}
-              disabled={taskPending}
-              loading={actionMutation.isPending && actionMutation.variables?.action === 'down'}
-              onClick={() => actionMutation.mutate({ action: 'down' })}
-            >
-              停止
-            </Button>
-            <Button
-              icon={<ReloadOutlined />}
-              disabled={taskPending || running === 0}
-              loading={actionMutation.isPending && actionMutation.variables?.action === 'restart'}
-              onClick={() => actionMutation.mutate({ action: 'restart' })}
-            >
-              重启
-            </Button>
-            <Button
-              icon={<CloudDownloadOutlined />}
-              disabled={taskPending}
-              loading={actionMutation.isPending && actionMutation.variables?.action === 'pull'}
-              onClick={() => actionMutation.mutate({ action: 'pull' })}
-            >
-              拉取镜像
-            </Button>
+            <PermGuard perm="stack:write">
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                disabled={taskPending}
+                loading={actionMutation.isPending && actionMutation.variables?.action === 'up'}
+                onClick={() => actionMutation.mutate({ action: 'up' })}
+              >
+                启动
+              </Button>
+              <Button
+                icon={<PoweroffOutlined />}
+                disabled={taskPending}
+                loading={actionMutation.isPending && actionMutation.variables?.action === 'down'}
+                onClick={() => actionMutation.mutate({ action: 'down' })}
+              >
+                停止
+              </Button>
+              <Button
+                icon={<ReloadOutlined />}
+                disabled={taskPending || running === 0}
+                loading={actionMutation.isPending && actionMutation.variables?.action === 'restart'}
+                onClick={() => actionMutation.mutate({ action: 'restart' })}
+              >
+                重启
+              </Button>
+              <Button
+                icon={<CloudDownloadOutlined />}
+                disabled={taskPending}
+                loading={actionMutation.isPending && actionMutation.variables?.action === 'pull'}
+                onClick={() => actionMutation.mutate({ action: 'pull' })}
+              >
+                拉取镜像
+              </Button>
+            </PermGuard>
             <Button
               icon={<ReloadOutlined />}
               loading={detailLoading}
@@ -395,14 +398,16 @@ const StackDetail = ({
               文件：{composeData?.composeFile || '-'}
               {composeData?.modifiedAt ? ` · 修改于 ${formatTimestamp(composeData.modifiedAt)}` : ''}
             </Typography.Text>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={saveMutation.isPending}
-              onClick={handleSaveCompose}
-            >
-              保存
-            </Button>
+            <PermGuard perm="stack:write">
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                loading={saveMutation.isPending}
+                onClick={handleSaveCompose}
+              >
+                保存
+              </Button>
+            </PermGuard>
           </Space>
           <Input.TextArea
             value={composeValue}
@@ -518,19 +523,21 @@ const StackDetail = ({
       destroyOnHidden
       footer={
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Popconfirm
-            title="删除 Stack"
-            description={`确定要删除「${stackName}」吗？将停止并移除全部服务，且删除 Stack 目录，不可恢复。`}
-            okText="删除"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            onConfirm={() => deleteMutation.mutate()}
-            disabled={taskPending}
-          >
-            <Button danger icon={<DeleteOutlined />} disabled={taskPending}>
-              删除 Stack
-            </Button>
-          </Popconfirm>
+          <PermGuard perm="stack:write">
+            <Popconfirm
+              title="删除 Stack"
+              description={`确定要删除「${stackName}」吗？将停止并移除全部服务，且删除 Stack 目录，不可恢复。`}
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={() => deleteMutation.mutate()}
+              disabled={taskPending}
+            >
+              <Button danger icon={<DeleteOutlined />} disabled={taskPending}>
+                删除 Stack
+              </Button>
+            </Popconfirm>
+          </PermGuard>
           <Button onClick={onClose}>关闭</Button>
         </div>
       }

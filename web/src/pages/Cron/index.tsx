@@ -24,6 +24,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { CronJob, SystemdTimer } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 import dayjs from 'dayjs'
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
@@ -253,7 +254,9 @@ const Cron = () => {
       key: 'enabled',
       width: 90,
       render: (v: boolean, record) => (
-        <Switch size="small" checked={v} onChange={(checked) => toggleEnabled(record, checked)} />
+        <PermGuard perm="cron:write" fallback={<Switch size="small" checked={v} disabled />}>
+          <Switch size="small" checked={v} onChange={(checked) => toggleEnabled(record, checked)} />
+        </PermGuard>
       ),
     },
     {
@@ -262,20 +265,22 @@ const Cron = () => {
       width: 160,
       render: (_, record) => (
         <Space size={0}>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="删除任务"
-            description={`将从 crontab 移除 ${record.name}，确认？`}
-            okText="删除"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => deleteJob(record.name)}
-          >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-              删除
+          <PermGuard perm="cron:write">
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
+              编辑
             </Button>
-          </Popconfirm>
+            <Popconfirm
+              title="删除任务"
+              description={`将从 crontab 移除 ${record.name}，确认？`}
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => deleteJob(record.name)}
+            >
+              <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          </PermGuard>
         </Space>
       ),
     },
@@ -371,9 +376,11 @@ const Cron = () => {
               }
             />
             <Button icon={<ReloadOutlined />} disabled={!selectedAgent} onClick={refresh} />
-            <Button type="primary" icon={<PlusOutlined />} disabled={!selectedAgent} onClick={openCreate}>
-              新建任务
-            </Button>
+            <PermGuard perm="cron:write">
+              <Button type="primary" icon={<PlusOutlined />} disabled={!selectedAgent} onClick={openCreate}>
+                新建任务
+              </Button>
+            </PermGuard>
           </Space>
         }
       >

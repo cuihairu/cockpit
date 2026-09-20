@@ -6,6 +6,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { ServiceActionName, ServiceUnit, ServiceUnitFile } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { usePerm } from '@/hooks/usePerm'
 import LogsPanel from '@/workbench/LogsPanel'
 
 // 服务管理（见 docs/guide/service-design.md）：systemd 与 Windows SCM 双后端
@@ -44,6 +45,8 @@ const SYSTEM_META: Record<string, { status: 'success' | 'error' | 'default' | 'w
 }
 
 const Services = () => {
+  // 服务操作全是写（start/stop/mask 等）；journal 日志是读，无写权限时保留
+  const canWrite = usePerm('services:write')
   const queryClient = useQueryClient()
   const [selectedAgent, setSelectedAgent] = useState<string>()
   const [search, setSearch] = useState('')
@@ -240,42 +243,44 @@ const Services = () => {
         const masked = r.unitFileState === 'masked'
         return (
           <Space size={4}>
-            {r.activeState === 'active' ? (
-              <>
-                <Tooltip title="停止服务">
+            {canWrite &&
+              (r.activeState === 'active' ? (
+                <>
+                  <Tooltip title="停止服务">
+                    <Button
+                      size="small"
+                      type="text"
+                      danger
+                      icon={<PoweroffOutlined />}
+                      loading={acting}
+                      onClick={() => runAction(r.name, 'stop')}
+                    />
+                  </Tooltip>
+                  <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'restart')}>
+                    重启
+                  </Button>
+                  {/* launchd/SCM 无 reload 语义（仅 systemd 后端支持） */}
+                  {isSystemd && (
+                    <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'reload')}>
+                      重载
+                    </Button>
+                  )}
+                </>
+              ) : (
+                !masked && (
                   <Button
                     size="small"
                     type="text"
-                    danger
                     icon={<PoweroffOutlined />}
                     loading={acting}
-                    onClick={() => runAction(r.name, 'stop')}
-                  />
-                </Tooltip>
-                <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'restart')}>
-                  重启
-                </Button>
-                {/* launchd/SCM 无 reload 语义（仅 systemd 后端支持） */}
-                {isSystemd && (
-                  <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'reload')}>
-                    重载
+                    onClick={() => runAction(r.name, 'start')}
+                  >
+                    启动
                   </Button>
-                )}
-              </>
-            ) : (
-              !masked && (
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<PoweroffOutlined />}
-                  loading={acting}
-                  onClick={() => runAction(r.name, 'start')}
-                >
-                  启动
-                </Button>
-              )
-            )}
-            {isSystemd &&
+                )
+              ))}
+            {canWrite &&
+              isSystemd &&
               (masked ? (
                 <Tooltip title="masked：unit 已链接到 /dev/null 彻底禁止启动，解除后才能再操作">
                   <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'unmask')}>
@@ -289,7 +294,8 @@ const Services = () => {
                   </Button>
                 </Tooltip>
               ))}
-            {canToggleEnable &&
+            {canWrite &&
+              canToggleEnable &&
               (r.unitFileState === 'enabled' ? (
                 <Button size="small" type="text" loading={acting} onClick={() => runAction(r.name, 'disable')}>
                   停自启
@@ -311,7 +317,7 @@ const Services = () => {
               </Tooltip>
             )}
             {/* unit 文件编辑（D13，仅 systemd 后端） */}
-            {isSystemd && (
+            {canWrite && isSystemd && (
               <Tooltip title="编辑 unit 文件">
                 <Button
                   size="small"
@@ -368,7 +374,7 @@ const Services = () => {
               showSearch
               optionFilterProp="label"
             />
-            {isSystemd && selectedAgent && (
+            {canWrite && isSystemd && selectedAgent && (
               <Popconfirm
                 title="重新加载 systemd 配置"
                 description="unit 文件有变更（手编/装卸包）后执行；不影响正在运行的服务"

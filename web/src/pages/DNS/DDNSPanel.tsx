@@ -20,6 +20,7 @@ import {
   message,
 } from 'antd'
 import { CheckCircleOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
+import { PermGuard } from '@/components/PermGuard'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { Agent, DDNSConfig } from '@/types'
@@ -199,21 +200,23 @@ const DDNSPanel: React.FC = () => {
       key: 'actions',
       width: 200,
       render: (_, r) => (
-        <Space size={4}>
-          <Tooltip title="立即检查（不等巡检周期）">
-            <Button
-              size="small"
-              type="text"
-              icon={<CheckCircleOutlined />}
-              loading={checkMut.isPending && checkMut.variables === r.id}
-              onClick={() => checkMut.mutate(r.id)}
-            />
-          </Tooltip>
-          <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
-          <Popconfirm title="删除该 DDNS 配置？（不影响 DNS 上已有的记录）" onConfirm={() => deleteMut.mutate(r.id)}>
-            <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
+        <PermGuard perm="ddns:write" fallback={<span style={{ color: '#999' }}>只读</span>}>
+          <Space size={4}>
+            <Tooltip title="立即检查（不等巡检周期）">
+              <Button
+                size="small"
+                type="text"
+                icon={<CheckCircleOutlined />}
+                loading={checkMut.isPending && checkMut.variables === r.id}
+                onClick={() => checkMut.mutate(r.id)}
+              />
+            </Tooltip>
+            <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
+            <Popconfirm title="删除该 DDNS 配置？（不影响 DNS 上已有的记录）" onConfirm={() => deleteMut.mutate(r.id)}>
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </Space>
+        </PermGuard>
       ),
     },
   ]
@@ -235,12 +238,14 @@ const DDNSPanel: React.FC = () => {
             style={{ width: 130 }}
           />
         )}
-        <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
-          保存
-        </Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新建 DDNS
-        </Button>
+        <PermGuard perm="ddns:write">
+          <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
+            保存
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新建 DDNS
+          </Button>
+        </PermGuard>
       </Space>
       <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
         将域名记录绑定到一台内网主机：巡检时该主机探测自己的公网出口 IP，记录缺失自动创建、IP 变化自动更新（保留记录的 TTL 与代理设置）。

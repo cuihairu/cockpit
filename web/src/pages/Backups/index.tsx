@@ -38,6 +38,7 @@ import dayjs from 'dayjs'
 import { api } from '@/services/api'
 import type { BackupConfig, BackupConfigInput, BackupFile, BackupRun, BackupTask } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 import ServerBackupCard from './ServerBackupCard'
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
@@ -273,15 +274,17 @@ const Backups = () => {
       width: 260,
       render: (_, cfg) => (
         <Space size={0}>
-          <Button
-            type="link"
-            size="small"
-            icon={<CaretRightOutlined />}
-            disabled={cfg.last_status === 'running'}
-            onClick={() => runMutation.mutate(cfg.id)}
-          >
-            运行
-          </Button>
+          <PermGuard perm="backup:write">
+            <Button
+              type="link"
+              size="small"
+              icon={<CaretRightOutlined />}
+              disabled={cfg.last_status === 'running'}
+              onClick={() => runMutation.mutate(cfg.id)}
+            >
+              运行
+            </Button>
+          </PermGuard>
           <Button
             type="link"
             size="small"
@@ -298,14 +301,16 @@ const Backups = () => {
           >
             文件
           </Button>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(cfg)} />
-          <Popconfirm
-            title="删除备份配置？"
-            description="运行历史将一并删除，备份文件不受影响"
-            onConfirm={() => deleteMutation.mutate(cfg.id)}
-          >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          <PermGuard perm="backup:write">
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(cfg)} />
+            <Popconfirm
+              title="删除备份配置？"
+              description="运行历史将一并删除，备份文件不受影响"
+              onConfirm={() => deleteMutation.mutate(cfg.id)}
+            >
+              <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </PermGuard>
         </Space>
       ),
     },
@@ -481,34 +486,36 @@ const Backups = () => {
           >
             下载
           </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<UndoOutlined />}
-            onClick={() => filesFor && openRestore(filesFor, f)}
-          >
-            恢复
-          </Button>
-          {filesFor?.remote_dest && (
-            <Tooltip title={`同步到远端：${filesFor.remote_dest}`}>
-              <Button
-                type="link"
-                size="small"
-                icon={<CloudUploadOutlined />}
-                loading={syncingRemote === f.name}
-                onClick={() => filesFor && syncRemoteMutation.mutate({ configId: filesFor.id, name: f.name })}
-              >
-                补传
-              </Button>
-            </Tooltip>
-          )}
-          <Popconfirm
-            title="删除该备份文件？"
-            description="此操作不可恢复"
-            onConfirm={() => filesFor && deleteFileMutation.mutate({ configId: filesFor.id, name: f.name })}
-          >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          <PermGuard perm="backup:write">
+            <Button
+              type="link"
+              size="small"
+              icon={<UndoOutlined />}
+              onClick={() => filesFor && openRestore(filesFor, f)}
+            >
+              恢复
+            </Button>
+            {filesFor?.remote_dest && (
+              <Tooltip title={`同步到远端：${filesFor.remote_dest}`}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<CloudUploadOutlined />}
+                  loading={syncingRemote === f.name}
+                  onClick={() => filesFor && syncRemoteMutation.mutate({ configId: filesFor.id, name: f.name })}
+                >
+                  补传
+                </Button>
+              </Tooltip>
+            )}
+            <Popconfirm
+              title="删除该备份文件？"
+              description="此操作不可恢复"
+              onConfirm={() => filesFor && deleteFileMutation.mutate({ configId: filesFor.id, name: f.name })}
+            >
+              <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </PermGuard>
         </Space>
       ),
     },
@@ -519,9 +526,11 @@ const Backups = () => {
       <Card
         title="备份配置"
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建备份
-          </Button>
+          <PermGuard perm="backup:write">
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建备份
+            </Button>
+          </PermGuard>
         }
       >
         {configs.length === 0 && !isLoading ? (

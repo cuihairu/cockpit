@@ -23,6 +23,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { DNSRecord, DNSRecordInput, DNSZone } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 import DDNSPanel from './DDNSPanel'
 
 // DNS 管理：Tab1 记录管理（按 dns.provider 分派 cloudflare/dnspod/alidns，
@@ -169,20 +170,22 @@ const RecordsPanel = ({ provider }: { provider: string }) => {
       key: 'actions',
       width: 130,
       render: (_, record) => (
-        <Space>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title={`删除记录 ${record.name}？`}
-            description="删除立即生效，不可恢复"
-            onConfirm={() => deleteMutation.mutate(record)}
-          >
-            <Button size="small" danger icon={<DeleteOutlined />}>
-              删除
+        <PermGuard perm="dns:write">
+          <Space>
+            <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
+              编辑
             </Button>
-          </Popconfirm>
-        </Space>
+            <Popconfirm
+              title={`删除记录 ${record.name}？`}
+              description="删除立即生效，不可恢复"
+              onConfirm={() => deleteMutation.mutate(record)}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          </Space>
+        </PermGuard>
       ),
     },
   ]
@@ -232,9 +235,11 @@ const RecordsPanel = ({ provider }: { provider: string }) => {
           >
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} disabled={!zoneId} onClick={openCreate}>
-            新建记录
-          </Button>
+          <PermGuard perm="dns:write">
+            <Button type="primary" icon={<PlusOutlined />} disabled={!zoneId} onClick={openCreate}>
+              新建记录
+            </Button>
+          </PermGuard>
         </Space>
       </Card>
 

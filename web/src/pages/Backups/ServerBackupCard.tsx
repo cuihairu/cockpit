@@ -23,6 +23,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { ServerBackupFile } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 
 // 面板数据库备份卡片（server 自身 SQLite 的 VACUUM INTO 定时备份，
 // 见 docs/guide/server-backup-design.md）。恢复 = 下载产物停服替换。
@@ -155,24 +156,26 @@ const ServerBackupCard = () => {
           <Button type="link" size="small" icon={<DownloadOutlined />} onClick={() => void download(f.name)}>
             下载
           </Button>
-          {effRemoteDest && (
-            <Tooltip title={`补推到 ${effRemoteDest}`}>
-              <Button
-                type="link"
-                size="small"
-                icon={<CloudUploadOutlined />}
-                loading={syncingRemote === f.name}
-                onClick={() => void syncRemote(f.name)}
-              >
-                补推
+          <PermGuard perm="backup:write">
+            {effRemoteDest && (
+              <Tooltip title={`补推到 ${effRemoteDest}`}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<CloudUploadOutlined />}
+                  loading={syncingRemote === f.name}
+                  onClick={() => void syncRemote(f.name)}
+                >
+                  补推
+                </Button>
+              </Tooltip>
+            )}
+            <Popconfirm title="删除该备份？" onConfirm={() => deleteMutation.mutate(f.name)}>
+              <Button type="link" size="small" danger>
+                删除
               </Button>
-            </Tooltip>
-          )}
-          <Popconfirm title="删除该备份？" onConfirm={() => deleteMutation.mutate(f.name)}>
-            <Button type="link" size="small" danger>
-              删除
-            </Button>
-          </Popconfirm>
+            </Popconfirm>
+          </PermGuard>
         </Space>
       ),
     },
@@ -188,13 +191,15 @@ const ServerBackupCard = () => {
       }
       extra={
         <Space>
-          <Button
-            icon={<PlusOutlined />}
-            loading={runMutation.isPending}
-            onClick={() => runMutation.mutate()}
-          >
-            立即备份
-          </Button>
+          <PermGuard perm="backup:write">
+            <Button
+              icon={<PlusOutlined />}
+              loading={runMutation.isPending}
+              onClick={() => runMutation.mutate()}
+            >
+              立即备份
+            </Button>
+          </PermGuard>
         </Space>
       }
     >
@@ -237,9 +242,11 @@ const ServerBackupCard = () => {
             server 主机未检测到 rclone，推送将失败
           </Typography.Text>
         )}
-        <Button size="small" loading={saving} onClick={() => void saveConfig()}>
-          保存
-        </Button>
+        <PermGuard perm="backup:write">
+          <Button size="small" loading={saving} onClick={() => void saveConfig()}>
+            保存
+          </Button>
+        </PermGuard>
       </Space>
       <Table<ServerBackupFile>
         rowKey="name"

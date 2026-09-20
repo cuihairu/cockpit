@@ -22,6 +22,7 @@ import { PlusOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { StackView } from '@/types'
+import { PermGuard } from '@/components/PermGuard'
 import StackDetail from './StackDetail'
 import TerminalBlock from './TerminalBlock'
 import {
@@ -190,14 +191,16 @@ const Stacks = () => {
         }
         extra={
           <Space>
-            <Button
-              icon={<PlusOutlined />}
-              type="primary"
-              onClick={() => setCreateOpen(true)}
-              disabled={stackAgents.length === 0}
-            >
-              新建 Stack
-            </Button>
+            <PermGuard perm="stack:write">
+              <Button
+                icon={<PlusOutlined />}
+                type="primary"
+                onClick={() => setCreateOpen(true)}
+                disabled={stackAgents.length === 0}
+              >
+                新建 Stack
+              </Button>
+            </PermGuard>
             <Button
               icon={<ReloadOutlined />}
               onClick={() => {
