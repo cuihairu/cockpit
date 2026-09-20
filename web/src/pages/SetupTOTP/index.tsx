@@ -80,14 +80,6 @@ const SetupTOTP = () => {
     }
   }
 
-  const handleConfirmBackup = () => {
-    if (!backupSaved) {
-      message.warning('请确认已保存备份码')
-      return
-    }
-    setCurrentStep(2)
-  }
-
   const handleFinish = () => {
     navigate('/settings')
   }
@@ -215,7 +207,7 @@ const SetupTOTP = () => {
 
               <Space>
                 <Button onClick={() => navigate('/settings')}>取消</Button>
-                <Button type="primary" onClick={handleConfirmBackup}>
+                <Button type="primary" onClick={() => setCurrentStep(2)}>
                   下一步
                 </Button>
               </Space>
