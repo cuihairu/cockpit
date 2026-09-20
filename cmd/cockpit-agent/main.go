@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/cuihairu/cockpit/internal/cli"
+	"github.com/cuihairu/cockpit/internal/agent"
 )
 
 func main() {
@@ -55,8 +55,8 @@ func printVersion(w io.Writer) {
 // handleStart `cockpit-agent start [-server ws://...]`
 func handleStart(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
-	startCmd := &cli.AgentStartCmd{}
-	startCmd.BindWithUsage(fs, cli.AgentStartUsage{
+	startCmd := &agent.StartCmd{}
+	startCmd.BindWithUsage(fs, agent.StartUsage{
 		Server: "Server WebSocket 地址 (必需)",
 		ID:     "Agent ID (可选，默认自动生成)",
 		Secret: "Agent 认证密钥 (可选，但推荐使用)",

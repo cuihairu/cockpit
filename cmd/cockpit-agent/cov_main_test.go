@@ -49,7 +49,7 @@ func TestCovHandleStartValidateFail(t *testing.T) {
 	}
 }
 
-// 指向必然拒绝连接的地址：AgentStartCmd.Run 返回 connect error → 退出码 1
+// 指向必然拒绝连接的地址：agent.StartCmd.Run 返回 connect error → 退出码 1
 func TestCovHandleStartConnectRefused(t *testing.T) {
 	code, _ := covRun("start", "-server", "ws://127.0.0.1:1/ws")
 	if code != 1 {

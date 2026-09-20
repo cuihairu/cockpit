@@ -1,4 +1,4 @@
-package cli
+package agent
 
 import (
 	"errors"
@@ -9,12 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-
-	"github.com/cuihairu/cockpit/internal/agent"
 )
 
-// AgentStartCmd starts a Cockpit agent instance.
-type AgentStartCmd struct {
+// StartCmd starts a Cockpit agent instance.
+type StartCmd struct {
 	Server string
 	ID     string
 	Secret string
@@ -23,8 +21,8 @@ type AgentStartCmd struct {
 	Labels string
 }
 
-// AgentStartUsage customizes shared flag descriptions.
-type AgentStartUsage struct {
+// StartUsage customizes shared flag descriptions.
+type StartUsage struct {
 	Server string
 	ID     string
 	Secret string
@@ -33,7 +31,7 @@ type AgentStartUsage struct {
 	Labels string
 }
 
-var defaultAgentStartUsage = AgentStartUsage{
+var defaultStartUsage = StartUsage{
 	Server: "Server WebSocket address (required)",
 	ID:     "Agent ID (optional, auto-generated when omitted)",
 	Secret: "Agent authentication secret (optional but recommended)",
@@ -43,22 +41,22 @@ var defaultAgentStartUsage = AgentStartUsage{
 }
 
 // Bind registers shared agent start flags on the provided FlagSet.
-func (c *AgentStartCmd) Bind(fs *flag.FlagSet) {
-	c.BindWithUsage(fs, defaultAgentStartUsage)
+func (c *StartCmd) Bind(fs *flag.FlagSet) {
+	c.BindWithUsage(fs, defaultStartUsage)
 }
 
 // BindWithUsage registers shared agent start flags with custom descriptions.
-func (c *AgentStartCmd) BindWithUsage(fs *flag.FlagSet, usage AgentStartUsage) {
-	fs.StringVar(&c.Server, "server", "", fallbackUsage(usage.Server, defaultAgentStartUsage.Server))
-	fs.StringVar(&c.ID, "id", "", fallbackUsage(usage.ID, defaultAgentStartUsage.ID))
-	fs.StringVar(&c.Secret, "secret", "", fallbackUsage(usage.Secret, defaultAgentStartUsage.Secret))
-	fs.StringVar(&c.Region, "region", "", fallbackUsage(usage.Region, defaultAgentStartUsage.Region))
-	fs.StringVar(&c.Zone, "zone", "", fallbackUsage(usage.Zone, defaultAgentStartUsage.Zone))
-	fs.StringVar(&c.Labels, "labels", "", fallbackUsage(usage.Labels, defaultAgentStartUsage.Labels))
+func (c *StartCmd) BindWithUsage(fs *flag.FlagSet, usage StartUsage) {
+	fs.StringVar(&c.Server, "server", "", fallbackUsage(usage.Server, defaultStartUsage.Server))
+	fs.StringVar(&c.ID, "id", "", fallbackUsage(usage.ID, defaultStartUsage.ID))
+	fs.StringVar(&c.Secret, "secret", "", fallbackUsage(usage.Secret, defaultStartUsage.Secret))
+	fs.StringVar(&c.Region, "region", "", fallbackUsage(usage.Region, defaultStartUsage.Region))
+	fs.StringVar(&c.Zone, "zone", "", fallbackUsage(usage.Zone, defaultStartUsage.Zone))
+	fs.StringVar(&c.Labels, "labels", "", fallbackUsage(usage.Labels, defaultStartUsage.Labels))
 }
 
 // Validate checks command arguments.
-func (c *AgentStartCmd) Validate() error {
+func (c *StartCmd) Validate() error {
 	if strings.TrimSpace(c.Server) == "" {
 		return errors.New("missing required -server flag")
 	}
@@ -66,12 +64,12 @@ func (c *AgentStartCmd) Validate() error {
 }
 
 // BuildConfig converts CLI options to runtime agent config.
-func (c *AgentStartCmd) BuildConfig() (agent.Config, error) {
+func (c *StartCmd) BuildConfig() (Config, error) {
 	if err := c.Validate(); err != nil {
-		return agent.Config{}, err
+		return Config{}, err
 	}
 
-	return agent.Config{
+	return Config{
 		ServerURL: c.Server,
 		AgentID:   c.ID,
 		Secret:    c.Secret,
@@ -82,13 +80,13 @@ func (c *AgentStartCmd) BuildConfig() (agent.Config, error) {
 }
 
 // Run starts the Cockpit agent.
-func (c *AgentStartCmd) Run() error {
+func (c *StartCmd) Run() error {
 	cfg, err := c.BuildConfig()
 	if err != nil {
 		return err
 	}
 
-	a := agent.NewAgent(cfg)
+	a := NewAgent(cfg)
 
 	// SIGTERM/SIGINT 优雅退出：systemd/容器停止时发 SIGTERM，Stop 取消
 	// agent 内部上下文，Start 随之返回 nil，进程以 0 正常退出

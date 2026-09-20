@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/cuihairu/cockpit/internal/agent"
 	"github.com/cuihairu/cockpit/internal/cli"
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/server"
@@ -160,10 +161,10 @@ func runServer(args []string, stdout io.Writer) int {
 	return startServer(*configPath, stdout)
 }
 
-// runAgent `cockpit agent [start] [-server ws://...]`（与 cockpit-agent start 共用 cli.AgentStartCmd）
+// runAgent `cockpit agent [start] [-server ws://...]`（与 cockpit-agent start 共用 agent.StartCmd）
 func runAgent(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
-	startCmd := &cli.AgentStartCmd{}
+	startCmd := &agent.StartCmd{}
 	startCmd.Bind(fs)
 	help := fs.Bool("h", false, "Show help")
 

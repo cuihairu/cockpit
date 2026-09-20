@@ -1,12 +1,12 @@
-package cli
+package agent
 
 import (
 	"reflect"
 	"testing"
 )
 
-func TestAgentStartCmdBuildConfig(t *testing.T) {
-	cmd := AgentStartCmd{
+func TestStartCmdBuildConfig(t *testing.T) {
+	cmd := StartCmd{
 		Server: "ws://localhost:9000/ws",
 		ID:     "agent-1",
 		Secret: "secret",
@@ -35,8 +35,8 @@ func TestAgentStartCmdBuildConfig(t *testing.T) {
 	}
 }
 
-func TestAgentStartCmdBuildConfigRequiresServer(t *testing.T) {
-	cmd := AgentStartCmd{}
+func TestStartCmdBuildConfigRequiresServer(t *testing.T) {
+	cmd := StartCmd{}
 
 	if _, err := cmd.BuildConfig(); err == nil {
 		t.Fatal("BuildConfig() expected error for missing server")
