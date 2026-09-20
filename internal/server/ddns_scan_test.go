@@ -18,21 +18,34 @@ import (
 
 // fakeDNSProvider dns.Provider 测试桩：记录写调用、返回预置记录表
 type fakeDNSProvider struct {
+	zones     []dns.Zone
 	records   []dns.Record
 	created   []dns.RecordInput
 	updated   map[string]dns.RecordInput
+	zonesErr  error
 	listErr   error
 	createErr error
 	updateErr error
+	// paginate：ListRecords 第一页空、TotalPage=2，第二页才给记录
+	// （覆盖调用方翻页循环）
+	paginate bool
 }
 
-func (f *fakeDNSProvider) ListZones(ctx context.Context) ([]dns.Zone, error) { return nil, nil }
+func (f *fakeDNSProvider) ListZones(ctx context.Context) ([]dns.Zone, error) {
+	if f.zonesErr != nil {
+		return nil, f.zonesErr
+	}
+	return f.zones, nil
+}
 
 func (f *fakeDNSProvider) ListRecords(ctx context.Context, zoneID, recordType string, page int) (*dns.RecordsPage, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	return &dns.RecordsPage{Records: f.records, Page: 1, TotalPage: 1}, nil
+	if f.paginate && page == 1 {
+		return &dns.RecordsPage{Records: nil, Page: 1, TotalPage: 2}, nil
+	}
+	return &dns.RecordsPage{Records: f.records, Page: page, TotalPage: page}, nil
 }
 
 func (f *fakeDNSProvider) CreateRecord(ctx context.Context, zoneID string, input dns.RecordInput) (*dns.Record, error) {
@@ -54,7 +67,18 @@ func (f *fakeDNSProvider) UpdateRecord(ctx context.Context, zoneID, recordID str
 		f.updated = map[string]dns.RecordInput{}
 	}
 	f.updated[recordID] = input
-	return &dns.Record{ID: recordID, Type: input.Type, Name: input.Name, Content: input.Content}, nil
+	// 回写记录表：与真实 provider 行为一致，后续 ListRecords 能查到新值
+	for i := range f.records {
+		if f.records[i].ID == recordID {
+			f.records[i].Type = input.Type
+			f.records[i].Name = input.Name
+			f.records[i].Content = input.Content
+			return &f.records[i], nil
+		}
+	}
+	rec := dns.Record{ID: recordID, Type: input.Type, Name: input.Name, Content: input.Content}
+	f.records = append(f.records, rec)
+	return &rec, nil
 }
 
 func (f *fakeDNSProvider) DeleteRecord(ctx context.Context, zoneID, recordID string) error {

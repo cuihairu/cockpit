@@ -54,6 +54,9 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleServerBackups(w, r)
 	case path == "/dns" || strings.HasPrefix(path, "/dns/"):
 		s.handleDNS(w, r)
+	case path == "/domains" || strings.HasPrefix(path, "/domains/"):
+		// 服务域名绑定（见 api_domain_bindings.go，domain-binding-design.md）
+		s.handleDomainBindings(w, r)
 	case path == "/overlay/cloud" || strings.HasPrefix(path, "/overlay/cloud/"):
 		// 组网云管理面（见 api_overlay_cloud.go，M2 D11-D19）
 		s.handleOverlayCloud(w, r)

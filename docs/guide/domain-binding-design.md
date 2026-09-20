@@ -67,6 +67,16 @@ POST   /api/domains/{domain}/apply   执行联动（DNS/反代/证书按 auto* �
 | P1 | agent `domains.list` RPC + probe 目标引用域名 + 一键生成安装/配置片段 | agent 侧配置不再手抄域名 |
 | P2（按需） | CNAME/泛域名、批量 apply、cert 监控自动移除 | 按实际需求排期 |
 
+## 实现状态
+
+- 2026-09-20：P0 主体落地——storage 单表 + server 四端点（列表/登记/删除/apply
+  三联动）+ apply 快照回写（`LastApplyStatus/LastError/AppliedAt`）。实现见
+  `internal/storage/domain_binding.go`、`internal/server/api_domain_bindings.go`。
+  未含：D6 漂移检查（列表暂不展示 DNS/站点/监控的实际状态）、dashboard 页面
+  （web UI 另行）、D9 权限点（沿用 admin 中间件现状）。换绑 cert 监控项走
+  `UpdateDomainAgentID` 显式更新——GORM `Assign(struct)` 对已存在记录不落库，
+  `UpsertDomain` 承担不了换绑语义（存量坑另记）。
+
 ## 不做的事
 
 - 不做 DNS 托管全量管理（zones/NS/SOA）——dns provider 已管记录，Binding 只管「服务视角」的那一条

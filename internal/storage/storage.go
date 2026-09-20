@@ -117,6 +117,7 @@ func (d *DB) migrate() error {
 		&DDNSConfig{},
 		&AcmeAccount{},
 		&AcmeCert{},
+		&DomainBinding{},
 	)
 }
 
@@ -278,6 +279,15 @@ func (d *DB) UpsertDomain(domain *Domain) error {
 	return d.db.Where("id = ?", domain.ID).
 		Assign(domain).
 		FirstOrCreate(domain).Error
+}
+
+// UpdateDomainAgentID 校准域名监控项归属（domain-binding D5 换绑用）。
+// 显式 Updates map：GORM 的 Assign(struct) 在记录已存在时不落库，
+// 不能承担换绑语义。
+func (d *DB) UpdateDomainAgentID(id, agentID string) error {
+	return d.db.Model(&Domain{}).
+		Where("id = ?", id).
+		Update("agent_id", agentID).Error
 }
 
 // UpdateDomainStatus 更新域名探测状态

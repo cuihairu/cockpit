@@ -106,6 +106,9 @@ const ResourceAcmeCert = "acme_cert"
 // ResourceOverlayMember 组网云管理面成员/设备资源类型（见 overlay-design.md M2 D14）
 const ResourceOverlayMember = "overlay_member"
 
+// ResourceDomainBinding 服务域名绑定资源类型（见 domain-binding-design.md）
+const ResourceDomainBinding = "domain_binding"
+
 // Status 状态
 const (
 	StatusSuccess = "success"
