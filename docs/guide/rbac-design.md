@@ -90,7 +90,7 @@ CA 目录切换归 `acme:admin`，查看证书列表 `acme:read`）。
 | 6 | web 权限基础设施：UserContext 启动拉 `/api/me` 存 permissions（D7 语义：动态拉取而非 login 固化，角色变更刷新即生效）+ `usePerm`/`PermGuard`（前端复刻 write⊇read、admin⊇write 隐含规则）+ 菜单按权限标注与裁剪 + 路由守卫（无 read 权限 → 403 页；后端 RBAC 仍是权威，守卫纯 UX）。落地决策：permissions 不落 localStorage（刷新即重拉，避免陈旧判定）；未加载/加载失败一律 fail-closed 全裁剪；菜单项 perm 与后端 requiredPerms 的 GET 语义一一对齐（monitor→inventory、disk→smart、域名绑定→dns:read）；设置菜单全员可见（含个人 TOTP），Tab 级裁剪笔 8 | ✅ |
 | 7 | web 用户/角色管理页：「访问控制」菜单组（用户管理 users:admin、角色管理 roles:admin），用户 CRUD/改角色/改密，角色 CRUD/权限点矩阵编辑（内置角色只读展示）。落地决策：合法权限点全集从内置 admin 角色的 permissions 推导（seed 恒全量，零后端改动）；用户表内联 Select 改角色（自己那行禁用——D13 前端预拦）；D13 后端拦截的错误信息经 message 透出 | ✅ |
 | 8a | web 核心运维模块写入口裁剪：DNS/Domains/Docker/Stacks/Backups/Proxy/Cron/Services 的写按钮与危险操作包 `PermGuard`（Docker 容器操作按 action 过滤——logs 是读）。落地决策：Services 与 Docker 同模式（组件顶层 `usePerm` + 条件渲染，journal 日志按钮保留）；Cron 启用开关用 PermGuard 禁用态兜底（Switch 无写权限显示 disabled 而非消失，保留状态可见性）；DDNS/ServerBackup 的巡检/定时配置行只包保存按钮（开关改动是本地暂存态，无保存入口即不落库，与读展示共存）；Proxy「配置」查看是读保留 | ✅ |
-| 8b | web 其余模块写入口裁剪：Acme（签发/部署 acme:admin）/Nas/Drift/Network/Disk/Recordings/Workbench（terminal:write 远控入口、files:write 文件操作）+ Settings 页 Tab 级（通用/告警 settings:admin，安全 Tab 全员——个人 TOTP） | 未开工 |
+| 8b | web 其余模块写入口裁剪：Acme（签发/部署 acme:admin）/Nas/Drift/Network/Disk/Recordings/Workbench（terminal:write 远控入口、files:write 文件操作）+ Settings 页 Tab 级（通用/告警 settings:admin，安全 Tab 全员——个人 TOTP）。落地决策：Acme 签发/部署按钮按后端固定 acme:admin、编辑/删除/新建/账户邮箱按 acme:write 分开标注（有 acme:write 无 admin 的角色可管配置但不能签发，与后端判定一一对齐）；Workbench 顶部 ssh/rdp/vnc 按钮组与 ConnectionPanel 连接按钮双入口都包 terminal:write；FileBrowser 预览/下载/搜索保留、编辑/权限/重命名/删除/新建目录/上传按 canWrite 条件渲染；Settings 用 usePerm 过滤 items 数组（安全/系统信息恒在）；Network 的 ZT 授权 Switch 用禁用态兜底、除名/TS 授权/TS 删除按钮包 PermGuard | ✅ |
 
 两个实现决策（设计阶段未写死，落地时定）：
 

@@ -1,5 +1,6 @@
 import { Button, Card, Descriptions, Space, Tag } from 'antd'
 import type { RemoteService } from './types'
+import { PermGuard } from '@/components/PermGuard'
 
 const ConnectionPanel = ({
   protocol,
@@ -22,9 +23,11 @@ const ConnectionPanel = ({
               <Tag color="success">可用</Tag>
             </Descriptions.Item>
           </Descriptions>
-          <Button type="primary" onClick={onConnect}>
-            打开 {protocol.toUpperCase()}
-          </Button>
+          <PermGuard perm="terminal:write">
+            <Button type="primary" onClick={onConnect}>
+              打开 {protocol.toUpperCase()}
+            </Button>
+          </PermGuard>
         </Space>
       ) : (
         <div style={{ padding: 24, color: '#86909C' }}>当前服务器未检测到 {protocol.toUpperCase()} 服务</div>

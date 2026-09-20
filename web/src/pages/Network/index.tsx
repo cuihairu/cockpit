@@ -23,6 +23,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
+import { PermGuard } from '@/components/PermGuard'
 import type {
   Agent,
   OverlayAgentIdentity,
@@ -315,12 +316,14 @@ const CloudPanel: React.FC = () => {
       dataIndex: 'authorized',
       width: 90,
       render: (v: boolean, m) => (
-        <Switch
-          size="small"
-          checked={v}
-          loading={ztAuthz.isPending && ztAuthz.variables?.memberId === m.id}
-          onChange={(checked) => ztAuthz.mutate({ networkId, memberId: m.id, authorized: checked })}
-        />
+        <PermGuard perm="overlay:write" fallback={<Switch size="small" checked={v} disabled />}>
+          <Switch
+            size="small"
+            checked={v}
+            loading={ztAuthz.isPending && ztAuthz.variables?.memberId === m.id}
+            onChange={(checked) => ztAuthz.mutate({ networkId, memberId: m.id, authorized: checked })}
+          />
+        </PermGuard>
       ),
     },
     {
@@ -354,15 +357,17 @@ const CloudPanel: React.FC = () => {
       key: 'action',
       width: 90,
       render: (_, m) => (
-        <Popconfirm
-          title="除名该成员？"
-          description="成员重新加入网络后可再次授权。"
-          onConfirm={() => ztRemove.mutate({ networkId, memberId: m.id })}
-        >
-          <Button size="small" danger loading={ztRemove.isPending && ztRemove.variables?.memberId === m.id}>
-            除名
-          </Button>
-        </Popconfirm>
+        <PermGuard perm="overlay:write">
+          <Popconfirm
+            title="除名该成员？"
+            description="成员重新加入网络后可再次授权。"
+            onConfirm={() => ztRemove.mutate({ networkId, memberId: m.id })}
+          >
+            <Button size="small" danger loading={ztRemove.isPending && ztRemove.variables?.memberId === m.id}>
+              除名
+            </Button>
+          </Popconfirm>
+        </PermGuard>
       ),
     },
   ]
@@ -408,14 +413,16 @@ const CloudPanel: React.FC = () => {
         v ? (
           <Tag color="success">已授权</Tag>
         ) : (
-          <Button
-            size="small"
-            type="primary"
-            loading={tsAuthorize.isPending && tsAuthorize.variables === d.id}
-            onClick={() => tsAuthorize.mutate(d.id)}
-          >
-            授权
-          </Button>
+          <PermGuard perm="overlay:write">
+            <Button
+              size="small"
+              type="primary"
+              loading={tsAuthorize.isPending && tsAuthorize.variables === d.id}
+              onClick={() => tsAuthorize.mutate(d.id)}
+            >
+              授权
+            </Button>
+          </PermGuard>
         ),
     },
     {
@@ -439,16 +446,18 @@ const CloudPanel: React.FC = () => {
       key: 'action',
       width: 90,
       render: (_, d) => (
-        <Button
-          size="small"
-          danger
-          onClick={() => {
-            setTsDeleteTarget(d)
-            setTsDeleteInput('')
-          }}
-        >
-          删除
-        </Button>
+        <PermGuard perm="overlay:write">
+          <Button
+            size="small"
+            danger
+            onClick={() => {
+              setTsDeleteTarget(d)
+              setTsDeleteInput('')
+            }}
+          >
+            删除
+          </Button>
+        </PermGuard>
       ),
     },
   ]

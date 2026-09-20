@@ -1,4 +1,5 @@
 import { Card, Tabs } from 'antd'
+import { usePerm } from '@/hooks/usePerm'
 import { useSettings } from './useSettings'
 import { GeneralSettings } from './GeneralSettings'
 import { SecuritySettings } from './SecuritySettings'
@@ -7,6 +8,9 @@ import { SystemInfo } from './SystemInfo'
 import { DisableTOTPModal } from './DisableTOTPModal'
 
 const Settings = () => {
+  // Tab 级裁剪（笔 8b）：通用/告警是系统级配置（settings:admin）；
+  // 安全 Tab 全员（个人 TOTP）；系统信息只读全员
+  const canAdmin = usePerm('settings:admin')
   const {
     loading,
     settings,
@@ -25,11 +29,15 @@ const Settings = () => {
       <Card title="系统设置">
         <Tabs
           items={[
-            {
-              key: 'general',
-              label: '通用设置',
-              children: <GeneralSettings loading={loading} settings={settings} onSave={saveSettings} />,
-            },
+            ...(canAdmin
+              ? [
+                  {
+                    key: 'general',
+                    label: '通用设置',
+                    children: <GeneralSettings loading={loading} settings={settings} onSave={saveSettings} />,
+                  },
+                ]
+              : []),
             {
               key: 'security',
               label: '安全设置',
@@ -40,11 +48,15 @@ const Settings = () => {
                 />
               ),
             },
-            {
-              key: 'alerts',
-              label: '告警设置',
-              children: <AlertSettings />,
-            },
+            ...(canAdmin
+              ? [
+                  {
+                    key: 'alerts',
+                    label: '告警设置',
+                    children: <AlertSettings />,
+                  },
+                ]
+              : []),
             {
               key: 'system',
               label: '系统信息',

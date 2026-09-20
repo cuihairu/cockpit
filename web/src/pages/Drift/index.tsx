@@ -21,6 +21,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { DriftCheckItem, DriftCheckResult } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 import DiffModal from './DiffModal'
 import ConsistencyTab from './ConsistencyTab'
 import { KIND_COLOR, KIND_LABEL } from './shared'
@@ -171,17 +172,19 @@ const Drift = () => {
             </Button>
           )}
           {(it.status === 'drifted' || it.status === 'no_baseline') && (
-            <Popconfirm
-              title={it.status === 'drifted' ? '以当前磁盘内容为新基线？' : '将当前内容登记为基线？'}
-              description="之后的漂移检测将以当前磁盘内容为标准。"
-              okText="确认登记"
-              cancelText="取消"
-              onConfirm={() => void recordCurrent(it)}
-            >
-              <Button size="small" icon={<CheckOutlined />}>
-                {it.status === 'drifted' ? '以当前为准' : '登记'}
-              </Button>
-            </Popconfirm>
+            <PermGuard perm="drift:write">
+              <Popconfirm
+                title={it.status === 'drifted' ? '以当前磁盘内容为新基线？' : '将当前内容登记为基线？'}
+                description="之后的漂移检测将以当前磁盘内容为标准。"
+                okText="确认登记"
+                cancelText="取消"
+                onConfirm={() => void recordCurrent(it)}
+              >
+                <Button size="small" icon={<CheckOutlined />}>
+                  {it.status === 'drifted' ? '以当前为准' : '登记'}
+                </Button>
+              </Popconfirm>
+            </PermGuard>
           )}
         </Space>
       ),
@@ -223,9 +226,11 @@ const Drift = () => {
               style={{ width: 130 }}
             />
           )}
-          <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
-            保存
-          </Button>
+          <PermGuard perm="drift:write">
+            <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
+              保存
+            </Button>
+          </PermGuard>
         </Space>
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
           自动巡检按间隔扫描全部支持的主机并推送漂移告警；下方为单台主机的即时检查。

@@ -40,6 +40,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { api } from '@/services/api'
+import { usePerm } from '@/hooks/usePerm'
 import type { FileEntry, FileSearchResult } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 
@@ -209,6 +210,8 @@ const PERM_HEADS = ['读', '写', '执行']
 // （见 docs/guide/file-manager-design.md；全文件系统可见，安全靠双端路径校验）
 const FileBrowser = ({ agentId }: { agentId: string }) => {
   const queryClient = useQueryClient()
+  // 浏览/预览/下载/搜索是读；编辑/权限/重命名/删除/新建目录/上传是写
+  const canWrite = usePerm('files:write')
   const [cwd, setCwd] = useState('/')
   const [jump, setJump] = useState('')
   const [mkdirOpen, setMkdirOpen] = useState(false)
@@ -697,7 +700,7 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
                 onClick={() => void openPreview(f)}
               />
             )}
-            {!f.isDir && !f.isSymlink && (
+            {canWrite && !f.isDir && !f.isSymlink && (
               <Button
                 type="link"
                 size="small"
@@ -716,45 +719,50 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
                 onClick={() => download(path)}
               />
             )}
-            <Button
-              type="link"
-              size="small"
-              icon={<SafetyOutlined />}
-              title={f.isSymlink ? '符号链接不支持权限编辑' : '权限'}
-              disabled={f.isSymlink}
-              onClick={() => openPerm(f)}
-            />
-            <Button
-              type="link"
-              size="small"
-              icon={<SwapOutlined />}
-              title="重命名"
-              onClick={() => {
-                setRenameTarget(f)
-                form.setFieldsValue({ name: f.name })
-              }}
-            />
-            {f.isDir && !f.isSymlink ? (
+            {canWrite && (
               <Button
                 type="link"
                 size="small"
-                danger
-                icon={<DeleteOutlined />}
-                title="删除目录"
+                icon={<SafetyOutlined />}
+                title={f.isSymlink ? '符号链接不支持权限编辑' : '权限'}
+                disabled={f.isSymlink}
+                onClick={() => openPerm(f)}
+              />
+            )}
+            {canWrite && (
+              <Button
+                type="link"
+                size="small"
+                icon={<SwapOutlined />}
+                title="重命名"
                 onClick={() => {
-                  setDeleteDir(f)
-                  setDeleteConfirm('')
+                  setRenameTarget(f)
+                  form.setFieldsValue({ name: f.name })
                 }}
               />
-            ) : (
-              <Popconfirm
-                title="删除该文件？"
-                description="此操作直接作用于 Agent 主机，不可恢复"
-                onConfirm={() => deleteMutation.mutate(path)}
-              >
-                <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-              </Popconfirm>
             )}
+            {canWrite &&
+              (f.isDir && !f.isSymlink ? (
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  title="删除目录"
+                  onClick={() => {
+                    setDeleteDir(f)
+                    setDeleteConfirm('')
+                  }}
+                />
+              ) : (
+                <Popconfirm
+                  title="删除该文件？"
+                  description="此操作直接作用于 Agent 主机，不可恢复"
+                  onConfirm={() => deleteMutation.mutate(path)}
+                >
+                  <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+                </Popconfirm>
+              ))}
           </Space>
         )
       },
@@ -794,23 +802,27 @@ const FileBrowser = ({ agentId }: { agentId: string }) => {
               }
             }}
           />
-          <Button size="small" icon={<FolderAddOutlined />} onClick={() => {
-            form.setFieldsValue({ name: '' })
-            setMkdirOpen(true)
-          }}>
-            新建目录
-          </Button>
+          {canWrite && (
+            <Button size="small" icon={<FolderAddOutlined />} onClick={() => {
+              form.setFieldsValue({ name: '' })
+              setMkdirOpen(true)
+            }}>
+              新建目录
+            </Button>
+          )}
           <Button size="small" icon={<SearchOutlined />} onClick={openSearch}>
             搜索
           </Button>
-          <Upload
-            multiple
-            showUploadList={false}
-            beforeUpload={() => false}
-            onChange={({ fileList }) => uploadFiles(fileList)}
-          >
-            <Button size="small" icon={<UploadOutlined />}>上传</Button>
-          </Upload>
+          {canWrite && (
+            <Upload
+              multiple
+              showUploadList={false}
+              beforeUpload={() => false}
+              onChange={({ fileList }) => uploadFiles(fileList)}
+            >
+              <Button size="small" icon={<UploadOutlined />}>上传</Button>
+            </Upload>
+          )}
           {uploading && (
             <Space size={4}>
               <Progress

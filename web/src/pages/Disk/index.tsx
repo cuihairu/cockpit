@@ -21,6 +21,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { Agent, SmartDevice, SmartStatus } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 
 // 磁盘健康（SMART）：各主机磁盘只读观测 + server 定时巡检告警
 // （见 docs/guide/disk-health-design.md）。server 纯转发不落库，
@@ -277,9 +278,11 @@ const Disk = () => {
               style={{ width: 130 }}
             />
           )}
-          <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
-            保存
-          </Button>
+          <PermGuard perm="smart:write">
+            <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
+              保存
+            </Button>
+          </PermGuard>
         </Space>
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
           巡检依赖 smartctl 读取盘的 SMART 数据，Agent 需以 root 运行；重映射/待定扇区增长是盘失效前的典型征兆，出现即建议备份数据。

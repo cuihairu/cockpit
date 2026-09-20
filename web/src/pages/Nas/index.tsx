@@ -21,6 +21,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { Agent, NasMount, NasPool, NasShare, NasStatus } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 
 // NAS 存储观测：各主机存储池/挂载/共享只读总览 + server 定时巡检告警
 // （见 docs/guide/nas-design.md）。server 纯转发不落库，总览由前端
@@ -356,9 +357,11 @@ const Nas = () => {
             addonAfter="% 容量告警"
             style={{ width: 160 }}
           />
-          <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
-            保存
-          </Button>
+          <PermGuard perm="nas:write">
+            <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
+              保存
+            </Button>
+          </PermGuard>
         </Space>
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
           观测来源为本机 mdadm（/proc/mdstat）、ZFS、LVM 与 SMB/NFS 导出，只读不落库；池降级或成员盘故障意味着冗余已受损，出现即建议备份数据。

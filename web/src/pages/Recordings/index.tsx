@@ -28,6 +28,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { TerminalRecording } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 import '@xterm/xterm/css/xterm.css'
 
 // 会话录制：远控终端输出流的 asciinema v2 落盘（server 侧录制，见
@@ -329,21 +330,23 @@ const Recordings = () => {
             回放
           </Button>
           <Button size="small" icon={<DownloadOutlined />} onClick={() => void handleDownload(rec)} />
-          {effRemoteDest && (
-            <Tooltip title={`补推到 ${effRemoteDest}`}>
-              <Button
-                size="small"
-                icon={<CloudUploadOutlined />}
-                loading={syncingRemote === rec.sessionId}
-                onClick={() => void syncRemote(rec)}
-              />
-            </Tooltip>
-          )}
-          <Popconfirm title="删除该录制？" onConfirm={() => void handleDelete(rec)}>
-            <Button size="small" danger>
-              删除
-            </Button>
-          </Popconfirm>
+          <PermGuard perm="recordings:write">
+            {effRemoteDest && (
+              <Tooltip title={`补推到 ${effRemoteDest}`}>
+                <Button
+                  size="small"
+                  icon={<CloudUploadOutlined />}
+                  loading={syncingRemote === rec.sessionId}
+                  onClick={() => void syncRemote(rec)}
+                />
+              </Tooltip>
+            )}
+            <Popconfirm title="删除该录制？" onConfirm={() => void handleDelete(rec)}>
+              <Button size="small" danger>
+                删除
+              </Button>
+            </Popconfirm>
+          </PermGuard>
         </Space>
       ),
     },

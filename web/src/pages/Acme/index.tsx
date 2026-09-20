@@ -30,6 +30,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { AcmeCertView, AcmeDnsStatus } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
+import { PermGuard } from '@/components/PermGuard'
 
 // ACME 证书自动签发页（见 docs/guide/acme-design.md D11/D13）：
 // DNS-01 challenge，provider 按 dns.provider 分派（Cloudflare/DNSPod/阿里云，
@@ -345,22 +346,24 @@ const Acme = () => {
       width: 200,
       render: (_, r) => (
         <Space size={4}>
-          <Tooltip title={r.status === 'issued' ? '重新签发' : '立即签发'}>
-            <Button
-              size="small"
-              type="text"
-              icon={<CloudUploadOutlined />}
-              loading={issuingId === r.id}
-              onClick={async () => {
-                setIssuingId(r.id)
-                try {
-                  await issueMut.mutateAsync(r.id)
-                } finally {
-                  setIssuingId(null)
-                }
-              }}
-            />
-          </Tooltip>
+          <PermGuard perm="acme:admin">
+            <Tooltip title={r.status === 'issued' ? '重新签发' : '立即签发'}>
+              <Button
+                size="small"
+                type="text"
+                icon={<CloudUploadOutlined />}
+                loading={issuingId === r.id}
+                onClick={async () => {
+                  setIssuingId(r.id)
+                  try {
+                    await issueMut.mutateAsync(r.id)
+                  } finally {
+                    setIssuingId(null)
+                  }
+                }}
+              />
+            </Tooltip>
+          </PermGuard>
           {r.status === 'issued' && (
             <Space.Compact size="small">
               <Button size="small" type="text" icon={<DownloadOutlined />} onClick={() => void download(r, 'cert')}>
@@ -372,27 +375,31 @@ const Acme = () => {
             </Space.Compact>
           )}
           {r.deployAgentId && r.status === 'issued' && (
-            <Tooltip title={`立即部署到 ${r.deployAgentId}`}>
-              <Button
-                size="small"
-                type="text"
-                icon={<SendOutlined />}
-                loading={deployingId === r.id}
-                onClick={async () => {
-                  setDeployingId(r.id)
-                  try {
-                    await deployMut.mutateAsync(r.id)
-                  } finally {
-                    setDeployingId(null)
-                  }
-                }}
-              />
-            </Tooltip>
+            <PermGuard perm="acme:admin">
+              <Tooltip title={`立即部署到 ${r.deployAgentId}`}>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<SendOutlined />}
+                  loading={deployingId === r.id}
+                  onClick={async () => {
+                    setDeployingId(r.id)
+                    try {
+                      await deployMut.mutateAsync(r.id)
+                    } finally {
+                      setDeployingId(null)
+                    }
+                  }}
+                />
+              </Tooltip>
+            </PermGuard>
           )}
-          <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
-          <Popconfirm title="删除该签发配置？（仅删本地记录，不吊销 CA 侧证书）" onConfirm={() => deleteMut.mutate(r.id)}>
-            <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          <PermGuard perm="acme:write">
+            <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
+            <Popconfirm title="删除该签发配置？（仅删本地记录，不吊销 CA 侧证书）" onConfirm={() => deleteMut.mutate(r.id)}>
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </PermGuard>
         </Space>
       ),
     },
@@ -428,21 +435,23 @@ const Acme = () => {
             style={{ width: 130 }}
           />
         )}
-        <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
-          保存
-        </Button>
-        <Button
-          size="small"
-          onClick={() => {
-            emailForm.setFieldsValue({ email: account?.email ?? '' })
-            setAccountOpen(true)
-          }}
-        >
-          账户邮箱{account?.email ? `：${account.email}` : '未设置'}
-        </Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新建签发
-        </Button>
+        <PermGuard perm="acme:write">
+          <Button size="small" onClick={() => void saveScanConfig()} loading={savingScan}>
+            保存
+          </Button>
+          <Button
+            size="small"
+            onClick={() => {
+              emailForm.setFieldsValue({ email: account?.email ?? '' })
+              setAccountOpen(true)
+            }}
+          >
+            账户邮箱{account?.email ? `：${account.email}` : '未设置'}
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新建签发
+          </Button>
+        </PermGuard>
       </Space>
       <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
         通过 DNS-01 验证签发 Let&apos;s Encrypt 证书：无需公网可达端口，支持泛域名；签发全程在 server 侧完成，已签发证书会同步出现在「资源 → 证书」。

@@ -16,6 +16,7 @@ import DesktopModal from '@/components/DesktopModal'
 import VNCModal from '@/components/VNCModal'
 import AgentSidebar from '@/workbench/AgentSidebar'
 import ConnectionPanel from '@/workbench/ConnectionPanel'
+import { PermGuard } from '@/components/PermGuard'
 import LogsPanel from '@/workbench/LogsPanel'
 import OverviewPanel from '@/workbench/OverviewPanel'
 import { getRemoteServices } from '@/workbench/services'
@@ -114,16 +115,18 @@ const Workbench = () => {
         <Col xs={24} lg={17} xl={18} style={{ display: 'flex' }}>
           <Card title={selectedAgent ? selectedAgent.hostname || selectedAgent.id : '工作台'} style={{ width: '100%' }}>
             <Space style={{ marginBottom: 16 }} wrap>
-              {protocolTabs.map((item) => (
-                <Button
-                  key={item.key}
-                  icon={item.icon}
-                  type={tab === item.key ? 'primary' : 'default'}
-                  onClick={() => openConnection(item.key)}
-                >
-                  {item.label}
-                </Button>
-              ))}
+              <PermGuard perm="terminal:write">
+                {protocolTabs.map((item) => (
+                  <Button
+                    key={item.key}
+                    icon={item.icon}
+                    type={tab === item.key ? 'primary' : 'default'}
+                    onClick={() => openConnection(item.key)}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </PermGuard>
             </Space>
 
             <Tabs
