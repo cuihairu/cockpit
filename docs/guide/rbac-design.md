@@ -78,7 +78,7 @@ CA 目录切换归 `acme:admin`，查看证书列表 `acme:read`）。
 | 2 | server：路由权限表（path 前缀 × method → 权限点，支持 AND 语义，domain-binding 增删改要求 `dns:write`+`proxy:write`）+ `authorize` 判定层（auth 后、serveAPI 分发前；每请求查库，角色缺失 fail-closed 403）+ 隐含规则（write⊇read、admin⊇write）+ 三角色矩阵测试。**不删存量判定**——authorize 拦在前，散落 `Role != "admin"` 暂成双保险 | ✅ |
 | 3 | 收敛：删 10 处散落 `Role != "admin"`（api.go ×7、api_proxy.go ×3），users/settings 端点改走权限表。落地时追加两项：创建/更新用户时校验角色名在角色表存在（幽灵角色 fail-closed 会锁号，`errors.Is(ErrNotFound)` 才 400、库故障放行 500）；创建用户默认角色 user→viewer（D9 迁移后 user 已不存在）。改密免验旧密码条件从 admin 字符串改为 `userHasPerm(users:admin)` | ✅ |
 | 4 | 角色/用户管理 API：`/api/roles` CRUD（仅 `roles:admin`）+ D13 自我保护（最后一个有效 admin 不可删/降级、不可改自己角色）+ D14 403 入审计。落地时追加三项：**「有效 admin」= 角色在角色表存在且覆盖 `users:admin`**（幽灵角色不算）；D13 计数出错时同样拒绝（fail-safe，库故障不做保护性变更）；RBAC 403 短路不经过内层 auth 挂点，审计层在请求前做可选认证（有效 Bearer 先塞 ctx）保证能记到「谁」被拒——内层 auth 幂等重复解析无害 | ✅ |
-| P1 | web：用户/角色管理页、`/api/me` permissions、菜单裁剪（拆笔见下表） | 拆 4 笔 |
+| P1 | web：用户/角色管理页、`/api/me` permissions、菜单裁剪（拆笔见下表） | ✅（笔 5–8b，验收达成：viewer 全站无写入口） |
 
 ## 实现状态（P1 拆笔）
 
