@@ -266,7 +266,7 @@ jobs:
           | \`cockpit-agent-windows-amd64-nightly.tar.gz\` | Windows Agent | x86_64 |
           | \`cockpit-darwin-arm64-nightly.tar.gz\` | macOS | Apple Silicon |
           | \`cockpit-agent-darwin-arm64-nightly.tar.gz\` | macOS Agent | Apple Silicon |
-          | \`cockpit-agent-*_*.ipk / cockpit-agent-openwrt-*.tar.gz\` | OpenWrt Agent | mipsel/mips/aarch64_generic/arm_cortex-a7/x86_64 |
+          | \`cockpit-agent_*.ipk / cockpit-agent-openwrt-*.tar.gz\` | OpenWrt Agent | mipsel/mips/aarch64_generic/arm_cortex-a7/x86_64 |
           | \`cockpit-web-nightly.tar.gz\` | Web UI | cross-platform |" \
             dist/cockpit-linux-amd64-nightly.tar.gz \
             dist/cockpit-agent-linux-amd64-nightly.tar.gz \
@@ -274,6 +274,6 @@ jobs:
             dist/cockpit-agent-windows-amd64-nightly.tar.gz \
             dist/cockpit-darwin-arm64-nightly.tar.gz \
             dist/cockpit-agent-darwin-arm64-nightly.tar.gz \
-            dist/cockpit-agent-*_*.ipk \
+            dist/cockpit-agent_*.ipk \
             dist/cockpit-agent-openwrt-*.tar.gz \
             dist/cockpit-web-nightly.tar.gz
