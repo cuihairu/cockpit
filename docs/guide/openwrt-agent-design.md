@@ -103,14 +103,60 @@ nightly.yml 新增 `build-openwrt` job（ubuntu-latest）：
 
 ## 安装与升级
 
+产物发布在 [nightly release](https://github.com/cuihairu/cockpit/releases/tag/nightly)：
+`cockpit-agent_<版本>_<架构>.ipk`（opkg 安装）与
+`cockpit-agent-openwrt-<架构>.tar.gz`（手动解包，文件树相同）。
+
+### 1. 确认设备架构
+
+路由器上执行 `opkg print-architecture`（或 `uname -m`），对照上表
+架构矩阵；主流 mt7621/mt7628 设备为 `mipsel`。
+
+### 2. 下载并上传
+
+本地机器：
+
 ```sh
-opkg install cockpit-agent_*_mipsel.ipk
-uci set cockpit-agent.main.server='wss://...'
-uci set cockpit-agent.main.secret='...'
-/etc/init.d/cockpit-agent enable && /etc/init.d/cockpit-agent start
+gh release download nightly -R cuihairu/cockpit -p 'cockpit-agent_*_mipsel.ipk'
+scp cockpit-agent_*_mipsel.ipk root@192.168.1.1:/tmp/
 ```
 
-升级：`opkg install 新包`，UCI 配置保留（conffiles），procd 自动重启。
+（浏览器下载：打开 release 页选对应架构的 .ipk 即可。）
+
+### 3. 安装与配置
+
+路由器上：
+
+```sh
+opkg install /tmp/cockpit-agent_*_mipsel.ipk
+# postinst 已自动执行 /etc/init.d/cockpit-agent enable
+uci set cockpit-agent.main.server='wss://cockpit.example.com/ws'
+uci set cockpit-agent.main.secret='YOUR_AGENT_SECRET'
+uci commit cockpit-agent
+/etc/init.d/cockpit-agent start
+```
+
+### 4. 验证与排障
+
+```sh
+ubus call service list | grep -A3 cockpit-agent   # procd 运行状态
+logread | grep cockpit-agent                      # 日志（stdout/stderr 进 logd）
+```
+
+Web UI 的 Agent 列表出现该设备即注册成功。启动失败最常见的两种：
+`server 未配置`（init 脚本拒绝启动，先 uci set server）与
+`connect failed`（server 地址不通/secret 不符，看 logread）。
+
+### 升级与卸载
+
+```sh
+opkg install /tmp/cockpit-agent_新版本_mipsel.ipk   # UCI 配置保留（conffiles）
+opkg remove cockpit-agent                           # 卸载；/etc/config 按惯例保留
+```
+
+无 opkg 场景（自编译固件裁掉了 opkg）：scp tar.gz 上去解包到根目录，
+`/etc/init.d/cockpit-agent enable && start` 同样可用——纯静态二进制
+无任何运行时依赖，musl/glibc 通吃。
 
 ## 非目标
 

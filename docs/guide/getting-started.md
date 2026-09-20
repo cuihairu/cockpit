@@ -105,6 +105,11 @@ $env:ADMIN_PASSWORD = 'change-this-password'
 
 ## 启动 Agent
 
+OpenWrt 路由器无需手工编译：nightly release 提供 5 架构
+`.ipk` 安装包（opkg 即装、procd 托管、UCI 配置），安装步骤见
+[OpenWrt Agent 打包设计](/guide/openwrt-agent-design#安装与升级)。
+
+其余 Linux/Windows/macOS 节点：下载对应平台 `cockpit-agent` 二进制，
 在被管理节点上运行：
 
 ```bash
