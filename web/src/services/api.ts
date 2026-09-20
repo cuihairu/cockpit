@@ -81,6 +81,10 @@ import type {
   AcmeCertInput,
   AcmeAccount,
   AcmeScanConfig,
+  DomainBinding,
+  DomainBindingInput,
+  DomainApplyStep,
+  DomainDriftResponse,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -1120,6 +1124,56 @@ class ApiService {
 
   async putAcmeScanConfig(scanIntervalSeconds: number): Promise<void> {
     await this.client.put('/acme/config', { scan_interval_seconds: scanIntervalSeconds })
+  }
+
+  // ========== 服务域名绑定（domain-binding-design.md） ==========
+
+  async getDomainBindings(agentId?: string): Promise<DomainBinding[]> {
+    const resp = await this.client.get<unknown, { data: DomainBinding[] }>('/domains', {
+      params: agentId ? { agent: agentId } : undefined,
+    })
+    return resp.data ?? []
+  }
+
+  async saveDomainBinding(input: DomainBindingInput): Promise<DomainBinding> {
+    return this.client.post<unknown, DomainBinding>('/domains', input)
+  }
+
+  async deleteDomainBinding(domain: string): Promise<void> {
+    await this.client.delete(`/domains/${encodeURIComponent(domain)}`)
+  }
+
+  // 执行三联动，返回各步骤结果
+  async applyDomainBinding(
+    domain: string,
+  ): Promise<{ domain: string; status: string; steps: DomainApplyStep[] }> {
+    return this.client.post<unknown, { domain: string; status: string; steps: DomainApplyStep[] }>(
+      `/domains/${encodeURIComponent(domain)}/apply`,
+    )
+  }
+
+  // D6 漂移检查（实时逐条；按需触发，不内嵌列表）
+  async getDomainDrift(agentId?: string): Promise<DomainDriftResponse> {
+    return this.client.get<unknown, DomainDriftResponse>('/domains/drift', {
+      params: agentId ? { agent: agentId } : undefined,
+    })
+  }
+
+  // D7 该 agent 的域名清单
+  async getAgentDomains(agentId: string): Promise<DomainBinding[]> {
+    const resp = await this.client.get<unknown, { data: DomainBinding[] }>(
+      `/agents/${encodeURIComponent(agentId)}/domains`,
+    )
+    return resp.data ?? []
+  }
+
+  // D7 配置片段（text/plain：env 行 + nginx server_name 行）
+  async getAgentDomainsSnippet(agentId: string): Promise<string> {
+    const resp = await this.client.get<unknown, string>(
+      `/agents/${encodeURIComponent(agentId)}/domains/snippet`,
+      { responseType: 'text' },
+    )
+    return resp
   }
 }
 

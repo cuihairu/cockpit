@@ -23,6 +23,7 @@ import {
   ThunderboltOutlined,
   SafetyCertificateOutlined,
   GlobalOutlined,
+  LinkOutlined,
   VideoCameraOutlined,
   FileSearchOutlined,
 } from '@ant-design/icons'
@@ -53,6 +54,7 @@ const Disk = lazy(() => import('./pages/Disk'))
 const Nas = lazy(() => import('./pages/Nas'))
 const Drift = lazy(() => import('./pages/Drift'))
 const DNS = lazy(() => import('./pages/DNS'))
+const Domains = lazy(() => import('./pages/Domains'))
 const Acme = lazy(() => import('./pages/Acme'))
 const Recordings = lazy(() => import('./pages/Recordings'))
 const Settings = lazy(() => import('./pages/Settings'))
@@ -184,6 +186,11 @@ const routeConfig: ProLayoutProps['route'] = {
       path: '/dns',
       name: 'DNS 管理',
       icon: <GlobalOutlined />,
+    },
+    {
+      path: '/domains',
+      name: '域名绑定',
+      icon: <LinkOutlined />,
     },
     {
       path: '/monitor',
@@ -370,6 +377,7 @@ const MainLayout = () => {
             <Route path="/nas" element={<Nas />} />
             <Route path="/drift" element={<Drift />} />
             <Route path="/dns" element={<DNS />} />
+            <Route path="/domains" element={<Domains />} />
             <Route path="/acme" element={<Acme />} />
             <Route path="/recordings" element={<Recordings />} />
             <Route path="/monitor" element={<Monitor />} />
