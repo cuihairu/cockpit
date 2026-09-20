@@ -565,6 +565,62 @@ func boolOrTrue(v *bool) bool {
 	return *v
 }
 
+// handleAgentDomainsAPI D7 agent 域名引用：/agents/{id}/domains 清单与
+// /agents/{id}/domains/snippet 配置片段（rest 形如 "{agentID}/domains..."）。
+// agent 零协议变更——清单事实源在 server 库，消费方是人/脚本/配置生成。
+func (s *Server) handleAgentDomainsAPI(w http.ResponseWriter, r *http.Request, rest string) {
+	idx := strings.Index(rest, "/domains")
+	agentID, sub := rest[:idx], rest[idx+len("/domains"):]
+	// 清单先行：库故障 500；agent 不存在 → 404（空清单与坏 id 区分）
+	list, err := s.db.ListDomainBindingsByAgent(agentID)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to list domain bindings")
+		return
+	}
+	if _, err := s.db.GetAgent(agentID); err != nil {
+		s.handleError(w, r, http.StatusNotFound, "Agent not found")
+		return
+	}
+	if r.Method != http.MethodGet {
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	if sub == "/snippet" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte(domainBindingsSnippet(agentID, list)))
+		return
+	}
+	if sub != "" && sub != "/" {
+		s.handleError(w, r, http.StatusNotFound, "Not found")
+		return
+	}
+	s.writeList(w, list, len(list))
+}
+
+// domainBindingsSnippet 配置片段（text/plain）：env 行 + nginx server_name 行，
+// 只取 enabled 绑定——curl 即得，agent 上的任意服务可 source/复制
+func domainBindingsSnippet(agentID string, list []*storage.DomainBinding) string {
+	var domains []string
+	for _, b := range list {
+		if b.Enabled {
+			domains = append(domains, b.Domain)
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString("# cockpit domains for agent " + agentID +
+		" (generated " + time.Now().UTC().Format(time.RFC3339) + ")\n")
+	if len(domains) == 0 {
+		sb.WriteString("# no enabled domain bindings\n")
+		return sb.String()
+	}
+	sb.WriteString("COCKPIT_AGENT_DOMAINS=\"" + strings.Join(domains, " ") + "\"\n")
+	sb.WriteString("\n# nginx\n")
+	for _, d := range domains {
+		sb.WriteString("server_name " + d + ";\n")
+	}
+	return sb.String()
+}
+
 func (s *Server) auditDomainBinding(r *http.Request, action, domain string, details map[string]interface{}) {
 	username := "unknown"
 	if userInfo, ok := auth.GetUserFromContext(r); ok {

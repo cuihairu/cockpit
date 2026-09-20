@@ -462,6 +462,27 @@ func (r *Runner) notifyService(res ProbeResult, eventType, message string) {
 	})
 }
 
+// resolveBindingTarget 解析 binding://{agentID}/{target} 引用（D7）：
+// 按 agent+target 查 domain_bindings，命中 enabled 绑定返回
+// https://{当前域名}。target 可为 docker:// 形态（内含斜杠），引用方按
+// 第一个斜杠切分 agentID 后整串匹配。引用键稳定——binding 换域名
+// （删旧建新同 agent+target）后探测自动跟随。
+func (r *Runner) resolveBindingTarget(target string) (string, error) {
+	ref := strings.TrimPrefix(target, "binding://")
+	agentID, bt, ok := strings.Cut(ref, "/")
+	if !ok || agentID == "" || bt == "" {
+		return "", fmt.Errorf("invalid binding reference %q (want binding://agentID/target)", target)
+	}
+	b, err := r.db.GetDomainBindingByAgentTarget(agentID, bt)
+	if err != nil {
+		return "", fmt.Errorf("binding reference %q not found", target)
+	}
+	if !b.Enabled {
+		return "", fmt.Errorf("binding reference %q is disabled", target)
+	}
+	return "https://" + b.Domain, nil
+}
+
 // probeService 探测单个服务
 func (r *Runner) probeService(s *storage.Service) ProbeResult {
 	pr := ProbeResult{
@@ -474,6 +495,26 @@ func (r *Runner) probeService(s *storage.Service) ProbeResult {
 	target := s.URL
 	if target == "" {
 		target = s.Name
+	}
+
+	// D7 域名引用：binding://{agentID}/{target} 解析为 https://{当前域名}——
+	// 引用键稳定，binding 换域名后探测自动跟随（不手抄）。仅 http/https 可用；
+	// 引用失效记 down 报错（可见，不静默）
+	if strings.HasPrefix(target, "binding://") {
+		if s.Type != "http" && s.Type != "https" {
+			pr.Status = "down"
+			pr.Error = "binding reference requires http/https type"
+			pr.Message = pr.Error
+			return pr
+		}
+		resolved, err := r.resolveBindingTarget(target)
+		if err != nil {
+			pr.Status = "down"
+			pr.Error = err.Error()
+			pr.Message = err.Error()
+			return pr
+		}
+		target = resolved
 	}
 
 	switch s.Type {

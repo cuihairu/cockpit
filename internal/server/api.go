@@ -104,6 +104,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			s.handleAgentDriftAPI(w, r, agentID)
 			return
 		}
+		// agent 域名清单 /agents/{id}/domains[/snippet]（见 api_domain_bindings.go，D7）
+		if strings.HasSuffix(agentID, "/domains") || strings.Contains(agentID, "/domains/") {
+			s.handleAgentDomainsAPI(w, r, agentID)
+			return
+		}
 		// 组网工具观测 /agents/{id}/overlay/...（见 api_overlay.go）
 		if strings.Contains(agentID, "/overlay/") {
 			s.handleAgentOverlayAPI(w, r, agentID)

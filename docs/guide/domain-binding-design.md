@@ -45,12 +45,12 @@
 | D4 | 反代下发 | `autoProxy` 开时复用既有 traefik `ApplySite`（ServerNames=[domain], Upstream=target），server 纯转发、agent 本地渲染+自检 | 完全复用 P1 反代通道，零新协议 |
 | D5 | 证书联动 | `autoCert` 开时域名自动进入 cert 监控清单；反向：Binding 删除时提示（不自动删）监控项 | 监控宁可多盯不可漏盯；自动删除监控是危险默认 |
 | D6 | 一致性检查 | Binding 列表页展示「漂移」：DNS 实际记录 ≠ 期望、站点未下发、监控缺失，逐项标记 | 登记了不等于生效了；漂移可见是自助排障第一步 |
-| D7 | agent 引用 | 新增只读 RPC `domains.list`（server 从库下发该 agent 的域名清单）；probe 目标、未来任何 agent 侧配置可直接引用域名 | 换域名只改 Binding，agent 配置拉取即新 |
+| D7 | agent 引用 | `GET /api/agents/{id}/domains`（含 `/snippet` 配置片段生成）下发该 agent 的域名清单；probe 目标支持 `binding://` 引用形态，解析点在 server 探测链路 | 换域名只改 Binding，引用键（agent+target）稳定则探测自动跟随 |
 | D8 | 删除语义 | 删 Binding 只删登记，不动已下发的 DNS/站点/监控项（提示手工清理） | 删除自动化连锁是危险操作；先可见后清理 |
 | D9 | 权限 | 增删改需 `dns:write` + `proxy:write`（联动了谁就要谁的权限）；只读沿用 `dns:read` | 与 RBAC 设计（rbac-design.md）权限点清单衔接 |
 | D10 | 存储 | 复用 settings/inventory 现有 SQLite，GORM 单表 `domain_bindings` | 无新依赖；量级（个位数到几十条）不值得独立存储 |
 
-## API（server 侧，agent 零协议变更除 D7 新增只读方法）
+## API（server 侧，agent 零协议变更）
 
 ```
 GET    /api/domains?agent=xxx     列表
@@ -58,7 +58,29 @@ GET    /api/domains/drift?agent=xxx  漂移检查（D6，实时逐条检查三�
 POST   /api/domains               登记/更新
 DELETE /api/domains/{domain}      删登记（D8）
 POST   /api/domains/{domain}/apply   执行联动（DNS/反代/证书按 auto* 开关）
+GET    /api/agents/{id}/domains      该 agent 的域名清单（D7）
+GET    /api/agents/{id}/domains/snippet  配置片段（D7，text/plain）
 ```
+
+### D7 agent 引用细化
+
+早期草案写「只读 RPC `domains.list`」——落地改为 **HTTP 端点**：现有
+RPC 协议是 server→agent 单向（agent 响应），而域名清单的事实源在
+server 库，「下发」的天然形态是 server 端点；agent 本身不消费清单
+（agent 零协议变更保持），消费方是人 / 脚本 / 配置生成。
+
+- **清单**：`GET /api/agents/{id}/domains`，数据源
+  `ListDomainBindingsByAgent`，agent 必须已注册（404）
+- **片段**：`GET /api/agents/{id}/domains/snippet` 返回 text/plain，
+  含 env 行（`COCKPIT_AGENT_DOMAINS="…"`）与 nginx `server_name` 行
+  两段，只取 enabled 绑定——curl 即得、agent 上的任意服务可 source
+- **probe 引用**：`Service.URL` 支持 `binding://{agentID}/{target}`
+  形态（如 `binding://a1/127.0.0.1:8080`、`binding://a1/docker://web`）。
+  探测时 probe Runner 查 binding 表按 agent+target 解析出当前域名，
+  以 `https://{domain}` 探测——引用键稳定，binding 换域名（删旧建新
+  同 agent+target）后探测自动跟随，不再手抄。仅 http/https 类型可用；
+  引用无匹配 / 绑定停用 / 类型不符 → 探测结果记 down 并报错（可见，
+  不静默）
 
 ### D6 漂移检查细化
 
@@ -96,6 +118,8 @@ agent RPC，内嵌会把列表拖到秒级），排障时主动触发。
   联动（语义见上节细化）。换绑 cert 监控项走 `UpdateDomainAgentID` 显式
   更新——GORM `Assign(struct)` 对已存在记录不落库，`UpsertDomain` 承担不了
   换绑语义（存量坑另记）。
+- 2026-09-20：D7 agent 引用落地——`GET /api/agents/{id}/domains`（+
+  `/snippet` 配置片段）与 probe `binding://` 引用解析（细化见上节）。
   未含：dashboard 页面（web UI 另行）、D9 权限点（沿用 admin 中间件现状）。
 
 ## 不做的事

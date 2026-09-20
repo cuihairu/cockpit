@@ -112,3 +112,43 @@ func TestDomainBindingListClosedDB(t *testing.T) {
 		t.Error("ListDomainBindingsByAgent on closed db should fail")
 	}
 }
+
+func TestGetDomainBindingByAgentTarget(t *testing.T) {
+	db := testBindingDB(t)
+	for _, b := range []*DomainBinding{
+		{Domain: "blog.example.com", AgentID: "a1", Target: "127.0.0.1:8080", Enabled: true},
+		{Domain: "nas.example.com", AgentID: "a1", Target: "docker://nas", Enabled: true},
+		{Domain: "api.example.com", AgentID: "a2", Target: "127.0.0.1:8080", Enabled: true},
+	} {
+		if err := db.SaveDomainBinding(b); err != nil {
+			t.Fatalf("seed %s: %v", b.Domain, err)
+		}
+	}
+
+	// 命中：agent+target 精确匹配（docker:// 含斜杠整串匹配）
+	got, err := db.GetDomainBindingByAgentTarget("a1", "127.0.0.1:8080")
+	if err != nil || got.Domain != "blog.example.com" {
+		t.Fatalf("lookup = %+v (%v), want blog.example.com", got, err)
+	}
+	got, err = db.GetDomainBindingByAgentTarget("a1", "docker://nas")
+	if err != nil || got.Domain != "nas.example.com" {
+		t.Fatalf("docker lookup = %+v (%v), want nas.example.com", got, err)
+	}
+
+	// 同 target 不同 agent 不串
+	got2, err := db.GetDomainBindingByAgentTarget("a2", "127.0.0.1:8080")
+	if err != nil || got2.Domain != "api.example.com" {
+		t.Fatalf("a2 lookup = %+v (%v), want api.example.com", got2, err)
+	}
+
+	// 未命中 → ErrNotFound（与库故障区分）
+	if _, err := db.GetDomainBindingByAgentTarget("a1", "10.0.0.1:9999"); err != ErrNotFound {
+		t.Errorf("miss should be ErrNotFound, got %v", err)
+	}
+
+	// closed db：库故障分支（非 NotFound）
+	db.Close()
+	if _, err := db.GetDomainBindingByAgentTarget("a1", "127.0.0.1:8080"); err == nil || err == ErrNotFound {
+		t.Errorf("closed db should fail with real error, got %v", err)
+	}
+}

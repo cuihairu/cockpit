@@ -2,6 +2,8 @@ package storage
 
 import (
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // DomainBinding 服务域名绑定（见 docs/guide/domain-binding-design.md D1/D2）：
@@ -47,6 +49,21 @@ func (d *DB) ListDomainBindingsByAgent(agentID string) ([]*DomainBinding, error)
 func (d *DB) GetDomainBinding(domain string) (*DomainBinding, error) {
 	var b DomainBinding
 	if err := d.db.Where("domain = ?", domain).First(&b).Error; err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// GetDomainBindingByAgentTarget 按 agent+target 取绑定（probe 引用解析用，
+// 见 domain-binding-design.md D7）。target 含 docker:// 形态（有斜杠），
+// 引用方按第一个斜杠切分 agentID 后整串传入。未命中返回 ErrNotFound。
+func (d *DB) GetDomainBindingByAgentTarget(agentID, target string) (*DomainBinding, error) {
+	var b DomainBinding
+	err := d.db.Where("agent_id = ? AND target = ?", agentID, target).First(&b).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
 	return &b, nil
