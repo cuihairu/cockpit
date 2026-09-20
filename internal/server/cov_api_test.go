@@ -45,14 +45,14 @@ func TestCovServeAPIRoutes(t *testing.T) {
 		{"agent cron", http.MethodGet, "/api/agents/a1/cron/jobs", http.StatusServiceUnavailable},
 		{"agent logs", http.MethodPost, "/api/agents/a1/logs/query", http.StatusServiceUnavailable},
 		{"agent drift", http.MethodPost, "/api/agents/a1/drift/check", http.StatusServiceUnavailable},
-		{"agent secret", http.MethodGet, "/api/agents/a1/secret", http.StatusForbidden},
+		{"agent secret", http.MethodGet, "/api/agents/a1/secret", http.StatusNotFound},
 		{"agent get", http.MethodGet, "/api/agents/a1", http.StatusNotFound},
 		{"resources domains", http.MethodGet, "/api/resources/domains", http.StatusOK},
 		{"resources wrong method", http.MethodPatch, "/api/resources/domains", http.StatusMethodNotAllowed},
 		{"resources unknown type", http.MethodGet, "/api/resources/unknown", http.StatusNotFound},
 		{"users", http.MethodGet, "/api/users", http.StatusOK},
 		{"users sub wrong method", http.MethodPatch, "/api/users/1", http.StatusMethodNotAllowed},
-		{"users sub", http.MethodPut, "/api/users/1", http.StatusUnauthorized},
+		{"users sub", http.MethodPut, "/api/users/1", http.StatusNotFound},
 		{"alerts", http.MethodGet, "/api/alerts", http.StatusUnauthorized},
 		{"alerts read-all", http.MethodPut, "/api/alerts/read-all", http.StatusUnauthorized},
 		{"alerts action", http.MethodPut, "/api/alerts/1/read", http.StatusUnauthorized},
@@ -411,19 +411,10 @@ func TestCovHandleUsersWrongMethod(t *testing.T) {
 func TestCovHandleUserCreateBranches(t *testing.T) {
 	s := covNewServer(t)
 	admin := covSeedUser(t, s, "admin", "admin12345", "admin")
-
-	// 无用户上下文 → 401
-	rec := covRec()
-	s.handleUserCreate(rec, covReq(http.MethodPost, "/api/users", strings.NewReader(`{}`)))
-	covWantCode(t, "no ctx", rec, http.StatusUnauthorized)
-
-	// 非 admin → 403
-	rec = covCallAuth(s, s.handleUserCreate,
-		covAuthReq(http.MethodPost, "/api/users", strings.NewReader(`{}`), "2", "bob", "user"))
-	covWantCode(t, "not admin", rec, http.StatusForbidden)
+	// 401/403 判定已收敛到外层 auth + RBAC 中间件（rbac_test.go 矩阵）
 
 	// 非法 JSON → 400
-	rec = covCallAuth(s, s.handleUserCreate,
+	rec := covCallAuth(s, s.handleUserCreate,
 		covAuthReq(http.MethodPost, "/api/users", strings.NewReader("not-json"), admin.ID, "admin", "admin"))
 	covWantCode(t, "bad json", rec, http.StatusBadRequest)
 
@@ -431,6 +422,11 @@ func TestCovHandleUserCreateBranches(t *testing.T) {
 	rec = covCallAuth(s, s.handleUserCreate,
 		covAuthReq(http.MethodPost, "/api/users", strings.NewReader(`{}`), admin.ID, "admin", "admin"))
 	covWantCode(t, "empty fields", rec, http.StatusBadRequest)
+
+	// 幽灵角色 → 400（RBAC fail-closed 防锁号）
+	rec = covCallAuth(s, s.handleUserCreate,
+		covAuthReq(http.MethodPost, "/api/users", strings.NewReader(`{"username":"u1","password":"goodpass","role":"user"}`), admin.ID, "admin", "admin"))
+	covWantCode(t, "unknown role", rec, http.StatusBadRequest)
 
 	// 用户名已存在 → 409
 	rec = covCallAuth(s, s.handleUserCreate,
@@ -445,10 +441,10 @@ func TestCovHandleUserCreateBranches(t *testing.T) {
 
 	// 创建成功 → 201
 	rec = covCallAuth(s, s.handleUserCreate,
-		covAuthReq(http.MethodPost, "/api/users", strings.NewReader(`{"username":"u1","password":"goodpass","role":"user"}`), admin.ID, "admin", "admin"))
+		covAuthReq(http.MethodPost, "/api/users", strings.NewReader(`{"username":"u1","password":"goodpass","role":"viewer"}`), admin.ID, "admin", "admin"))
 	covWantCode(t, "created", rec, http.StatusCreated)
 
-	// closed db：GetUserByUsername 出错放行、CreateUser 失败 → 500
+	// closed db：GetRole 非 NotFound 放行、CreateUser 失败 → 500
 	s2 := covNewServer(t)
 	covCloseDB(t, s2)
 	rec = covCallAuth(s2, s2.handleUserCreate,
@@ -460,7 +456,6 @@ func TestCovHandleUserDeleteBranches(t *testing.T) {
 	s := covNewServer(t)
 	admin := covSeedUser(t, s, "admin", "admin12345", "admin")
 	bob := covSeedUser(t, s, "bob", "bobpass123", "user")
-	carol := covSeedUser(t, s, "carol", "carolpass1", "user")
 
 	// 无上下文 → 401
 	rec := covRec()
@@ -479,13 +474,7 @@ func TestCovHandleUserDeleteBranches(t *testing.T) {
 	}, covAuthReq(http.MethodDelete, "/api/users/"+admin.ID, nil, admin.ID, "admin", "admin"))
 	covWantCode(t, "delete self", rec, http.StatusBadRequest)
 
-	// 非 admin 删他人 → 403
-	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
-		s.handleUserDelete(w, r, carol.ID)
-	}, covAuthReq(http.MethodDelete, "/api/users/"+carol.ID, nil, bob.ID, "bob", "user"))
-	covWantCode(t, "forbidden", rec, http.StatusForbidden)
-
-	// admin 删除他人 → 200
+	// admin 删除他人 → 200（非 admin 判定已收敛到 RBAC 中间件）
 	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
 		s.handleUserDelete(w, r, bob.ID)
 	}, covAuthReq(http.MethodDelete, "/api/users/"+bob.ID, nil, admin.ID, "admin", "admin"))
@@ -496,11 +485,13 @@ func TestCovHandleUserChangePasswordBranches(t *testing.T) {
 	s := covNewServer(t)
 	admin := covSeedUser(t, s, "admin", "admin12345", "admin")
 	bob := covSeedUser(t, s, "bob", "bobpass123", "user")
+	// 401 语义收敛到外层 auth + RBAC 中间件（rbac_test.go 矩阵）
 
-	// 无上下文 → 401
+	// 无认证上下文：userHasPerm 判 false → 走验旧密码分支 → 401
 	rec := covRec()
-	s.handleUserChangePassword(rec, covReq(http.MethodPost, "/api/users/"+bob.ID+"/password", nil), bob.ID)
-	covWantCode(t, "no ctx", rec, http.StatusUnauthorized)
+	s.handleUserChangePassword(rec, covReq(http.MethodPost, "/api/users/"+bob.ID+"/password",
+		strings.NewReader(`{"old_password":"wrong","new_password":"newpass123"}`)), bob.ID)
+	covWantCode(t, "no ctx wrong old password", rec, http.StatusUnauthorized)
 
 	// 目标不存在 → 404
 	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
@@ -508,12 +499,12 @@ func TestCovHandleUserChangePasswordBranches(t *testing.T) {
 	}, covAuthReq(http.MethodPost, "/api/users/ghost/password", nil, admin.ID, "admin", "admin"))
 	covWantCode(t, "not found", rec, http.StatusNotFound)
 
-	// 非 admin 修改他人密码 → 403
+	// 无 users:admin 权限改他人密码 → 走验旧密码分支，旧密码错 → 401
 	body := `{"old_password":"x","new_password":"newpass123"}`
 	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
 		s.handleUserChangePassword(w, r, admin.ID)
 	}, covAuthReq(http.MethodPost, "/api/users/"+admin.ID+"/password", strings.NewReader(body), bob.ID, "bob", "user"))
-	covWantCode(t, "change other forbidden", rec, http.StatusForbidden)
+	covWantCode(t, "no perm wrong old password", rec, http.StatusUnauthorized)
 
 	// 非法 JSON → 400
 	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
@@ -560,14 +551,10 @@ func TestCovHandleUserUpdateBranches(t *testing.T) {
 	s := covNewServer(t)
 	admin := covSeedUser(t, s, "admin", "admin12345", "admin")
 	bob := covSeedUser(t, s, "bob", "bobpass123", "user")
-
-	// 无上下文 → 401
-	rec := covRec()
-	s.handleUserUpdate(rec, covReq(http.MethodPut, "/api/users/"+bob.ID, nil), bob.ID)
-	covWantCode(t, "no ctx", rec, http.StatusUnauthorized)
+	// 401/403 语义收敛到外层 auth + RBAC 中间件（rbac_test.go 矩阵）
 
 	// 目标不存在 → 404
-	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
+	rec := covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
 		s.handleUserUpdate(w, r, "ghost")
 	}, covAuthReq(http.MethodPut, "/api/users/ghost", nil, admin.ID, "admin", "admin"))
 	covWantCode(t, "not found", rec, http.StatusNotFound)
@@ -578,17 +565,11 @@ func TestCovHandleUserUpdateBranches(t *testing.T) {
 	}, covAuthReq(http.MethodPut, "/api/users/"+bob.ID, strings.NewReader("not-json"), bob.ID, "bob", "user"))
 	covWantCode(t, "bad json", rec, http.StatusBadRequest)
 
-	// bob 改 admin 的邮箱 → 403
-	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
-		s.handleUserUpdate(w, r, admin.ID)
-	}, covAuthReq(http.MethodPut, "/api/users/"+admin.ID, strings.NewReader(`{"email":"x@y.z"}`), bob.ID, "bob", "user"))
-	covWantCode(t, "email forbidden", rec, http.StatusForbidden)
-
-	// bob 尝试改自己角色 → 403
+	// 幽灵角色 → 400（角色表校验防锁号）
 	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
 		s.handleUserUpdate(w, r, bob.ID)
-	}, covAuthReq(http.MethodPut, "/api/users/"+bob.ID, strings.NewReader(`{"role":"admin"}`), bob.ID, "bob", "user"))
-	covWantCode(t, "role forbidden", rec, http.StatusForbidden)
+	}, covAuthReq(http.MethodPut, "/api/users/"+bob.ID, strings.NewReader(`{"role":"user"}`), bob.ID, "bob", "user"))
+	covWantCode(t, "unknown role", rec, http.StatusBadRequest)
 
 	// bob 更新自己邮箱（不改角色）→ 200
 	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
@@ -599,7 +580,7 @@ func TestCovHandleUserUpdateBranches(t *testing.T) {
 	// admin 更新他人角色 → 200
 	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
 		s.handleUserUpdate(w, r, bob.ID)
-	}, covAuthReq(http.MethodPut, "/api/users/"+bob.ID, strings.NewReader(`{"role":"user","email":"bob3@test.local"}`), admin.ID, "admin", "admin"))
+	}, covAuthReq(http.MethodPut, "/api/users/"+bob.ID, strings.NewReader(`{"role":"viewer","email":"bob3@test.local"}`), admin.ID, "admin", "admin"))
 	covWantCode(t, "admin update ok", rec, http.StatusOK)
 }
 

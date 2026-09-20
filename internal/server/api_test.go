@@ -616,22 +616,8 @@ func TestHandleUsersWrongMethod(t *testing.T) {
 	}
 }
 
-func TestHandleUserCreateUnauthorized(t *testing.T) {
-	s := newTestServerWithDB(t)
-
-	body, _ := json.Marshal(CreateUserRequest{
-		Username: "newuser",
-		Password: "pass123",
-	})
-	req := httptest.NewRequest("POST", "/api/users", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-
-	s.handleUserCreate(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-}
+// 未认证 401 / 无权限 403 语义由外层 auth + RBAC 中间件承担（rbac_test.go
+// 矩阵覆盖），handler 直调用例不再断言 unauthorized
 
 func TestHandleUserCreateSuccess(t *testing.T) {
 	s := newTestServerWithDB(t)
@@ -641,7 +627,7 @@ func TestHandleUserCreateSuccess(t *testing.T) {
 		Username: "newuser",
 		Password: "pass123",
 		Email:    "new@test.com",
-		Role:     "user",
+		Role:     "viewer",
 	})
 	_, req := doAuthenticatedRequest(s, "POST", "/api/users", body)
 	result := callWithAuth(s, s.handleUserCreate, req)
@@ -1288,31 +1274,8 @@ func TestHandleUserDeleteUnauthorized(t *testing.T) {
 	}
 }
 
-func TestHandleUserUpdateUnauthorized(t *testing.T) {
-	s := newTestServerWithDB(t)
-
-	req := httptest.NewRequest("PUT", "/api/users/1", nil)
-	rec := httptest.NewRecorder()
-
-	s.handleUserUpdate(rec, req, "1")
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-}
-
-func TestHandleUserChangePasswordUnauthorized(t *testing.T) {
-	s := newTestServerWithDB(t)
-
-	req := httptest.NewRequest("POST", "/api/users/1/password", nil)
-	rec := httptest.NewRecorder()
-
-	s.handleUserChangePassword(rec, req, "1")
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-}
+// 401/403 未认证与无权限语义收敛到外层 auth + RBAC 中间件（rbac_test.go
+// 矩阵覆盖），handler 直调 unauthorized 用例移除
 
 func TestHandleUserActionsNoPath(t *testing.T) {
 	s := newTestServerWithDB(t)
@@ -2357,20 +2320,6 @@ func TestHandleAgentSecretGetNonexistent(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("Status = %d, want %d", rr.Code, http.StatusNotFound)
-	}
-}
-
-func TestHandleAgentSecretGetNoAuth(t *testing.T) {
-	s := newTestServerWithDB(t)
-
-	s.db.UpsertAgent(&storage.Agent{ID: "test-agent", Hostname: "test-agent", Status: "online"})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/secret", nil)
-	rec := httptest.NewRecorder()
-	s.makeAgentSecretHandler("test-agent")(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("Status = %d, want %d", rec.Code, http.StatusForbidden)
 	}
 }
 

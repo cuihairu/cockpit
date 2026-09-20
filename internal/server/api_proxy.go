@@ -72,12 +72,8 @@ func (s *Server) handleProxyCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 验证管理员权限
-	userInfo, ok := auth.GetUserFromContext(r)
-	if !ok || userInfo.Role != "admin" {
-		http.Error(w, "Admin access required", http.StatusForbidden)
-		return
-	}
+	// 审计与 CreatedBy 用（RBAC proxy:write 已在中间件层拦截）
+	userInfo, _ := auth.GetUserFromContext(r)
 
 	var req struct {
 		Name        string `json:"name"`
@@ -189,13 +185,6 @@ func (s *Server) handleProxyUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 验证管理员权限
-	userInfo, ok := auth.GetUserFromContext(r)
-	if !ok || userInfo.Role != "admin" {
-		http.Error(w, "Admin access required", http.StatusForbidden)
-		return
-	}
-
 	// 从 URL 获取代理 ID
 	// 假设 URL 格式为 /api/proxies/{id}
 	// 这里简化处理，从请求体获取
@@ -275,13 +264,6 @@ func (s *Server) handleProxyUpdate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleProxyDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// 验证管理员权限
-	userInfo, ok := auth.GetUserFromContext(r)
-	if !ok || userInfo.Role != "admin" {
-		http.Error(w, "Admin access required", http.StatusForbidden)
 		return
 	}
 

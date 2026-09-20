@@ -9,6 +9,8 @@ package server
 import (
 	"net/http"
 	"strings"
+
+	"github.com/cuihairu/cockpit/internal/auth"
 )
 
 // resourceRule path 前缀 → resource；fixed 非空时忽略 method 推导恒用该
@@ -151,6 +153,20 @@ func roleCovers(have []string, need string) bool {
 		}
 	}
 	return false
+}
+
+// userHasPerm 当前请求用户（context）是否持有权限点（每请求查库）。
+// RBAC 拦截之外的细粒度判定用（如改密码免验旧密码的条件）。
+func (s *Server) userHasPerm(r *http.Request, perm string) bool {
+	user, ok := auth.GetUserFromContext(r)
+	if !ok {
+		return false
+	}
+	role, err := s.db.GetRole(user.Role)
+	if err != nil {
+		return false
+	}
+	return roleCovers(role.Permissions, perm)
 }
 
 // RBACMiddleware 全局权限判定（AuditMiddleware 内层：403 也进审计链）

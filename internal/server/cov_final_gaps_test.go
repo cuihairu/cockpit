@@ -306,7 +306,7 @@ func TestCovProxyCreate(t *testing.T) {
 	rec := covRec()
 	s.handleProxyCreate(rec, covReq(http.MethodGet, "/x", nil))
 	covWantCode(t, "create 405", rec, http.StatusMethodNotAllowed)
-	covWantCode(t, "create 403", create("user", full(18100, true, "agent-px")), http.StatusForbidden)
+	// 非 admin 判定已收敛到 RBAC 中间件（rbac_test.go 矩阵）
 	covWantCode(t, "create bad body", create("admin", "{bad"), http.StatusBadRequest)
 	covWantCode(t, "create missing", create("admin", `{"name":"x"}`), http.StatusBadRequest)
 	covWantCode(t, "create agent missing", create("admin", full(18100, true, "ghost")), http.StatusNotFound)
@@ -342,9 +342,7 @@ func TestCovProxyUpdateDeleteStatus(t *testing.T) {
 	rec := covRec()
 	s.handleProxyUpdate(rec, covReq(http.MethodPost, "/x", nil))
 	covWantCode(t, "update 405", rec, http.StatusMethodNotAllowed)
-	rec = covCallAuth(s, s.handleProxyUpdate,
-		covAuthReq(http.MethodPut, "/x", nil, "1", "covuser", "user"))
-	covWantCode(t, "update 403", rec, http.StatusForbidden)
+	// 非 admin 判定已收敛到 RBAC 中间件（rbac_test.go 矩阵）
 	covWantCode(t, "update bad body", update(http.MethodPut, "{bad"), http.StatusBadRequest)
 	covWantCode(t, "update empty id", update(http.MethodPut, `{"name":"x"}`), http.StatusBadRequest)
 	covWantCode(t, "update missing", update(http.MethodPut, `{"id":"ghost"}`), http.StatusNotFound)
@@ -371,9 +369,7 @@ func TestCovProxyUpdateDeleteStatus(t *testing.T) {
 	rec = covRec()
 	s.handleProxyDelete(rec, covReq(http.MethodGet, "/x", nil))
 	covWantCode(t, "delete 405", rec, http.StatusMethodNotAllowed)
-	rec = covCallAuth(s, s.handleProxyDelete,
-		covAuthReq(http.MethodDelete, "/x", nil, "1", "covuser", "user"))
-	covWantCode(t, "delete 403", rec, http.StatusForbidden)
+	// 非 admin 判定已收敛到 RBAC 中间件（rbac_test.go 矩阵）
 	covWantCode(t, "delete empty id", del("", ""), http.StatusBadRequest)
 	covWantCode(t, "delete by body", del(`{"id":"p2"}`, ""), http.StatusNoContent)
 	covWantCode(t, "delete by query", del("{bad", "id=p1"), http.StatusNoContent)
@@ -531,15 +527,7 @@ func TestCovAPIHandleStatusAndActions(t *testing.T) {
 	}, covAuthReq(http.MethodPost, "/api/users/"+target.ID+"/noop", nil, "1", "covadmin", "admin"))
 	covWantCode(t, "user action 405", rec, http.StatusMethodNotAllowed)
 
-	// handleUserDelete：普通用户删他人 → 403
-	adminUser, _ := s.db.GetUserByUsername("admin")
-	if adminUser == nil { // admin 未初始化时直接造一个
-		adminUser = covSeedUser(t, s, "covadm2", "cov-pass-3", "admin")
-	}
-	rec = covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
-		s.handleUserDelete(w, r, adminUser.ID)
-	}, covAuthReq(http.MethodDelete, "/api/users/"+adminUser.ID, nil, target.ID, "covtarget", "user"))
-	covWantCode(t, "delete forbidden", rec, http.StatusForbidden)
+	// handleUserDelete：非 admin 判定已收敛到 RBAC 中间件（矩阵覆盖）
 
 	// middleware 小函数
 	if got := s.getResourceFromPath("/health"); got != "unknown" {

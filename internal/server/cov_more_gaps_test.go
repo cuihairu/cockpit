@@ -146,14 +146,8 @@ func TestCovAgentSecretHandler(t *testing.T) {
 			s.handleAgentSecret(w, r, id)
 		}, covAuthReq(method, "/api/agents/"+id+"/secret", nil, "1", "covadmin", "admin"))
 	}
-	// 非 admin → 403
-	rec := covCallAuth(s, func(w http.ResponseWriter, r *http.Request) {
-		s.handleAgentSecret(w, r, "agent-sec")
-	}, covAuthReq(http.MethodGet, "/x", nil, "9", "covuser", "user"))
-	covWantCode(t, "secret forbidden", rec, http.StatusForbidden)
-
-	// agent 不存在 → 404
-	rec = do(http.MethodGet, "ghost")
+	// agent 不存在 → 404（非 admin 判定已收敛到 RBAC 中间件）
+	rec := do(http.MethodGet, "ghost")
 	covWantCode(t, "secret missing", rec, http.StatusNotFound)
 
 	rec = do(http.MethodGet, "agent-sec")

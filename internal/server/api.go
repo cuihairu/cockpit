@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -396,14 +397,8 @@ func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request, id strin
 	s.writeJSON(w, http.StatusOK, storageAgentToResponse(agent))
 }
 
-// handleAgentSecret 管理 Agent 密钥（仅限管理员）
+// handleAgentSecret 管理 Agent 密钥（RBAC：inventory:write）
 func (s *Server) handleAgentSecret(w http.ResponseWriter, r *http.Request, id string) {
-	userInfo, ok := auth.GetUserFromContext(r)
-	if !ok || userInfo.Role != "admin" {
-		s.handleError(w, r, http.StatusForbidden, "Admin access required")
-		return
-	}
-
 	agent, err := s.db.GetAgent(id)
 	if err != nil {
 		s.handleError(w, r, http.StatusNotFound, "Agent not found")
@@ -698,21 +693,8 @@ type CreateUserRequest struct {
 	Role     string `json:"role"`
 }
 
-// handleUserCreate 创建用户
+// handleUserCreate 创建用户（RBAC：users:admin）
 func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
-	// 获取当前用户
-	user, ok := auth.GetUserFromContext(r)
-	if !ok {
-		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
-		return
-	}
-
-	// 只有管理员可以创建用户
-	if user.Role != "admin" {
-		s.handleError(w, r, http.StatusForbidden, "Only admin can create users")
-		return
-	}
-
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
@@ -725,9 +707,15 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 设置默认角色
+	// 设置默认角色（viewer = D9 迁移后 user 的对应语义；user 角色已不存在）
 	if req.Role == "" {
-		req.Role = "user"
+		req.Role = "viewer"
+	}
+	// 角色必须是角色表已存在的名字，否则新用户会被 fail-closed 全拒。
+	// 只拒「确认不存在」；库故障等其他错误放行——后续写库自然报 500
+	if _, err := s.db.GetRole(req.Role); errors.Is(err, storage.ErrNotFound) {
+		s.handleError(w, r, http.StatusBadRequest, "Unknown role")
+		return
 	}
 
 	// 检查用户名是否已存在
@@ -784,7 +772,8 @@ func (s *Server) handleUserActions(w http.ResponseWriter, r *http.Request, path 
 	}
 }
 
-// handleUserDelete 删除用户
+// handleUserDelete 删除用户（RBAC：users:admin；「不能删自己」为 D13
+// 自我保护，最后 admin 保护在笔 4）
 func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request, id string) {
 	// 获取当前用户
 	user, ok := auth.GetUserFromContext(r)
@@ -806,12 +795,6 @@ func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
-	// 只有管理员可以删除用户
-	if user.Username != "admin" && user.Username != targetUser.Username {
-		s.handleError(w, r, http.StatusForbidden, "Forbidden")
-		return
-	}
-
 	if err := s.db.DeleteUser(id); err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to delete user")
 		return
@@ -827,14 +810,9 @@ type UpdateUserRequest struct {
 }
 
 // handleUserUpdate 更新用户
+// handleUserUpdate 更新用户（RBAC：users:admin——到达者皆持权限，
+// 散落的 admin 字符串判定已收敛；角色名合法性在角色表校验防锁号）
 func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request, id string) {
-	// 获取当前用户
-	user, ok := auth.GetUserFromContext(r)
-	if !ok {
-		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
-		return
-	}
-
 	// 查询目标用户
 	targetUser, err := s.db.GetUserByID(id)
 	if err != nil {
@@ -848,21 +826,13 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
-	// 只有管理员可以修改角色
-	if req.Role != "" && req.Role != targetUser.Role && user.Role != "admin" {
-		s.handleError(w, r, http.StatusForbidden, "Only admin can change role")
-		return
-	}
-
-	// 用户只能修改自己的邮箱，管理员可以修改任何人
-	if req.Email != "" && user.Username != targetUser.Username && user.Role != "admin" {
-		s.handleError(w, r, http.StatusForbidden, "Forbidden")
-		return
-	}
-
 	// 更新用户
 	targetUser.Email = req.Email
-	if req.Role != "" && user.Role == "admin" {
+	if req.Role != "" {
+		if _, err := s.db.GetRole(req.Role); errors.Is(err, storage.ErrNotFound) {
+			s.handleError(w, r, http.StatusBadRequest, "Unknown role")
+			return
+		}
 		targetUser.Role = req.Role
 	}
 
@@ -881,25 +851,13 @@ type ChangePasswordRequest struct {
 	NewPassword string `json:"new_password"`
 }
 
-// handleUserChangePassword 修改用户密码
+// handleUserChangePassword 修改用户密码（RBAC：users:admin——到达者皆持
+// 权限；免验旧密码的判定同步从 admin 字符串改为 users:admin 权限点）
 func (s *Server) handleUserChangePassword(w http.ResponseWriter, r *http.Request, id string) {
-	// 获取当前用户
-	user, ok := auth.GetUserFromContext(r)
-	if !ok {
-		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
-		return
-	}
-
 	// 查询目标用户
 	targetUser, err := s.db.GetUserByID(id)
 	if err != nil {
 		s.handleError(w, r, http.StatusNotFound, "User not found")
-		return
-	}
-
-	// 只能修改自己的密码，管理员可以修改任何人的密码
-	if user.Username != targetUser.Username && user.Role != "admin" {
-		s.handleError(w, r, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -915,9 +873,8 @@ func (s *Server) handleUserChangePassword(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 非管理员修改密码需要验证旧密码
-	if user.Role != "admin" {
-		// 验证旧密码
+	// 无 users:admin 权限（如未来受限角色进入此端点）需要验证旧密码
+	if !s.userHasPerm(r, "users:admin") {
 		_, err := s.db.VerifyPassword(targetUser.Username, req.OldPassword)
 		if err != nil {
 			s.handleError(w, r, http.StatusUnauthorized, "Invalid old password")

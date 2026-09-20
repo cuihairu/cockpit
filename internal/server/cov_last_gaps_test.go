@@ -155,9 +155,10 @@ func TestCovReadOnlyDBWriteFailures(t *testing.T) {
 	covWantCode(t, "user delete write fail", rec, http.StatusInternalServerError)
 
 	// handleUserUpdate：管理员改他人 → UpdateUser 失败
+	// （role 传 viewer：幽灵角色会被 400 拦住，到不了写库失败分支）
 	rec = authed(func(w http.ResponseWriter, r *http.Request) {
 		s.handleUserUpdate(w, r, u.ID)
-	}, http.MethodPut, "/x", `{"email":"z@example.com","role":"user"}`, adminU.ID, "covro-admin", "admin")
+	}, http.MethodPut, "/x", `{"email":"z@example.com","role":"viewer"}`, adminU.ID, "covro-admin", "admin")
 	covWantCode(t, "user update write fail", rec, http.StatusInternalServerError)
 
 	// handleUserChangePassword：管理员免旧密码 → UpdatePassword 失败
