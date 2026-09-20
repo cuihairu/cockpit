@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -20,11 +21,12 @@ import (
 // apply 按三个 auto 开关各自独立联动（幂等，可重复执行）。
 //
 //	GET    /api/domains?agent=xxx       列表
+//	GET    /api/domains/drift?agent=xxx 漂移检查（D6，实时逐条）
 //	POST   /api/domains                 登记/更新（domain 唯一 upsert）
 //	DELETE /api/domains/{domain}        删登记（D8：不动已下发产物）
 //	POST   /api/domains/{domain}/apply  执行联动
 //
-// 漂移检查（D6）与 agent 侧 domains.list RPC（D7）见分期 P1。
+// agent 侧 domains.list RPC（D7）见分期 P1。
 
 var (
 	domainBindingRe = regexp.MustCompile(
@@ -74,6 +76,11 @@ func (s *Server) handleDomainBindings(w http.ResponseWriter, r *http.Request) {
 			s.handleDomainBindingSave(w, r)
 			return
 		}
+	case path == "/drift":
+		if r.Method == http.MethodGet {
+			s.handleDomainBindingsDrift(w, r)
+			return
+		}
 	case strings.HasSuffix(path, "/apply"):
 		if r.Method == http.MethodPost {
 			s.handleDomainBindingApply(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/apply"))
@@ -102,6 +109,192 @@ func (s *Server) handleDomainBindingsList(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.writeList(w, list, len(list))
+}
+
+// domainDriftCheck 单路联动漂移结果（D6 细化见设计文档）：
+// ok 无漂移 / status 确认漂移（missing|mismatch|foreign，附 expected/actual）/
+// error 检查失败不可判定——三态语义，前端红黄区分
+type domainDriftCheck struct {
+	Checked  bool   `json:"checked"` // auto* 开才查
+	OK       bool   `json:"ok"`
+	Status   string `json:"status,omitempty"` // missing / mismatch / foreign
+	Expected string `json:"expected,omitempty"`
+	Actual   string `json:"actual,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// domainDriftReport 单条绑定的三路检查报告
+type domainDriftReport struct {
+	Domain  string           `json:"domain"`
+	Enabled bool             `json:"enabled"` // false = 整条未检查
+	DNS     domainDriftCheck `json:"dns"`
+	Proxy   domainDriftCheck `json:"proxy"`
+	Cert    domainDriftCheck `json:"cert"`
+}
+
+// handleDomainBindingsDrift 漂移检查（D6）：漂移 = auto* 开关承诺的状态与实际的
+// 差距——开关关没承诺就没漂移（checked=false），enabled=false 整条跳过。
+// 实时逐条检查（DNS 打 provider API、proxy 打 agent RPC），故独立于列表端点
+// 按需触发，不内嵌列表。
+func (s *Server) handleDomainBindingsDrift(w http.ResponseWriter, r *http.Request) {
+	var list []*storage.DomainBinding
+	var err error
+	if agentID := r.URL.Query().Get("agent"); agentID != "" {
+		list, err = s.db.ListDomainBindingsByAgent(agentID)
+	} else {
+		list, err = s.db.ListDomainBindings()
+	}
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to list domain bindings")
+		return
+	}
+	items := make([]domainDriftReport, 0, len(list))
+	for _, b := range list {
+		rep := domainDriftReport{Domain: b.Domain, Enabled: b.Enabled}
+		if b.Enabled {
+			if b.AutoDNS {
+				rep.DNS = s.checkBindingDNS(b)
+			}
+			if b.AutoProxy {
+				rep.Proxy = s.checkBindingProxy(b)
+			}
+			if b.AutoCert {
+				rep.Cert = s.checkBindingCert(b)
+			}
+		}
+		items = append(items, rep)
+	}
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items": items, "checkedAt": time.Now().Unix(),
+	})
+}
+
+// checkBindingDNS 期望 = agent 注册主地址（与 applyBindingDNS 同源）；
+// 实际 = provider 内该域名 A 记录
+func (s *Server) checkBindingDNS(b *storage.DomainBinding) domainDriftCheck {
+	c := domainDriftCheck{Checked: true}
+	if s.dns == nil {
+		c.Error = "DNS provider not configured"
+		return c
+	}
+	agent, err := s.db.GetAgent(b.AgentID)
+	if err != nil {
+		c.Error = "agent not found: " + b.AgentID
+		return c
+	}
+	if agent.IP == "" {
+		c.Error = "agent has no registered address"
+		return c
+	}
+	c.Expected = agent.IP
+	ctx := context.Background()
+	zone, err := findDNSZoneForDomain(s.dns, ctx, b.Domain)
+	if err != nil {
+		c.Error = "zone lookup failed: " + err.Error()
+		return c
+	}
+	rec, err := findDNSRecordInZone(s.dns, ctx, zone.ID, "A", b.Domain)
+	if err != nil {
+		c.Error = "record lookup failed: " + err.Error()
+		return c
+	}
+	switch {
+	case rec == nil:
+		c.Status = "missing"
+	case rec.Content != agent.IP:
+		c.Status = "mismatch"
+		c.Actual = rec.Content
+	default:
+		c.OK = true
+	}
+	return c
+}
+
+// checkBindingProxy site.get 查站点；「site not found」error 是确认未下发，
+// 其余 RPC 错是检查失败；站点在则比对 upstream（docker:// 归一）与 serverNames
+func (s *Server) checkBindingProxy(b *storage.DomainBinding) domainDriftCheck {
+	c := domainDriftCheck{Checked: true}
+	expected := strings.TrimPrefix(b.Target, "docker://")
+	c.Expected = expected
+	resp, err := s.CallAgent(b.AgentID, s.proxyRPCPrefix(b.AgentID)+"site.get",
+		map[string]interface{}{"name": bindingSiteName(b.Domain)})
+	if err != nil {
+		c.Error = "agent unreachable: " + err.Error()
+		return c
+	}
+	rpcResp, err := protocol.DecodeRPCResponse(resp)
+	if err != nil {
+		c.Error = "invalid agent response"
+		return c
+	}
+	if rpcResp.Status == "error" {
+		if strings.Contains(rpcResp.Error, "site not found") {
+			c.Status = "missing"
+			return c
+		}
+		c.Error = rpcResp.Error
+		if c.Error == "" {
+			c.Error = "agent rejected the operation"
+		}
+		return c
+	}
+	data, _ := rpcResp.Data.(map[string]interface{})
+	site, _ := data["site"].(map[string]interface{})
+	upstream, _ := site["upstream"].(string)
+	switch {
+	case upstream == "":
+		c.Status = "mismatch"
+		c.Actual = "(no upstream in site data)"
+	case upstream != expected:
+		c.Status = "mismatch"
+		c.Actual = upstream
+	case !serverNamesContain(site["serverNames"], b.Domain):
+		c.Status = "mismatch"
+		c.Actual = upstream + " (serverNames missing " + b.Domain + ")"
+	default:
+		c.OK = true
+	}
+	return c
+}
+
+// checkBindingCert 监控缺失 missing、被其他 agent 占 foreign（inventory Domain）
+func (s *Server) checkBindingCert(b *storage.DomainBinding) domainDriftCheck {
+	c := domainDriftCheck{Checked: true, Expected: b.AgentID}
+	existing, err := s.db.GetDomainByName(b.Domain)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.Status = "missing"
+			return c
+		}
+		c.Error = "lookup failed: " + err.Error()
+		return c
+	}
+	if existing.AgentID == nil || *existing.AgentID != b.AgentID {
+		c.Status = "foreign"
+		if existing.AgentID != nil {
+			c.Actual = *existing.AgentID
+		} else {
+			c.Actual = "(unassigned)"
+		}
+		return c
+	}
+	c.OK = true
+	return c
+}
+
+// serverNamesContain RPC 数据里的 serverNames（[]interface{}）是否含 domain
+// （不区分大小写，与 findDNSRecordInZone 的 name 比对同规）
+func serverNamesContain(v interface{}, domain string) bool {
+	list, ok := v.([]interface{})
+	if !ok {
+		return false
+	}
+	for _, item := range list {
+		if s, ok := item.(string); ok && strings.EqualFold(s, domain) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleDomainBindingSave 登记/更新

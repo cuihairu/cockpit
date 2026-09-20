@@ -53,11 +53,31 @@
 ## API（server 侧，agent 零协议变更除 D7 新增只读方法）
 
 ```
-GET    /api/domains?agent=xxx     列表（含漂移状态）
+GET    /api/domains?agent=xxx     列表
+GET    /api/domains/drift?agent=xxx  漂移检查（D6，实时逐条检查三路联动）
 POST   /api/domains               登记/更新
 DELETE /api/domains/{domain}      删登记（D8）
 POST   /api/domains/{domain}/apply   执行联动（DNS/反代/证书按 auto* 开关）
 ```
+
+### D6 漂移检查细化
+
+漂移 = **auto\* 开关承诺的状态**与实际状态的差距；没承诺（开关关）就没漂移。
+实时按需检查（列表不内嵌——每条 DNS 检查要打 provider API、proxy 检查要打
+agent RPC，内嵌会把列表拖到秒级），排障时主动触发。
+
+- 检查范围：`enabled=false` 整条跳过；`autoDNS/autoProxy/autoCert` 关的
+  路不检查（`checked=false`），开的路逐项标记
+- DNS：期望 = agent 注册主地址（与 apply 同源）；实际 = provider 内该域名
+  A 记录。记录缺失 `missing`、内容不符 `mismatch`；provider 未配置 /
+  zone 不匹配 / agent 无地址 → `error`（无法判定，非漂移）
+- Proxy：`site.get` 查 `bindingSiteName(domain)`；站点不存在 `missing`；
+  存在但 upstream（docker:// 前缀归一后）或 serverNames 与登记不符
+  `mismatch`；agent 不可达 / RPC 失败 → `error`
+- Cert：inventory Domain 缺失 `missing`、被其他 agent 占 `foreign`；
+  否则 ok
+- 三态语义：`ok`（无漂移）/ `missing|mismatch|foreign`（确认漂移，附
+  expected/actual）/ `error`（检查失败，不可判定）——前端红黄区分
 
 ## 分期
 
@@ -72,10 +92,11 @@ POST   /api/domains/{domain}/apply   执行联动（DNS/反代/证书按 auto* �
 - 2026-09-20：P0 主体落地——storage 单表 + server 四端点（列表/登记/删除/apply
   三联动）+ apply 快照回写（`LastApplyStatus/LastError/AppliedAt`）。实现见
   `internal/storage/domain_binding.go`、`internal/server/api_domain_bindings.go`。
-  未含：D6 漂移检查（列表暂不展示 DNS/站点/监控的实际状态）、dashboard 页面
-  （web UI 另行）、D9 权限点（沿用 admin 中间件现状）。换绑 cert 监控项走
-  `UpdateDomainAgentID` 显式更新——GORM `Assign(struct)` 对已存在记录不落库，
-  `UpsertDomain` 承担不了换绑语义（存量坑另记）。
+- 2026-09-20：D6 漂移检查落地——`GET /api/domains/drift` 实时逐条检查三路
+  联动（语义见上节细化）。换绑 cert 监控项走 `UpdateDomainAgentID` 显式
+  更新——GORM `Assign(struct)` 对已存在记录不落库，`UpsertDomain` 承担不了
+  换绑语义（存量坑另记）。
+  未含：dashboard 页面（web UI 另行）、D9 权限点（沿用 admin 中间件现状）。
 
 ## 不做的事
 
