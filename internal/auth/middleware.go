@@ -85,6 +85,12 @@ type contextKey string
 const userKey contextKey = "user"
 
 func contextWithUser(ctx context.Context, userID, username, role string) context.Context {
+	return ContextWithUser(ctx, userID, username, role)
+}
+
+// ContextWithUser 把已验证的用户信息注入 context（导出版本：审计层在
+// auth 挂点之前解析 Bearer 记录「谁被拒」，见 server/middleware.go）
+func ContextWithUser(ctx context.Context, userID, username, role string) context.Context {
 	return context.WithValue(ctx, userKey, UserInfo{UserID: userID, Username: username, Role: role})
 }
 

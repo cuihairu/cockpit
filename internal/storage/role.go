@@ -199,6 +199,21 @@ func (d *DB) DeleteRole(name string) error {
 	return d.db.Delete(&Role{}, "name = ?", name).Error
 }
 
+// CountUsersByRoles 统计角色名在集合内的用户数（D13 有效 admin 计数的
+// 查询半边；判定半边在 server 侧用 roleCovers 筛角色名）。skipUserID
+// 排除假想变更的目标用户本身。
+func (d *DB) CountUsersByRoles(roleNames []string, skipUserID string) (int64, error) {
+	q := d.db.Model(&User{}).Where("role IN ?", roleNames)
+	if skipUserID != "" {
+		q = q.Where("id != ?", skipUserID)
+	}
+	var count int64
+	if err := q.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // SeedRoles 幂等 seed 内置角色（Open 时自动执行）：不存在的创建；与代码
 // 定义不一致的按代码覆盖 permissions（内置角色用户不可改——D12，版本升级
 // 调整内置清单必须能生效；撞名的自定义角色同样收编为 builtin）。

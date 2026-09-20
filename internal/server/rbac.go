@@ -86,6 +86,9 @@ func requiredPerms(path, method string) (perms []string, governed bool) {
 		return []string{"settings:admin"}, true
 	case path == "/api/users" || strings.HasPrefix(path, "/api/users/"):
 		return []string{"users:admin"}, true
+	case path == "/api/roles" || strings.HasPrefix(path, "/api/roles/"):
+		// 角色管理面整体仅 roles:admin（含 GET——roles 只有 admin action）
+		return []string{"roles:admin"}, true
 	}
 	// acme 签发/部署归 acme:admin（D3 约定：签发/吊销是高危动作）
 	if method == http.MethodPost && strings.HasPrefix(path, "/api/acme/") &&
@@ -167,6 +170,39 @@ func (s *Server) userHasPerm(r *http.Request, perm string) bool {
 		return false
 	}
 	return roleCovers(role.Permissions, perm)
+}
+
+// roleCoversPerm 角色名是否覆盖权限点（角色在角色表存在且权限足够）。
+// D13「有效 admin」判定用：角色缺失（幽灵角色 fail-closed）不算。
+func (s *Server) roleCoversPerm(roleName, perm string) bool {
+	role, err := s.db.GetRole(roleName)
+	if err != nil {
+		return false
+	}
+	return roleCovers(role.Permissions, perm)
+}
+
+// countEffectiveAdmins 有效 admin 用户数：角色在角色表存在且覆盖
+// users:admin。skipUserID/skipRoleName 把目标用户/角色从计数中剔除——
+// D13 判断「这次变更之后是否还有 admin」。
+func (s *Server) countEffectiveAdmins(skipUserID, skipRoleName string) (int64, error) {
+	roles, err := s.db.ListRoles()
+	if err != nil {
+		return 0, err
+	}
+	names := make([]string, 0, len(roles))
+	for _, r := range roles {
+		if r.Name == skipRoleName {
+			continue
+		}
+		if roleCovers(r.Permissions, "users:admin") {
+			names = append(names, r.Name)
+		}
+	}
+	if len(names) == 0 {
+		return 0, nil
+	}
+	return s.db.CountUsersByRoles(names, skipUserID)
 }
 
 // RBACMiddleware 全局权限判定（AuditMiddleware 内层：403 也进审计链）

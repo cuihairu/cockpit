@@ -74,6 +74,16 @@ func (s *Server) AuditMiddleware(next http.Handler) http.Handler {
 		// 保存原始响应写入器
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
+		// D14：可选认证——有效 Bearer 先把用户塞进 ctx。RBAC 判定层
+		// 403 短路时不经过内层 auth 挂点，这里保证审计能记到「谁」被拒；
+		// 内层 auth 幂等（重新解析覆盖，语义不变）
+		if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
+			if claims, err := s.authService().ValidateToken(strings.TrimPrefix(header, "Bearer ")); err == nil {
+				ctx := auth.ContextWithUser(r.Context(), claims.UserID, claims.Username, claims.Role)
+				r = r.WithContext(ctx)
+			}
+		}
+
 		// 处理请求（在处理过程中，auth 中间件会设置用户上下文）
 		next.ServeHTTP(wrapped, r)
 
@@ -87,7 +97,7 @@ func (s *Server) AuditMiddleware(next http.Handler) http.Handler {
 		}
 
 		// 记录审计日志（只记录需要审计的路径）
-		if s.shouldAudit(r.Method, r.URL.Path) {
+		if s.shouldAudit(r.Method, r.URL.Path, wrapped.statusCode) {
 			action := s.getActionFromMethod(r.Method)
 			resource := s.getResourceFromPath(r.URL.Path)
 
@@ -113,11 +123,18 @@ func (s *Server) AuditMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// shouldAudit 判断是否需要审计
-func (s *Server) shouldAudit(method, path string) bool {
+// shouldAudit 判断是否需要审计。statusCode 是刚写出的响应码：D14——
+// API 的 403（越权拒绝，含 RBAC 判定层出的）恒记录，GET 也记，用于
+// 发现权限配置不足与探测行为
+func (s *Server) shouldAudit(method, path string, statusCode int) bool {
 	// 不记录健康检查、静态资源等
 	if path == "/health" || path == "/api/status" {
 		return false
+	}
+
+	// API 403 恒记录（越权拒绝）
+	if statusCode == http.StatusForbidden && strings.HasPrefix(path, "/api/") {
+		return true
 	}
 
 	// 不记录 GET 请求（查询操作）

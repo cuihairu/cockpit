@@ -21,38 +21,43 @@ func TestShouldAudit(t *testing.T) {
 	s := newTestServer()
 
 	tests := []struct {
-		method string
-		path   string
-		want   bool
+		method     string
+		path       string
+		statusCode int
+		want       bool
 	}{
 		// Health and status should not be audited
-		{"GET", "/health", false},
-		{"GET", "/api/status", false},
+		{"GET", "/health", http.StatusOK, false},
+		{"GET", "/api/status", http.StatusOK, false},
 
 		// GET requests to non-admin API should not be audited
-		{"GET", "/api/agents", false},
-		{"GET", "/api/agents/agent-1", false},
+		{"GET", "/api/agents", http.StatusOK, false},
+		{"GET", "/api/agents/agent-1", http.StatusOK, false},
 
 		// GET to admin API should be audited
-		{"GET", "/api/admin/users", true},
-		{"GET", "/api/admin/settings", true},
+		{"GET", "/api/admin/users", http.StatusOK, true},
+		{"GET", "/api/admin/settings", http.StatusOK, true},
 
 		// Non-GET API requests should be audited
-		{"POST", "/api/agents", true},
-		{"PUT", "/api/agents/agent-1", true},
-		{"PATCH", "/api/agents/agent-1", true},
-		{"DELETE", "/api/agents/agent-1", true},
+		{"POST", "/api/agents", http.StatusCreated, true},
+		{"PUT", "/api/agents/agent-1", http.StatusOK, true},
+		{"PATCH", "/api/agents/agent-1", http.StatusOK, true},
+		{"DELETE", "/api/agents/agent-1", http.StatusNoContent, true},
+
+		// API 403 always audited (D14), GET included
+		{"GET", "/api/agents", http.StatusForbidden, true},
+		{"POST", "/api/users", http.StatusForbidden, true},
 
 		// Non-API paths should not be audited
-		{"GET", "/", false},
-		{"GET", "/static/app.js", false},
-		{"POST", "/login", false},
+		{"GET", "/", http.StatusOK, false},
+		{"GET", "/static/app.js", http.StatusOK, false},
+		{"POST", "/login", http.StatusForbidden, false},
 	}
 
 	for _, tt := range tests {
-		got := s.shouldAudit(tt.method, tt.path)
+		got := s.shouldAudit(tt.method, tt.path, tt.statusCode)
 		if got != tt.want {
-			t.Errorf("shouldAudit(%q, %q) = %v, want %v", tt.method, tt.path, got, tt.want)
+			t.Errorf("shouldAudit(%q, %q, %d) = %v, want %v", tt.method, tt.path, tt.statusCode, got, tt.want)
 		}
 	}
 }

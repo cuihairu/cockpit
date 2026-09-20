@@ -192,6 +192,36 @@ func TestRoleCRUD(t *testing.T) {
 	}
 }
 
+// TestCountUsersByRoles D13 有效 admin 计数的查询半边：集合过滤与
+// skipUserID 排除目标用户本身
+func TestCountUsersByRoles(t *testing.T) {
+	db := openSeededDB(t)
+	db.CreateUser(&User{ID: "u1", Username: "a1", Password: "h", Role: "admin"})
+	db.CreateUser(&User{ID: "u2", Username: "a2", Password: "h", Role: "admin"})
+	db.CreateUser(&User{ID: "u3", Username: "v1", Password: "h", Role: "viewer"})
+
+	if n, err := db.CountUsersByRoles([]string{"admin"}, ""); err != nil || n != 2 {
+		t.Errorf("count admin = %d, %v; want 2, nil", n, err)
+	}
+	// 排除目标用户本身（假想变更后不计自己）
+	if n, err := db.CountUsersByRoles([]string{"admin"}, "u1"); err != nil || n != 1 {
+		t.Errorf("count admin skip u1 = %d, %v; want 1, nil", n, err)
+	}
+	// 多角色集合
+	if n, err := db.CountUsersByRoles([]string{"admin", "viewer"}, ""); err != nil || n != 3 {
+		t.Errorf("count admin+viewer = %d, %v; want 3, nil", n, err)
+	}
+	// 空集合（countEffectiveAdmins 筛后无人时提前 return，不走到这）
+	if n, err := db.CountUsersByRoles([]string{"ghost"}, ""); err != nil || n != 0 {
+		t.Errorf("count ghost = %d, %v; want 0, nil", n, err)
+	}
+
+	db.Close()
+	if _, err := db.CountUsersByRoles([]string{"admin"}, ""); err == nil {
+		t.Error("CountUsersByRoles on closed db should fail")
+	}
+}
+
 func TestPermissionValid(t *testing.T) {
 	for _, p := range []string{"dns:write", "acme:admin", "logs:read", "terminal:write"} {
 		if !PermissionValid(p) {
@@ -231,6 +261,41 @@ func TestSeedRolesWriteFailures(t *testing.T) {
 	db.db.Callback().Update().Remove("test/boom")
 	if !errors.Is(err, boom) {
 		t.Fatalf("seed should fail on save error, got %v", err)
+	}
+}
+
+func TestSeedRolesLegacyCountFailure(t *testing.T) {
+	db := openSeededDB(t)
+	boom := errors.New("boom")
+
+	// 稳态（角色一致、零写）走到 D9 迁移的 Count；只对 users 表注入
+	// 查询失败（roles 表的 First 不受影响）
+	db.db.Callback().Query().Before("gorm:query").Register("test/count-boom", func(tx *gorm.DB) {
+		if tx.Statement.Table == "users" {
+			tx.AddError(boom)
+		}
+	})
+	err := db.SeedRoles()
+	db.db.Callback().Query().Remove("test/count-boom")
+	if !errors.Is(err, boom) {
+		t.Fatalf("seed should fail on legacy count error, got %v", err)
+	}
+}
+
+func TestSamePermissions(t *testing.T) {
+	cases := []struct {
+		a, b []string
+		want bool
+	}{
+		{[]string{"dns:read", "dns:write"}, []string{"dns:write", "dns:read"}, true},
+		{[]string{"dns:read"}, []string{"dns:read", "dns:write"}, false},
+		{[]string{"dns:read", "dns:write"}, []string{"dns:read", "hack:read"}, false},
+		{nil, nil, true},
+	}
+	for _, c := range cases {
+		if got := samePermissions(c.a, c.b); got != c.want {
+			t.Errorf("samePermissions(%v, %v) = %v, want %v", c.a, c.b, got, c.want)
+		}
 	}
 }
 

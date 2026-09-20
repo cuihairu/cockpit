@@ -132,6 +132,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleUsers(w, r)
 	case strings.HasPrefix(path, "/users/"):
 		s.handleUserActions(w, r, strings.TrimPrefix(path, "/users/"))
+	case path == "/roles":
+		// 角色 CRUD（见 api_roles.go，rbac-design.md 笔 4）
+		s.handleRoles(w, r)
+	case strings.HasPrefix(path, "/roles/"):
+		s.handleRoleActions(w, r, strings.TrimPrefix(path, "/roles/"))
 	case path == "/alerts" || path == "/alerts/read-all":
 		s.handleAlertsList(w, r)
 	case strings.HasPrefix(path, "/alerts/"):
@@ -772,8 +777,8 @@ func (s *Server) handleUserActions(w http.ResponseWriter, r *http.Request, path 
 	}
 }
 
-// handleUserDelete 删除用户（RBAC：users:admin；「不能删自己」为 D13
-// 自我保护，最后 admin 保护在笔 4）
+// handleUserDelete 删除用户（RBAC：users:admin；D13 自我保护——不能删
+// 自己、不能删最后一个有效 admin）
 func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request, id string) {
 	// 获取当前用户
 	user, ok := auth.GetUserFromContext(r)
@@ -795,6 +800,17 @@ func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
+	// D13：不能删除最后一个有效 admin（角色存在且覆盖 users:admin）。
+	// 到达者持 users:admin、自身即有效 admin，正常路径下排除目标后至少
+	// 剩自己，此分支不可达，作为判定层变化时的防御纵深保留。count 出错
+	// 时同样拒绝——保护检查 fail-safe，宁可拒绝一次管理操作
+	if s.roleCoversPerm(targetUser.Role, "users:admin") {
+		if n, _ := s.countEffectiveAdmins(targetUser.ID, ""); n == 0 {
+			s.handleError(w, r, http.StatusBadRequest, "Cannot delete the last admin")
+			return
+		}
+	}
+
 	if err := s.db.DeleteUser(id); err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to delete user")
 		return
@@ -809,10 +825,17 @@ type UpdateUserRequest struct {
 	Role  string `json:"role"`
 }
 
-// handleUserUpdate 更新用户
 // handleUserUpdate 更新用户（RBAC：users:admin——到达者皆持权限，
-// 散落的 admin 字符串判定已收敛；角色名合法性在角色表校验防锁号）
+// 散落的 admin 字符串判定已收敛；角色名合法性在角色表校验防锁号；
+// D13：不可改自己角色、不可降级最后一个有效 admin）
 func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request, id string) {
+	// D13 改自己角色的判定需要当前用户
+	user, ok := auth.GetUserFromContext(r)
+	if !ok {
+		s.handleError(w, r, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
 	// 查询目标用户
 	targetUser, err := s.db.GetUserByID(id)
 	if err != nil {
@@ -832,6 +855,22 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request, id str
 		if _, err := s.db.GetRole(req.Role); errors.Is(err, storage.ErrNotFound) {
 			s.handleError(w, r, http.StatusBadRequest, "Unknown role")
 			return
+		}
+		// D13：不可修改自己的角色
+		if user.UserID == targetUser.ID {
+			s.handleError(w, r, http.StatusBadRequest, "Cannot change your own role")
+			return
+		}
+		// D13：不可降级最后一个有效 admin。到达者持 users:admin、自身
+		// 即有效 admin，正常路径下排除目标后至少剩自己，此分支不可达，
+		// 作为判定层变化时的防御纵深保留；count 出错时同样拒绝（fail-safe）
+		if req.Role != targetUser.Role &&
+			s.roleCoversPerm(targetUser.Role, "users:admin") &&
+			!s.roleCoversPerm(req.Role, "users:admin") {
+			if n, _ := s.countEffectiveAdmins(targetUser.ID, ""); n == 0 {
+				s.handleError(w, r, http.StatusBadRequest, "Cannot demote the last admin")
+				return
+			}
 		}
 		targetUser.Role = req.Role
 	}
