@@ -7,7 +7,7 @@ import {
   DesktopOutlined,
   HddOutlined,
 } from '@ant-design/icons';
-import { formatBytes, formatUptime } from '@/services/metrics';
+import { formatBytes, formatUptime } from '@/utils/format';
 import type { SystemInfoSnapshot } from '@/services/metrics';
 
 const { Text } = Typography;

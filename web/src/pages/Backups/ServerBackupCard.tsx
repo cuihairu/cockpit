@@ -21,6 +21,7 @@ import {
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
+import { formatBytes } from '@/utils/format'
 import type { ServerBackupFile } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 import { PermGuard } from '@/components/PermGuard'
@@ -29,12 +30,6 @@ import { PermGuard } from '@/components/PermGuard'
 // 见 docs/guide/server-backup-design.md）。恢复 = 下载产物停服替换。
 // M2：remote_dest 非空时备份成功后 rclone copy 推送异地；补推按钮
 // 对应 POST /{name}/sync-remote（D17）。
-
-const fmtBytes = (n: number) => {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
-}
 
 // 与后端 serverBackupRemoteDestRe 同源：remote:path，remote 名不以 - 开头
 const remoteDestPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*:[^\s]+$/
@@ -147,7 +142,7 @@ const ServerBackupCard = () => {
       width: 170,
       render: (v: string) => new Date(v).toLocaleString(),
     },
-    { title: '大小', dataIndex: 'size', width: 100, render: fmtBytes },
+    { title: '大小', dataIndex: 'size', width: 100, render: formatBytes },
     {
       title: '操作',
       width: effRemoteDest ? 190 : 130,

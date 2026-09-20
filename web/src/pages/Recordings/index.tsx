@@ -26,6 +26,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
+import { formatBytes, formatDuration } from '@/utils/format'
 import type { TerminalRecording } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 import { PermGuard } from '@/components/PermGuard'
@@ -39,22 +40,6 @@ import '@xterm/xterm/css/xterm.css'
 const PROTOCOL_COLOR: Record<string, string> = {
   ssh: 'green',
   telnet: 'orange',
-}
-
-const fmtDuration = (ms: number) => {
-  if (!ms) return '进行中'
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m${s % 60}s`
-  return `${Math.floor(m / 60)}h${m % 60}m`
-}
-
-const fmtBytes = (b: number) => {
-  if (!b) return '-'
-  if (b < 1024) return `${b} B`
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
-  return `${(b / 1024 / 1024).toFixed(1)} MB`
 }
 
 // asciinema v2 事件：[相对秒, 类型, 数据]
@@ -195,7 +180,7 @@ const PlaybackModal = ({ recording, onClose }: PlayerProps) => {
           ]}
         />
         <Typography.Text type="secondary">
-          {loading ? '加载中…' : `进度 ${fmtDuration(progress * 1000)} / ${fmtDuration(totalSeconds * 1000)}`}
+          {loading ? '加载中…' : `进度 ${formatDuration(progress * 1000)} / ${formatDuration(totalSeconds * 1000)}`}
         </Typography.Text>
       </Space>
       <div
@@ -313,9 +298,9 @@ const Recordings = () => {
       title: '时长',
       dataIndex: 'durationMs',
       width: 100,
-      render: (v: number) => (v ? fmtDuration(v) : <Tag color="processing">进行中</Tag>),
+      render: (v: number) => (v ? formatDuration(v) : <Tag color="processing">进行中</Tag>),
     },
-    { title: '大小', dataIndex: 'bytes', width: 90, render: fmtBytes },
+    { title: '大小', dataIndex: 'bytes', width: 90, render: (v: number) => (v ? formatBytes(v) : '-') },
     {
       title: '操作',
       width: effRemoteDest ? 250 : 200,

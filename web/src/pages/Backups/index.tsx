@@ -36,6 +36,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { api } from '@/services/api'
+import { formatBytes } from '@/utils/format'
 import type { BackupConfig, BackupConfigInput, BackupFile, BackupRun, BackupTask } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 import { PermGuard } from '@/components/PermGuard'
@@ -63,13 +64,6 @@ const statusTag = (status: string) => {
     default:
       return <Tag>未运行</Tag>
   }
-}
-
-const formatBytes = (n: number): string => {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 const formatTime = (unix: number): string =>

@@ -20,9 +20,6 @@ import axios from 'axios'
 const locationStub = { href: '' }
 vi.stubGlobal('location', locationStub)
 import {
-  formatBytes,
-  formatPercent,
-  formatUptime,
   getMetricsHistory,
   getSystemSnapshot,
   getSystemSnapshots,
@@ -70,26 +67,6 @@ describe('metrics 服务', () => {
   })
 })
 
-describe('metrics 格式化', () => {
-  it('formatBytes 量级与保留两位小数', () => {
-    expect(formatBytes(0)).toBe('0 B')
-    expect(formatBytes(1024)).toBe('1.00 KB')
-    expect(formatBytes(1536)).toBe('1.50 KB')
-    expect(formatBytes(1024 * 1024 * 512)).toBe('512.00 MB')
-    expect(formatBytes(1024 ** 4)).toBe('1.00 TB')
-  })
-
-  it('formatPercent 保留一位小数', () => {
-    expect(formatPercent(12.345)).toBe('12.3%')
-    expect(formatPercent(0)).toBe('0.0%')
-  })
-
-  it('formatUptime 天/小时/分钟三档', () => {
-    expect(formatUptime(59)).toBe('0分钟')
-    expect(formatUptime(3600)).toBe('1小时 0分钟')
-    expect(formatUptime(86400 * 2 + 3600 * 3)).toBe('2天 3小时')
-  })
-})
 
 describe('metrics 拦截器', () => {
   it('请求拦截器注入 Bearer', async () => {

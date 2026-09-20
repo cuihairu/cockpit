@@ -40,6 +40,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { api } from '@/services/api'
+import { formatBytes } from '@/utils/format'
 import { usePerm } from '@/hooks/usePerm'
 import type { FileEntry, FileSearchResult } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
@@ -125,13 +126,6 @@ const imageExt = (name: string): string | null => {
   if (idx < 0) return null
   const ext = name.slice(idx + 1).toLowerCase()
   return IMAGE_MIME[ext] ? ext : null
-}
-
-const formatBytes = (n: number): string => {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 // 路径 → 面包屑段（绝对路径按 / 切分）
