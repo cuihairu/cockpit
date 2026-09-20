@@ -43,6 +43,7 @@ export function highlightConfigLine(line: string): ConfigToken[] {
   if (key) {
     push(key[1])
     push(key[2], COLORS.key) // 引号一并算键色（JSON 键）
+    push(key[3]) // 键后分隔符（: / = / 空格=）保持默认色——slice 会连它一起截掉，须显式补回
     rest = rest.slice(key[0].length)
   } else if (nginx) {
     push(nginx[1])
