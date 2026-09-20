@@ -94,7 +94,7 @@ func (d *DB) Close() error {
 
 // migrate 执行数据库迁移
 func (d *DB) migrate() error {
-	return d.db.AutoMigrate(
+	if err := d.db.AutoMigrate(
 		&User{},
 		&Agent{},
 		&Alert{},
@@ -119,7 +119,14 @@ func (d *DB) migrate() error {
 		&AcmeAccount{},
 		&AcmeCert{},
 		&DomainBinding{},
-	)
+		&Role{},
+	); err != nil {
+		return err
+	}
+
+	// 内置角色幂等 seed + D9 存量迁移（role=user → viewer），
+	// 见 docs/guide/rbac-design.md
+	return d.SeedRoles()
 }
 
 // Session 创建新的会话

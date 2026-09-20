@@ -70,6 +70,25 @@ CA 目录切换归 `acme:admin`，查看证书列表 `acme:read`）。
 | P1（前端+管理） | 用户/角色管理页、`/api/me` 返回 permissions、路由守卫与菜单裁剪、v-perm 按钮指令 | viewer 登录看不到任何写操作入口 |
 | P2（按需） | 自定义角色 UI 完善、权限模板、部门级授权（Department 字段已有，暂不参与判定） | 按实际需求排期 |
 
+## 实现状态（P0 拆笔）
+
+| 笔 | 内容 | 状态 |
+|----|------|------|
+| 1 | storage：`Role` 表（name 主键 / permissions JSON / builtin）+ 权限点常量与内置角色定义（admin/operator/viewer）+ seed（幂等，内置角色 permissions 以代码为准覆盖更新）+ CRUD（自定义角色权限点白名单校验；删除时拒内置、拒被引用）+ D9 存量迁移 `role=user → viewer` | ✅ |
+| 2 | server：路由权限表（path 前缀 × method → 权限点，支持 AND 语义，domain-binding 增删改要求 `dns:write`+`proxy:write`）+ `authorize` 判定层（auth 后、serveAPI 分发前；每请求查库，角色缺失 fail-closed 403）+ 隐含规则（write⊇read、admin⊇write）+ 三角色矩阵测试。**不删存量判定**——authorize 拦在前，散落 `Role != "admin"` 暂成双保险 | 未开工 |
+| 3 | 收敛：删 10 处散落 `Role != "admin"`（api.go ×7、api_proxy.go ×3），users/settings 端点改走权限表 | 未开工 |
+| 4 | 角色/用户管理 API：`/api/roles` CRUD（仅 `roles:admin`）+ D13 自我保护（最后一个有效 admin 不可删/降级、不可改自己角色）+ D14 403 入审计 | 未开工 |
+| P1 | web：用户/角色管理页、`/api/me` permissions、菜单裁剪 | 未开工 |
+
+两个实现决策（设计阶段未写死，落地时定）：
+
+- **内置角色 seed 覆盖策略**：已存在的 builtin 角色 permissions 以代码为准覆盖更新
+  （内置角色用户不可改——D12，因此版本升级调整内置清单必须能生效）；自定义角色不动。
+- **自定义角色删除**：被任何用户引用时拒绝删除（软引用删除会让这些用户 fail-closed
+  全拒，等价于锁号）。
+
+## 不做的事
+
 ## 不做的事
 
 - 不引入 casban/ory 类权限框架——依赖重量与本项目体量不匹配
