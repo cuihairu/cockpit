@@ -13,6 +13,10 @@ func main() {
 	os.Exit(run(os.Args, os.Stdout))
 }
 
+// version 默认值供本地开发构建；nightly 构建用
+// -ldflags "-X main.version=..." 注入。
+var version = "0.1.0"
+
 // run 命令分发，返回进程退出码（main 只做薄壳，逻辑全在此可测）
 func run(args []string, stdout io.Writer) int {
 	if len(args) < 2 {
@@ -49,7 +53,7 @@ func printUsage(w io.Writer) {
 }
 
 func printVersion(w io.Writer) {
-	fmt.Fprintln(w, "Cockpit Agent v0.1.0")
+	fmt.Fprintf(w, "Cockpit Agent v%s\n", version)
 }
 
 // handleStart `cockpit-agent start [-server ws://...]`

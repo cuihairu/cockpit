@@ -322,7 +322,7 @@ func TestCovPrintHelpers(t *testing.T) {
 
 	buf.Reset()
 	printVersion(&buf)
-	if !strings.Contains(buf.String(), Version) {
+	if !strings.Contains(buf.String(), version) {
 		t.Fatalf("version output: %q", buf.String())
 	}
 }

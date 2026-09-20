@@ -13,7 +13,9 @@ import (
 	"github.com/cuihairu/cockpit/internal/server"
 )
 
-const Version = "0.1.0"
+// version 默认值供本地开发构建；nightly/发布构建用
+// -ldflags "-X main.version=..." 注入（const 无法被 -X 覆盖，必须是 var）。
+var version = "0.1.0"
 
 var defaultConfigPaths = []string{
 	"./config/cockpit.yaml",
@@ -136,7 +138,7 @@ func printUsage(w io.Writer) {
 }
 
 func printVersion(w io.Writer) {
-	fmt.Fprintf(w, "Cockpit v%s\n", Version)
+	fmt.Fprintf(w, "Cockpit v%s\n", version)
 }
 
 // runServer `cockpit server [-config path]`
