@@ -110,6 +110,15 @@ func decodeRegisterForWebSocket(msg *protocol.Message) (protocol.RegisterPayload
 	return protocol.DecodeRegister(msg)
 }
 
+// wsRegistryLookup registry 活跃连接查询。包级变量仅为测试可注入：
+// 后注册者跳过 Get 检查即可确定性复现「检查时不存在、注册时已被
+// 抢先」的 TOCTOU 后半程——真实并发下该窗口极窄，高负载（CI race
+// 检测）后到者几乎总被 Get 先拦成 duplicate_connection，赌调度
+// 会 flaky。
+var wsRegistryLookup = func(r *Registry, agentID string) (*Agent, bool) {
+	return r.Get(agentID)
+}
+
 func (s *Server) registerAgentConnection(conn *websocket.Conn, reg *protocol.RegisterPayload) (*Agent, *registrationRejection, error) {
 	if reg.AgentID == "" {
 		reg.AgentID = protocol.GenerateIDWithPrefix("agent")
@@ -124,7 +133,7 @@ func (s *Server) registerAgentConnection(conn *websocket.Conn, reg *protocol.Reg
 	}
 
 	// Registry 中的 Agent 均为活跃连接，已有记录时拒绝重复连接。
-	if _, exists := s.registry.Get(reg.AgentID); exists {
+	if _, exists := wsRegistryLookup(s.registry, reg.AgentID); exists {
 		return nil, &registrationRejection{
 			code:    "duplicate_connection",
 			message: "Agent already connected",

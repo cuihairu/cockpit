@@ -314,51 +314,31 @@ func TestCovPctTicketCleanupExpires(t *testing.T) {
 }
 
 // TestCovPctWSRegistrationRace 覆盖 websocket.go 的 registration_failed
-// rejection：两个 goroutine 越过 barrier 并发 registerAgentConnection 同一
-// 新 agentID，双方都先通过 db 查重（均无记录），后注册者在
-// registry.Register 处撞 ErrAgentAlreadyExists → registration_failed。
-// 每轮换新 ID 重试直至命中（15s deadline）。
+// rejection。原实现赌两个 goroutine「都越过 db 查重、在 registry.Register
+// 处碰撞」的极窄窗口——高负载（CI race 检测）下后到者几乎总被
+// registry.Get 先拦成 duplicate_connection，15s 可能零命中（CI 偶发
+// FAIL）。改为构造性验证：先注册者正常成功；后注册者注入跳过 Get
+// 检查（即"检查时不存在、注册时已被抢先"的 TOCTOU 后半程），确定性
+// 撞 ErrAgentAlreadyExists → registration_failed。
 func TestCovPctWSRegistrationRace(t *testing.T) {
 	s := newTestServerWithDB(t)
 
-	deadline := time.Now().Add(15 * time.Second)
-	hit := false
-	for round := 0; !hit && time.Now().Before(deadline); round++ {
-		agentID := fmt.Sprintf("cov-ws-race-%d", round)
-		barrier := make(chan struct{})
-		type wsResult struct {
-			rejection *registrationRejection
-			err       error
-		}
-		results := make(chan wsResult, 2)
-		for i := 0; i < 2; i++ {
-			go func() {
-				reg := &protocol.RegisterPayload{
-					AgentID:  agentID,
-					Hostname: "host-" + agentID,
-				}
-				<-barrier
-				_, rejection, err := s.registerAgentConnection(nil, reg)
-				results <- wsResult{rejection: rejection, err: err}
-			}()
-		}
-		close(barrier)
-
-		for i := 0; i < 2; i++ {
-			r := <-results
-			if r.err != nil {
-				t.Fatalf("registerAgentConnection: %v", r.err)
-			}
-			if r.rejection != nil && r.rejection.code == "registration_failed" {
-				hit = true
-			}
-			if r.rejection == nil {
-				s.registry.Unregister(agentID)
-			}
-		}
+	reg := &protocol.RegisterPayload{AgentID: "cov-ws-race-a", Hostname: "host-cov-ws-race-a"}
+	if _, rejection, err := s.registerAgentConnection(nil, reg); err != nil || rejection != nil {
+		t.Fatalf("first registration: err=%v rejection=%v", err, rejection)
 	}
-	if !hit {
-		t.Fatalf("registration_failed rejection not observed within deadline")
+
+	orig := wsRegistryLookup
+	wsRegistryLookup = func(*Registry, string) (*Agent, bool) { return nil, false }
+	defer func() { wsRegistryLookup = orig }()
+
+	reg2 := &protocol.RegisterPayload{AgentID: "cov-ws-race-a", Hostname: "host-cov-ws-race-a"}
+	_, rejection, err := s.registerAgentConnection(nil, reg2)
+	if err != nil {
+		t.Fatalf("second registration: %v", err)
+	}
+	if rejection == nil || rejection.code != "registration_failed" {
+		t.Fatalf("expected registration_failed, got %+v", rejection)
 	}
 }
 
