@@ -1,111 +1,112 @@
-// Dashboard 样式 - 阿里云风格
+// Dashboard 样式：统计卡走容器底色 + 语义色 accent（企业控制台惯例），
+// 亮/暗由 <html data-theme> 切换，不再使用满版渐变。
+@stat-green: #00b42a;
+@stat-red: #f53f3f;
+@stat-blue: #165dff;
+@stat-orange: #ff7d00;
+@stat-purple: #722ed1;
+@stat-cyan: #13c2c2;
+
 .dashboard-container {
   padding: 24px;
-  background: #F2F3F5;
   min-height: calc(100vh - 64px);
 }
 
 .stat-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
   padding: 20px;
-  transition: all 0.3s ease;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
   min-height: 120px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  box-shadow: rgba(30, 118, 255, 0.12) 0 2px 12px 0px;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-
-  // 添加装饰性背景
-  &::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    right: -20%;
-    width: 200px;
-    height: 200px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 50%;
-  }
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 
   &:hover {
-    transform: translateY(-4px);
-    box-shadow: rgba(30, 118, 255, 0.2) 0 8px 24px 0px;
+    border-color: #c9cdd4;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
   }
 
-  .stat-icon {
-    font-size: 28px;
-    opacity: 0.95;
+  .stat-card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
     margin-bottom: 12px;
-    display: inline-block;
   }
 
   .ant-statistic-title {
-    color: rgba(255, 255, 255, 0.9);
+    color: #86909c;
     font-size: 13px;
     font-weight: 400;
     margin-bottom: 8px;
   }
 
   .ant-statistic-content {
-    color: white;
-    position: relative;
-    z-index: 1;
-
     .ant-statistic-content-value {
-      font-size: 32px;
+      font-size: 28px;
       font-weight: 600;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       line-height: 1.2;
     }
 
     .ant-statistic-content-suffix {
-      font-size: 16px;
+      font-size: 14px;
       margin-left: 4px;
-      opacity: 0.9;
+      color: #86909c;
     }
-  }
-
-  .stat-trend {
-    font-size: 12px;
-    opacity: 0.85;
-    margin-top: 8px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-}
-
-.stat-card-blue {
-  background: linear-gradient(135deg, #1366EC 0%, #40A9FF 100%);
-
-  &::before {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.15), transparent);
   }
 }
 
 .stat-card-green {
-  background: linear-gradient(135deg, #00A870 0%, #52C41A 100%);
+  .stat-card-icon { background: fade(@stat-green, 10%); color: @stat-green; }
+  .ant-statistic-content-value { color: @stat-green; }
 }
-
-.stat-card-orange {
-  background: linear-gradient(135deg, #FF7D00 0%, #FFA940 100%);
-}
-
 .stat-card-red {
-  background: linear-gradient(135deg, #F53F3F 0%, #FF7875 100%);
+  .stat-card-icon { background: fade(@stat-red, 10%); color: @stat-red; }
+  .ant-statistic-content-value { color: @stat-red; }
 }
-
+.stat-card-blue {
+  .stat-card-icon { background: fade(@stat-blue, 10%); color: @stat-blue; }
+  .ant-statistic-content-value { color: @stat-blue; }
+}
+.stat-card-orange {
+  .stat-card-icon { background: fade(@stat-orange, 10%); color: @stat-orange; }
+  .ant-statistic-content-value { color: @stat-orange; }
+}
 .stat-card-purple {
-  background: linear-gradient(135deg, #722ED1 0%, #B37FEB 100%);
+  .stat-card-icon { background: fade(@stat-purple, 10%); color: @stat-purple; }
+  .ant-statistic-content-value { color: @stat-purple; }
+}
+.stat-card-cyan {
+  .stat-card-icon { background: fade(@stat-cyan, 10%); color: @stat-cyan; }
+  .ant-statistic-content-value { color: @stat-cyan; }
 }
 
-.stat-card-cyan {
-  background: linear-gradient(135deg, #13C2C2 0%, #36CFC9 100%);
+// 暗色：容器底 #1d1d1d、弱化边框（antd darkAlgorithm 容器色系）
+[data-theme='dark'] {
+  .dashboard-container {
+    background: transparent;
+  }
+
+  .stat-card {
+    background: #1d1d1d;
+    border-color: rgba(255, 255, 255, 0.08);
+
+    &:hover {
+      border-color: rgba(255, 255, 255, 0.16);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    .ant-statistic-title,
+    .ant-statistic-content-suffix {
+      color: #a0a4ab;
+    }
+  }
 }
 
 // 响应式
@@ -118,13 +119,15 @@
     min-height: 100px;
     padding: 16px;
 
-    .stat-icon {
-      font-size: 24px;
+    .stat-card-icon {
+      width: 32px;
+      height: 32px;
+      font-size: 16px;
+      margin-bottom: 8px;
     }
 
     .ant-statistic-content-value {
-      font-size: 24px;
+      font-size: 22px;
     }
   }
 }
-

@@ -74,6 +74,11 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
     return () => media.removeEventListener('change', updateResolvedTheme)
   }, [settings.theme])
 
+  // 暗色标记落到 <html data-theme>，供 less/自绘样式适配（antd token 之外的场景）
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', resolvedTheme)
+  }, [resolvedTheme])
+
   const updateSettings = (patch: Partial<UISettings>) => {
     setSettings((current) => normalizeSettings({ ...current, ...patch }))
   }

@@ -1,5 +1,5 @@
 // 阿里云控制台风格主题
-@primary-color: #1366EC; // 阿里云蓝
+@primary-color: #165DFF; // 主色（与 ConfigProvider colorPrimary 一致，Arco 蓝）
 @success-color: #00A870;
 @warning-color: #FF7D00;
 @error-color: #F53F3F;
@@ -15,6 +15,12 @@ body {
   color: @text-color;
   margin: 0;
   padding: 0;
+}
+
+// 暗色跟随 <html data-theme>（SettingsContext 同步）
+html[data-theme='dark'] body {
+  background-color: #141414;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 // ProLayout 样式覆盖
@@ -121,11 +127,11 @@ body {
         border-radius: 4px;
 
         &:hover {
-          background: rgba(19, 102, 236, 0.06);
+          background: rgba(22, 93, 255, 0.06);
         }
 
         &.ant-menu-item-selected {
-          background: rgba(19, 102, 236, 0.1);
+          background: rgba(22, 93, 255, 0.1);
           color: @primary-color;
 
           &::after {
@@ -143,14 +149,14 @@ body {
           border-radius: 4px;
 
           &:hover {
-            background: rgba(19, 102, 236, 0.06);
+            background: rgba(22, 93, 255, 0.06);
             color: @primary-color;
           }
         }
 
         &.ant-menu-submenu-open {
           > .ant-menu-submenu-title {
-            background: rgba(19, 102, 236, 0.06);
+            background: rgba(22, 93, 255, 0.06);
             color: @primary-color;
           }
         }
@@ -209,7 +215,7 @@ body {
     &:focus {
       background: #fff;
       border-color: @primary-color !important;
-      box-shadow: 0 0 0 2px rgba(19, 102, 236, 0.1);
+      box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.1);
     }
 
     &:hover {
@@ -252,70 +258,6 @@ body {
   }
 }
 
-// 统计数字卡片 - 阿里云风格渐变
-.stat-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border-radius: 8px;
-  padding: 20px;
-  transition: all 0.3s;
-  min-height: 120px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  }
-
-  .ant-statistic-title {
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 13px;
-    font-weight: 400;
-    margin-bottom: 8px;
-  }
-
-  .ant-statistic-content {
-    color: white;
-
-    .ant-statistic-content-value {
-      font-size: 28px;
-      font-weight: 600;
-    }
-
-    .ant-statistic-content-suffix {
-      font-size: 14px;
-      margin-left: 4px;
-      opacity: 0.85;
-    }
-  }
-}
-
-.stat-card-blue {
-  background: linear-gradient(135deg, #1366EC 0%, #40A9FF 100%);
-}
-
-.stat-card-green {
-  background: linear-gradient(135deg, #00A870 0%, #52C41A 100%);
-}
-
-.stat-card-orange {
-  background: linear-gradient(135deg, #FF7D00 0%, #FFA940 100%);
-}
-
-.stat-card-red {
-  background: linear-gradient(135deg, #F53F3F 0%, #FF7875 100%);
-}
-
-.stat-card-purple {
-  background: linear-gradient(135deg, #722ED1 0%, #B37FEB 100%);
-}
-
-.stat-card-cyan {
-  background: linear-gradient(135deg, #13C2C2 0%, #36CFC9 100%);
-}
 
 // 表格样式（阿里云风格）
 .ant-table {
@@ -375,7 +317,7 @@ body {
 
   &.ant-tag-processing,
   &.ant-tag-blue {
-    background: rgba(19, 102, 236, 0.1);
+    background: rgba(22, 93, 255, 0.1);
     color: #1366EC;
     border-color: rgba(19, 102, 236, 0.2);
   }
@@ -405,7 +347,7 @@ body {
 
     &:hover {
       color: @primary-color;
-      background: rgba(19, 102, 236, 0.06);
+      background: rgba(22, 93, 255, 0.06);
     }
   }
 }
