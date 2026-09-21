@@ -23,6 +23,75 @@ html[data-theme='dark'] body {
   color: rgba(255, 255, 255, 0.85);
 }
 
+// 暗色覆盖：上文 ProLayout/卡片/表格覆盖层原为亮色硬编码（#fff/#F7F8FA），
+// 与 antd darkAlgorithm 打架时类选择器覆盖 CSS-in-JS，这里集中接管。
+// 色板对齐 antd dark：布局 #141414、容器 #1d1d1d、填充 #222、弱边框。
+html[data-theme='dark'] {
+  .ant-pro-basicLayout {
+    .ant-pro-top-nav-header {
+      background: #1d1d1d;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+
+      .ant-menu.ant-menu-top .ant-menu-item {
+        color: rgba(255, 255, 255, 0.65);
+      }
+    }
+
+    .ant-pro-sider {
+      background: #1d1d1d;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .ant-pro-basicLayout-content {
+      background: #141414;
+    }
+  }
+
+  .ant-input-search .ant-input {
+    background: #222222;
+
+    &:focus,
+    &:hover {
+      background: #1d1d1d;
+    }
+  }
+
+  .ant-card {
+    background: #1d1d1d;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+
+    .ant-card-head {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+
+      .ant-card-head-title {
+        color: rgba(255, 255, 255, 0.85);
+      }
+    }
+  }
+
+  .ant-table {
+    .ant-table-thead > tr > th {
+      background-color: #222222;
+      color: rgba(255, 255, 255, 0.85);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .ant-table-tbody > tr {
+      &:hover > td {
+        background-color: #222222 !important;
+      }
+
+      > td {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+    }
+  }
+
+  .ant-breadcrumb .ant-breadcrumb-link {
+    color: #a0a4ab;
+  }
+}
+
 // ProLayout 样式覆盖
 .ant-pro-basicLayout {
   // 顶部 Header 样式

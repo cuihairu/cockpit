@@ -504,8 +504,9 @@ const AppShell = () => {
         },
         components: {
           Layout: {
-            headerBg: resolvedTheme === 'dark' ? '#141414' : '#fff',
-            siderBg: resolvedTheme === 'dark' ? '#141414' : '#fff',
+            // 头/侧栏底色与 App.less 暗色覆盖段保持一致（容器层 #1d1d1d）
+            headerBg: resolvedTheme === 'dark' ? '#1d1d1d' : '#fff',
+            siderBg: resolvedTheme === 'dark' ? '#1d1d1d' : '#fff',
           },
         },
       }}
