@@ -245,7 +245,10 @@ const Acme = () => {
   }
 
   const saveEmail = async () => {
-    const { email } = await emailForm.validateFields()
+    // 与 submit 一致：校验失败的 reject 需吞掉（否则 unhandled rejection 泄漏）
+    const values = await emailForm.validateFields().catch(() => undefined)
+    if (!values) return
+    const email = values.email
     try {
       await api.putAcmeAccount(email.trim())
       setAccountOpen(false)
