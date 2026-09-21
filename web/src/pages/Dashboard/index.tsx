@@ -1,20 +1,16 @@
-import { Card, Row, Col, Statistic, Progress, Table, Tag, Space, Typography, Button } from 'antd'
-import {
-  CloudServerOutlined,
-  SafetyOutlined,
-  CheckCircleOutlined,
-  WarningOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons'
+import { Button, Typography } from 'antd'
+import { ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/services/api'
-import type { ColumnsType } from 'antd/es/table'
-import type { Agent } from '@/types'
 import { useSettingsContext } from '@/contexts/useSettingsContext'
+import AgentTable from './AgentTable'
+import HealthBar from './HealthBar'
+import StatCards from './StatCards'
 import './index.less'
 
 const { Title, Text } = Typography
 
+// 总览：资源六卡 + 基础设施健康度 + Agent 概览表（完整管理在 /agents）
 const Dashboard = () => {
   const { settings } = useSettingsContext()
   const { data: status, refetch } = useQuery({
@@ -39,101 +35,6 @@ const Dashboard = () => {
     ? Math.round((stats.infrastructure.online / stats.infrastructure.total) * 100)
     : 0
 
-  // 搜索过滤
-  const resourceCards = [
-    {
-      title: '运行中服务',
-      value: stats.services.running,
-      suffix: '个',
-      icon: <CheckCircleOutlined />,
-      color: 'stat-card-green',
-    },
-    {
-      title: '异常服务',
-      value: stats.services.down,
-      suffix: '个',
-      icon: <WarningOutlined />,
-      color: 'stat-card-red',
-    },
-    {
-      title: '在线 Agent',
-      value: stats.infrastructure.online,
-      suffix: `/${stats.infrastructure.total}`,
-      icon: <CloudServerOutlined />,
-      color: 'stat-card-blue',
-    },
-    {
-      title: '有效域名',
-      value: stats.domains.valid,
-      suffix: '个',
-      icon: <SafetyOutlined />,
-      color: 'stat-card-purple',
-    },
-    {
-      title: '有效证书',
-      value: stats.certificates.valid,
-      suffix: '个',
-      icon: <SafetyOutlined />,
-      color: 'stat-card-cyan',
-    },
-    {
-      title: '即将过期',
-      value: stats.certificates.expiring,
-      suffix: '个',
-      icon: <WarningOutlined />,
-      color: 'stat-card-orange',
-    },
-  ]
-
-  const agentColumns: ColumnsType<Agent> = [
-    {
-      title: '主机名',
-      dataIndex: 'hostname',
-      key: 'hostname',
-      render: (text: string) => (
-        <Space>
-          <CloudServerOutlined />
-          <span>{text}</span>
-        </Space>
-      ),
-    },
-    {
-      title: 'IP 地址',
-      dataIndex: 'ip',
-      key: 'ip',
-    },
-    {
-      title: '区域',
-      key: 'location',
-      render: (_value, record) => `${record.location?.region || '-'}/${record.location?.zone || '-'}`,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      render: (status: string) => (
-        <Tag color={status === 'online' ? 'success' : 'default'}>
-          {status === 'online' ? '在线' : '离线'}
-        </Tag>
-      ),
-    },
-    {
-      title: '能力',
-      dataIndex: 'capabilities',
-      key: 'capabilities',
-      render: (caps: Agent['capabilities']) => (
-        <Space size={4}>
-          {caps?.slice(0, 3).map((cap) => (
-            <Tag key={cap.type} color="processing" style={{ fontSize: 11 }}>
-              {cap.type}
-            </Tag>
-          ))}
-          {caps?.length > 3 && <Tag>+{caps.length - 3}</Tag>}
-        </Space>
-      ),
-    },
-  ]
-
   return (
     <div className="dashboard-container">
       <div style={{ marginBottom: 24, display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
@@ -146,47 +47,9 @@ const Dashboard = () => {
         </Button>
       </div>
 
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        {(settings.showResourceCount ? resourceCards : resourceCards.slice(0, 4)).map((card, index) => (
-          <Col xs={12} sm={12} md={8} lg={4} key={index}>
-            <div className={`stat-card ${card.color}`}>
-              <div style={{ fontSize: 20, marginBottom: 8 }}>{card.icon}</div>
-              <Statistic
-                title={card.title}
-                value={card.value}
-                suffix={card.suffix}
-                valueStyle={{ fontSize: 24, fontWeight: 600 }}
-              />
-            </div>
-          </Col>
-        ))}
-      </Row>
-
-      <Card style={{ marginBottom: 24 }} variant="borderless">
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-          <Title level={5} style={{ margin: 0 }}>基础设施健康度</Title>
-          <Text type="secondary">{onlineRate}% 在线</Text>
-        </div>
-        <Progress
-          percent={onlineRate}
-          strokeColor={{
-            '0%': '#108ee9',
-            '100%': '#87d068',
-          }}
-          status={onlineRate >= 80 ? 'success' : onlineRate >= 50 ? 'normal' : 'exception'}
-        />
-      </Card>
-
-      <Card title="Agent 列表" variant="borderless" extra={<a href="/agents">查看全部</a>}>
-        <Table
-          dataSource={agents || []}
-          columns={agentColumns}
-          rowKey="id"
-          pagination={{ pageSize: 5 }}
-          size="small"
-          scroll={{ x: 640 }}
-        />
-      </Card>
+      <StatCards stats={stats} showAll={settings.showResourceCount} />
+      <HealthBar onlineRate={onlineRate} />
+      <AgentTable agents={agents || []} />
     </div>
   )
 }

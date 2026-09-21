@@ -1318,3 +1318,10 @@ export interface AuditLogsPage {
   data: AuditLog[]
   pagination: { total: number }
 }
+
+export interface StatusResponse {
+  services: { running: number; down: number; unknown: number }
+  domains: { valid: number; expiring: number }
+  certificates: { valid: number; expiring: number }
+  infrastructure: { total: number; online: number }
+}

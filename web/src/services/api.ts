@@ -3,6 +3,7 @@ import type { UISettings } from '@/contexts/settingsTypes'
 import type {
   Agent,
   AuditLogStats,
+  StatusResponse,
   AuditLogsPage,
   ComputeInstance,
   Domain,
@@ -91,13 +92,6 @@ import type {
   DomainDriftResponse,
 } from '@/types'
 import { logger } from '@/utils/logger'
-
-type StatusResponse = {
-  services: { running: number; down: number; unknown: number }
-  domains: { valid: number; expiring: number }
-  certificates: { valid: number; expiring: number }
-  infrastructure: { total: number; online: number }
-}
 
 class ApiService {
   private client: AxiosInstance
