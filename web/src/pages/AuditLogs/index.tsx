@@ -12,23 +12,11 @@ import type { ColumnsType } from 'antd/es/table'
 import { RangePickerProps } from 'antd/es/date-picker'
 import dayjs from 'dayjs'
 import { logger } from '@/utils/logger'
+import type { AuditLog } from '@/types'
+import { api } from '@/services/api'
 import './index.less'
 
 const { RangePicker } = DatePicker
-
-interface AuditLog {
-  id: number
-  user_id: string
-  username: string
-  action: string
-  resource: string
-  resource_id: string
-  details: string
-  ip: string
-  user_agent: string
-  status: string
-  created_at: string
-}
 
 interface RemoteAuditDetails {
   protocol?: string
@@ -39,15 +27,6 @@ interface RemoteAuditDetails {
   egress?: string
   duration?: string
   reason?: string
-}
-
-interface AuditLogStats {
-  total_logs: number
-  today_logs: number
-  failed_logs: number
-  by_action: Record<string, number>
-  by_resource: Record<string, number>
-  by_user: Record<string, number>
 }
 
 const ACTION_MAP: Record<string, { text: string; color: string }> = {
@@ -146,49 +125,8 @@ function renderGenericAuditDetails(details: Record<string, unknown> | null, raw:
   )
 }
 
-const fetchAuditLogs = async (
-  filters: Record<string, string | undefined>,
-  page: number,
-  pageSize: number,
-) => {
-  const params = new URLSearchParams({
-    page: page.toString(),
-    page_size: pageSize.toString(),
-  })
-
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value) {
-      params.set(key, value)
-    }
-  })
-
-  const response = await fetch(`/api/admin/audit/logs?${params}`)
-  return response.json()
-}
-
-const fetchAuditStats = async (): Promise<AuditLogStats> => {
-  const response = await fetch('/api/admin/audit/stats')
-  return response.json()
-}
-
-const exportAuditLogs = async (filters: Record<string, string | undefined>) => {
-  const params = new URLSearchParams()
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value) {
-      params.set(key, value)
-    }
-  })
-
-  const token = localStorage.getItem('token')
-  const response = await fetch(`/api/admin/audit/export?${params}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  })
-
-  if (!response.ok) {
-    throw new Error(`导出失败: ${response.status}`)
-  }
-
-  const blob = await response.blob()
+const exportAndDownload = async (filters: Record<string, string | undefined>) => {
+  const blob = await api.exportAuditLogs(filters)
   const url = window.URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -230,12 +168,12 @@ const AuditLogs = () => {
 
   const logsQuery = useQuery({
     queryKey: ['audit-logs', filters, pagination.current, pagination.pageSize],
-    queryFn: () => fetchAuditLogs(filters, pagination.current, pagination.pageSize),
+    queryFn: () => api.getAuditLogs(filters, pagination.current, pagination.pageSize),
   })
 
   const statsQuery = useQuery({
     queryKey: ['audit-stats', filters],
-    queryFn: fetchAuditStats,
+    queryFn: () => api.getAuditStats(),
   })
 
   const logs = (logsQuery.data?.data || []) as AuditLog[]
@@ -256,7 +194,7 @@ const AuditLogs = () => {
 
   const handleExport = async () => {
     try {
-      await exportAuditLogs(filters)
+      await exportAndDownload(filters)
       void message.success('导出成功')
     } catch (error) {
       logger.error('Failed to export audit logs:', error)

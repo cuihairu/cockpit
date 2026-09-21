@@ -2,6 +2,8 @@ import axios, { AxiosInstance } from 'axios'
 import type { UISettings } from '@/contexts/settingsTypes'
 import type {
   Agent,
+  AuditLogStats,
+  AuditLogsPage,
   ComputeInstance,
   Domain,
   Certificate,
@@ -197,6 +199,35 @@ class ApiService {
 
   async deleteRole(name: string): Promise<{ message: string }> {
     return this.client.delete<unknown, { message: string }>(`/roles/${encodeURIComponent(name)}`)
+  }
+
+  // ========== 审计日志（admin/audit） ==========
+
+  async getAuditLogs(
+    filters: Record<string, string | undefined>,
+    page: number,
+    pageSize: number,
+  ): Promise<AuditLogsPage> {
+    const params: Record<string, string> = { page: String(page), page_size: String(pageSize) }
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v) params[k] = v
+    })
+    return this.client.get<unknown, AuditLogsPage>('/admin/audit/logs', { params })
+  }
+
+  async getAuditStats(): Promise<AuditLogStats> {
+    return this.client.get<unknown, AuditLogStats>('/admin/audit/stats')
+  }
+
+  async exportAuditLogs(filters: Record<string, string | undefined>): Promise<Blob> {
+    const params: Record<string, string> = {}
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v) params[k] = v
+    })
+    return this.client.get<unknown, Blob>('/admin/audit/export', {
+      params,
+      responseType: 'blob',
+    })
   }
 
   // 更新当前用户信息
