@@ -213,7 +213,8 @@ const Acme = () => {
   }
 
   const submit = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => undefined)
+    if (!values) return
     const domains = values.domains.map((d) => d.trim().toLowerCase()).filter(Boolean)
     if (domains.length === 0) {
       message.warning('请至少填写一个域名')

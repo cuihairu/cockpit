@@ -342,7 +342,7 @@ const DomainsPage = () => {
         title={editing ? `编辑绑定 · ${editing.domain}` : '登记绑定'}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
-        onOk={() => form.validateFields().then((v) => saveMutation.mutate(v))}
+        onOk={() => form.validateFields().then((v) => saveMutation.mutate(v)).catch(() => undefined)}
         confirmLoading={saveMutation.isPending}
         destroyOnClose
       >

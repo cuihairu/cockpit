@@ -177,7 +177,8 @@ const Backups = () => {
 
   const save = async () => {
     try {
-      const values = await form.validateFields()
+      const values = await form.validateFields().catch(() => undefined)
+      if (!values) return
       let schedule = 'manual'
       if (values.scheduleType === 'daily' && values.dailyTime) {
         schedule = `daily@${values.dailyTime.format('HH:mm')}`

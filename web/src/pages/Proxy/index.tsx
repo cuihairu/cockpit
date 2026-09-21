@@ -129,7 +129,9 @@ const Proxy = () => {
 
   const saveSite = async () => {
     if (!selectedAgent) return
-    const raw = await form.validateFields()
+    // 校验失败的 reject 在表单层已呈现，这里吞掉避免 unhandled rejection
+    const raw = await form.validateFields().catch(() => undefined)
+    if (!raw) return
     const site: ProxySite = {
       name: raw.name.trim(),
       serverNames: (raw.serverNames as string[])

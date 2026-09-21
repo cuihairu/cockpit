@@ -170,7 +170,8 @@ const Cron = () => {
 
   const saveJob = async () => {
     if (!selectedAgent) return
-    const raw = await form.validateFields()
+    const raw = await form.validateFields().catch(() => undefined)
+    if (!raw) return
     const job: CronJob = {
       name: raw.name.trim(),
       schedule: raw.schedule.trim(),

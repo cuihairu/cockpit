@@ -129,7 +129,8 @@ const DDNSPanel: React.FC = () => {
   }
 
   const submit = async () => {
-    const values = await form.validateFields()
+    const values = await form.validateFields().catch(() => undefined)
+    if (!values) return
     const zone = zones.find((z) => z.id === values.zoneId)
     const input = {
       agentId: values.agentId,
