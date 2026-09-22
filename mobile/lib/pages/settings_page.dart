@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/auth.dart';
+import '../state/biometric.dart';
 import '../state/settings.dart';
 import 'audit_page.dart';
 
@@ -35,6 +36,7 @@ class SettingsPage extends ConsumerWidget {
             ref.invalidate(apiProvider);
           },
         ),
+        _BiometricTile(enabled: s.biometricLock),
         const Divider(),
         ListTile(
           leading: const Icon(Icons.history),
@@ -58,5 +60,36 @@ class SettingsPage extends ConsumerWidget {
   void _showChangeServer(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('修改地址请退出登录后在引导页重新配置（M1）')));
+  }
+}
+
+/// 生物识别锁开关：设备不支持时禁用；平台通道异常视为不支持。
+class _BiometricTile extends ConsumerWidget {
+  const _BiometricTile({required this.enabled});
+
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FutureBuilder<bool>(
+      future: ref.read(biometricProvider).isSupported(),
+      builder: (context, snap) {
+        final supported = snap.data ?? false;
+        return SwitchListTile(
+          secondary: const Icon(Icons.fingerprint),
+          title: const Text('启动生物识别锁'),
+          subtitle: Text(supported
+              ? '打开应用需验证指纹或面容'
+              : snap.hasError
+                  ? '无法检测生物识别可用性'
+                  : '本设备不支持生物识别'),
+          value: enabled,
+          onChanged: supported
+              ? (v) =>
+                  ref.read(settingsProvider.notifier).setBiometricLock(v)
+              : null,
+        );
+      },
+    );
   }
 }

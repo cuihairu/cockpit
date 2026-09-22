@@ -6,6 +6,7 @@ import 'pages/login_page.dart';
 import 'pages/server_setup_page.dart';
 import 'state/auth.dart';
 import 'state/settings.dart';
+import 'widgets/lock_gate.dart';
 
 void main() {
   runApp(const ProviderScope(child: CockpitApp()));
@@ -49,7 +50,11 @@ class _CockpitAppState extends ConsumerState<CockpitApp> {
         error: (e, _) => const ServerSetupPage(),
         data: (_) => switch (auth) {
           AuthTotpRequired() => const LoginPage(),
-          Authenticated() => const HomePage(),
+          Authenticated() =>
+            // 生物识别锁只护已登录视图；登录流程本身已要求认证
+            settings.biometricLock
+                ? const LockGate(child: HomePage())
+                : const HomePage(),
           _ => const LoginPage(),
         },
       );
