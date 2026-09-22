@@ -134,6 +134,20 @@ describe('useDesktopWS', () => {
     expect(handlers.onError).not.toHaveBeenCalled()
   })
 
+  it('ws.onopen 置 connecting；ws.onclose 置 disconnected', async () => {
+    const { get } = setup()
+    await connect(get())
+    const ws = FakeWebSocket.instances[0]
+    await act(async () => {
+      ws.onopen!()
+    })
+    expect(document.querySelector('[data-testid="state"]')!.textContent).toBe('connecting')
+    await act(async () => {
+      ws.onclose!()
+    })
+    expect(document.querySelector('[data-testid="state"]')!.textContent).toBe('disconnected')
+  })
+
   it('ws.onerror 置 disconnected 并回调', async () => {
     const { handlers, get } = setup()
     await connect(get())
@@ -168,6 +182,17 @@ describe('useDesktopWS', () => {
       get().sendKeyboard(1, true, false)
     })
     expect(FakeWebSocket.instances[0].sent).toHaveLength(0)
+  })
+
+  it('未建 WS 时 send 系列静默（ws 为 null 分支）', async () => {
+    const { get } = setup()
+    await act(async () => {
+      get().sendKeyboard(1, true, false)
+      get().sendMouse(0, 0, 0, 0, 'move')
+      get().sendClipboard('x')
+      get().sendSetResolution(1, 1)
+    })
+    expect(FakeWebSocket.instances).toHaveLength(0)
   })
 
   it('disconnect 关 WS 置态；卸载自动关', async () => {

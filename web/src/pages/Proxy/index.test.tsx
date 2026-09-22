@@ -47,10 +47,14 @@ const sites = {
   ],
 }
 
-const renderPage = () => {
-  apiMock.getAgents.mockResolvedValue(agents)
-  apiMock.getProxyStatus.mockResolvedValue(status)
-  apiMock.getProxySites.mockResolvedValue(sites)
+const renderPage = (over?: {
+  agents?: Agent[]
+  status?: unknown
+  sites?: unknown
+}) => {
+  apiMock.getAgents.mockResolvedValue(over?.agents ?? agents)
+  apiMock.getProxyStatus.mockResolvedValue(over?.status ?? status)
+  apiMock.getProxySites.mockResolvedValue(over?.sites ?? sites)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
@@ -249,5 +253,111 @@ describe('Proxy', () => {
     })
     await waitFor(() => expect(apiMock.deleteProxySite).toHaveBeenCalledWith('ag-1', 'blog'))
     expect(msgSuccess).toHaveBeenCalledWith('站点 blog 已删除')
+  })
+
+  it('删除失败：错误提示；配置预览 footer 关闭按钮', async () => {
+    apiMock.deleteProxySite.mockRejectedValue(new Error('boom'))
+    apiMock.getProxySite.mockResolvedValue({ name: 'api', content: 'server {}' })
+    renderPage()
+    await screen.findByText('选择一台安装了 Nginx 或 Traefik 的主机开始管理')
+    await act(async () => {
+      await pickAgent('gw-nginx')
+    })
+    expect(await screen.findByText('blog')).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(within(rowOf('blog')).getByRole('button', { name: /配\s*置/ }))
+    })
+    expect(await screen.findByText('配置预览：blog')).toBeInTheDocument()
+    // footer 的关闭按钮（而非右上角 X）
+    fireEvent.click(screen.getByRole('button', { name: /关\s*闭/ }))
+    // 删除失败
+    await act(async () => {
+      fireEvent.click(within(rowOf('blog')).getByRole('button', { name: /删\s*除/ }))
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    })
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('删除失败'))
+  })
+
+  it('下拉标签：无版本后端、hostname 缺省用 id；capabilities 缺省禁用', async () => {
+    renderPage({
+      agents: [
+        { id: 'ag-nv', hostname: 'no-ver', ip: '1.1.1.1', status: 'online', lastSeen: '0',
+          capabilities: [{ type: 'nginx-proxy' }] } as unknown as Agent,
+        { id: 'ag-tv', hostname: 'tf-ver', ip: '1.1.1.2', status: 'online', lastSeen: '0',
+          capabilities: [{ type: 'traefik-proxy' }] } as unknown as Agent,
+        { id: 'ag-noid', ip: '1.1.1.3', status: 'online', lastSeen: '0',
+          capabilities: [{ type: 'nginx-proxy', metadata: {} }] } as unknown as Agent,
+        { id: 'ag-nocaps', hostname: 'nocaps', ip: '1.1.1.4', status: 'online', lastSeen: '0' } as unknown as Agent,
+      ],
+    })
+    await screen.findByText('选择一台安装了 Nginx 或 Traefik 的主机开始管理')
+    fireEvent.mouseDown(document.querySelector('.ant-select-selector')!)
+    await waitFor(() =>
+      expect(document.querySelectorAll('.ant-select-item-option').length).toBeGreaterThan(0))
+    const optText = (label: string) =>
+      Array.from(document.querySelectorAll('.ant-select-item-option')).find(
+        (o) => o.textContent?.startsWith(label))?.textContent ?? ''
+    expect(optText('no-ver')).toBe('no-ver（Nginx）')
+    expect(optText('tf-ver')).toBe('tf-ver（Traefik）')
+    // hostname 缺省 → 用 id 展示
+    expect(optText('ag-noid')).toBe('ag-noid（Nginx）')
+    // capabilities 缺省 → 禁用并提示未检测
+    expect(optText('nocaps')).toBe('nocaps（未检测到 Nginx/Traefik）')
+  })
+
+  it('systemctl 生效方式与无版本展示；站点空文案', async () => {
+    renderPage({
+      agents: [mkAgent('ag-1', 'gw-nginx', 'nginx-proxy')],
+      status: {
+        backend: 'nginx', installed: true, version: '', confDir: '/etc/nginx/conf.d', siteCount: 0, reloadMode: 'systemctl',
+      },
+      sites: { sites: [] },
+    })
+    await act(async () => {
+      await pickAgent('gw-nginx')
+    })
+    expect(await screen.findByText('systemctl')).toBeInTheDocument()
+    // version 空 → 「已安装」
+    expect(screen.getByText('已安装')).toBeInTheDocument()
+    expect(screen.getByText('暂无站点，点击「新建站点」下发第一个配置')).toBeInTheDocument()
+  })
+
+  it('未安装展示未检测到；traefik 无 confDir 用「配置目录」兜底', async () => {
+    renderPage({
+      agents: [mkAgent('ag-2', 'gw-traefik', 'traefik-proxy', false, 'v3.1')],
+      status: { backend: 'traefik', installed: false, siteCount: 0, reloadMode: 'hot' },
+      sites: { sites: [] },
+    })
+    await act(async () => {
+      await pickAgent('gw-traefik')
+    })
+    expect(await screen.findByText('未检测到')).toBeInTheDocument()
+    expect(screen.getByText(/只管理 配置目录 下的 cockpit-site-\*\.yml/)).toBeInTheDocument()
+  })
+
+  it('域名格式校验：非法域名提交被拒', async () => {
+    // 直接编辑带非法域名的站点（tags 输入在 jsdom 下不产生 tag），回填后提交触发 validator
+    apiMock.applyProxySite.mockResolvedValue({})
+    renderPage({
+      sites: {
+        sites: [
+          { name: 'bad', serverNames: ['bad domain!'], upstream: '127.0.0.1:80', scheme: 'http' as const },
+        ],
+      },
+    })
+    await screen.findByText('选择一台安装了 Nginx 或 Traefik 的主机开始管理')
+    await act(async () => {
+      await pickAgent('gw-nginx')
+    })
+    await screen.findByText('bad')
+    await act(async () => {
+      fireEvent.click(within(rowOf('bad')).getByRole('button', { name: /编辑/ }))
+    })
+    await screen.findByText('编辑站点 bad')
+    await modalOk()
+    expect(await screen.findByText('域名只能含字母/数字/点/连字符/通配符 *')).toBeInTheDocument()
+    expect(apiMock.applyProxySite).not.toHaveBeenCalled()
   })
 })

@@ -12,26 +12,54 @@ vi.mock('@/services/api', () => ({ api: apiMock }))
 
 const modalStubs = vi.hoisted(() => ({
   opened: [] as string[],
+  closed: [] as string[],
   TerminalModal: vi.fn(),
   DesktopModal: vi.fn(),
   VNCModal: vi.fn(),
 }))
 vi.mock('@/components/TerminalModal', () => ({
-  default: (props: { title?: string; agentId?: string }) => {
-    modalStubs.opened.push(`terminal:${props.title}`)
-    return <div data-testid="terminal-modal" />
+  default: (props: { title?: string; agentId?: string; onClose?: () => void }) => {
+    const key = `terminal:${props.title}`
+    if (!modalStubs.opened.includes(key)) modalStubs.opened.push(key)
+    return (
+      <div
+        data-testid="terminal-modal"
+        onClick={() => {
+          modalStubs.closed.push('terminal')
+          props.onClose?.()
+        }}
+      />
+    )
   },
 }))
 vi.mock('@/components/DesktopModal', () => ({
-  default: (props: { title?: string }) => {
-    modalStubs.opened.push(`desktop:${props.title}`)
-    return <div data-testid="desktop-modal" />
+  default: (props: { title?: string; onClose?: () => void }) => {
+    const key = `desktop:${props.title}`
+    if (!modalStubs.opened.includes(key)) modalStubs.opened.push(key)
+    return (
+      <div
+        data-testid="desktop-modal"
+        onClick={() => {
+          modalStubs.closed.push('desktop')
+          props.onClose?.()
+        }}
+      />
+    )
   },
 }))
 vi.mock('@/components/VNCModal', () => ({
-  default: (props: { title?: string }) => {
-    modalStubs.opened.push(`vnc:${props.title}`)
-    return <div data-testid="vnc-modal" />
+  default: (props: { title?: string; onClose?: () => void }) => {
+    const key = `vnc:${props.title}`
+    if (!modalStubs.opened.includes(key)) modalStubs.opened.push(key)
+    return (
+      <div
+        data-testid="vnc-modal"
+        onClick={() => {
+          modalStubs.closed.push('vnc')
+          props.onClose?.()
+        }}
+      />
+    )
   },
 }))
 vi.mock('@/components/RemoteServices', () => ({
@@ -183,5 +211,70 @@ describe('Agents', () => {
     const before = apiMock.getAgents.mock.calls.length
     fireEvent.click(screen.getByRole('button', { name: /刷新/ }))
     await waitFor(() => expect(apiMock.getAgents.mock.calls.length).toBeGreaterThan(before))
+  })
+
+  it('类型筛选非 physical 分支按 virtType 命中', async () => {
+    renderPage()
+    await screen.findByText('web-01')
+    fireEvent.mouseDown(screen.getAllByText('筛选类型')[0].closest('.ant-select')!.querySelector('.ant-select-selector')!)
+    await pickOption('KVM')
+    expect(rowOf('ag-1')).toBeInTheDocument()
+    expect(document.querySelectorAll('tr.ant-table-row').length).toBe(1)
+  })
+
+  it('地域缺省归入 unknown 选项', async () => {
+    apiMock.getAgents.mockResolvedValue([
+      { id: 'ag-x', hostname: 'solo', ip: '5.5.5.5', status: 'online', lastSeen: '0', capabilities: [] } as unknown as Agent,
+    ])
+    renderPage()
+    await screen.findByText('solo')
+    fireEvent.mouseDown(screen.getAllByText('筛选地域')[0].closest('.ant-select')!.querySelector('.ant-select-selector')!)
+    // region 缺省的主机归入 unknown 选项（过滤比较的是原始 region，选项仅展示）
+    await pickOption('unknown')
+  })
+
+  it('三协议分流打开对应 Modal 且各自 onClose 可关；详情 X 触发 onClose', async () => {
+    apiMock.getAgents.mockResolvedValue([
+      {
+        // 无 id → handleConnect 的 selectedAgent?.id || '' 走兜底空串
+        hostname: 'triple',
+        ip: '7.7.7.7',
+        region: 'cn',
+        status: 'online',
+        lastSeen: '0',
+        virtType: 'kvm',
+        virtRole: 'guest',
+        capabilities: [
+          {
+            type: 'remote-services',
+            metadata: {
+              ssh: { host: '7.7.7.7', port: 22, name: 'SSH', running: true },
+              rdp: { host: '7.7.7.7', port: 3389, name: 'RDP', running: true },
+              vnc: { host: '7.7.7.7', port: 5900, name: 'VNC', running: true },
+            },
+          },
+        ],
+      } as unknown as Agent,
+    ])
+    renderPage()
+    await screen.findByText('triple')
+    fireEvent.click(within(rowOf('triple')).getByRole('button', { name: '详情' }))
+    expect(await screen.findByText('Agent 详情')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('conn-ssh'))
+    fireEvent.click(screen.getByText('conn-rdp'))
+    fireEvent.click(screen.getByText('conn-vnc'))
+    await screen.findByTestId('terminal-modal')
+    expect(modalStubs.opened).toEqual([
+      'terminal:SSH - 7.7.7.7:22',
+      'desktop:RDP - 7.7.7.7:3389',
+      'vnc:VNC - 7.7.7.7:5900',
+    ])
+    // 三个 Modal 的 onClose 各自触发（visible 置 false 的 setter）
+    fireEvent.click(screen.getByTestId('terminal-modal'))
+    fireEvent.click(screen.getByTestId('desktop-modal'))
+    fireEvent.click(screen.getByTestId('vnc-modal'))
+    expect(modalStubs.closed).toEqual(['terminal', 'desktop', 'vnc'])
+    // 详情 Modal 的 X → onClose
+    fireEvent.click(document.querySelector('.ant-modal-close')!)
   })
 })

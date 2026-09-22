@@ -96,3 +96,22 @@ describe('pairDiffLines', () => {
     expect(rows.map((r) => r.type)).toEqual(['same', 'change', 'same', 'change'])
   })
 })
+
+describe('lineDiff 尾部剩余', () => {
+  it('主循环因当前侧耗尽退出后，基线剩余行走 del 尾循环', () => {
+    const r = lineDiff('a\nb', 'a')
+    expect(r.lines).toEqual([
+      { type: 'same', text: 'a', oldLine: 1, newLine: 1 },
+      { type: 'del', text: 'b', oldLine: 2 },
+    ])
+    expect(r.truncated).toBe(false)
+  })
+
+  it('主循环因基线侧耗尽退出后，当前剩余行走 add 尾循环', () => {
+    const r = lineDiff('a', 'a\nb')
+    expect(r.lines).toEqual([
+      { type: 'same', text: 'a', oldLine: 1, newLine: 1 },
+      { type: 'add', text: 'b', newLine: 2 },
+    ])
+  })
+})

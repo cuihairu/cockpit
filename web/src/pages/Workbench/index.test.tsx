@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { message } from 'antd'
@@ -15,21 +15,33 @@ vi.mock('@/hooks/usePerm', () => ({ usePerm: () => true }))
 
 const opened = vi.hoisted(() => ({ titles: [] as string[] }))
 vi.mock('@/components/TerminalModal', () => ({
-  default: (props: { title?: string }) => {
+  default: (props: { title?: string; onClose?: () => void }) => {
     opened.titles.push(`terminal:${props.title}`)
-    return <div data-testid="terminal-modal" />
+    return (
+      <div data-testid="terminal-modal">
+        <button onClick={props.onClose}>close-terminal</button>
+      </div>
+    )
   },
 }))
 vi.mock('@/components/DesktopModal', () => ({
-  default: (props: { title?: string }) => {
+  default: (props: { title?: string; onClose?: () => void }) => {
     opened.titles.push(`desktop:${props.title}`)
-    return <div data-testid="desktop-modal" />
+    return (
+      <div data-testid="desktop-modal">
+        <button onClick={props.onClose}>close-desktop</button>
+      </div>
+    )
   },
 }))
 vi.mock('@/components/VNCModal', () => ({
-  default: (props: { title?: string }) => {
+  default: (props: { title?: string; onClose?: () => void }) => {
     opened.titles.push(`vnc:${props.title}`)
-    return <div data-testid="vnc-modal" />
+    return (
+      <div data-testid="vnc-modal">
+        <button onClick={props.onClose}>close-vnc</button>
+      </div>
+    )
   },
 }))
 vi.mock('@/components/FileBrowser', () => ({
@@ -40,11 +52,13 @@ vi.mock('@/workbench/AgentSidebar', () => ({
     agents,
     selectedAgentId,
     onQueryChange,
+    onRefresh,
     onSelect,
   }: {
     agents: Agent[]
     selectedAgentId: string
     onQueryChange: (q: string) => void
+    onRefresh: () => void
     onSelect: (id: string) => void
   }) => (
     <div>
@@ -54,6 +68,7 @@ vi.mock('@/workbench/AgentSidebar', () => ({
         aria-label="sidebar-query"
         onChange={(e) => onQueryChange(e.target.value)}
       />
+      <button onClick={onRefresh}>refresh-agents</button>
       {agents.map((a) => (
         <button key={a.id} onClick={() => onSelect(a.id)}>
           pick-{a.hostname}
@@ -196,9 +211,108 @@ describe('Workbench', () => {
     renderPage()
     await screen.findByText('web-01')
     await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /概\s*览/ }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /日\s*志/ }))
+    })
+    await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /文\s*件/ }))
     })
     expect(msgWarning).not.toHaveBeenCalled()
     expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toContain('文件')
+  })
+
+  it('侧栏刷新重查 Agent；Tabs 栏切换走 onChange', async () => {
+    renderPage()
+    await screen.findByText('web-01')
+    const before = apiMock.getAgents.mock.calls.length
+    fireEvent.click(screen.getByText('refresh-agents'))
+    await waitFor(() => expect(apiMock.getAgents.mock.calls.length).toBeGreaterThan(before))
+    // 直接点 Tabs 栏（onChange → setTab）
+    fireEvent.click(screen.getByRole('tab', { name: '日志' }))
+    expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toContain('日志')
+  })
+
+  it('搜索按 id/ip/region 命中；缺 hostname/ip 的 agent 不炸', async () => {
+    renderPage([
+      {
+        id: 'ag-1', hostname: 'web-01', ip: '10.0.0.1', region: 'cn-bj', status: 'online', lastSeen: '0',
+        capabilities: [],
+      },
+      {
+        id: 'special-id', status: 'online', lastSeen: '0', capabilities: [],
+      },
+    ] as unknown as Agent[])
+    await screen.findByText('web-01')
+    // 按 id 命中（大小写归一）
+    fireEvent.change(screen.getByLabelText('sidebar-query'), { target: { value: 'SPECIAL' } })
+    expect(screen.getByTestId('sidebar-count')).toHaveTextContent('1')
+    // 按 ip 命中
+    fireEvent.change(screen.getByLabelText('sidebar-query'), { target: { value: '10.0.0' } })
+    expect(screen.getByTestId('sidebar-count')).toHaveTextContent('1')
+    // 按 region 命中
+    fireEvent.change(screen.getByLabelText('sidebar-query'), { target: { value: 'cn-bj' } })
+    expect(screen.getByTestId('sidebar-count')).toHaveTextContent('1')
+    // 无命中
+    fireEvent.change(screen.getByLabelText('sidebar-query'), { target: { value: 'zzz' } })
+    expect(screen.getByTestId('sidebar-count')).toHaveTextContent('0')
+  })
+
+  it('RDP 有服务时开 DesktopModal；面板 connect 按钮分流三协议；关闭各自 Modal', async () => {
+    renderPage([
+      {
+        id: 'ag-1',
+        hostname: '', // 空 hostname → 标题/会话名回落 id
+        ip: '10.0.0.1',
+        region: 'cn-bj',
+        status: 'online',
+        lastSeen: '0',
+        capabilities: [
+          {
+            type: 'remote-services',
+            metadata: {
+              ssh: { host: '10.0.0.1', port: 22, name: 'SSH', running: true },
+              rdp: { host: '10.0.0.1', port: 3389, name: 'RDP', running: true },
+              vnc: { host: '10.0.0.1', port: 5900, name: 'VNC', running: true },
+            },
+          },
+        ],
+      },
+    ] as unknown as Agent[])
+    // 空 hostname 回退 agent id 作卡片标题
+    await waitFor(() =>
+      expect(document.querySelector('.ant-card-head-title')?.textContent).toContain('ag-1'))
+    await screen.findByTestId('overview')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /RDP/ }))
+    })
+    await screen.findByTestId('desktop-modal')
+    expect(opened.titles).toEqual(expect.arrayContaining(['desktop:RDP - ag-1']))
+    fireEvent.click(screen.getByText('close-desktop'))
+    await waitFor(() => expect(screen.queryByTestId('desktop-modal')).toBeNull())
+    // RDP Tab 面板的连接按钮（ConnectionPanel onConnect → openConnection('rdp')）
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('panel-rdp'))
+    })
+    await screen.findByTestId('desktop-modal')
+    fireEvent.click(screen.getByText('close-desktop'))
+    await waitFor(() => expect(screen.queryByTestId('desktop-modal')).toBeNull())
+    // SSH/VNC 面板连接按钮（切 Tab 后挂载）
+    fireEvent.click(screen.getByRole('tab', { name: 'SSH' }))
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('panel-ssh'))
+    })
+    await screen.findByTestId('terminal-modal')
+    fireEvent.click(screen.getByText('close-terminal'))
+    await waitFor(() => expect(screen.queryByTestId('terminal-modal')).toBeNull())
+    fireEvent.click(screen.getByRole('tab', { name: 'VNC' }))
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('panel-vnc'))
+    })
+    await screen.findByTestId('vnc-modal')
+    fireEvent.click(screen.getByText('close-vnc'))
+    await waitFor(() => expect(screen.queryByTestId('vnc-modal')).toBeNull())
+    expect(msgWarning).not.toHaveBeenCalled()
   })
 })

@@ -58,17 +58,21 @@ const report = {
   ],
 }
 
-const renderPage = () => {
-  apiMock.getAgents.mockResolvedValue(agents)
-  apiMock.getDriftConfig.mockResolvedValue({ scan_interval_seconds: 300 })
-  apiMock.checkDrift.mockResolvedValue({ agentId: 'ag-1', items: checkItems })
-  apiMock.getInventoryConsistency.mockResolvedValue(report)
+const mount = () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
       <Drift />
     </QueryClientProvider>,
   )
+}
+
+const renderPage = () => {
+  apiMock.getAgents.mockResolvedValue(agents)
+  apiMock.getDriftConfig.mockResolvedValue({ scan_interval_seconds: 300 })
+  apiMock.checkDrift.mockResolvedValue({ agentId: 'ag-1', items: checkItems })
+  apiMock.getInventoryConsistency.mockResolvedValue(report)
+  return mount()
 }
 
 const rowOf = (cell: string) =>
@@ -257,5 +261,104 @@ describe('Drift', () => {
     render(<QueryClientProvider client={qc3}><Drift /></QueryClientProvider>)
     fireEvent.click(await screen.findByRole('tab', { name: 'CMDB 一致性' }))
     expect(await screen.findByText('CMDB 一致性不可用')).toBeInTheDocument()
+  })
+
+  it('巡检间隔越界拦截：<1 分钟与 >1440 分钟（派生值直传校验）', async () => {
+    // scan_interval_seconds 10 → 换算 0 分钟（< 1）
+    apiMock.getAgents.mockResolvedValue(agents)
+    apiMock.getDriftConfig.mockResolvedValue({ scan_interval_seconds: 10 })
+    apiMock.putDriftConfig.mockResolvedValue({})
+    apiMock.getInventoryConsistency.mockResolvedValue(report)
+    mount()
+    // 等巡检配置落地（scanOn 派生为真渲染出间隔输入）再保存
+    await screen.findByRole('spinbutton')
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('间隔需在 1～1440 分钟之间'))
+    expect(apiMock.putDriftConfig).not.toHaveBeenCalled()
+  })
+
+  it('巡检间隔越界拦截：超大间隔（>1440）；清空输入回落 1 分钟', async () => {
+    apiMock.getAgents.mockResolvedValue(agents)
+    apiMock.getDriftConfig.mockResolvedValue({ scan_interval_seconds: 100000000 })
+    apiMock.putDriftConfig.mockResolvedValue({})
+    apiMock.getInventoryConsistency.mockResolvedValue(report)
+    mount()
+    // 等巡检配置落地（scanOn 派生为真渲染出间隔输入）再保存
+    await screen.findByRole('spinbutton')
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('间隔需在 1～1440 分钟之间'))
+    // 清空 InputNumber：onChange(null) → minutes 回落 1，保存成功（?? 右分支）
+    fireEvent.change(document.querySelector<HTMLInputElement>('.ant-input-number-input')!, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(apiMock.putDriftConfig).toHaveBeenCalledWith(60))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已开启自动巡检'))
+  })
+
+  it('保存巡检配置失败：透出回退文案；无 scan_interval_seconds 默认 30 分钟', async () => {
+    apiMock.getAgents.mockResolvedValue(agents)
+    apiMock.getDriftConfig.mockResolvedValue({})
+    apiMock.putDriftConfig.mockRejectedValue(new Error('cfg down'))
+    apiMock.getInventoryConsistency.mockResolvedValue(report)
+    mount()
+    // 等配置加载完（Switch loading 解除）再开开关：关闭态不渲染间隔输入
+    await waitFor(() => expect(document.querySelector('.ant-switch-loading')).toBeNull())
+    fireEvent.click(document.querySelector('.ant-switch')!)
+    expect(await screen.findByDisplayValue('30')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('保存失败'))
+  })
+
+  it('登记失败：透出回退文案', async () => {
+    apiMock.driftRecord.mockRejectedValue(new Error('record down'))
+    renderPage()
+    await runCheckOn()
+    await screen.findByText('发现 3 项漂移/异常，请核对是否为本人操作')
+    fireEvent.click(within(rowOf('api.example.com')).getByRole('button', { name: /登\s*记/ }))
+    await screen.findByText('将当前内容登记为基线？')
+    fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('登记失败'))
+  })
+
+  it('差异 Modal 关闭回调收起弹窗；未知状态行不渲染状态 Tag', async () => {
+    apiMock.getAgents.mockResolvedValue(agents)
+    apiMock.getDriftConfig.mockResolvedValue({ scan_interval_seconds: 300 })
+    apiMock.driftDiff.mockResolvedValue({
+      expected: 'a\nb', current: 'a\nc', baseline_updated_at: 1759000000,
+    })
+    apiMock.checkDrift.mockResolvedValue({ agentId: 'ag-1', items: [
+      { kind: 'nginx', name: 'ok.example.com', status: 'ok', baseline_sha: 'a', current_sha: 'a' },
+      { kind: 'cron', name: 'cleanup', status: 'drifted', baseline_sha: 'c', current_sha: 'd' },
+      { kind: 'nginx', name: 'odd.example.com', status: 'weird-status', baseline_sha: '', current_sha: '' },
+    ] })
+    apiMock.getInventoryConsistency.mockResolvedValue(report)
+    mount()
+    await runCheckOn()
+    await screen.findByText('发现 1 项漂移/异常，请核对是否为本人操作')
+    // 未知 status → STATUS_META 缺省 null，状态列不渲染 Tag（类型列仍有 kind Tag）
+    const oddRow = rowOf('odd.example.com')
+    expect(oddRow.querySelectorAll('td')[2].querySelector('.ant-tag')).toBeNull()
+    // 打开差异后点 footer「关闭」（onClose → setDiffTarget(null)→ open=false 进入离场）
+    fireEvent.click(within(rowOf('cleanup')).getByRole('button', { name: /差\s*异/ }))
+    await screen.findByText('定时任务 · cleanup', { selector: '.ant-modal-title' })
+    // 等 diff 加载完（footer 关闭按钮 loading 解除）
+    await screen.findByText('对照')
+    const modal = document.querySelector('.ant-modal') as HTMLElement
+    fireEvent.click(within(modal).getByRole('button', { name: /^关\s*闭$/ }))
+    await waitFor(() => expect(modal.className).toContain('ant-zoom-leave'))
+  })
+
+  it('无 capabilities 的 agent 不入候选；候选 label 缺 hostname 回退 id', async () => {
+    apiMock.getAgents.mockResolvedValue([
+      { id: 'ag-no', hostname: 'no-caps', status: 'online' } as unknown as Agent,
+      { id: 'ag-empty', hostname: 'empty-caps', status: 'online', capabilities: [] } as unknown as Agent,
+      // 具备 drift 能力但无 hostname → label 回退 agent id
+      { id: 'ag-noname', status: 'online', capabilities: [{ type: 'drift' }] } as unknown as Agent,
+    ])
+    apiMock.getDriftConfig.mockResolvedValue({ scan_interval_seconds: 0 })
+    apiMock.getInventoryConsistency.mockResolvedValue(report)
+    mount()
+    fireEvent.mouseDown(screen.getByText('选择服务器').closest('.ant-select')!.querySelector('.ant-select-selector')!)
+    expect(await screen.findByText('ag-noname', { selector: '.ant-select-item-option-content' })).toBeInTheDocument()
+    expect(document.querySelectorAll('.ant-select-item-option-content')).toHaveLength(1)
   })
 })

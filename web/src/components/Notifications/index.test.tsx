@@ -50,12 +50,14 @@ describe('NotificationDropdown', () => {
   })
 
   it('点未读条目标记已读；已读条目点击不触发', async () => {
-    apiMock.getAlerts.mockResolvedValue({ data: [alert()] })
+    apiMock.getAlerts.mockResolvedValue({ data: [alert(), alert({ id: 'a2', title: '另一个' })] })
     render(<NotificationDropdown />)
     await open()
     const item = (await screen.findAllByText('CPU 高'))[0].closest('.ant-list-item')!
     fireEvent.click(item)
     await waitFor(() => expect(apiMock.markAlertRead).toHaveBeenCalledWith('a1'))
+    // map 命中项置 read，未命中项原样保留
+    await waitFor(() => expect(document.querySelector('.ant-badge-count')?.textContent).toBe('1'))
   })
 
   it('「全部已读」标记所有；「清空」清列表', async () => {
@@ -85,5 +87,44 @@ describe('NotificationDropdown', () => {
     await screen.findByText('暂无通知')
     expect(screen.queryByText('全部已读')).toBeNull()
     expect(screen.queryByText('清空')).toBeNull()
+  })
+
+  it('success/info 类型走默认图标与 tag 配色分支', async () => {
+    apiMock.getAlerts.mockResolvedValue({ data: [
+      alert({ id: 's1', type: 'success', title: '备份完成' }),
+      alert({ id: 'i1', type: 'info', title: '提示一条' }),
+    ] })
+    render(<NotificationDropdown />)
+    await open()
+    expect(await screen.findByText('备份完成')).toBeInTheDocument()
+    expect(screen.getByText('提示一条')).toBeInTheDocument()
+    expect(screen.getByText('success')).toBeInTheDocument()
+    expect(screen.getByText('info')).toBeInTheDocument()
+  })
+
+  it('标记已读/全部已读失败静默', async () => {
+    apiMock.getAlerts.mockResolvedValue({ data: [alert(), alert({ id: 'a2' })] })
+    apiMock.markAlertRead.mockRejectedValue(new Error('mark down'))
+    apiMock.markAllAlertsRead.mockRejectedValue(new Error('mark all down'))
+    render(<NotificationDropdown />)
+    await open()
+    const item = (await screen.findAllByText('CPU 高'))[0].closest('.ant-list-item')!
+    fireEvent.click(item)
+    await waitFor(() => expect(apiMock.markAlertRead).toHaveBeenCalledWith('a1'))
+    fireEvent.click(screen.getByText('全部已读'))
+    await waitFor(() => expect(apiMock.markAllAlertsRead).toHaveBeenCalledTimes(1))
+    // 失败后列表仍在（未误清空）
+    expect(screen.getAllByText('CPU 高').length).toBeGreaterThan(0)
+  })
+
+  it('getAlerts 无 data 字段回落空列表；拉取中显示 Spin', async () => {
+    let resolveAlerts: (v: unknown) => void = () => {}
+    apiMock.getAlerts.mockImplementation(() => new Promise((r) => { resolveAlerts = r }))
+    render(<NotificationDropdown />)
+    fireEvent.click(document.querySelector('.ant-dropdown-trigger')!)
+    await screen.findByText('通知中心')
+    expect(document.querySelector('.ant-spin')).not.toBeNull()
+    resolveAlerts({})
+    expect(await screen.findByText('暂无通知')).toBeInTheDocument()
   })
 })

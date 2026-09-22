@@ -18,6 +18,8 @@ vi.mock('@/services/api', () => ({ api: apiMock }))
 vi.mock('@/hooks/usePerm', () => ({ usePerm: () => true }))
 
 const msgSuccess = vi.spyOn(message, 'success')
+const msgError = vi.spyOn(message, 'error')
+const msgWarning = vi.spyOn(message, 'warning')
 
 const mkAgent = (id: string, hostname: string, nas = true): Agent =>
   ({
@@ -164,5 +166,204 @@ describe('Nas', () => {
     expect(await screen.findByText('未发现存储池')).toBeInTheDocument()
     fireEvent.click(panelHeader('db-01'))
     expect(await screen.findByText('未发现可观测的存储（mdadm/ZFS/LVM/SMB/NFS 均无数据）')).toBeInTheDocument()
+  })
+
+  // ---- 巡检校验 / 保存分支 ----
+
+  const renderWithCfg = (cfg: unknown) => {
+    apiMock.getAgents.mockResolvedValue(agents)
+    apiMock.getNASStatus.mockImplementation(statusOf)
+    apiMock.getNASConfig.mockResolvedValue(cfg)
+    apiMock.putNASConfig.mockResolvedValue({})
+    return render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <Nas />
+      </QueryClientProvider>,
+    )
+  }
+
+  // Switch 的 loading={!scanCfg} 会吞点击——等配置落地
+  const waitForCfg = async () => {
+    const sw = await screen.findByRole('switch')
+    await waitFor(() => expect(sw).not.toHaveClass('ant-switch-loading'))
+    return sw
+  }
+
+  it('服务端已开巡检但间隔过小：保存触发间隔校验告警', async () => {
+    // scan_interval_seconds=60 → 派生 minutes=1 <5
+    renderWithCfg({ scan_interval_seconds: 60, usage_warn_percent: 80, usageMin: 50, usageMax: 99 })
+    const sw = await screen.findByRole('switch')
+    await waitFor(() => expect(sw).not.toHaveClass('ant-switch-loading'))
+    expect(sw).toBeChecked()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    })
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('间隔需在 5～1440 分钟之间'))
+    expect(apiMock.putNASConfig).not.toHaveBeenCalled()
+  })
+
+  it('容量阈值越界：带 min/max 与缺省 min/max 两种配置均拦截', async () => {
+    // A：服务端带 min/max 且已存阈值低于下限
+    renderWithCfg({ scan_interval_seconds: 0, usage_warn_percent: 40, usageMin: 50, usageMax: 99 })
+    await waitForCfg()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    })
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('容量阈值需在 50～99 之间'))
+    expect(apiMock.putNASConfig).not.toHaveBeenCalled()
+  })
+
+  it('容量阈值越界：配置缺省 min/max 时用 50～99 兜底文案', async () => {
+    renderWithCfg({ scan_interval_seconds: 0, usage_warn_percent: 40 })
+    await waitForCfg()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    })
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('容量阈值需在 50～99 之间'))
+  })
+
+  it('关闭态保存 0 秒；配置缺省字段时条件两侧 ?? 兜底走完；保存失败报错', async () => {
+    renderWithCfg({ scan_interval_seconds: 0 }) // usageMin/Max/usage_warn_percent 均缺省
+    await waitForCfg()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    })
+    // scanOn=false → seconds=0；warnPct=80 落在兜底 50～99 内
+    await waitFor(() => expect(apiMock.putNASConfig).toHaveBeenCalledWith(0, 80))
+    expect(msgSuccess).toHaveBeenCalledWith('巡检设置已保存')
+    // 失败分支
+    apiMock.putNASConfig.mockRejectedValue(new Error('boom'))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    })
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('保存失败'))
+  })
+
+  it('服务端已开巡检：间隔分钟按服务端值派生；输入改动与清空回落默认', async () => {
+    renderWithCfg({ scan_interval_seconds: 3600, usage_warn_percent: 80, usageMin: 50, usageMax: 99 })
+    const sw = await screen.findByRole('switch')
+    await waitFor(() => expect(sw).not.toHaveClass('ant-switch-loading'))
+    expect(sw).toBeChecked()
+    const minuteInput = await waitFor(() => {
+      const el = document.querySelector('.ant-input-number input') as HTMLInputElement
+      if (!el) throw new Error('input not rendered')
+      return el
+    })
+    // 3600s → 60 分钟派生显示
+    expect(minuteInput.value).toBe('60')
+    fireEvent.change(minuteInput, { target: { value: '45' } }) // v ?? 30 左侧
+    fireEvent.change(minuteInput, { target: { value: '' } }) // v ?? 30 右侧（回落 30）
+    const pctInput = document.querySelectorAll('.ant-input-number input')[1] as HTMLInputElement
+    fireEvent.change(pctInput, { target: { value: '' } }) // v ?? 80 右侧
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    })
+    await waitFor(() => expect(apiMock.putNASConfig).toHaveBeenCalledWith(1800, 80))
+  })
+
+  // ---- 渲染分支边界 ----
+
+  it('池状态/类型与共享协议未知值回落；降级-only 出 warning 拼接文案', async () => {
+    renderPage(() => Promise.resolve({
+      available: true,
+      source: 'linux',
+      pools: [
+        { name: 'u0', kind: 'ceph' as never, state: 'unknown' as const, totalGB: 10 },
+        { name: 'r0', kind: 'zfs' as const, state: 'resync' as const, totalGB: 10 },
+        { name: 'w0', kind: 'zfs' as const, state: 'weird' as never, totalGB: 10, detail: 'x' },
+      ],
+      mounts: [],
+      shares: [{ protocol: 'webdav' as never, name: 's1', path: '/s1', comment: '', hosts: '' }],
+    }))
+    expect((await screen.findAllByRole('cell', { name: 'u0' })).length).toBeGreaterThanOrEqual(1)
+    // unknown 状态（severity 2）与 KIND_LABEL 缺省回落
+    expect(screen.getAllByText('未知').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('ceph').length).toBeGreaterThanOrEqual(2)
+    // resync → 降级/同步中计入 degraded 文案
+    expect(screen.getByText('2 个存储池降级/同步中')).toBeInTheDocument()
+    // 未知协议回落原值；说明/允许主机空串 → —
+    expect(screen.getAllByText('webdav').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('挂载点边界：无容量、无已用、未超阈值与超阈值并存', async () => {
+    renderPage(() => Promise.resolve({
+      available: true,
+      source: 'linux',
+      pools: [{ name: 'p0', kind: 'lvm' as const, state: 'healthy' as const }],
+      mounts: [
+        { device: '/dev/a', mountPath: '/a', fsType: 'ext4' }, // 无 totalGB → —
+        { device: '/dev/b', mountPath: '/b', fsType: 'ext4', totalGB: 100 }, // 无 usedGB → 0%
+        { device: '/dev/c', mountPath: '/c', fsType: 'ext4', totalGB: 100, usedGB: 10 }, // 10% 未超阈值
+      ],
+      shares: [],
+    }))
+    expect((await screen.findAllByRole('cell', { name: '/a' })).length).toBeGreaterThanOrEqual(1)
+    expect(rowOf('/b').textContent).toContain('0%（—）')
+    expect(rowOf('/c').textContent).toContain('10%')
+    // 无超阈值挂载 → 不出容量告警（仅 healthy 池）
+    expect(screen.queryByText(/挂载点容量超过/)).toBeNull()
+  })
+
+  it('单主机面板：三段表格齐渲染；字段缺省走 ?? [] 兜底', async () => {
+    renderPage((id: string) => Promise.resolve(
+      id === 'ag-1'
+        ? {
+            available: true,
+            source: 'linux',
+            // pools/mounts/shares 均缺省 → ?? [] 兜底
+          }
+        : {
+            available: true,
+            source: 'linux',
+            pools: [{ name: 'vp', kind: 'dsm' as const, state: 'healthy' as const }],
+            mounts: [{ device: '/dev/v', mountPath: '/v', fsType: 'btrfs', totalGB: 10, usedGB: 1 }],
+            shares: [{ protocol: 'nfs' as const, name: 'exp', path: '/exp' }],
+          },
+    ))
+    expect(await screen.findByText('vp')).toBeInTheDocument()
+    // ag-2 面板：三段（含 ShareTable showAgent=false 分支），面板与总览各一份
+    fireEvent.click(panelHeader('db-01'))
+    await waitFor(() => expect(screen.getAllByText('/exp').length).toBeGreaterThanOrEqual(2))
+    expect(screen.getAllByText('NFS').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('/v').length).toBeGreaterThanOrEqual(2)
+    // ag-1 面板：pools/mounts/shares 缺省 → 两空表 + 无共享卡
+    fireEvent.click(panelHeader('web-01'))
+    expect(await screen.findByText('未发现挂载点')).toBeInTheDocument()
+    expect(screen.getAllByText('未发现存储池').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('无 id/hostname 的主机：主机列与排序的 agent 兜底为空串', async () => {
+    const ghost = {
+      ip: '9.9.9.9',
+      status: 'online',
+      lastSeen: '0',
+      capabilities: [{ type: 'nas' }],
+    } as unknown as Agent
+    // capabilities 字段缺省 → 过滤处 ?? [] 兜底（被过滤掉）
+    const noCaps = { id: 'ag-nocaps', hostname: 'nocaps', ip: '8.8.8.8', status: 'online', lastSeen: '0' } as unknown as Agent
+    apiMock.getAgents.mockResolvedValue([ghost, noCaps])
+    apiMock.getNASConfig.mockResolvedValue({ scan_interval_seconds: 0 })
+    apiMock.getNASStatus.mockResolvedValue({
+      available: true,
+      source: 'linux',
+      pools: [
+        { name: 'g1', kind: 'zfs' as const, state: 'healthy' as const, host: 'net-disk' },
+        { name: 'g2', kind: 'zfs' as const, state: 'healthy' as const },
+      ],
+      mounts: [],
+      shares: [],
+    })
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <Nas />
+      </QueryClientProvider>,
+    )
+    // host 非空 → 「 · 设备」拼接（agent 兜底 ''）；无 host → agent ?? ''
+    expect(await screen.findByText('· net-disk')).toBeInTheDocument()
+    expect(screen.getByText('g2')).toBeInTheDocument()
+    // 同 severity 两池触发 localeCompare 两侧 agent 兜底
+    expect(document.querySelectorAll('tr.ant-table-row').length).toBe(2)
+    expect(apiMock.getNASStatus).not.toHaveBeenCalledWith('ag-nocaps')
   })
 })

@@ -71,4 +71,70 @@ describe('SettingsContext', () => {
     expect(listener).toHaveBeenCalled()
     window.removeEventListener('cockpit:settings-changed', listener)
   })
+
+  it('useSettingsContext 在 Provider 外抛错', () => {
+    const Outside = () => {
+      useSettingsContext()
+      return null
+    }
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(() => render(<Outside />)).toThrow('useSettingsContext must be used within a SettingsProvider')
+    spy.mockRestore()
+  })
+
+  it('normalizeSettings：过小间隔回退、显式 false 开关保留、light 显式值', () => {
+    localStorage.setItem('cockpit.ui.settings', JSON.stringify({
+      siteName: 'Keep', refreshInterval: 3,
+      enableNotifications: false, compactMode: false, showResourceCount: false, theme: 'light',
+    }))
+    render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('interval').textContent).toBe('30')
+    expect(screen.getByTestId('site').textContent).toBe('Keep')
+    expect(screen.getByTestId('theme').textContent).toBe('light')
+  })
+
+  it('首个键空串落到次键；双键皆空用默认', () => {
+    localStorage.setItem('cockpit.ui.settings', '')
+    localStorage.setItem('cockpit:settings', JSON.stringify({ siteName: 'Second' }))
+    const { unmount } = render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('site').textContent).toBe('Second')
+    unmount()
+    localStorage.clear()
+    render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('site').textContent).toBe('Cockpit')
+  })
+
+  it('auto 主题：prefers-color-scheme dark 解析为 dark，media 变更跟随', () => {
+    const listeners: Array<() => void> = []
+    const orig = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: (_: string, cb: () => void) => { listeners.push(cb) },
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia
+    localStorage.setItem('cockpit.ui.settings', JSON.stringify({ theme: 'auto' }))
+    const { unmount } = render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('theme').textContent).toBe('dark')
+    // media change → 重新解析（matches 仍为 true → 保持 dark，走 updateResolvedTheme）
+    act(() => { listeners.forEach((cb) => cb()) })
+    expect(screen.getByTestId('theme').textContent).toBe('dark')
+    unmount()
+    window.matchMedia = orig
+  })
+
+  it('无 matchMedia：resolveTheme 回退 light，主题 effect 提前返回', () => {
+    const orig = window.matchMedia
+    // @ts-expect-error 故意移除 matchMedia 模拟受限环境
+    delete window.matchMedia
+    localStorage.setItem('cockpit.ui.settings', JSON.stringify({ theme: 'auto' }))
+    const { unmount } = render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('theme').textContent).toBe('light')
+    unmount()
+    window.matchMedia = orig
+  })
 })

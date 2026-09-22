@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { message } from 'antd'
+import dayjs from 'dayjs'
 import AuditLogs from './index'
 
 // AuditLogs：统计卡片成败两态 / 行动与资源列映射 / 详情四分支
@@ -54,6 +55,27 @@ const renderPage = () => {
 const rowOf = (cell: string) =>
   Array.from(document.querySelectorAll<HTMLTableRowElement>('tr.ant-table-row')).find((tr) =>
     tr.textContent?.includes(cell)) as HTMLTableRowElement
+
+// RangePicker：聚焦输入展开面板，取可点日期格（title 为 YYYY-MM-DD）
+const openRangePicker = async () => {
+  const root = document.querySelector('.ant-picker-range') as HTMLElement
+  const input = root.querySelector('input') as HTMLInputElement
+  fireEvent.mouseDown(root)
+  fireEvent.focus(input)
+  fireEvent.click(root)
+  return await waitFor(() => {
+    const cells = Array.from(document.querySelectorAll('td.ant-picker-cell')).filter(
+      (c) => c.getAttribute('title') && !c.classList.contains('ant-picker-cell-disabled'))
+    if (cells.length < 20) throw new Error('range picker cells not ready')
+    return cells as HTMLElement[]
+  })
+}
+
+const cellAt = (idx: number) => {
+  const cells = Array.from(document.querySelectorAll('td.ant-picker-cell')).filter(
+    (c) => c.getAttribute('title') && !c.classList.contains('ant-picker-cell-disabled'))
+  return cells[idx] as HTMLElement
+}
 
 describe('AuditLogs', () => {
   beforeEach(() => {
@@ -170,5 +192,86 @@ describe('AuditLogs', () => {
     expect((await screen.findAllByText('admin')).length).toBe(2)
     fireEvent.click(screen.getByTitle('2'))
     await waitFor(() => expect(apiMock.getAuditLogs).toHaveBeenLastCalledWith({}, 2, 20))
+  })
+
+  it('资源类型下拉：改写 resource 并重置页码', async () => {
+    renderPage()
+    expect((await screen.findAllByText('admin')).length).toBe(2)
+    fireEvent.mouseDown(screen.getByText('资源类型'))
+    const opt = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll('.ant-select-item-option')).find(
+        (o) => o.textContent === '存储')
+      if (!el) throw new Error('option not found')
+      return el as HTMLElement
+    })
+    fireEvent.click(opt)
+    await waitFor(() =>
+      expect(apiMock.getAuditLogs).toHaveBeenLastCalledWith({ resource: 'storage' }, 1, 20))
+  })
+
+  it('统计：total_logs 为 0 时成功率兑底 100%', async () => {
+    apiMock.getAuditLogs.mockResolvedValue({ data: [], pagination: { total: 0 } })
+    apiMock.getAuditStats.mockResolvedValue({ total_logs: 0, today_logs: 0, failed_logs: 0 })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <AuditLogs />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('总日志数')).toBeInTheDocument()
+    const rateCard = screen.getByText('成功率').closest('.ant-card')!
+    expect(rateCard.textContent).toContain('100')
+  })
+
+  it('远控详情：仅主机不拼端口，仅端口主机回退 -', async () => {
+    apiMock.getAuditLogs.mockResolvedValue({
+      data: [
+        {
+          id: 11, created_at: '2026-01-05T12:00:00Z', username: 'u1', action: 'view',
+          resource: 'remote_session', status: 'success', ip: '10.0.0.5',
+          details: '{"protocol":"telnet","host":"web-02"}',
+        },
+        {
+          id: 12, created_at: '2026-01-06T12:00:00Z', username: 'u2', action: 'view',
+          resource: 'remote_session', status: 'success', ip: '10.0.0.6',
+          details: '{"protocol":"ssh","port":2222}',
+        },
+      ],
+      pagination: { total: 2 },
+    })
+    apiMock.getAuditStats.mockResolvedValue(stats)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <AuditLogs />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('web-02')).toBeInTheDocument()
+    // 有 host 无 port：不拼 :port（strong+文本节点拆分，断整行 textContent）
+    const r1 = rowOf('web-02')
+    expect(r1.textContent).toContain('目标:')
+    expect(r1.textContent).toContain('web-02')
+    expect(r1.textContent).not.toContain('web-02:')
+    // 有 port 无 host：host 回退 '-' 并拼出 :2222
+    const r2 = rowOf('10.0.0.6')
+    expect(r2.textContent).toContain('目标:')
+    expect(r2.textContent).toContain('-:2222')
+  })
+
+  it('日期范围：选中写入起止时间，清除还原', async () => {
+    renderPage()
+    expect((await screen.findAllByText('admin')).length).toBe(2)
+    const cells = await openRangePicker()
+    const startTitle = cells[5].getAttribute('title')!
+    const endTitle = cells[10].getAttribute('title')!
+    fireEvent.click(cells[5])
+    fireEvent.click(cellAt(10))
+    await waitFor(() =>
+      expect(apiMock.getAuditLogs).toHaveBeenLastCalledWith({
+        start_time: dayjs(startTitle).startOf('day').toISOString(),
+        end_time: dayjs(endTitle).endOf('day').toISOString(),
+      }, 1, 20))
+    fireEvent.click(document.querySelector('.ant-picker-clear')!)
+    await waitFor(() => expect(apiMock.getAuditLogs).toHaveBeenLastCalledWith({}, 1, 20))
   })
 })

@@ -46,6 +46,38 @@ const ndjson = (frames: object[]) => {
 const followResp = (frames: object[]) =>
   ({ ok: true, status: 200, body: ndjson(frames) }) as unknown as Response
 
+// 单 chunk 推送完整 NDJSON 文本（含空行/坏帧时才走 continue 分支）
+const oneChunk = (text: string) =>
+  ({
+    ok: true,
+    status: 200,
+    body: new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(text))
+        controller.close()
+      },
+    }),
+  }) as unknown as Response
+
+// 按钮 disabled 后 React/antd 层都不派发 onClick（getListener 与 antd 守卫），
+// 沿 fiber 上溯取 LogsPanel 传给 Button 的原始 handler（0 参闭包）直调，
+// 覆盖 startFollow 的 !source 防御分支
+const callButtonOnClick = (el: HTMLElement) => {
+  const key = Object.keys(el).find((k) => k.startsWith('__reactFiber$'))
+  if (!key) throw new Error('未找到 react fiber')
+  let fiber: unknown = (el as unknown as Record<string, unknown>)[key]
+  let latest: (() => void) | null = null
+  while (fiber) {
+    const p = (fiber as { memoizedProps?: Record<string, unknown> }).memoizedProps
+    if (p && typeof p.onClick === 'function' && (p.onClick as () => void).length === 0) {
+      latest = p.onClick as () => void
+    }
+    fiber = (fiber as { return?: unknown }).return
+  }
+  if (!latest) throw new Error('未找到 Button onClick')
+  latest()
+}
+
 describe('lineTone / GrepLine（纯渲染）', () => {
   it('级别着色：ERROR/FATAL/PANIC 红、WARN 橙、其余 null', () => {
     expect(lineTone('got ERROR here')).toBe('#ff6b6b')
@@ -210,6 +242,140 @@ describe('LogsPanel', () => {
     expect(apiMock.queryLogs).toHaveBeenCalledWith('ag1', expect.objectContaining({
       source: 'cron.service',
     }))
+  })
+
+  it('initialSource 但主机无 journalctl：跳过自动首查', async () => {
+    ready({ journalctl: false })
+    apiMock.queryLogs.mockResolvedValue({ lines: 'x', truncated: false })
+    render(wrap(<LogsPanel agentId="ag1" initialSource="cron.service" />))
+    await screen.findByText('该主机没有 journalctl（非 systemd 或未安装）')
+    expect(apiMock.queryLogs).not.toHaveBeenCalled()
+  })
+
+  it('无可用日志源：查询/尾随前置校验 message.warning', async () => {
+    apiMock.getLogsSources.mockResolvedValue({ systemd: [], docker: [] })
+    apiMock.queryLogs.mockResolvedValue({ lines: 'x', truncated: false })
+    render(wrap(<LogsPanel agentId="ag1" />))
+    await screen.findByText('选择日志源', { selector: '.ant-select-selection-placeholder' })
+    fireEvent.click(screen.getByText('查 询').closest('button')!)
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('请选择日志源'))
+    expect(apiMock.queryLogs).not.toHaveBeenCalled()
+    // 尾随按钮 disabled={!source}，点击到不了 handler——直调 props.onClick 覆盖防御分支
+    const btn = followButton()
+    expect((btn as HTMLButtonElement).disabled).toBe(true)
+    callButtonOnClick(btn)
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledTimes(2))
+    expect(apiMock.followLogs).not.toHaveBeenCalled()
+  })
+
+  it('手选源保留选择；不在新类型列表时回落第一项', async () => {
+    apiMock.queryLogs.mockResolvedValue({ lines: 'x', truncated: false })
+    render(wrap(<LogsPanel agentId="ag1" />))
+    await screen.findByText('nginx.service')
+    const sel = screen.getByText('nginx.service', { selector: '.ant-select-selection-item' })
+      .closest('.ant-select')!
+    fireEvent.mouseDown(sel.querySelector('.ant-select-selector')!)
+    fireEvent.click(await screen.findByText('ssh.service', { selector: '.ant-select-item-option-content' }))
+    fireEvent.click(screen.getByText('查 询').closest('button')!)
+    await waitFor(() =>
+      expect(apiMock.queryLogs).toHaveBeenLastCalledWith('ag1', expect.objectContaining({
+        source: 'ssh.service',
+      })))
+    fireEvent.click(screen.getByText('docker 容器'))
+    fireEvent.click(screen.getByText('查 询').closest('button')!)
+    await waitFor(() =>
+      expect(apiMock.queryLogs).toHaveBeenLastCalledWith('ag1', expect.objectContaining({
+        type: 'docker', source: 'web',
+      })))
+  })
+
+  it('行数清空回落 200、回车触发查询、刷新按钮复用查询', async () => {
+    apiMock.queryLogs.mockResolvedValue({ lines: 'x', truncated: false })
+    render(wrap(<LogsPanel agentId="ag1" />))
+    await screen.findByText('nginx.service')
+    const tailInput = document.querySelector<HTMLInputElement>('.ant-input-number-input')!
+    fireEvent.change(tailInput, { target: { value: '50' } })
+    fireEvent.click(screen.getByText('查 询').closest('button')!)
+    await waitFor(() =>
+      expect(apiMock.queryLogs).toHaveBeenLastCalledWith('ag1', expect.objectContaining({ tail: 50 })))
+    fireEvent.change(tailInput, { target: { value: '' } })
+    fireEvent.click(screen.getByText('刷新').closest('button')!)
+    await waitFor(() =>
+      expect(apiMock.queryLogs).toHaveBeenLastCalledWith('ag1', expect.objectContaining({ tail: 200 })))
+    const grepInput = screen.getByPlaceholderText('关键词过滤')
+    fireEvent.change(grepInput, { target: { value: 'err' } })
+    fireEvent.keyDown(grepInput, { key: 'Enter' })
+    await waitFor(() =>
+      expect(apiMock.queryLogs).toHaveBeenLastCalledWith('ag1', expect.objectContaining({ grep: 'err' })))
+  })
+
+  it('尾随失败：错误体无 error 字段保留 HTTP 提示；无流 body 报不支持', async () => {
+    apiMock.followLogs.mockResolvedValue(
+      { ok: false, status: 502, json: async () => ({}) } as unknown as Response,
+    )
+    render(wrap(<LogsPanel agentId="ag1" />))
+    await screen.findByText('nginx.service')
+    fireEvent.click(followButton())
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('实时尾随失败'))
+
+    apiMock.followLogs.mockResolvedValue({ ok: true, status: 200, body: undefined } as unknown as Response)
+    fireEvent.click(followButton())
+    await waitFor(() => expect(msgError).toHaveBeenCalledTimes(2))
+  })
+
+  it('尾随帧解析：空行/坏 JSON/无 data 跳过；eof 缺省 reason 显示已停止', async () => {
+    // 单 chunk 内含空行与坏帧（分 chunk 时空行会进残 buf，走不到 continue 分支）
+    apiMock.followLogs.mockResolvedValue(oneChunk(
+      '  \nnot-json\n{}\n' + JSON.stringify({ data: 'x\n' }) + '\n' + JSON.stringify({ eof: true }) + '\n',
+    ))
+    render(wrap(<LogsPanel agentId="ag1" />))
+    await screen.findByText('nginx.service')
+    fireEvent.click(followButton())
+    expect(await screen.findByText('x')).toBeInTheDocument()
+    expect(await screen.findByText('已停止')).toBeInTheDocument()
+  })
+
+  it('eof 未知 reason 原样展示', async () => {
+    apiMock.followLogs.mockResolvedValue(followResp([
+      { data: 'y\n' }, { eof: true, reason: 'mystery' },
+    ]))
+    render(wrap(<LogsPanel agentId="ag1" />))
+    await screen.findByText('nginx.service')
+    fireEvent.click(followButton())
+    expect(await screen.findByText('y')).toBeInTheDocument()
+    expect(await screen.findByText('mystery')).toBeInTheDocument()
+  })
+
+  it('停止尾随触发 AbortError 静默返回不报错', async () => {
+    apiMock.followLogs.mockImplementation((_id: string, _p: unknown, signal: AbortSignal) =>
+      Promise.resolve({
+        ok: true, status: 200,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(JSON.stringify({ data: 'live\n' }) + '\n'))
+            signal.addEventListener('abort', () => {
+              controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+            })
+          },
+        }),
+      } as unknown as Response))
+    render(wrap(<LogsPanel agentId="ag1" />))
+    await screen.findByText('nginx.service')
+    fireEvent.click(followButton())
+    await screen.findByText('live')
+    fireEvent.click(followButton())
+    await waitFor(() => expect(screen.getByText('实时尾随')).toBeInTheDocument())
+    expect(msgError).not.toHaveBeenCalled()
+  })
+
+  it('先选 docker 再感知 docker 缺失：提示该主机没有 docker 命令', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><LogsPanel agentId="ag1" /></QueryClientProvider>)
+    await screen.findByText('nginx.service')
+    fireEvent.click(screen.getByText('docker 容器'))
+    ready({ journalctl: true, docker: false })
+    await qc.invalidateQueries({ queryKey: ['logs-status', 'ag1'] })
+    expect(await screen.findByText('该主机没有 docker 命令')).toBeInTheDocument()
   })
 })
 

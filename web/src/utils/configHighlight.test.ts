@@ -88,3 +88,16 @@ describe('highlightConfigLine', () => {
     expect(tokens.some((t) => t.text === '443' && t.color === '#d46b08')).toBe(true)
   })
 })
+
+describe('highlightConfigLine 段首数字', () => {
+  it('非独立数字开头的纯文本段按数字色（flushPlain 拆分数分支）', () => {
+    // '3rd place' 不满足独立数字边界，整段落入 plain；
+    // split 后段首是数字 → 走数字上色分支（不拆碎语义与 v2 不同）
+    expect(highlightConfigLine('3rd place')).toEqual([
+      { text: '3rd place', color: '#d46b08' },
+    ])
+    expect(highlightConfigLine('2fa required')).toEqual([
+      { text: '2fa required', color: '#d46b08' },
+    ])
+  })
+})

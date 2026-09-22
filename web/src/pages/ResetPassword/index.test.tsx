@@ -65,6 +65,14 @@ describe('ResetPassword', () => {
     expect(screen.getByRole('button', { name: /^验\s*证$/ })).toBeInTheDocument()
   })
 
+  it('验证失败：接口异常透错并停留步骤 1', async () => {
+    apiMock.verifyResetCode.mockRejectedValue(new Error('svc down'))
+    renderAt()
+    await submitCode('123456')
+    expect(msgError).toHaveBeenCalledWith('验证失败')
+    expect(screen.getByRole('button', { name: /^验\s*证$/ })).toBeInTheDocument()
+  })
+
   it('验证成功进步骤 2：密码强度弱/中/强三档', async () => {
     renderAt()
     await submitCode('654321')
@@ -82,6 +90,29 @@ describe('ResetPassword', () => {
     expect(screen.getByText('中')).toBeInTheDocument()
     fireEvent.change(pw, { target: { value: 'Abcdefgh1234' } }) // 90 → 强
     expect(screen.getByText('强')).toBeInTheDocument()
+  })
+
+  it('密码强度：短长度/无数字/含特殊字符各分支', async () => {
+    renderAt()
+    await submitCode('654321')
+    const pw = screen.getByPlaceholderText('请输入新密码（至少6位）')
+    // 短于 8 位（长度加分分支 false）+ 无数字 + 含特殊字符 → 20+20+10=50 中
+    fireEvent.change(pw, { target: { value: 'Ab!' } })
+    expect(screen.getByText('中')).toBeInTheDocument()
+    // 无数字、含特殊字符、≥8 位 → 25+20+20+10=75 强
+    fireEvent.change(pw, { target: { value: 'Abcdefgh!' } })
+    expect(screen.getByText('强')).toBeInTheDocument()
+  })
+
+  it('步骤 2：确认密码为空走校验通过分支（required 拦截）', async () => {
+    renderAt()
+    await submitCode('654321')
+    fireEvent.change(screen.getByPlaceholderText('请输入新密码（至少6位）'), { target: { value: 'newpass123' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '重置密码' }))
+    })
+    expect(await screen.findByText('请确认新密码')).toBeInTheDocument()
+    expect(apiMock.resetPassword).not.toHaveBeenCalled()
   })
 
   it('步骤 2：确认密码不一致校验', async () => {

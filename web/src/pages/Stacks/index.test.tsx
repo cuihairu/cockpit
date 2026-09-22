@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { message } from 'antd'
@@ -49,6 +49,16 @@ const stacks = [
     lastAction: 'restart', lastStatus: 'failed', lastDeployedAt: 1759000000 },
 ] as unknown as StackView[]
 
+const mount = () => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(
+    <QueryClientProvider client={qc}>
+      <Stacks />
+    </QueryClientProvider>,
+  )
+  return { ...view, qc }
+}
+
 const renderPage = (stackList = stacks) => {
   apiMock.getAgents.mockResolvedValue(agents)
   apiMock.getStacks.mockResolvedValue({
@@ -58,12 +68,7 @@ const renderPage = (stackList = stacks) => {
       'ag-1111111111112': { dir: '/data/stacks', dirWritable: true },
     },
   })
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={qc}>
-      <Stacks />
-    </QueryClientProvider>,
-  )
+  return mount()
 }
 
 const stackRow = (cell: string) =>
@@ -277,5 +282,116 @@ describe('Stacks', () => {
     expect(screen.getAllByRole('button', { name: /刷新$/ }).length).toBeGreaterThanOrEqual(1)
     fireEvent.click(screen.getByText('compose.yml'))
     await waitFor(() => expect(screen.queryByRole('button', { name: /保存$/ })).not.toBeInTheDocument())
+  })
+
+  it('新建非 502 失败：创建失败提示', async () => {
+    apiMock.saveStackCompose.mockRejectedValue(new Error('agent unreachable'))
+    renderPage()
+    expect(await screen.findByText('blog')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建 Stack/ }))
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('新建 Stack'))
+    fireEvent.mouseDown(screen.getByText('选择在线的 Docker Agent').closest('.ant-select')!.querySelector('.ant-select-selector')!)
+    fireEvent.click(await screen.findByText(/node-01 \(ag-/, { selector: '.ant-select-item-option-content' }))
+    fireEvent.change(screen.getByLabelText('Stack 名称'), { target: { value: 'my-blog' } })
+    fireEvent.click(document.querySelector('.ant-modal .ant-btn-primary')!)
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('创建失败: agent unreachable'))
+  })
+
+  it('新建弹窗取消关闭；模板可清空（未知 key 不填充）', async () => {
+    renderPage()
+    expect(await screen.findByText('blog')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建 Stack/ }))
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('新建 Stack'))
+    // 模板选中后清空（allowClear → onChange(undefined) 不填充）
+    const openSelect = (ph: string) =>
+      fireEvent.mouseDown(screen.getByText(ph).closest('.ant-select')!.querySelector('.ant-select-selector')!)
+    openSelect('选择模板或粘贴已有 compose.yml')
+    fireEvent.click(await screen.findByText('Nginx 静态站', { selector: '.ant-select-item-option-content' }))
+    const composeArea = document.querySelector('.ant-modal textarea') as HTMLTextAreaElement
+    await waitFor(() => expect(composeArea.value).toContain('nginx:latest'))
+    // allowClear 的清除按钮在 mouseDown 触发 → onChange(undefined)：find 不命中则不填充
+    fireEvent.mouseDown(document.querySelector('.ant-modal .ant-select-clear')!)
+    // 取消（onCancel）关闭弹窗
+    fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }))
+    const createModal = document.querySelector('.ant-modal')!
+    await waitFor(() => expect(createModal.className).toContain('ant-zoom-leave-active'))
+    fireEvent.transitionEnd(createModal)
+    await waitFor(() => expect(createModal).not.toBeVisible())
+  })
+
+  it('YAML 校验失败终端弹窗可手动关闭', async () => {
+    apiMock.saveStackCompose.mockRejectedValue(axios502('yaml: bad'))
+    renderPage()
+    expect(await screen.findByText('blog')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建 Stack/ }))
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('新建 Stack'))
+    fireEvent.mouseDown(screen.getByText('选择在线的 Docker Agent').closest('.ant-select')!.querySelector('.ant-select-selector')!)
+    fireEvent.click(await screen.findByText(/node-01 \(ag-/, { selector: '.ant-select-item-option-content' }))
+    fireEvent.change(screen.getByLabelText('Stack 名称'), { target: { value: 'my-blog' } })
+    fireEvent.click(document.querySelector('.ant-modal .ant-btn-primary')!)
+    expect(await screen.findByText('YAML 校验失败 — docker compose config 错误输出')).toBeInTheDocument()
+    const termModal = screen.getByText('YAML 校验失败 — docker compose config 错误输出').closest('.ant-modal')!
+    fireEvent.click(termModal.querySelector('.ant-modal-close')!)
+    await waitFor(() => expect(termModal.className).toContain('ant-zoom-leave-active'))
+    fireEvent.transitionEnd(termModal)
+    await waitFor(() => expect(termModal).not.toBeVisible())
+  })
+
+  it('列表刷新按钮重查；无 Docker 能力 Agent 时新建禁用', async () => {
+    apiMock.getAgents.mockResolvedValue([
+      mkAgent('ag-plain', 'plain', ['files']),
+      { id: 'ag-x', hostname: 'x', status: 'online' } as unknown as Agent,
+    ])
+    apiMock.getStacks.mockResolvedValue({ stacks: [], agentInfo: {} })
+    mount()
+    expect(await screen.findByText('暂无 Stack，点击右上角「新建 Stack」开始部署应用')).toBeInTheDocument()
+    // 无 docker/docker-api 能力与 capabilities 缺失的 agent 都不入候选 → 新建禁用
+    const createBtn = screen.getByRole('button', { name: /新建 Stack/ }) as HTMLButtonElement
+    expect(createBtn.disabled).toBe(true)
+    const before = apiMock.getStacks.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: /刷新$/ }))
+    await waitFor(() => expect(apiMock.getStacks.mock.calls.length).toBeGreaterThan(before))
+  })
+
+  it('最近部署：有动作但时间戳为 0 不渲染时间；目录告警无 dirError 兜底', async () => {
+    apiMock.getAgents.mockResolvedValue(agents)
+    apiMock.getStacks.mockResolvedValue({
+      stacks: [{ ...stacks[0], lastDeployedAt: 0 } as unknown as StackView],
+      agentInfo: {
+        // dirWritable=false 且无 dirError：告警行不带括号原因
+        'ag-quiet': { dir: '/data/stacks', dirWritable: false },
+      },
+    })
+    mount()
+    expect(await screen.findByText('blog')).toBeInTheDocument()
+    const row = stackRow('blog')
+    expect(within(row).getByText('up')).toBeInTheDocument()
+    expect(within(row).queryByText(/2025/)).not.toBeInTheDocument()
+    expect(screen.getByText('部分 Agent 的 stacks 目录异常')).toBeInTheDocument()
+    const alert = screen.getByText('部分 Agent 的 stacks 目录异常').closest('.ant-alert')!
+    expect(alert.textContent).toContain('目录 /data/stacks 不可写')
+    // 无 dirError：不带括号原因
+    expect(alert.textContent).not.toContain('（')
+  })
+
+  it('加载中文案：Stack 列表与 Agent 下拉占位', async () => {
+    let resolveStacks: (v: unknown) => void = () => {}
+    let resolveAgents: (v: unknown) => void = () => {}
+    apiMock.getStacks.mockImplementation(() => new Promise((r) => { resolveStacks = r }))
+    apiMock.getAgents.mockImplementation(() => new Promise((r) => { resolveAgents = r }))
+    const { qc } = mount()
+    expect(await screen.findByText('正在加载 Stack 列表...')).toBeInTheDocument()
+    // 先让 agents 载入（新建按钮解锁），再重查制造 isFetching 占位分支
+    resolveAgents(agents)
+    await waitFor(() => expect((screen.getByRole('button', { name: /新建 Stack/ }) as HTMLButtonElement).disabled).toBe(false))
+    resolveStacks({ stacks: [], agentInfo: {} })
+    await screen.findByText('暂无 Stack，点击右上角「新建 Stack」开始部署应用')
+    apiMock.getAgents.mockImplementation(() => new Promise(() => {}))
+    await act(async () => {
+      void qc.invalidateQueries({ queryKey: ['agents'] })
+    })
+    fireEvent.click(screen.getByRole('button', { name: /新建 Stack/ }))
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('新建 Stack'))
+    expect(await screen.findByText('正在加载 Agent 列表...')).toBeInTheDocument()
   })
 })

@@ -172,4 +172,64 @@ describe('DesktopModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /close/i }))
     await waitFor(() => expect(props.onClose).toHaveBeenCalledTimes(1))
   })
+
+  it('切换全屏：fullscreenchange 同步；断开按钮全屏态退出', async () => {
+    const exitFullscreen = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(document, 'exitFullscreen', { value: exitFullscreen, configurable: true })
+    render(<DesktopModal {...props} />)
+    clickConnect()
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1))
+    await push({ type: 'connected', width: 1, height: 1 })
+
+    // 全屏开启（fullscreenchange handler 同步 isFullscreen）
+    await act(async () => {
+      Object.defineProperty(document, 'fullscreenElement', { value: document.body, configurable: true })
+      document.dispatchEvent(new Event('fullscreenchange'))
+    })
+    // 断开按钮在全屏态下会 exitFullscreen + setIsFullscreen(false)
+    const buttons = document.querySelectorAll('button')
+    fireEvent.click(buttons[buttons.length - 1])
+    await waitFor(() => expect(exitFullscreen).toHaveBeenCalled())
+    expect(screen.getByPlaceholderText('administrator')).toBeInTheDocument()
+    Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true })
+    document.dispatchEvent(new Event('fullscreenchange'))
+  })
+
+  it('连接态关闭 Modal（handleClose）回调 onClose 并清理', async () => {
+    render(<DesktopModal {...props} />)
+    clickConnect()
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1))
+    await push({ type: 'connected', width: 1, height: 1 })
+    // 连接态下 Modal 的 close 图标
+    fireEvent.click(document.querySelector('.ant-modal-close')!)
+    await waitFor(() => expect(props.onClose).toHaveBeenCalled())
+  })
+
+  it('全屏按钮切换（handleToggleFullscreen 两分支）', async () => {
+    const requestFullscreen = vi.fn()
+    const exitFullscreen = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(document, 'exitFullscreen', { value: exitFullscreen, configurable: true })
+    render(<DesktopModal {...props} />)
+    clickConnect()
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1))
+    await push({ type: 'connected', width: 1, height: 1 })
+
+    const container = document.querySelector('.ant-modal-body > div') as HTMLElement
+    Object.defineProperty(container, 'requestFullscreen', { value: requestFullscreen, configurable: true })
+
+    // 全屏按钮：icon aria-label=fullscreen
+    const btn = screen.getByRole('button', { name: /fullscreen/i })
+    fireEvent.click(btn)
+    expect(requestFullscreen).toHaveBeenCalled()
+
+    // fullscreenchange 同步 isFullscreen=true → 再点走退出分支
+    await act(async () => {
+      Object.defineProperty(document, 'fullscreenElement', { value: document.body, configurable: true })
+      document.dispatchEvent(new Event('fullscreenchange'))
+    })
+    fireEvent.click(screen.getByRole('button', { name: /fullscreen/i }))
+    await waitFor(() => expect(exitFullscreen).toHaveBeenCalled())
+    Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true })
+    document.dispatchEvent(new Event('fullscreenchange'))
+  })
 })

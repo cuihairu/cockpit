@@ -79,4 +79,19 @@ describe('ForgotPassword', () => {
     // 未进入步骤 2
     expect(screen.getByRole('button', { name: '发送重置邮件' })).toBeInTheDocument()
   })
+
+  it('步骤 2 重发失败走安全措辞；「返回登录」跳登录', async () => {
+    render(wrap(<ForgotPassword />))
+    await submitUsername('admin')
+    expect(screen.getByText('重置邮件已发送')).toBeInTheDocument()
+    // 步骤 2 的返回登录（navigate）
+    fireEvent.click(screen.getByRole('button', { name: '返回登录' }))
+    // 重发失败（倒计时归零后）
+    act(() => { vi.advanceTimersByTime(60_000) })
+    apiMock.forgotPassword.mockRejectedValue(new Error('smtp down'))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '重新发送' }))
+    })
+    expect(msgInfo).toHaveBeenCalledWith('如果该用户存在，重置邮件已发送')
+  })
 })

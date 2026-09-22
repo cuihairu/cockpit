@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Empty, Modal, Select, Space, Table, Tabs, Tag, message } from 'antd'
 import { ReloadOutlined, EyeOutlined } from '@ant-design/icons'
@@ -98,6 +98,10 @@ const Docker = () => {
   const [logContainer, setLogContainer] = useState<ContainerInfo | null>(null)
   const [logTail, setLogTail] = useState('100')
   const logContainerRef = useRef<HTMLDivElement>(null)
+  // 操作成功后延迟 500ms 再刷新（等 docker 状态翻转）；卸载时清理，
+  // 否则 teardown 后 refetch 会让 React 调度落在已销毁的 jsdom 上。
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(refreshTimer.current), [])
 
   // 写操作入口裁剪（RBAC 笔 8a）：无 docker:write 只留查看日志
   const canWrite = usePerm('docker:write')
@@ -186,7 +190,8 @@ const Docker = () => {
       }
     },
     onSuccess: () => {
-      setTimeout(() => {
+      clearTimeout(refreshTimer.current)
+      refreshTimer.current = setTimeout(() => {
         void refetchContainers()
       }, 500)
     },

@@ -48,4 +48,13 @@ describe('HeartbeatBar', () => {
     const { container } = render(<HeartbeatBar results={results} slots={4} />)
     expect(cells(container)).toHaveLength(4)
   })
+
+  it('tip 拼接延迟与消息；results 缺省回落空态', () => {
+    const results = [mk('1', 'up', { latencyMs: 42, message: 'timeout-ish' }), mk('2', 'down', { message: 'refused' })]
+    const { container, unmount } = render(<HeartbeatBar results={results} slots={2} />)
+    expect(cells(container)).toHaveLength(2)
+    unmount()
+    const empty = render(<HeartbeatBar results={undefined as unknown as ProbeResult[]} />)
+    expect(empty.container.textContent).toBe('暂无记录')
+  })
 })

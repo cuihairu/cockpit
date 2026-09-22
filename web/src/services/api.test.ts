@@ -335,3 +335,184 @@ describe('ApiService 拦截器', () => {
     expect(locationStub.href).toBe('')
   })
 })
+
+describe('ApiService 默认参数与可选分支', () => {
+  beforeEach(() => {
+    for (const m of [mockInstance.get, mockInstance.post, mockInstance.put, mockInstance.delete]) {
+      m.mockClear()
+      m.mockResolvedValue({})
+    }
+    localStorage.clear()
+    locationStub.href = ''
+  })
+
+  it('getAuditLogs/getAuditStats/exportAuditLogs：过滤空值、分页与 blob', async () => {
+    await api.getAuditLogs({ username: 'ops', action: undefined, resource: '' }, 2, 20)
+    expect(mockInstance.get).toHaveBeenCalledWith('/admin/audit/logs', {
+      params: { page: '2', page_size: '20', username: 'ops' },
+    })
+    await api.getAuditStats()
+    expect(mockInstance.get).toHaveBeenCalledWith('/admin/audit/stats')
+    await api.exportAuditLogs({ username: 'ops', action: undefined })
+    expect(mockInstance.get).toHaveBeenCalledWith('/admin/audit/export', {
+      params: { username: 'ops' },
+      responseType: 'blob',
+    })
+  })
+
+  it('getContainers 省略 all 走默认 true', async () => {
+    await api.getContainers('ag')
+    expect(mockInstance.get).toHaveBeenCalledWith('/docker/agents/ag/containers', {
+      params: { all: true },
+    })
+  })
+
+  it('stop/restartContainer 无 timeout 时 params 为 undefined', async () => {
+    await api.stopContainer('ag', 'c1')
+    expect(mockInstance.post).toHaveBeenCalledWith(
+      '/docker/agents/ag/containers/c1/stop', undefined, { params: undefined })
+    await api.restartContainer('ag', 'c1')
+    expect(mockInstance.post).toHaveBeenCalledWith(
+      '/docker/agents/ag/containers/c1/restart', undefined, { params: undefined })
+  })
+
+  it('getContainerLogs 缺省 opts 用 tail=100/timestamps=false，显式值覆盖', async () => {
+    await api.getContainerLogs('ag', 'c1')
+    expect(mockInstance.get).toHaveBeenCalledWith(
+      '/docker/agents/ag/containers/c1/logs',
+      { params: { tail: '100', timestamps: false } },
+    )
+    await api.getContainerLogs('ag', 'c1', { tail: '50', timestamps: true })
+    expect(mockInstance.get).toHaveBeenLastCalledWith(
+      '/docker/agents/ag/containers/c1/logs',
+      { params: { tail: '50', timestamps: true } },
+    )
+  })
+
+  it('getStackLogs 缺省 opts 与显式 service/tail', async () => {
+    await api.getStackLogs('ag', 's1')
+    expect(mockInstance.get).toHaveBeenCalledWith(
+      '/stacks/agents/ag/s1/logs', { params: { service: undefined, tail: 200 } })
+    await api.getStackLogs('ag', 's1', { service: 'web', tail: 10 })
+    expect(mockInstance.get).toHaveBeenLastCalledWith(
+      '/stacks/agents/ag/s1/logs', { params: { service: 'web', tail: 10 } })
+  })
+
+  it('历史/运行记录类 limit 省略走默认 50', async () => {
+    await api.getStackHistory('ag', 's1')
+    expect(mockInstance.get).toHaveBeenCalledWith(
+      '/stacks/agents/ag/s1/history', { params: { limit: 50 } })
+    await api.getProbeHistory('service', 'id 1')
+    expect(mockInstance.get).toHaveBeenCalledWith(
+      '/probe/history?resource_type=service&resource_id=id%201&limit=50')
+    await api.getBackupRuns()
+    expect(mockInstance.get).toHaveBeenCalledWith('/backups/runs?limit=50')
+    await api.getBackupConfigRuns(3)
+    expect(mockInstance.get).toHaveBeenCalledWith('/backups/configs/3/runs?limit=50')
+  })
+
+  it('writeFile/searchFiles 省略可选参走默认值', async () => {
+    await api.writeFile('ag', '/p/a.txt', 'ZGF0YQ==')
+    expect(mockInstance.post).toHaveBeenCalledWith(
+      '/agents/ag/files/write', { path: '/p/a.txt', data: 'ZGF0YQ==', truncate: true })
+    await api.searchFiles('ag', '/p', 'q')
+    expect(mockInstance.post).toHaveBeenCalledWith(
+      '/agents/ag/files/search', { dir: '/p', query: 'q', caseSensitive: false })
+  })
+
+  it('cron 系列省略 user 时 URL 无查询串', async () => {
+    await api.getCronStatus('ag')
+    expect(mockInstance.get).toHaveBeenCalledWith('/agents/ag/cron/status')
+    await api.getCronJobs('ag')
+    expect(mockInstance.get).toHaveBeenCalledWith('/agents/ag/cron/jobs')
+    await api.applyCronJob('ag', { name: 'j1' } as never)
+    expect(mockInstance.put).toHaveBeenCalledWith('/agents/ag/cron/jobs/j1', { name: 'j1' })
+    await api.deleteCronJob('ag', 'j1')
+    expect(mockInstance.delete).toHaveBeenCalledWith('/agents/ag/cron/jobs/j1')
+  })
+
+  it('getDNSRecords 可选 type/page 省略时 params 空，提供时分别并入', async () => {
+    mockInstance.get.mockResolvedValue({ data: { records: [] } })
+    await api.getDNSRecords('zone 1')
+    expect(mockInstance.get).toHaveBeenCalledWith(
+      '/dns/zones/zone%201/records', { params: {} })
+    await api.getDNSRecords('zone 1', 'A')
+    expect(mockInstance.get).toHaveBeenLastCalledWith(
+      '/dns/zones/zone%201/records', { params: { type: 'A' } })
+    await api.getDNSRecords('zone 1', undefined, 2)
+    expect(mockInstance.get).toHaveBeenLastCalledWith(
+      '/dns/zones/zone%201/records', { params: { page: '2' } })
+  })
+
+  it('data 包装端点有 data 原样返回，缺 data 兜底空数组', async () => {
+    mockInstance.get.mockResolvedValueOnce({ data: [{ id: 'r1' }] })
+    expect(await api.getRecordings()).toEqual([{ id: 'r1' }])
+    mockInstance.get.mockResolvedValueOnce({ data: undefined })
+    expect(await api.getRecordings()).toEqual([])
+    mockInstance.get.mockResolvedValueOnce({ data: [{ name: 'b1.sql' }] })
+    expect(await api.getServerBackups()).toEqual([{ name: 'b1.sql' }])
+    mockInstance.get.mockResolvedValueOnce({})
+    expect(await api.getServerBackups()).toEqual([])
+    mockInstance.get.mockResolvedValueOnce({ data: [{ id: 'z1' }] })
+    expect(await api.getDNSZones()).toEqual([{ id: 'z1' }])
+    mockInstance.get.mockResolvedValueOnce({})
+    expect(await api.getDNSZones()).toEqual([])
+    mockInstance.get.mockResolvedValueOnce({ data: [{ domain: 'd1' }] })
+    expect(await api.getAgentDomains('ag')).toEqual([{ domain: 'd1' }])
+    mockInstance.get.mockResolvedValueOnce({})
+    expect(await api.getAgentDomains('ag')).toEqual([])
+  })
+
+  it('getDomainBindings/getDomainDrift 省略 agentId 时无查询参数', async () => {
+    mockInstance.get.mockResolvedValue({ data: [] })
+    await api.getDomainBindings()
+    expect(mockInstance.get).toHaveBeenCalledWith('/domains', { params: undefined })
+    await api.getDomainDrift()
+    expect(mockInstance.get).toHaveBeenCalledWith('/domains/drift', { params: undefined })
+    await api.getDomainBindings('ag')
+    expect(mockInstance.get).toHaveBeenLastCalledWith('/domains', { params: { agent: 'ag' } })
+    await api.getDomainDrift('ag')
+    expect(mockInstance.get).toHaveBeenLastCalledWith('/domains/drift', { params: { agent: 'ag' } })
+  })
+
+  it('getRecordingCast transformResponse 恒等透传原文', async () => {
+    mockInstance.get.mockResolvedValue('raw-cast')
+    expect(await api.getRecordingCast('s1')).toBe('raw-cast')
+    const calls = mockInstance.get.mock.calls
+    const cfg = calls[calls.length - 1][1] as {
+      transformResponse: Array<(d: string) => string>
+    }
+    expect(cfg.transformResponse[0]('raw')).toBe('raw')
+  })
+
+  it('followLogs 无 token 时不带 Authorization 头', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.followLogs('ag', {} as never, new AbortController().signal)
+    const headers = (fetchMock.mock.calls[0][1] as { headers: Record<string, string> }).headers
+    expect(headers.Authorization).toBeUndefined()
+    expect(headers['Content-Type']).toBe('application/json')
+  })
+})
+
+describe('ApiService 拦截器边界', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    locationStub.href = ''
+  })
+
+  it('响应错误带 response 但非 401 不清凭证不跳转', async () => {
+    const resUse = vi.fn()
+    mockInstance.interceptors.response.use = resUse
+    const Ctor = Object.getPrototypeOf(api).constructor
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    new (Ctor as any)()
+    const [, onResErr] = resUse.mock.calls[0] as [unknown, (e: unknown) => Promise<never>]
+    localStorage.setItem('token', 'keep')
+    await expect(onResErr({ response: { status: 500 } })).rejects.toMatchObject({
+      response: { status: 500 },
+    })
+    expect(locationStub.href).toBe('')
+    expect(localStorage.getItem('token')).toBe('keep')
+  })
+})

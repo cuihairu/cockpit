@@ -156,4 +156,70 @@ describe('TerminalModal', () => {
     expect(terminalMock.writeln).toHaveBeenCalledWith(expect.stringContaining('正在重连'))
     expect(createRemoteTicket).toHaveBeenCalledTimes(2)
   })
+
+  it('ws.onerror 置断开并输出连接错误', async () => {
+    render(<TerminalModal {...props} />)
+    await flush()
+    const ws = FakeWebSocket.instances[0]
+    await act(async () => {
+      ws.readyState = FakeWebSocket.OPEN
+      ws.onopen!()
+      ws.onerror!()
+    })
+    expect(terminalMock.writeln).toHaveBeenCalledWith(expect.stringContaining('连接错误'))
+    expect(screen.getByText(/重\s*连/)).toBeInTheDocument()
+  })
+
+  it('ws.onclose 置断开（不覆盖文案）', async () => {
+    render(<TerminalModal {...props} />)
+    await flush()
+    const ws = FakeWebSocket.instances[0]
+    await act(async () => {
+      ws.readyState = FakeWebSocket.OPEN
+      ws.onopen!()
+      ws.onclose!()
+    })
+    expect(screen.getByText(/重\s*连/)).toBeInTheDocument()
+  })
+
+  it('连接超时：CONNECTING 状态下 30s 后关 WS 并提示', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<TerminalModal {...props} />)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000)
+      })
+      const ws = FakeWebSocket.instances[0]
+      expect(ws.close).toHaveBeenCalled()
+      expect(terminalMock.writeln).toHaveBeenCalledWith(expect.stringContaining('连接超时'))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('visible=false 时清理 WS（effect cleanup）', async () => {
+    const { rerender } = render(<TerminalModal {...props} />)
+    await flush()
+    const ws = FakeWebSocket.instances[0]
+    await act(async () => {
+      ws.readyState = FakeWebSocket.OPEN
+      ws.onopen!()
+    })
+    expect(screen.getByText(/已\s*连接/)).toBeInTheDocument()
+    rerender(<TerminalModal {...props} visible={false} />)
+    // 第一个 useEffect 的 cleanup 负责关 WS + dispose 终端
+    expect(ws.close).toHaveBeenCalled()
+    expect(terminalMock.dispose).toHaveBeenCalled()
+  })
+
+  it('终端输入在非 OPEN 状态不发送', async () => {
+    render(<TerminalModal {...props} />)
+    await flush()
+    const ws = FakeWebSocket.instances[0]
+    const onDataCb = terminalMock.onData.mock.calls[0][0] as (d: string) => void
+    await act(async () => {
+      onDataCb('ls\n') // CONNECTING 状态
+    })
+    expect(ws.sent).toHaveLength(0)
+  })
 })

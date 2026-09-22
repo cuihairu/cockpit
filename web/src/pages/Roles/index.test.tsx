@@ -179,4 +179,38 @@ describe('Roles', () => {
     })
     await waitFor(() => expect(msgError).toHaveBeenCalledWith('操作失败'))
   })
+
+  it('删除失败：fallback 错误文案；刷新按钮触发 invalidate', async () => {
+    apiMock.deleteRole.mockRejectedValue(new Error('boom'))
+    renderPage()
+    await screen.findByText('operator')
+    const before = apiMock.listRoles.mock.calls.length
+    fireEvent.click(document.querySelector('.anticon-reload')!.closest('button')!)
+    await waitFor(() => expect(apiMock.listRoles.mock.calls.length).toBeGreaterThan(before))
+    fireEvent.click(within(rowOf('operator')).getByRole('button', { name: /删\s*除/ }))
+    expect(await screen.findByText('删除角色 operator?')).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(popconfirmOk())
+    })
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('操作失败'))
+  })
+
+  it('弹窗取消：关闭且不提交；空权限角色 Popover 提示 fail-closed', async () => {
+    renderPage([
+      { name: 'admin', builtin: true, permissions: ['files:read', ':orphan', 'weird:read'] },
+      { name: 'blank', permissions: [] },
+    ])
+    await screen.findByText('blank')
+    // 空权限：0 项 → Popover 显示 fail-closed 说明（cond-expr 空分支）
+    fireEvent.mouseEnter(within(rowOf('blank')).getByRole('button', { name: '0 项' }))
+    fireEvent.mouseMove(within(rowOf('blank')).getByRole('button', { name: '0 项' }))
+    expect(await screen.findByText(/无权限（只读库 fail-closed/)).toBeInTheDocument()
+    fireEvent.mouseLeave(document.body)
+    // 未知资源标签回落原名（RESOURCE_LABELS ?? res）
+    fireEvent.click(screen.getByRole('button', { name: /新建角色/ }))
+    await waitFor(() => expect(document.querySelector('.ant-modal')).toBeInTheDocument())
+    expect(screen.getByText('weird')).toBeInTheDocument()
+    // 取消触发 onCancel（editing/createOpen 归零）；测试未包 ConfigProvider，footer 是英文 Cancel
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }))
+  })
 })

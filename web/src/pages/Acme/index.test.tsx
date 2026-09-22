@@ -30,12 +30,16 @@ vi.mock('@/hooks/usePerm', () => ({ usePerm: (p: string) => (p === 'acme:admin' 
 
 const msgSuccess = vi.spyOn(message, 'success')
 const msgInfo = vi.spyOn(message, 'info')
+const msgError = vi.spyOn(message, 'error')
+const msgWarning = vi.spyOn(message, 'warning')
 
 const agents = [
   { id: 'ag-1', hostname: 'web-01', ip: '10.0.0.1', region: 'cn', zone: 'z1', status: 'online',
     lastSeen: '0', capabilities: [{ type: 'nginx-proxy' }] },
   { id: 'ag-2', hostname: 'db-01', ip: '10.0.0.2', region: 'cn', zone: 'z1', status: 'offline',
     lastSeen: '0', capabilities: [] },
+  { id: 'ag-3', hostname: '', ip: '10.0.0.3', region: 'cn', zone: 'z1', status: 'online',
+    lastSeen: '0' },
 ] as unknown as Agent[]
 
 // 到期色阶：now+20d → 橙（15 ≤ 20 < 30），避免长期漂移
@@ -54,11 +58,11 @@ const certs = [
     autoRenew: true, renewBeforeDays: 21, expiresAt: soonIso, lastRenewAt: 0 },
 ] as unknown as AcmeCertView[]
 
-const renderPage = (scanCfg?: unknown) => {
-  apiMock.getAcmeCerts.mockResolvedValue(certs)
+const renderPage = (scanCfg?: unknown, opts?: { certs?: AcmeCertView[]; account?: unknown }) => {
+  apiMock.getAcmeCerts.mockResolvedValue(opts?.certs ?? certs)
   apiMock.getAcmeScanConfig.mockResolvedValue(
     scanCfg ?? { scan_interval_seconds: 7200, dns: { provider: 'dnspod', configured: true } })
-  apiMock.getAcmeAccount.mockResolvedValue({ email: 'ops@example.com' })
+  apiMock.getAcmeAccount.mockResolvedValue(opts?.account ?? { email: 'ops@example.com' })
   apiMock.getAgents.mockResolvedValue(agents)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -89,6 +93,30 @@ const modalTitle = async (title: string) => {
 
 const modalOk = () => {
   fireEvent.click(document.querySelector('.ant-modal-footer .ant-btn-primary')!)
+}
+
+const modalCancel = () => {
+  const btns = Array.from(document.querySelectorAll<HTMLButtonElement>('.ant-modal-footer button'))
+  fireEvent.click(btns.find((b) => !b.classList.contains('ant-btn-primary'))!)
+}
+
+// jsdom 不派发 transitionend，弹窗关闭动画停在 leave；用 leave 类断言关闭已发起
+const expectModalLeaving = async () => {
+  await waitFor(() => expect(document.querySelector('.ant-modal')?.className).toContain('ant-zoom-leave'))
+}
+
+const openSelect = (label: string) => {
+  const input = screen.getByLabelText(label)
+  fireEvent.mouseDown(input.closest('.ant-select-selector')!)
+}
+
+const pickOption = async (label: string) => {
+  fireEvent.click(await screen.findByText(label))
+}
+
+const addDomainTag = (value: string) => {
+  const domInput = document.querySelector('.ant-modal .ant-select-selection-search-input') as HTMLInputElement
+  fireEvent.change(domInput, { target: { value } })
 }
 
 describe('Acme', () => {
@@ -260,5 +288,150 @@ describe('Acme', () => {
     expect(screen.queryByRole('button', { name: /账户邮箱/ })).not.toBeInTheDocument()
     // 下载不在 PermGuard 内，issued 行保留
     expect(within(r1).getByRole('button', { name: /私\s*钥/ })).toBeInTheDocument()
+  })
+
+  it('巡检间隔越界拦截，改合法后保存失败走 message.error', async () => {
+    apiMock.putAcmeScanConfig.mockRejectedValue(new Error('busy'))
+    renderPage({ scan_interval_seconds: 120, dns: { provider: 'dnspod', configured: true } })
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    const minutesInput = document.querySelector('.ant-input-number-input') as HTMLInputElement
+    expect(minutesInput.value).toBe('2')
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('间隔需在 5～1440 分钟之间'))
+    expect(apiMock.putAcmeScanConfig).not.toHaveBeenCalled()
+    fireEvent.change(minutesInput, { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(apiMock.putAcmeScanConfig).toHaveBeenCalledWith(600))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('保存失败'))
+  })
+
+  it('清空分钟输入：onChange 回退默认 5 分钟', async () => {
+    apiMock.putAcmeScanConfig.mockResolvedValue({})
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    const minutesInput = document.querySelector('.ant-input-number-input') as HTMLInputElement
+    expect(minutesInput.value).toBe('120')
+    fireEvent.change(minutesInput, { target: { value: '' } })
+    expect(minutesInput.value).toBe('5')
+    await waitFor(() => {
+      const b = screen.getByRole('button', { name: /保\s*存/ }) as HTMLButtonElement
+      if (b.disabled) throw new Error('save button busy')
+    })
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    await waitFor(() => expect(apiMock.putAcmeScanConfig).toHaveBeenCalledWith(300))
+  })
+
+  it('账户邮箱未设：按钮文案「未设置」、空回填、保存失败与取消', async () => {
+    apiMock.putAcmeAccount.mockRejectedValue(new Error('bad mail'))
+    renderPage(undefined, { account: {} })
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /账户邮箱未设置/ }))
+    await modalTitle('ACME 账户邮箱')
+    expect(fieldEl('邮箱').value).toBe('')
+    fireEvent.change(fieldEl('邮箱'), { target: { value: 'ops@example.com' } })
+    modalOk()
+    await waitFor(() => expect(apiMock.putAcmeAccount).toHaveBeenCalledWith('ops@example.com'))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('保存失败'))
+    modalCancel()
+    await expectModalLeaving()
+  })
+
+  it('新建取消与编辑无部署字段证书', async () => {
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建签发/ }))
+    await modalTitle('新建签发配置')
+    modalCancel()
+    await expectModalLeaving()
+    fireEvent.click(iconBtnIn(rowOf('c.dev'), 'anticon-edit')!)
+    await modalTitle('编辑签发配置')
+    expect(fieldEl('域名（首个为主域名）').id).toBeTruthy()
+    expect(screen.queryByLabelText('证书路径（agent 上）')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('私钥路径（agent 上，落盘权限 0600）')).not.toBeInTheDocument()
+  })
+
+  it('新建表单：部署目标选项兜底与空域名默认路径', async () => {
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建签发/ }))
+    await modalTitle('新建签发配置')
+    openSelect('自动部署目标（可选）')
+    expect(await screen.findByText('web-01（Nginx）')).toBeInTheDocument()
+    expect(screen.getByText('db-01（离线）')).toBeInTheDocument()
+    expect(screen.getByText('ag-3')).toBeInTheDocument()
+    await pickOption('web-01（Nginx）')
+    await screen.findByLabelText('证书路径（agent 上）')
+    fireEvent.click(screen.getByRole('button', { name: /按主域名填默认路径/ }))
+    expect(fieldEl('证书路径（agent 上）').value).toBe('/etc/cockpit/certs/example.com.crt.pem')
+    expect(fieldEl('私钥路径（agent 上，落盘权限 0600）').value).toBe('/etc/cockpit/certs/example.com.key.pem')
+  })
+
+  it('仅空白域名：提交被拦截提示且不调接口', async () => {
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建签发/ }))
+    await modalTitle('新建签发配置')
+    addDomainTag('\t,')
+    expect(document.querySelector('.ant-modal .ant-select-selection-item')).toBeTruthy()
+    modalOk()
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('请至少填写一个域名'))
+    expect(apiMock.createAcmeCert).not.toHaveBeenCalled()
+  })
+
+  it('新建保存失败：message.error', async () => {
+    apiMock.createAcmeCert.mockRejectedValue(new Error('dup'))
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建签发/ }))
+    await modalTitle('新建签发配置')
+    addDomainTag('x.com,')
+    modalOk()
+    await waitFor(() => expect(apiMock.createAcmeCert).toHaveBeenCalled())
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('保存失败'))
+  })
+
+  it('到期红色/待推送/未知状态兜底/最后签发时间', async () => {
+    const redIso = new Date(Date.now() + 10 * 86400000 + 3600000).toISOString()
+    const edgeCerts = [
+      { id: 11, status: 'issued', primaryDomain: 'e.org', domains: ['e.org'], caDirectory: 'staging',
+        autoRenew: true, renewBeforeDays: 7, expiresAt: redIso, lastRenewAt: 1759000000,
+        deployAgentId: 'ag-1', deployCertPath: '/e.crt.pem', lastDeployAt: 0 },
+      { id: 12, status: 'oops', primaryDomain: 'g.dev', domains: ['g.dev'], caDirectory: 'staging',
+        autoRenew: false, renewBeforeDays: 30, expiresAt: '', lastRenewAt: 0 },
+    ] as unknown as AcmeCertView[]
+    renderPage(undefined, { certs: edgeCerts })
+    expect(await screen.findByText('e.org')).toBeInTheDocument()
+    expect(within(rowOf('e.org')).getByText('待推送')).toBeInTheDocument()
+    expect(within(rowOf('e.org')).getByText(/剩 10 天/)).toHaveStyle({ color: '#cf1322' })
+    expect(within(rowOf('e.org')).getByText(new Date(1759000000 * 1000).toLocaleString())).toBeInTheDocument()
+    expect(within(rowOf('g.dev')).getByText('待签发')).toBeInTheDocument()
+    expect(screen.queryByText(/有配置最近一次签发失败/)).not.toBeInTheDocument()
+  })
+
+  it('签发失败与部署失败：message.error', async () => {
+    apiMock.issueAcmeCert.mockRejectedValue(new Error('ca down'))
+    apiMock.deployAcmeCert.mockRejectedValue(new Error('agent down'))
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(iconBtnIn(rowOf('c.dev'), 'anticon-cloud-upload')!)
+    await waitFor(() => expect(apiMock.issueAcmeCert).toHaveBeenCalledWith(3))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('签发失败'))
+    fireEvent.click(iconBtnIn(rowOf('a.com'), 'anticon-send')!)
+    await waitFor(() => expect(apiMock.deployAcmeCert).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('部署失败'))
+  })
+
+  it('下载失败与删除失败：message.error', async () => {
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:mock'), configurable: true })
+    apiMock.downloadAcmeCert.mockRejectedValue(new Error('net'))
+    apiMock.deleteAcmeCert.mockRejectedValue(new Error('ref'))
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(within(rowOf('a.com')).getByRole('button', { name: /证\s*书/ }))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('下载失败'))
+    fireEvent.click(iconBtnIn(rowOf('a.com'), 'anticon-delete')!)
+    expect(await screen.findByText(/删除该签发配置/)).toBeInTheDocument()
+    fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('删除失败'))
   })
 })

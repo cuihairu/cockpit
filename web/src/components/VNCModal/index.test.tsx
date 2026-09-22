@@ -12,6 +12,7 @@ const msgError = vi.spyOn(message, 'error')
 const { FakeRFB } = vi.hoisted(() => {
   class FakeRFB {
     static instances: FakeRFB[] = []
+    static throwError = false
     listeners: Record<string, Array<(e: { detail?: unknown }) => void>> = {}
     scaleViewport = false
     resizeSession = false
@@ -23,6 +24,7 @@ const { FakeRFB } = vi.hoisted(() => {
       public url: string,
       public opts: unknown,
     ) {
+      if (FakeRFB.throwError) throw new Error('RFB boom')
       FakeRFB.instances.push(this)
     }
     addEventListener(type: string, cb: (e: { detail?: unknown }) => void) {
@@ -138,6 +140,97 @@ describe('VNCModal', () => {
     render(<VNCModal {...props} />)
     fireEvent.click(screen.getByRole('button', { name: /close/i }))
     await waitFor(() => expect(props.onClose).toHaveBeenCalledTimes(1))
+  })
+
+  it('credentialsrequired：表单有密码则回填，否则 prompt 取密码', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('prompted')
+    render(<VNCModal {...props} />)
+    fireEvent.change(screen.getByPlaceholderText('(可选) VNC 密码'), { target: { value: '' } })
+    fireEvent.click(screen.getByText('连 接').closest('button')!)
+    await waitFor(() => expect(FakeRFB.instances.length).toBe(1))
+    const rfb = FakeRFB.instances[0]
+    await act(async () => {
+      rfb.emit('credentialsrequired')
+    })
+    expect(promptSpy).toHaveBeenCalled()
+    expect(rfb.sendCredentials).toHaveBeenCalledWith({ password: 'prompted' })
+    promptSpy.mockRestore()
+  })
+
+  it('credentialsrequired：prompt 取消则不发凭据', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(null)
+    render(<VNCModal {...props} />)
+    fireEvent.click(screen.getByText('连 接').closest('button')!)
+    await waitFor(() => expect(FakeRFB.instances.length).toBe(1))
+    const rfb = FakeRFB.instances[0]
+    await act(async () => {
+      rfb.emit('credentialsrequired')
+    })
+    expect(rfb.sendCredentials).not.toHaveBeenCalled()
+    promptSpy.mockRestore()
+  })
+
+  it('RFB 构造失败：提示连接失败并回 disconnected', async () => {
+    FakeRFB.throwError = true
+    try {
+      render(<VNCModal {...props} />)
+      fireEvent.click(screen.getByText('连 接').closest('button')!)
+      await waitFor(() => expect(msgError).toHaveBeenCalled())
+      expect(msgError.mock.calls.some((c) => /VNC 连接失败/.test(String(c[0])))).toBe(true)
+    } finally {
+      FakeRFB.throwError = false
+    }
+  })
+
+  it('fullscreenchange 同步 isFullscreen（开/关两分支）', async () => {
+    render(<VNCModal {...props} />)
+    fireEvent.click(screen.getByText('连 接').closest('button')!)
+    await waitFor(() => expect(FakeRFB.instances.length).toBe(1))
+    await act(async () => {
+      FakeRFB.instances[0].emit('connect')
+    })
+
+    await act(async () => {
+      Object.defineProperty(document, 'fullscreenElement', { value: document.body, configurable: true })
+      document.dispatchEvent(new Event('fullscreenchange'))
+    })
+    // 全屏态：Modal 宽度 100vw（isFullscreen 传导）
+    expect(document.querySelector('.ant-modal')!.getAttribute('style')).toContain('100vw')
+
+    await act(async () => {
+      Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true })
+      document.dispatchEvent(new Event('fullscreenchange'))
+    })
+    expect(document.querySelector('.ant-modal')!.getAttribute('style') ?? '').not.toContain('100vw')
+  })
+
+  it('disconnect clean:true 不弹异常提示（只显示已断开）', async () => {
+    render(<VNCModal {...props} />)
+    fireEvent.click(screen.getByText('连 接').closest('button')!)
+    await waitFor(() => expect(FakeRFB.instances.length).toBe(1))
+    await act(async () => {
+      FakeRFB.instances[0].emit('connect')
+    })
+    await act(async () => {
+      FakeRFB.instances[0].emit('disconnect', { clean: true })
+    })
+    expect(msgError).not.toHaveBeenCalledWith('VNC 连接异常断开')
+    expect(screen.getByText('连接已断开')).toBeInTheDocument()
+  })
+
+  it('desktopname 无 name 清空桌面名', async () => {
+    render(<VNCModal {...props} />)
+    fireEvent.click(screen.getByText('连 接').closest('button')!)
+    await waitFor(() => expect(FakeRFB.instances.length).toBe(1))
+    await act(async () => {
+      FakeRFB.instances[0].emit('connect')
+      FakeRFB.instances[0].emit('desktopname', { name: 'Win11' })
+    })
+    expect(screen.getByText('Win11')).toBeInTheDocument()
+    await act(async () => {
+      FakeRFB.instances[0].emit('desktopname', {})
+    })
+    expect(screen.queryByText('Win11')).not.toBeInTheDocument()
   })
 })
 

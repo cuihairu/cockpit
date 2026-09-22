@@ -38,3 +38,22 @@ describe('logger', () => {
     expect(log).not.toHaveBeenCalled()
   })
 })
+
+describe('logger development 模式', () => {
+  it('MODE=development 时 info/warn/debug 透出 console', async () => {
+    vi.resetModules()
+    vi.stubEnv('MODE', 'development')
+    const { logger: devLogger } = await import('./logger')
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    devLogger.info('i', 1)
+    devLogger.warn('w')
+    devLogger.debug('d')
+    expect(info).toHaveBeenCalledWith('i', 1)
+    expect(warn).toHaveBeenCalledWith('w')
+    expect(log).toHaveBeenCalledWith('d')
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+})

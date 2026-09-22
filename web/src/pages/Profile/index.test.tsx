@@ -30,8 +30,9 @@ const apiMock = vi.hoisted(() => ({
 }))
 vi.mock('@/services/api', () => ({ api: apiMock }))
 const updateUser = vi.hoisted(() => vi.fn())
+let mockUser: typeof localUser | null = localUser
 vi.mock('@/contexts/useUser', () => ({
-  useUser: () => ({ user: localUser, updateUser }),
+  useUser: () => ({ user: mockUser, updateUser }),
 }))
 
 const msgError = vi.spyOn(message, 'error')
@@ -40,6 +41,7 @@ const msgSuccess = vi.spyOn(message, 'success')
 describe('Profile', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockUser = localUser
     apiMock.getCurrentUser.mockReset()
     apiMock.getCurrentUser.mockResolvedValue(serverUser)
     apiMock.updateProfile.mockReset()
@@ -136,5 +138,58 @@ describe('Profile', () => {
     })
     expect(await screen.findByText('两次输入的密码不一致')).toBeInTheDocument()
     expect(apiMock.changePassword).not.toHaveBeenCalled()
+  })
+
+  it('改密失败：报错文案透出', async () => {
+    apiMock.changePassword.mockRejectedValue(new Error('old wrong'))
+    render(<Profile />)
+    fireEvent.change(screen.getByPlaceholderText('请输入当前密码'), { target: { value: 'old123' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入新密码（至少 6 位）'), { target: { value: 'newpass123' } })
+    fireEvent.change(screen.getByPlaceholderText('请再次输入新密码'), { target: { value: 'newpass123' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /修改密码/ }))
+    })
+    expect(msgError).toHaveBeenCalledWith('修改密码失败')
+  })
+
+  it('无本地 user：描述兜底 Admin/用户 角色文案，保存回落空 id/角色 user', async () => {
+    mockUser = null
+    apiMock.getCurrentUser.mockRejectedValue(new Error('down'))
+    apiMock.updateProfile.mockResolvedValue({})
+    render(<Profile />)
+    expect(screen.getByText('Admin')).toBeInTheDocument()
+    expect(screen.getByText('用户')).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /保存信息/ }))
+    })
+    await waitFor(() => expect(updateUser).toHaveBeenCalledWith(
+      expect.objectContaining({ id: '', username: '', role: 'user' })))
+  })
+
+  it('服务器资料缺可选字段：表单回落空串', async () => {
+    apiMock.getCurrentUser.mockResolvedValue({
+      id: 'u1', username: 'admin', role: 'admin', permissions: [], totp_enabled: false,
+    })
+    render(<Profile />)
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText('请输入邮箱') as HTMLInputElement).value).toBe(''))
+    expect((screen.getByPlaceholderText('请输入手机号') as HTMLInputElement).value).toBe('')
+    expect((screen.getByPlaceholderText('请输入部门') as HTMLInputElement).value).toBe('')
+  })
+
+  it('加载中卸载：ignore 短路成功与失败回填', async () => {
+    let resolveMe: (v: unknown) => void = () => {}
+    apiMock.getCurrentUser.mockImplementation(() => new Promise((r) => { resolveMe = r }))
+    const first = render(<Profile />)
+    first.unmount()
+    resolveMe(serverUser)
+    await waitFor(() => expect(apiMock.getCurrentUser).toHaveBeenCalled())
+
+    let rejectMe: (e: unknown) => void = () => {}
+    apiMock.getCurrentUser.mockImplementation(() => new Promise((_r, rej) => { rejectMe = rej }))
+    const second = render(<Profile />)
+    second.unmount()
+    rejectMe(new Error('down'))
+    await waitFor(() => expect(apiMock.getCurrentUser).toHaveBeenCalledTimes(2))
   })
 })

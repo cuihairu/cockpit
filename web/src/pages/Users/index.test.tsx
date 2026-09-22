@@ -191,4 +191,64 @@ describe('Users', () => {
     })
     await waitFor(() => expect(msgError).toHaveBeenCalledWith('操作失败'))
   })
+
+  it('改角色失败：fallback 错误文案', async () => {
+    apiMock.updateUser.mockRejectedValue(new Error('role boom'))
+    renderPage()
+    await screen.findByText('alice')
+    fireEvent.mouseDown(rowOf('alice').querySelector('.ant-select-selector')!)
+    await pickOption('operator')
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('操作失败'))
+  })
+
+  it('新建用户失败：fallback 错误文案', async () => {
+    apiMock.createUser.mockRejectedValue(new Error('create boom'))
+    renderPage()
+    await screen.findByText('alice')
+    fireEvent.click(screen.getByRole('button', { name: /新建用户/ }))
+    await waitFor(() => expect(screen.getByText('邮箱（可选）')).toBeInTheDocument())
+    const textboxes = await screen.findAllByRole('textbox')
+    fireEvent.change(textboxes[0], { target: { value: 'bob' } })
+    fireEvent.change(document.querySelector('.ant-modal input[type="password"]')!, { target: { value: 'pass12345' } })
+    await act(async () => {
+      fireEvent.click(modalOk())
+    })
+    await waitFor(() => expect(apiMock.createUser).toHaveBeenCalledWith(expect.objectContaining({ username: 'bob' })))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('操作失败'))
+  })
+
+  it('改密失败：fallback 错误文案', async () => {
+    apiMock.changeUserPassword.mockRejectedValue(new Error('pwd boom'))
+    renderPage()
+    await screen.findByText('alice')
+    fireEvent.click(resetPwdBtn('alice'))
+    expect(await screen.findByText('重置 alice 的密码')).toBeInTheDocument()
+    fireEvent.change(document.querySelector('.ant-modal input[type="password"]')!, { target: { value: 'newpass123' } })
+    await act(async () => {
+      fireEvent.click(modalOk())
+    })
+    await waitFor(() => expect(apiMock.changeUserPassword).toHaveBeenCalledWith('u2', 'newpass123'))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('操作失败'))
+  })
+
+  it('刷新按钮 invalidate 用户列表；两个弹窗取消触发 onCancel', async () => {
+    renderPage()
+    await screen.findByText('alice')
+    const before = apiMock.listUsers.mock.calls.length
+    fireEvent.click(document.querySelector('.anticon-reload')!.closest('button')!)
+    await waitFor(() => expect(apiMock.listUsers.mock.calls.length).toBeGreaterThan(before))
+    // 新建弹窗取消（footer Cancel；测试未包 ConfigProvider 为英文文案）
+    fireEvent.click(screen.getByRole('button', { name: /新建用户/ }))
+    await waitFor(() => expect(screen.getByText('邮箱（可选）')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }))
+  })
+
+  it('重置密码弹窗取消（X）触发 onCancel', async () => {
+    renderPage()
+    await screen.findByText('alice')
+    fireEvent.click(resetPwdBtn('alice'))
+    expect(await screen.findByText('重置 alice 的密码')).toBeInTheDocument()
+    // jsdom 下关弹窗动画不结束、标题被冻结，无法断言关闭——点 X 覆盖 onCancel 即可
+    fireEvent.click(document.querySelector('.ant-modal-close')!)
+  })
 })

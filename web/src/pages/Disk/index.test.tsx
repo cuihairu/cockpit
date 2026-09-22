@@ -19,6 +19,7 @@ vi.mock('@/hooks/usePerm', () => ({ usePerm: () => true }))
 
 const msgError = vi.spyOn(message, 'error')
 const msgSuccess = vi.spyOn(message, 'success')
+const msgWarning = vi.spyOn(message, 'warning')
 
 const mkAgent = (id: string, hostname: string, smart = true): Agent =>
   ({
@@ -198,5 +199,100 @@ describe('Disk', () => {
     expect(await screen.findByText('各主机暂无磁盘读数')).toBeInTheDocument()
     fireEvent.click(panelHeader('db-01'))
     expect(await screen.findByText('未发现可读 SMART 的磁盘（需 root 权限运行 Agent）')).toBeInTheDocument()
+  })
+
+  it('服务端已开巡检但间隔过小：保存触发间隔校验告警', async () => {
+    // scan_interval_seconds=60 → 派生 scanMinutes=1 <5，走防御校验分支
+    apiMock.getAgents.mockResolvedValue(agents)
+    apiMock.getSmartStatus.mockImplementation(statusOf)
+    apiMock.getSmartConfig.mockResolvedValue({ scan_interval_seconds: 60, min: 300, max: 86400, default: 3600 })
+    apiMock.putSmartConfig.mockResolvedValue({})
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <Disk />
+      </QueryClientProvider>,
+    )
+    const sw = await readySwitch()
+    expect(sw).toBeChecked() // 服务端已开
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    })
+    await waitFor(() => expect(msgError).not.toHaveBeenCalled())
+    expect(msgWarning).toHaveBeenCalledWith('间隔需在 5～1440 分钟之间')
+    expect(apiMock.putSmartConfig).not.toHaveBeenCalled()
+  })
+
+  it('边界数据：devices 缺省、无 hostname、未知健康态、温度/介质错误渲染', async () => {
+    const bare = {
+      id: 'ag-bare',
+      ip: '1.1.1.1',
+      status: 'online',
+      lastSeen: '0',
+      // capabilities 缺省 → (a.capabilities ?? []) 兜底后被过滤
+      capabilities: undefined,
+    } as unknown as Agent
+    const noHost = {
+      id: 'ag-nohost',
+      hostname: '',
+      ip: '2.2.2.2',
+      status: 'online',
+      lastSeen: '0',
+      capabilities: [{ type: 'hardware-monitor', metadata: { smart: true } }],
+    } as unknown as Agent
+    const second = mkAgent('ag-2nd', 'box-02')
+    apiMock.getAgents.mockResolvedValue([noHost, second, bare])
+    // 同 severity 两盘触发 badSectors 比较（sda 无 reallocatedSectors → ?? 0）；
+    // caution 为 HEALTH_META 未知键；一块带温度+介质错误
+    apiMock.getSmartStatus.mockImplementation((id: string) =>
+      Promise.resolve(
+        id === 'ag-nohost'
+          ? {
+              available: true,
+              devices: [
+                { name: '/dev/sdz', health: 'caution', mediaErrors: 3, temperatureC: 41 },
+                { name: '/dev/sdy', health: 'passed', pendingSectors: 1 },
+              ],
+            }
+          : { available: true }, // devices 字段缺省 → ?? [] 兜底
+      ))
+    apiMock.getSmartConfig.mockResolvedValue({ scan_interval_seconds: 0 })
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <Disk />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText('/dev/sdz')).toBeInTheDocument()
+    // 未知健康态（map 缺省键）回落「未知」徽标
+    expect(screen.getAllByText('未知').length).toBeGreaterThanOrEqual(1)
+    // 介质错误 >0 高亮数值
+    expect(screen.getByText('3')).toBeInTheDocument()
+    expect(screen.getByText('41°C')).toBeInTheDocument()
+    // hostname 空 → 面板标题用 id；面板表格渲染后温度双份（总览+面板）
+    fireEvent.click(panelHeader('ag-nohost'))
+    await waitFor(() => expect(screen.getAllByText('/dev/sdy').length).toBeGreaterThanOrEqual(2))
+    expect(screen.getAllByText('41°C').length).toBeGreaterThanOrEqual(2)
+    // devices 缺省的主机：面板走空态（(data.devices ?? []).length === 0）
+    fireEvent.click(panelHeader('box-02'))
+    expect(await screen.findByText('未发现可读 SMART 的磁盘（需 root 权限运行 Agent）')).toBeInTheDocument()
+    // bare agent 无 capabilities 被过滤，不发状态查询
+    expect(apiMock.getSmartStatus).not.toHaveBeenCalledWith('ag-bare')
+  })
+
+  it('清空间隔输入回落默认 5 分钟', async () => {
+    renderPage()
+    const sw = await readySwitch()
+    await act(async () => {
+      fireEvent.click(sw)
+    })
+    const input = await waitFor(() => {
+      const el = document.querySelector('.ant-input-number input') as HTMLInputElement
+      if (!el) throw new Error('input not rendered')
+      return el
+    })
+    fireEvent.change(input, { target: { value: '' } }) // v ?? 5
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    })
+    await waitFor(() => expect(apiMock.putSmartConfig).toHaveBeenCalledWith(300))
   })
 })

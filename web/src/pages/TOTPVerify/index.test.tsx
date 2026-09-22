@@ -100,6 +100,23 @@ describe('TOTPVerify', () => {
     expect(screen.getByText('请打开您的认证器应用，输入 6 位验证码')).toBeInTheDocument()
   })
 
+  it('验证码模式空提交告警文案独立分支', async () => {
+    renderAt()
+    fireEvent.change(codeInput(), { target: { value: '123456' } })
+    fireEvent.change(codeInput(), { target: { value: '' } })
+    await act(async () => {
+      fireEvent.keyDown(codeInput(), { key: 'Enter' })
+      fireEvent.keyUp(codeInput(), { key: 'Enter' })
+    })
+    expect(msgWarning).toHaveBeenCalledWith('请输入验证码')
+    expect(apiMock.verifyTOTP).not.toHaveBeenCalled()
+  })
+
+  it('缺 username 参数：问候回落「用户」', async () => {
+    renderAt('?tmp_token=tt1')
+    expect(await screen.findByText('你好，用户')).toBeInTheDocument()
+  })
+
   it('页脚返回登录链接', () => {
     renderAt()
     fireEvent.click(screen.getByText('返回登录'))

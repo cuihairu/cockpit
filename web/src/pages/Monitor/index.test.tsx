@@ -43,6 +43,18 @@ vi.mock('@/components/MetricsChart', () => ({
     <div data-testid="chart">{title}:{data?.length}</div>
   ),
 }))
+// Grid.useBreakpoint 由测试控制（覆盖窄屏/宽屏两套 Select 宽度分支）
+const breakpoint = vi.hoisted(() => ({ current: {} as Record<string, boolean> }))
+vi.mock('antd', async (importOriginal) => {
+  const antd = await importOriginal<typeof import('antd')>()
+  return {
+    ...antd,
+    Grid: {
+      ...antd.Grid,
+      useBreakpoint: () => breakpoint.current,
+    },
+  }
+})
 
 const snapshots = [
   { agentId: 'ag-1', hostname: 'web-01', osName: 'linux', arch: 'amd64' },
@@ -67,6 +79,7 @@ const renderPage = () => {
 describe('Monitor', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    breakpoint.current = {} // 默认窄屏（md 未命中）
     metricsMock.getSystemSnapshots.mockReset()
     metricsMock.getSystemSnapshots.mockResolvedValue(snapshots)
     metricsMock.getSystemSnapshot.mockReset()
@@ -117,5 +130,14 @@ describe('Monitor', () => {
     fireEvent.click(document.querySelector('.anticon-reload')!)
     await waitFor(() =>
       expect(metricsMock.getSystemSnapshots.mock.calls.length).toBeGreaterThan(before))
+  })
+
+  it('宽屏：下拉固定 250px 宽度分支', async () => {
+    breakpoint.current = { md: true }
+    renderPage()
+    await screen.findByTestId('sys-card')
+    const sel = document.querySelector('#agent-select, .ant-select') as HTMLElement
+    expect(sel.getAttribute('style')).toContain('width: 250px')
+    expect(sel.getAttribute('style')).toContain('min-width: 250px')
   })
 })

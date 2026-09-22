@@ -94,13 +94,13 @@ describe('Docker', () => {
 
   it('无 docker agent：空态提示且不发容器查询', async () => {
     renderPage([mkAgent('ag-plain', 'plain', ['files'])])
-    expect(await screen.findByText('暂无在线的 Docker Agent。请在目标主机部署 Agent 并确保可访问 /var/run/docker.sock', {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(await screen.findByText('暂无在线的 Docker Agent。请在目标主机部署 Agent 并确保可访问 /var/run/docker.sock')).toBeInTheDocument()
     expect(apiMock.getContainers).not.toHaveBeenCalled()
   })
 
   it('默认选中首个 docker agent：容器表与状态分档操作集', async () => {
     renderPage()
-    expect(await screen.findByText('nginx', {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(await screen.findByText('nginx')).toBeInTheDocument()
     expect(apiMock.getContainers).toHaveBeenCalledWith('ag-docker', true)
     expect(apiMock.getImages).toHaveBeenCalledWith('ag-docker')
     // 底部 agent 信息条
@@ -122,7 +122,7 @@ describe('Docker', () => {
   it('RBAC 无写权限：操作只剩日志', async () => {
     canWrite = false
     renderPage()
-    expect(await screen.findByText('nginx', {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(await screen.findByText('nginx')).toBeInTheDocument()
     const r1 = rowOf('nginx')
     expect(btnIn(r1, '日志')).toBeTruthy()
     expect(btnIn(r1, '停止')).toBeFalsy()
@@ -133,11 +133,11 @@ describe('Docker', () => {
 
   it('镜像 tab：Tag 与 sha256 截断、大小格式化', async () => {
     renderPage()
-    await screen.findByText('nginx', {}, { timeout: 5000 })
+    await screen.findByText('nginx')
     await act(async () => {
       fireEvent.click(screen.getByText(/镜像 \(2\)/))
     })
-    expect(await screen.findByText('nginx:alpine', {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(await screen.findByText('nginx:alpine')).toBeInTheDocument()
     expect(screen.getByText('abcdef123456')).toBeInTheDocument()
     // >=10 取整；0/无时间戳显示 '-'
     expect(screen.getByText('64 MB')).toBeInTheDocument()
@@ -146,13 +146,13 @@ describe('Docker', () => {
 
   it('日志弹窗：标题与 tail 切换、剥离流控制头', async () => {
     renderPage()
-    await screen.findByText('nginx', {}, { timeout: 5000 })
+    await screen.findByText('nginx')
     await act(async () => {
       fireEvent.click(btnIn(rowOf('nginx'), '日志'))
     })
-    expect(await screen.findByText('容器日志 — nginx', {}, { timeout: 5000 })).toBeInTheDocument()
-    expect(await screen.findByText(/2026-01-01 line1/, {}, { timeout: 5000 })).toBeInTheDocument()
-    expect(await screen.findByText(/raw line2/, {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(await screen.findByText('容器日志 — nginx')).toBeInTheDocument()
+    expect(await screen.findByText(/2026-01-01 line1/)).toBeInTheDocument()
+    expect(await screen.findByText(/raw line2/)).toBeInTheDocument()
     await waitFor(() => expect(apiMock.getContainerLogs).toHaveBeenCalledWith('ag-docker', 'c-run', { tail: '100', timestamps: true }))
     // 切 tail 500 → 重拉
     fireEvent.mouseDown(document.querySelector('.ant-modal .ant-select-selector')!)
@@ -170,11 +170,11 @@ describe('Docker', () => {
   it('危险操作走确认弹窗：停止确认后调 stopContainer', async () => {
     apiMock.stopContainer.mockResolvedValue({})
     renderPage()
-    await screen.findByText('nginx', {}, { timeout: 5000 })
+    await screen.findByText('nginx')
     await act(async () => {
       fireEvent.click(btnIn(rowOf('nginx'), '停止'))
     })
-    expect(await screen.findByText('确定要停止「nginx」吗？', {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(await screen.findByText('确定要停止「nginx」吗？')).toBeInTheDocument()
     expect(apiMock.stopContainer).not.toHaveBeenCalled()
     await act(async () => {
       fireEvent.click(document.querySelector('.ant-modal-confirm-btns .ant-btn-primary')!)
@@ -185,7 +185,7 @@ describe('Docker', () => {
   it('非危险操作直发：启动 exited 容器不弹确认', async () => {
     apiMock.startContainer.mockResolvedValue({})
     renderPage()
-    await screen.findByText('nginx', {}, { timeout: 5000 })
+    await screen.findByText('nginx')
     await act(async () => {
       fireEvent.click(btnIn(rowOf('redis'), '启动'))
     })
@@ -196,7 +196,7 @@ describe('Docker', () => {
   it('操作失败：message.error 带错误信息', async () => {
     apiMock.startContainer.mockRejectedValue(new Error('daemon down'))
     renderPage()
-    await screen.findByText('nginx', {}, { timeout: 5000 })
+    await screen.findByText('nginx')
     await act(async () => {
       fireEvent.click(btnIn(rowOf('redis'), '启动'))
     })
