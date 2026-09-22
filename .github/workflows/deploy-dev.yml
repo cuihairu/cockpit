@@ -1,0 +1,167 @@
+name: Deploy to Dev
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'web/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.26'
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Get version
+        id: version
+        run: echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build Web UI
+        run: |
+          cd web
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build Server
+        run: |
+          CGO_ENABLED=1 go build -ldflags="-s -w" -o cockpit ./cmd/cockpit
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cockpit-dev
+          path: |
+            cockpit
+            web/dist/
+          retention-days: 3
+
+  deploy:
+    name: Deploy to Dev
+    needs: build
+    runs-on: [self-hosted, dev]
+    environment: dev
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cockpit-dev
+          path: /tmp/cockpit-deploy
+
+      - name: Deploy
+        env:
+          DEPLOY_DIR: /opt/cockpit
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -e
+
+          # 停止服务
+          sudo systemctl stop cockpit || true
+
+          # 备份当前版本
+          if [ -f ${DEPLOY_DIR}/cockpit ]; then
+            sudo cp ${DEPLOY_DIR}/cockpit ${DEPLOY_DIR}/cockpit.bak.$(date +%Y%m%d%H%M%S)
+          fi
+
+          # 部署新版本
+          sudo mkdir -p ${DEPLOY_DIR}/web
+          sudo cp /tmp/cockpit-deploy/cockpit ${DEPLOY_DIR}/cockpit
+          sudo chmod +x ${DEPLOY_DIR}/cockpit
+          sudo rm -rf ${DEPLOY_DIR}/web/*
+          sudo cp -r /tmp/cockpit-deploy/web/dist/* ${DEPLOY_DIR}/web/
+
+          # 更新配置（如果不存在）
+          if [ ! -f /etc/cockpit/config.yaml ]; then
+            sudo mkdir -p /etc/cockpit
+            sudo tee /etc/cockpit/config.yaml > /dev/null << 'EOF'
+          server:
+            host: 127.0.0.1
+            port: 9000
+            static_dir: /opt/cockpit/web
+
+          database:
+            path: /var/lib/cockpit/cockpit.db
+
+          inventory:
+            path: /var/lib/cockpit/inventory.yaml
+            watch: true
+
+          jwt:
+            secret: ${JWT_SECRET}
+            expiration: 24h
+
+          email:
+            enabled: false
+
+          notification:
+            enabled: false
+          EOF
+          fi
+
+          # 确保环境文件存在
+          if [ ! -f /etc/default/cockpit-server ]; then
+            sudo tee /etc/default/cockpit-server > /dev/null << 'EOF'
+          ADMIN_USERNAME=admin
+          ADMIN_PASSWORD=${ADMIN_PASSWORD}
+          PRODUCTION=true
+          ALLOWED_ORIGINS=https://cockpit.cuihairu.site
+          EOF
+            sudo chmod 600 /etc/default/cockpit-server
+          fi
+
+          # 确保数据目录存在
+          sudo mkdir -p /var/lib/cockpit
+          sudo chown -R cockpit:cockpit /var/lib/cockpit 2>/dev/null || true
+
+          # 启动服务
+          sudo systemctl daemon-reload
+          sudo systemctl start cockpit
+          sudo systemctl enable cockpit
+
+          # 清理
+          rm -rf /tmp/cockpit-deploy
+
+          echo "Deployed version: ${VERSION}"
+
+      - name: Verify
+        run: |
+          sleep 5
+          if curl -sf http://127.0.0.1:9000/health > /dev/null; then
+            echo "Health check passed"
+          else
+            echo "Health check failed"
+            sudo journalctl -u cockpit --no-pager -n 50
+            exit 1
+          fi
