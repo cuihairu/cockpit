@@ -25,7 +25,7 @@ const agents = [
     id: 'ag-1',
     hostname: 'web-01',
     ip: '10.0.0.1',
-    location: { region: 'cn-bj', zone: 'z1' },
+    region: 'cn-bj', zone: 'z1',
     status: 'online',
     lastSeen: '0',
     capabilities: [
@@ -39,7 +39,7 @@ const agents = [
     id: 'ag-2',
     hostname: 'db-01',
     ip: '10.0.0.2',
-    location: { region: 'us-la', zone: 'z2' },
+    region: 'us-la', zone: 'z2',
     status: 'offline',
     lastSeen: '0',
     capabilities: [],

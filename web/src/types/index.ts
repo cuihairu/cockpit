@@ -9,16 +9,14 @@ export type ResourceType =
   | 'ci-service'
   | 'storage'
 
-// 位置信息
-export interface Location {
-  region: string
-  zone: string
-}
+// 位置信息：后端一律顶层序列化 region/zone（storage.Agent/ComputeInstance），
+// 空串/缺省=未上报，展示侧自行兜底
 
 // Agent 状态
 export interface Agent {
   id: string
-  location: Location
+  region?: string
+  zone?: string
   capabilities: Capability[]
   hostname: string
   ip: string
@@ -65,7 +63,6 @@ export interface ComputeInstance {
   id: string
   name: string
   displayName: string
-  location: Location
   type: 'bare-metal' | 'vm' | 'container' | 'vps'
   region?: string
   zone?: string
@@ -189,7 +186,6 @@ export interface Gateway {
   id: string
   name: string
   displayName: string
-  location: Location
   type: 'openwrt'
   agentId?: string
   ipv4?: string
@@ -239,7 +235,6 @@ export interface Storage {
   id: string
   name: string
   displayName: string
-  location: Location
   type: 'nas' | 'san' | 'object-storage' | 'local' | 'nfs' | 'iscsi' | 'ceph'
   agentId?: string
   path?: string

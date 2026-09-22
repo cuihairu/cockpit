@@ -43,10 +43,10 @@ export const buildAgentColumns = ({ onShowDetail }: ColumnOptions): ColumnsType<
       <Space direction="vertical" size="small">
         <Space>
           <EnvironmentOutlined />
-          <span>{record.location?.region || 'unknown'}</span>
+          <span>{record.region || 'unknown'}</span>
         </Space>
         <span style={{ fontSize: 12, color: '#999', marginLeft: 20 }}>
-          {record.location?.zone || '-'}
+          {record.zone || '-'}
         </span>
       </Space>
     ),

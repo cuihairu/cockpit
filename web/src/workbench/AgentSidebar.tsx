@@ -61,7 +61,7 @@ const AgentSidebar = ({
                 </Space>
                 <Typography.Text type="secondary">{agent.ip || '-'}</Typography.Text>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  {agent.location?.region || '-'} / {agent.location?.zone || '-'}
+                  {agent.region || '-'} / {agent.zone || '-'}
                 </Typography.Text>
               </Space>
             </List.Item>

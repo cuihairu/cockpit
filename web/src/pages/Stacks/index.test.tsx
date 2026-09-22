@@ -31,7 +31,7 @@ const msgError = vi.spyOn(message, 'error')
 const msgWarning = vi.spyOn(message, 'warning')
 
 const mkAgent = (id: string, hostname: string, caps: string[], status = 'online'): Agent =>
-  ({ id, hostname, ip: '10.0.0.1', location: { region: 'cn', zone: 'z1' }, status, lastSeen: '0',
+  ({ id, hostname, ip: '10.0.0.1', region: 'cn', zone: 'z1', status, lastSeen: '0',
      capabilities: caps.map((type) => ({ type })) }) as unknown as Agent
 
 const agents = [

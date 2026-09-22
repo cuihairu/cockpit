@@ -30,7 +30,7 @@ const agent = {
   id: 'ag-1',
   hostname: 'web-01',
   ip: '10.0.0.1',
-  location: { region: 'cn-bj', zone: 'z1' },
+  region: 'cn-bj', zone: 'z1',
   status: 'online',
   lastSeen: '1758000000',
   virtType: 'kvm',

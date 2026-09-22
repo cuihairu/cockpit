@@ -56,7 +56,7 @@ const Workbench = () => {
         agent.id.toLowerCase().includes(keyword) ||
         (agent.hostname || '').toLowerCase().includes(keyword) ||
         (agent.ip || '').toLowerCase().includes(keyword) ||
-        (agent.location?.region || '').toLowerCase().includes(keyword)
+        (agent.region || '').toLowerCase().includes(keyword)
       )
     })
   }, [agents, query])

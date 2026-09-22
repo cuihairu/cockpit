@@ -39,9 +39,9 @@ const msgSuccess = vi.spyOn(message, 'success')
 const msgError = vi.spyOn(message, 'error')
 
 const agents = [
-  { id: 'ag-1', hostname: 'node-01', ip: '10.0.0.1', location: { region: 'cn', zone: 'z1' },
+  { id: 'ag-1', hostname: 'node-01', ip: '10.0.0.1', region: 'cn', zone: 'z1',
     status: 'online', lastSeen: '0', capabilities: [] },
-  { id: 'ag-2', hostname: 'off-02', ip: '10.0.0.2', location: { region: 'cn', zone: 'z1' },
+  { id: 'ag-2', hostname: 'off-02', ip: '10.0.0.2', region: 'cn', zone: 'z1',
     status: 'offline', lastSeen: '0', capabilities: [] },
 ] as unknown as Agent[]
 

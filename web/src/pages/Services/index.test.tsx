@@ -36,7 +36,7 @@ const mkSvcAgent = (id: string, hostname: string, backend: string | null, status
     id,
     hostname,
     ip: '10.0.0.1',
-    location: { region: 'cn', zone: 'z1' },
+    region: 'cn', zone: 'z1',
     status,
     lastSeen: '0',
     capabilities: backend ? [{ type: 'service', metadata: { backend } }] : [{ type: 'files' }],

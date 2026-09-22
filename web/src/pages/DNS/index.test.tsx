@@ -48,7 +48,7 @@ const records = {
 }
 
 const mkAgent = (id: string, hostname: string, status = 'online'): Agent =>
-  ({ id, hostname, ip: '10.0.0.1', location: { region: 'cn', zone: 'z1' }, status, lastSeen: '0',
+  ({ id, hostname, ip: '10.0.0.1', region: 'cn', zone: 'z1', status, lastSeen: '0',
      capabilities: [] }) as unknown as Agent
 
 const ddnsAgents = [mkAgent('ag-1', 'edge-01'), mkAgent('ag-2', 'off-02', 'offline')]

@@ -25,7 +25,6 @@ const mkAgent = (id: string, hostname: string, smart = true): Agent =>
     id,
     hostname,
     ip: '1.2.3.4',
-    location: {},
     status: 'online',
     lastSeen: '0',
     capabilities: smart

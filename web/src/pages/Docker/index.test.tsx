@@ -34,7 +34,7 @@ const mkAgent = (id: string, hostname: string, caps: string[] = ['docker-api']):
     id,
     hostname,
     ip: '10.0.0.1',
-    location: { region: 'cn', zone: 'z1' },
+    region: 'cn', zone: 'z1',
     status: 'online',
     lastSeen: '0',
     capabilities: caps.map((type) => ({ type })),

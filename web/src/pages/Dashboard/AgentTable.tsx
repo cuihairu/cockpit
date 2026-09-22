@@ -23,7 +23,7 @@ const columns: ColumnsType<Agent> = [
   {
     title: '区域',
     key: 'location',
-    render: (_value, record) => `${record.location?.region || '-'}/${record.location?.zone || '-'}`,
+    render: (_value, record) => `${record.region || '-'}/${record.zone || '-'}`,
   },
   {
     title: '状态',

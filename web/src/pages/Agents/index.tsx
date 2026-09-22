@@ -46,7 +46,7 @@ const Agents = () => {
       )
     }
     if (regionFilter) {
-      filtered = filtered.filter((agent) => agent.location?.region === regionFilter)
+      filtered = filtered.filter((agent) => agent.region === regionFilter)
     }
     if (statusFilter) {
       filtered = filtered.filter((agent) => agent.status === statusFilter)
@@ -61,7 +61,7 @@ const Agents = () => {
   }, [searchText, regionFilter, statusFilter, virtFilter, agents])
 
   const regions = Array.from(
-    new Set(agents.map((a) => a.location?.region || 'unknown').filter(Boolean)),
+    new Set(agents.map((a) => a.region || 'unknown').filter(Boolean)),
   )
 
   const showDetail = (agent: Agent) => {

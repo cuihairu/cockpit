@@ -37,8 +37,8 @@ export const AgentDetailModal: React.FC<AgentDetailModalProps> = ({
         </Descriptions.Item>
         <Descriptions.Item label="主机名">{agent.hostname || '-'}</Descriptions.Item>
         <Descriptions.Item label="IP 地址">{agent.ip || '-'}</Descriptions.Item>
-        <Descriptions.Item label="地域">{agent.location?.region || '-'}</Descriptions.Item>
-        <Descriptions.Item label="可用区">{agent.location?.zone || '-'}</Descriptions.Item>
+        <Descriptions.Item label="地域">{agent.region || '-'}</Descriptions.Item>
+        <Descriptions.Item label="可用区">{agent.zone || '-'}</Descriptions.Item>
         <Descriptions.Item label="系统类型">
           {(() => {
             const config = getVirtDisplay(agent)

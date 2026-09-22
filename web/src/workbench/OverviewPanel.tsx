@@ -13,8 +13,8 @@ const OverviewPanel = ({ agent }: { agent: Agent | null }) => {
       </Descriptions.Item>
       <Descriptions.Item label="主机名">{agent.hostname || '-'}</Descriptions.Item>
       <Descriptions.Item label="IP">{agent.ip || '-'}</Descriptions.Item>
-      <Descriptions.Item label="地域">{agent.location?.region || '-'}</Descriptions.Item>
-      <Descriptions.Item label="可用区">{agent.location?.zone || '-'}</Descriptions.Item>
+      <Descriptions.Item label="地域">{agent.region || '-'}</Descriptions.Item>
+      <Descriptions.Item label="可用区">{agent.zone || '-'}</Descriptions.Item>
       <Descriptions.Item label="状态">
         <Tag color={agent.status === 'online' ? 'success' : 'default'}>
           {agent.status === 'online' ? '在线' : '离线'}

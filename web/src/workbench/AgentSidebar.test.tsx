@@ -7,7 +7,7 @@ import type { Agent } from '@/types'
 
 const agent = (overrides: Partial<Agent> = {}): Agent => ({
   id: 'ag1', hostname: 'web-01', ip: '10.0.0.1', status: 'online', lastSeen: '',
-  location: { region: 'cn-east', zone: 'a' }, capabilities: [],
+  region: 'cn-east', zone: 'a', capabilities: [],
   ...overrides,
 })
 
@@ -33,7 +33,7 @@ describe('AgentSidebar', () => {
   it('离线主机显示离线；hostname 缺省用 id；ip 缺省 -', () => {
     render(
       <AgentSidebar
-        agents={[agent({ hostname: '', ip: '', status: 'offline', location: { region: '', zone: '' } })]}
+        agents={[agent({ hostname: '', ip: '', status: 'offline', region: '', zone: '' })]}
         loading={false}
         query=""
         selectedAgentId=""

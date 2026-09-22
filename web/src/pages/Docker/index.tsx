@@ -424,7 +424,7 @@ const Docker = () => {
         <Tabs activeKey={activeKey} onChange={setActiveKey} items={tabItems} />
         <div style={{ marginTop: 8, color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
           Agent：{selectedAgent?.hostname} · IP：{selectedAgent?.ip || '-'} · 地区：
-          {selectedAgent?.location?.region}/{selectedAgent?.location?.zone}
+          {selectedAgent?.region}/{selectedAgent?.zone}
         </div>
       </Card>
 

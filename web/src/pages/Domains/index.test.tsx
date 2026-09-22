@@ -25,7 +25,7 @@ const msgWarning = vi.spyOn(message, 'warning')
 const msgError = vi.spyOn(message, 'error')
 
 const agents = [
-  { id: 'ag-1', hostname: 'web-01', ip: '1.2.3.4', location: {}, status: 'online', lastSeen: '0', capabilities: [] },
+  { id: 'ag-1', hostname: 'web-01', ip: '1.2.3.4', status: 'online', lastSeen: '0', capabilities: [] },
 ] as unknown as Agent[]
 
 const mkBinding = (over: Partial<DomainBinding>): DomainBinding =>

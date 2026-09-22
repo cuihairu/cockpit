@@ -27,7 +27,6 @@ const mkAgent = (id: string, hostname: string, cap: string | null, offline = fal
     id,
     hostname,
     ip: '1.2.3.4',
-    location: {},
     status: offline ? 'offline' : 'online',
     lastSeen: '0',
     capabilities: cap ? [{ type: cap, metadata: { version } }] : [],

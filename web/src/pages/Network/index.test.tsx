@@ -30,7 +30,7 @@ const mkOverlayAgent = (id: string, hostname: string, identity?: object, status 
     id,
     hostname,
     ip: '10.0.0.1',
-    location: { region: 'cn', zone: 'z1' },
+    region: 'cn', zone: 'z1',
     status,
     lastSeen: '0',
     capabilities: [{ type: 'overlay', metadata: identity ? { identity } : {} }],
@@ -40,7 +40,7 @@ const agents = [
   mkOverlayAgent('ag-1', 'node-01', { nodeId: 'zt123', id: 'ts456' }),
   mkOverlayAgent('ag-2', 'node-02'),
   mkOverlayAgent('ag-3', 'empty-01'),
-  { id: 'ag-plain', hostname: 'plain', ip: '10.0.0.9', location: { region: 'cn', zone: 'z1' },
+  { id: 'ag-plain', hostname: 'plain', ip: '10.0.0.9', region: 'cn', zone: 'z1',
     status: 'online', lastSeen: '0', capabilities: [{ type: 'files' }] } as unknown as Agent,
   mkOverlayAgent('ag-off', 'off-01', undefined, 'offline'),
 ]
@@ -140,17 +140,17 @@ describe('Network', () => {
     // tailscale unavailable 不出现在 mesh
     expect(screen.queryByText('Tailscale', { selector: '.ant-table-cell .ant-tag' })).not.toBeInTheDocument()
     // 按主机查看面板标题（offline/无能力主机被过滤）
-    expect(screen.getByText('node-01', { selector: '.ant-collapse-header-text' })).toBeInTheDocument()
-    expect(screen.getByText('node-02', { selector: '.ant-collapse-header-text' })).toBeInTheDocument()
-    expect(screen.getByText('empty-01', { selector: '.ant-collapse-header-text' })).toBeInTheDocument()
-    expect(screen.queryByText('off-01', { selector: '.ant-collapse-header-text' })).not.toBeInTheDocument()
+    expect(screen.getByText('node-01 · cn', { selector: '.ant-collapse-header-text' })).toBeInTheDocument()
+    expect(screen.getByText('node-02 · cn', { selector: '.ant-collapse-header-text' })).toBeInTheDocument()
+    expect(screen.getByText('empty-01 · cn', { selector: '.ant-collapse-header-text' })).toBeInTheDocument()
+    expect(screen.queryByText('off-01 · cn', { selector: '.ant-collapse-header-text' })).not.toBeInTheDocument()
   })
 
   it('主机面板：身份 chip、工具卡状态/版本、interfaces 与 peers 表', async () => {
     renderPage()
     expect(await screen.findByText('peer-a')).toBeInTheDocument()
     // 展开 node-01 面板（Collapse 第一个）
-    fireEvent.click(screen.getByText('node-01', { selector: '.ant-collapse-header-text' }))
+    fireEvent.click(screen.getByText('node-01 · cn', { selector: '.ant-collapse-header-text' }))
     expect(await screen.findByText('本机身份（云端对照用）：')).toBeInTheDocument()
     expect(screen.getByText('ZeroTier zt123')).toBeInTheDocument()
     expect(screen.getByText('Tailscale ts456')).toBeInTheDocument()
@@ -165,11 +165,11 @@ describe('Network', () => {
   it('主机面板：全部 unavailable 出空态、拉取失败出告警', async () => {
     renderPage()
     expect(await screen.findByText('peer-a')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('empty-01', { selector: '.ant-collapse-header-text' }))
+    fireEvent.click(screen.getByText('empty-01 · cn', { selector: '.ant-collapse-header-text' }))
     expect(await screen.findByText('未检测到组网工具')).toBeInTheDocument()
     apiMock.getOverlayStatus.mockImplementation((id: string) =>
       id === 'ag-1' ? Promise.reject(new Error('boom')) : Promise.resolve(statusOf(id)))
-    fireEvent.click(screen.getByText('node-01', { selector: '.ant-collapse-header-text' }))
+    fireEvent.click(screen.getByText('node-01 · cn', { selector: '.ant-collapse-header-text' }))
     await waitFor(() => expect(apiMock.getOverlayStatus).toHaveBeenCalledWith('ag-1'))
     // 面板独立查询失败 → 告警
     expect(await screen.findByText('该主机状态获取失败')).toBeInTheDocument()

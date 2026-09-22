@@ -77,7 +77,7 @@ describe('OverviewPanel', () => {
   it('渲染 agent 概览与能力 tags', () => {
     const agent: Agent = {
       id: 'ag1', hostname: 'web-01', ip: '10.0.0.1', status: 'online', lastSeen: '',
-      location: { region: 'cn', zone: 'z' },
+      region: 'cn', zone: 'z',
       capabilities: [{ type: 'shell' }, { type: 'metrics' }] as Agent['capabilities'],
     }
     render(<OverviewPanel agent={agent} />)
@@ -91,7 +91,7 @@ describe('OverviewPanel', () => {
   it('空能力不渲染 tags；离线显示离线', () => {
     const agent: Agent = {
       id: 'ag2', hostname: '', ip: '', status: 'offline', lastSeen: '',
-      location: { region: '', zone: '' }, capabilities: [],
+      region: '', zone: '', capabilities: [],
     }
     render(<OverviewPanel agent={agent} />)
     expect(screen.getByText('离线')).toBeInTheDocument()

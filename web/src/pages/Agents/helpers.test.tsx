@@ -9,7 +9,7 @@ const baseAgent = (over: Partial<Agent>): Agent =>
     id: 'ag-1',
     hostname: 'h',
     ip: '1.2.3.4',
-    location: { region: 'r', zone: 'z' },
+    region: 'r', zone: 'z',
     capabilities: [],
     status: 'online',
     lastSeen: '0',

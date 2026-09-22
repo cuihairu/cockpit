@@ -27,7 +27,6 @@ const mkAgent = (id: string, hostname: string, withLogs: boolean): Agent =>
     id,
     hostname,
     ip: '1.2.3.4',
-    location: {},
     capabilities: withLogs ? [{ type: 'logs' }] : [{ type: 'files' }],
     status: 'online',
     lastSeen: '0',
