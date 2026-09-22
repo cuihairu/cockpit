@@ -103,6 +103,44 @@ void main() {
       expect(l.status, 'success');
     });
 
+    test('BackupConfig/BackupRun：snake_case 配置 + camelCase 运行', () {
+      final c = BackupConfig.fromJson({
+        'id': 7,
+        'agent_id': 'ag-1',
+        'name': 'etc-backup',
+        'sources': ['/etc', '/opt/data'],
+        'dest_dir': '/var/backups',
+        'schedule': 'daily@03:00',
+        'retention': 7,
+        'enabled': true,
+        'last_status': 'failed',
+        'last_run_at': 1758500000,
+        'next_run_at': 1758586400,
+        'created_at': 1750000000,
+      });
+      expect(c.id, 7);
+      expect(c.sources.length, 2);
+      expect(c.schedule, 'daily@03:00');
+      expect(c.lastStatus, 'failed');
+
+      final r = BackupRun.fromJson({
+        'id': 99,
+        'configId': 7,
+        'taskId': 't-1',
+        'status': 'timeout',
+        'file': 'etc-backup-20260922.tar.gz',
+        'size': 52428800,
+        'error': 'context deadline exceeded',
+        'remoteStatus': 'ok',
+        'startedAt': 1758500000,
+        'finishedAt': 1758500900,
+      });
+      expect(r.configId, 7);
+      expect(r.status, 'timeout');
+      expect(r.size, 52428800);
+      expect(r.remoteStatus, 'ok');
+    });
+
     test('TotpVerifyResponse：换取正式 JWT', () {
       final r = TotpVerifyResponse.fromJson({
         'token': 'jwt-x',

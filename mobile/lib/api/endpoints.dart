@@ -109,3 +109,32 @@ extension ResourceApi on CockpitApi {
         .toList();
   }
 }
+
+extension BackupApi on CockpitApi {
+  /// GET /api/backups/configs → {configs}
+  Future<List<BackupConfig>> backupConfigs() async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/backups/configs');
+    final data = r.data!['configs'] as List<dynamic>? ?? [];
+    return data
+        .map((e) => BackupConfig.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// GET /api/backups/runs?limit=N → {runs}
+  Future<List<BackupRun>> backupRuns({int limit = 5}) async {
+    final r = await client.dio.get<Map<String, dynamic>>('/api/backups/runs',
+        queryParameters: {'limit': limit});
+    final data = r.data!['runs'] as List<dynamic>? ?? [];
+    return data
+        .map((e) => BackupRun.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// POST /api/backups/configs/{id}/run → {status}（手动触发一次）。
+  Future<String> runBackup(int configId) async {
+    final r = await client.dio
+        .post<Map<String, dynamic>>('/api/backups/configs/$configId/run');
+    return r.data?['status'] as String? ?? '';
+  }
+}

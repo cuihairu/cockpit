@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/endpoints.dart';
 import '../models/models.dart';
 import '../state/settings.dart';
+import 'backups_tab.dart';
 
 /// 域名/证书到期视图（M2，只读）：两 tab，状态徽标用后端 status。
 class ResourcesPage extends StatelessWidget {
@@ -12,16 +13,18 @@ class ResourcesPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('资源'),
           bottom: const TabBar(tabs: [
             Tab(text: '域名'),
             Tab(text: '证书'),
+            Tab(text: '备份'),
           ]),
         ),
-        body: const TabBarView(children: [_DomainsTab(), _CertsTab()]),
+        body: const TabBarView(
+            children: [_DomainsTab(), _CertsTab(), BackupsTab()]),
       ),
     );
   }

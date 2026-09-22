@@ -316,3 +316,76 @@ class StatusSummary {
     );
   }
 }
+
+/// 对齐 web BackupConfig（agent 侧备份任务）。
+class BackupConfig {
+  final int id;
+  final String agentId;
+  final String name;
+  final List<String> sources;
+  final String schedule; // manual / daily@HH:mm / every:Nh
+  final bool enabled;
+  final String lastStatus; // "" / running / success / failed
+  final int lastRunAt; // unix 秒
+  final int nextRunAt; // manual 恒为 0
+
+  BackupConfig({
+    required this.id,
+    required this.agentId,
+    required this.name,
+    required this.sources,
+    required this.schedule,
+    required this.enabled,
+    required this.lastStatus,
+    required this.lastRunAt,
+    required this.nextRunAt,
+  });
+
+  factory BackupConfig.fromJson(Map<String, dynamic> j) => BackupConfig(
+        id: (j['id'] as num).toInt(),
+        agentId: j['agent_id'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        sources: (j['sources'] as List<dynamic>? ?? [])
+            .map((e) => e as String)
+            .toList(),
+        schedule: j['schedule'] as String? ?? 'manual',
+        enabled: j['enabled'] as bool? ?? false,
+        lastStatus: j['last_status'] as String? ?? '',
+        lastRunAt: (j['last_run_at'] as num?)?.toInt() ?? 0,
+        nextRunAt: (j['next_run_at'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// 对齐 web BackupRun（camelCase，remoteStatus 空=未启用异地）。
+class BackupRun {
+  final int id;
+  final int configId;
+  final String status; // running / success / failed / timeout
+  final int size;
+  final String error;
+  final String remoteStatus; // "" / ok / failed
+  final int startedAt; // unix 秒
+  final int finishedAt; // unix 秒
+
+  BackupRun({
+    required this.id,
+    required this.configId,
+    required this.status,
+    required this.size,
+    required this.error,
+    required this.remoteStatus,
+    required this.startedAt,
+    required this.finishedAt,
+  });
+
+  factory BackupRun.fromJson(Map<String, dynamic> j) => BackupRun(
+        id: (j['id'] as num).toInt(),
+        configId: (j['configId'] as num?)?.toInt() ?? 0,
+        status: j['status'] as String? ?? '',
+        size: (j['size'] as num?)?.toInt() ?? 0,
+        error: j['error'] as String? ?? '',
+        remoteStatus: j['remoteStatus'] as String? ?? '',
+        startedAt: (j['startedAt'] as num?)?.toInt() ?? 0,
+        finishedAt: (j['finishedAt'] as num?)?.toInt() ?? 0,
+      );
+}
