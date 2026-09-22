@@ -3,8 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../state/settings.dart';
+import 'cron_page.dart';
 
-/// 主机列表：hostname · region/zone · 在线徽标 · docker 能力入口。
+/// 主机列表：hostname · region/zone · 在线徽标 · docker/cron 能力入口。
 class AgentsPage extends ConsumerStatefulWidget {
   const AgentsPage({super.key});
 
@@ -65,17 +66,28 @@ class _AgentsPageState extends ConsumerState<AgentsPage> {
                 ),
                 title: Text(a.hostname),
                 subtitle: Text(loc.isEmpty ? a.ip : '${a.ip} · $loc'),
-                trailing: a.hasDocker
-                    ? IconButton(
-                        icon: const Icon(Icons.view_in_ar),
-                        tooltip: '容器',
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ContainersPage(agent: a),
-                          ),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (a.hasDocker)
+                    IconButton(
+                      icon: const Icon(Icons.view_in_ar),
+                      tooltip: '容器',
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ContainersPage(agent: a),
                         ),
-                      )
-                    : null,
+                      ),
+                    ),
+                  if (a.hasCron)
+                    IconButton(
+                      icon: const Icon(Icons.schedule),
+                      tooltip: '定时任务',
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => CronJobsPage(agent: a),
+                        ),
+                      ),
+                    ),
+                ]),
               );
             },
           );

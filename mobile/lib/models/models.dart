@@ -41,6 +41,7 @@ class Agent {
 
   bool get online => status == 'online';
   bool get hasDocker => capabilities.any((c) => c.type.startsWith('docker'));
+  bool get hasCron => capabilities.any((c) => c.type == 'cron');
 
   factory Agent.fromJson(Map<String, dynamic> j) => Agent(
         id: j['id'] as String,
@@ -387,5 +388,46 @@ class BackupRun {
         remoteStatus: j['remoteStatus'] as String? ?? '',
         startedAt: (j['startedAt'] as num?)?.toInt() ?? 0,
         finishedAt: (j['finishedAt'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// 对齐 web CronJob（cockpit 名下任务，next_run unix 秒可选）。
+class CronJob {
+  final String name;
+  final String schedule;
+  final String command;
+  final bool enabled;
+  final int nextRun; // 0 或缺省 = 未知
+
+  CronJob({
+    required this.name,
+    required this.schedule,
+    required this.command,
+    required this.enabled,
+    required this.nextRun,
+  });
+
+  factory CronJob.fromJson(Map<String, dynamic> j) => CronJob(
+        name: j['name'] as String? ?? '',
+        schedule: j['schedule'] as String? ?? '',
+        command: j['command'] as String? ?? '',
+        enabled: j['enabled'] as bool? ?? false,
+        nextRun: (j['next_run'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// 对齐 web CronJobsResult：jobs + 外部条目原文（只读）。
+class CronJobsResult {
+  final List<CronJob> jobs;
+  final String external;
+
+  CronJobsResult({required this.jobs, required this.external});
+
+  factory CronJobsResult.fromJson(Map<String, dynamic> j) =>
+      CronJobsResult(
+        jobs: (j['jobs'] as List<dynamic>? ?? [])
+            .map((e) => CronJob.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        external: j['external'] as String? ?? '',
       );
 }

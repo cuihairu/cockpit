@@ -138,3 +138,12 @@ extension BackupApi on CockpitApi {
     return r.data?['status'] as String? ?? '';
   }
 }
+
+extension CronApi on CockpitApi {
+  /// GET /api/agents/{id}/cron/jobs（cockpit 任务 + 外部条目原文）。
+  Future<CronJobsResult> cronJobs(String agentId) async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/agents/$agentId/cron/jobs');
+    return CronJobsResult.fromJson(r.data!);
+  }
+}
