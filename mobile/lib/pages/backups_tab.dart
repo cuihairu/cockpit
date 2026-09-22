@@ -187,15 +187,17 @@ class _BackupsTabState extends ConsumerState<BackupsTab>
   }
 
   String _fmtSize(int bytes) {
+    // 与 web 端 formatBytes 同规则：B 整数、KB/MB 一位小数、GB/TB 两位小数
     if (bytes <= 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB'];
-    var v = bytes.toDouble();
-    var u = 0;
-    while (v >= 1024 && u < units.length - 1) {
-      v /= 1024;
-      u++;
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
     }
-    return '${v.toStringAsFixed(v >= 10 || u == 0 ? 0 : 1)} ${units[u]}';
+    if (bytes < 1024 * 1024 * 1024 * 1024) {
+      return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+    }
+    return '${(bytes / 1024 / 1024 / 1024 / 1024).toStringAsFixed(2)} TB';
   }
 }
 

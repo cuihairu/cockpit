@@ -233,7 +233,7 @@ void main() {
     await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('5 GB'), findsOneWidget);
+    expect(find.textContaining('5.00 GB'), findsOneWidget);
   });
 }
 

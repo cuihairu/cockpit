@@ -158,7 +158,7 @@ void main() {
         });
         return s;
       } finally {
-        HttpOverrides.global = saved as HttpOverrides?;
+        HttpOverrides.global = saved;
       }
     }))!;
 
@@ -202,7 +202,7 @@ void main() {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
       } finally {
-        HttpOverrides.global = saved as HttpOverrides?;
+        HttpOverrides.global = saved;
       }
     });
     await tester.pump();
@@ -224,6 +224,10 @@ void main() {
     // _fail 对 connected 态的服务端正常 close 只置错误态、不覆盖文案（空横幅）
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
 
+    // 主动卸载 widget → dispose 触发 sink.close()，后者挂 5s close 超时 Timer；
+    // 推进 fake time 让其落定，否则 _verifyInvariants 报 timersPending。
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 5));
     await tester.runAsync(() => server.close());
   });
 }

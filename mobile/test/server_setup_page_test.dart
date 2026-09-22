@@ -71,7 +71,7 @@ Future<HttpServer> _startServer(WidgetTester tester) async {
       });
       return s;
     } finally {
-      HttpOverrides.global = saved as HttpOverrides?;
+      HttpOverrides.global = saved;
     }
   });
   return server!;
@@ -95,7 +95,7 @@ Future<void> _saveAndWait(
         if (done() != null) return;
       }
     } finally {
-      HttpOverrides.global = saved as HttpOverrides?;
+      HttpOverrides.global = saved;
     }
   });
 }
@@ -158,7 +158,7 @@ void main() {
         await holder.close();
         return p;
       } finally {
-        HttpOverrides.global = saved as HttpOverrides?;
+        HttpOverrides.global = saved;
       }
     });
     final settings = _WritableSettings(url: '');

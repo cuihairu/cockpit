@@ -1,12 +1,10 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:cockpit_mobile/api/client.dart';
 import 'package:cockpit_mobile/api/endpoints.dart';
@@ -50,41 +48,6 @@ class MockAdapter implements HttpClientAdapter {
 const _storageChannel =
     MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
 const _authChannel = MethodChannel('plugins.flutter.io/local_auth');
-
-void _mockSecureStorage(Map<String, String> store) {
-  TestWidgetsFlutterBinding.instance.defaultBinaryMessenger
-      .setMockMethodCallHandler(_storageChannel, (call) async {
-    switch (call.method) {
-      case 'read':
-        return store[call.arguments['key'] as String];
-      case 'write':
-        store[call.arguments['key'] as String] =
-            call.arguments['value'] as String;
-        return null;
-      case 'delete':
-        store.remove(call.arguments['key'] as String);
-        return null;
-      default:
-        return null;
-    }
-  });
-}
-
-void _mockLocalAuth({bool supported = true}) {
-  TestWidgetsFlutterBinding.instance.defaultBinaryMessenger
-      .setMockMethodCallHandler(_authChannel, (call) async {
-    switch (call.method) {
-      case 'isDeviceSupported':
-        return supported;
-      case 'getAvailableBiometrics':
-        return supported ? <String>['fingerprint'] : <String>[];
-      case 'authenticate':
-        return true;
-      default:
-        return null;
-    }
-  });
-}
 
 void main() {
   tearDown(() {

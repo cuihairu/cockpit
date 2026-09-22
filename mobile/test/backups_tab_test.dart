@@ -227,9 +227,11 @@ void main() {
     // 三种状态的 chip 文案
     expect(find.text('运行中'), findsOneWidget);
     expect(find.text('超时'), findsOneWidget);
-    expect(find.text('weird'), findsNWidgets(2)); // run chip + 任务 subtitle
+    // 未知状态：run chip 精确文本 + 任务名 weird-task + 任务 subtitle 各含 weird
+    expect(find.text('weird'), findsOneWidget);
+    expect(find.textContaining('weird'), findsNWidgets(3));
     // GB 级尺寸与异地已推送
-    expect(find.textContaining('5 GB'), findsOneWidget);
+    expect(find.textContaining('5.00 GB'), findsOneWidget);
     expect(find.textContaining('异地已推送'), findsOneWidget);
   });
 }

@@ -62,7 +62,7 @@ void main() {
     final store = <String, String>{};
     _mockSecureStorage(store);
     final c = ProviderContainer();
-    final s = c.read(settingsProvider.notifier);
+    c.read(settingsProvider.notifier);
     // build() 里 _load 异步，等一拍
     await Future<void>.delayed(Duration.zero);
     final state = c.read(settingsProvider);
@@ -174,7 +174,7 @@ void main() {
     } finally {
       c.dispose();
       await server.close();
-      HttpOverrides.global = savedOverrides as HttpOverrides?;
+      HttpOverrides.global = savedOverrides;
     }
   });
 }

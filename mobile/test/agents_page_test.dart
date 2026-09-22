@@ -216,9 +216,9 @@ void main() {
     await tester.tap(find.text('web-1'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('SSH 终端'));
-    await tester.pump();
-    await tester.pump();
-    await tester.pump();
+    // ticket 走 mock（未配路由即 404），无 WS 挂起，可安全 settle；
+    // 否则 Dio connectTimeout Timer 会挂到测试结束触发 timersPending。
+    await tester.pumpAndSettle();
 
     expect(find.text('终端 · 10.0.0.1:22'), findsOneWidget);
   });

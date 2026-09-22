@@ -29,6 +29,7 @@ enum _ConnState { connecting, connected, error }
 class _TerminalPageState extends ConsumerState<TerminalPage> {
   final _terminal = Terminal(maxLines: 5000);
   WebSocketChannel? _channel;
+  StreamSubscription<dynamic>? _sub;
   _ConnState _state = _ConnState.connecting;
   String _error = '';
 
@@ -61,7 +62,9 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
       _terminal.onOutput = (data) {
         channel.sink.add(jsonEncode({'type': 'input', 'data': data}));
       };
-      channel.stream.listen(
+      // 保存 subscription 以便 dispose 时取消：WS 回调落在真 async 区，
+      // 测试/页面销毁后仍会触发 _fail → setState(defunct)。
+      _sub = channel.stream.listen(
         (msg) => _onServerMessage(msg as String),
         onError: (Object e) => _fail('连接错误：$e'),
         onDone: () => _fail('连接已关闭'),
@@ -120,6 +123,7 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
 
   @override
   void dispose() {
+    _sub?.cancel();
     _channel?.sink.close();
     super.dispose();
   }

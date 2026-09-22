@@ -57,8 +57,9 @@ class _AsyncList<T> extends ConsumerWidget {
     return RefreshIndicator(
       onRefresh: () async => ref.invalidate(apiProvider),
       child: FutureBuilder<List<T>>(
+        // watch 而非 read：下拉刷新 invalidate(apiProvider) 才会触发本列表重建
         future:
-            ref.read(apiProvider.future).then((api) => load(api)),
+            ref.watch(apiProvider.future).then((api) => load(api)),
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());

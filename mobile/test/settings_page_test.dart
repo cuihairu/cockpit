@@ -141,7 +141,7 @@ void main() {
         authProvider.overrideWith(() => auth),
         biometricProvider.overrideWithValue(_FakeBiometric(supported: true)),
       ],
-      child: const MaterialApp(home: SettingsPage()),
+      child: const MaterialApp(home: Scaffold(body: SettingsPage())),
     ));
     await tester.pumpAndSettle();
 
@@ -179,7 +179,7 @@ void main() {
         biometricProvider.overrideWithValue(_FakeBiometric(supported: false)),
         apiProvider.overrideWith((ref) async => api),
       ],
-      child: const MaterialApp(home: SettingsPage()),
+      child: const MaterialApp(home: Scaffold(body: SettingsPage())),
     ));
     await tester.pumpAndSettle();
 
