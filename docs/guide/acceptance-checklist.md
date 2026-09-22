@@ -143,6 +143,22 @@
 - [ ] Windows SCM：列表/启停/自启切换/restart 等待 30s 超时路径实测；无权限服务报错透传；reload 按钮确认隐藏
 - [ ] macOS launchd：列表/启停/自启切换；`kickstart` 失败回退 `bootstrap` 路径；无权限报错透传
 
+## 移动端（Flutter，iOS + Android）
+
+设计：[mobile-design](./mobile-design.md)。前置：Android 真机（或模拟器）安装 debug APK（CI `Mobile` workflow artifact 或本地 `flutter build apk --debug`）；server 可达（公网或同网段）。iOS 构建需 macOS + Xcode（本仓库 CI 不构建 iOS，见 D8）。
+
+- [ ] 首启引导：输入 server 地址 → `/health` 通过 → 落盘进入登录页；错误地址的失败呈现可读
+- [ ] 登录：用户名密码 → 开启 TOTP 的账号进入验证码二步 → 成功后底部四 tab 可用
+- [ ] 仪表盘：主机在线/离线计数、未读/错误告警数与 web 面板一致
+- [ ] 主机列表：在线徽标、`ip · region · zone` 标签与后端一致；下拉刷新
+- [ ] 容器操作：docker 主机进容器列表，restart 真实生效（状态翻转）、失败 SnackBar 呈现、操作在 web 审计留痕
+- [ ] 告警：列表与 server 一致、未读加粗带点、「全部已读」后 web 侧同步已读
+- [ ] 审计：分页首屏加载、数据不足一屏自动预取、失败行红标
+- [ ] 会话恢复：杀进程重开直接进入主界面（本地 token）；调短 JWT expiration 后 token 过期自动续期无感；refresh 失效回登录页
+- [ ] 安全：未开自签开关时自签 server 连接被拒；开启后可用（红字风险提示存在）
+- [ ] 推送：server 配 ntfy 渠道，触发一条告警，ntfy 官方 app 手机送达（D3 路径）
+- [ ] 深色模式跟随系统切换正常
+
 ## 验收后回填约定
 
 - 每通过一项：勾选本清单 + 在 `todo.md` 对应条目的「剩余」中移除该项，要点补进 ✅ 记录

@@ -750,8 +750,20 @@
 
 功能路线图自可选任务收尾后，把滞后于实现的对外文档对齐：
 
+功能路线图自可选任务收尾后，把滞后于实现的对外文档对齐：
+
 1. ✅ **README「当前能力」对齐 2026-09 功能面**：原 5 条停在 6 月版本（资源/工作台/监控/设置/审计/远程连接），补齐控制面基础（TOTP/RBAC）、资源视图（心跳条/到期告警）、远程操作（录制/文件/日志联邦检索）、容器与 Stacks、备份恢复（agent+server 双侧）、反代双后端、ACME 三 provider、DNS/DDNS/台账、主机运维（服务三后端/Cron/SMART/NAS/组网观测）、漂移与多渠道通知；「关键配置」补新配置键指引与环境变量清单。
 2. ✅ **config/cockpit.yaml 示例补齐**：`notification` 补 ntfy/webhook/telegram 渠道示例（对照 `internal/config/config.go` 实际 yaml tag）；`dns` 补 `provider`/`dnspod`/`alidns` 键与三家环境变量注入提示；新增注释形态 `overlay` 段（zerotier/tailscale token + tailnet）。密钥一律以注释示例 + env 优先呈现，不引入真实凭据。YAML 解析校验通过。
+
+## 移动端 Flutter（2026-09-22）
+
+用户指定 Flutter 出手机版（iOS + Android）。设计 [mobile-design](docs/guide/mobile-design.md)（D1-D8），M1 分三笔落地：
+
+1. ✅ **docs(design)**（071a964e）：选型对比、直连既有 `/api/*` 不建 BFF（web api.ts 173 端点复用）、告警推送复用 ntfy 渠道不接 FCM/APNs、JWT+TOTP 双步复用、自签显式开关、Riverpod+dio、终端 M2、独立 mobile.yml（iOS 不进 CI）。诚实边界：本机 Linux 无法构建 iOS，需 macOS。
+2. ✅ **feat(mobile) M1 主体**（eeb7cecd）：Flutter 3.47.5 双端工程；models 逐一对照 Go json tag（region/zone 顶层、ContainerInfo 大写缩写词）；dio 客户端 401 刷新重放一次+失败登出；四态认证机（token 入 secure storage，启动恢复+401 兜底）；引导/登录（TOTP 双步）/仪表盘/主机+容器 start-stop-restart/告警+全部已读/设置 八页；13 测试（MockAdapter 序列响应验 401 链路）。CI mobile.yml：analyze/test + debug APK 构建通过。
+3. ✅ **feat(mobile) 审计页**（99a440b0）：AuditLog 对齐 + 分页加载更多（占位 item post-frame 自动预取，build 期间 setState 是真坑）+ 失败行红标；16 测试全绿。
+
+验收边界：`flutter analyze` 0 issue、`flutter test` 16/16、CI Mobile workflow 绿（Android APK 出包验证）。真机验收项已入 [acceptance-checklist](docs/guide/acceptance-checklist.md) 移动端节（12 项）；iOS 装机与 ntfy 推送送达需真机+凭据，挂起待验。
 
 ## 未来路线图（个人云场景功能扩展）
 
