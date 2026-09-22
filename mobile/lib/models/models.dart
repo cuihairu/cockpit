@@ -44,6 +44,25 @@ class Agent {
   bool get hasCron => capabilities.any((c) => c.type == 'cron');
   bool get hasFile => capabilities.any((c) => c.type == 'file');
 
+  /// remote-services capability 里的 SSH 服务（agent 上报 running 才返回）。
+  SshService? get sshService {
+    for (final c in capabilities) {
+      if (c.type != 'remote-services') continue;
+      final m = c.metadata;
+      if (m == null) continue;
+      final ssh = m['ssh'];
+      if (ssh is! Map<String, dynamic>) continue;
+      final running = ssh['running'] == true;
+      final port = (ssh['port'] as num?)?.toInt() ?? 0;
+      if (!running || port <= 0) continue;
+      return SshService(
+        host: ssh['host'] as String? ?? ip,
+        port: port,
+      );
+    }
+    return null;
+  }
+
 
   factory Agent.fromJson(Map<String, dynamic> j) => Agent(
         id: j['id'] as String,
@@ -486,3 +505,24 @@ class FileListResult {
       );
 }
 
+
+/// Workbench remote-services 里可用的 SSH 服务端点。
+class SshService {
+  final String host;
+  final int port;
+
+  SshService({required this.host, required this.port});
+}
+
+/// POST /api/remote/tickets 响应（expires_at ISO 字符串，移动端不解析）。
+class RemoteTicket {
+  final String ticket;
+  final String expiresAt;
+
+  RemoteTicket({required this.ticket, required this.expiresAt});
+
+  factory RemoteTicket.fromJson(Map<String, dynamic> j) => RemoteTicket(
+        ticket: j['ticket'] as String? ?? '',
+        expiresAt: j['expires_at'] as String? ?? '',
+      );
+}

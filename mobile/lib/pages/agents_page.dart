@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../state/settings.dart';
 import 'cron_page.dart';
 import 'files_page.dart';
+import 'terminal_page.dart';
 
 /// 主机列表：hostname · region/zone · 在线徽标 · docker/cron/file 能力入口。
 class AgentsPage extends ConsumerStatefulWidget {
@@ -30,6 +31,7 @@ class _AgentsPageState extends ConsumerState<AgentsPage> {
 
   /// 能力动作单：行点开的完整入口（含终端），trailing 图标是高频捷径。
   void _showActions(Agent a) {
+    final ssh = a.sshService;
     showModalBottomSheet<void>(
       context: context,
       builder: (sheetContext) => SafeArea(
@@ -39,6 +41,13 @@ class _AgentsPageState extends ConsumerState<AgentsPage> {
             child: Text('选择功能',
                 style: TextStyle(fontWeight: FontWeight.bold)),
           ),
+          if (ssh != null)
+            ListTile(
+              leading: const Icon(Icons.terminal),
+              title: const Text('SSH 终端'),
+              subtitle: Text('${ssh.host}:${ssh.port}'),
+              onTap: () => _push(sheetContext, TerminalPage(agent: a, ssh: ssh)),
+            ),
           if (a.hasDocker)
             ListTile(
               leading: const Icon(Icons.view_in_ar),

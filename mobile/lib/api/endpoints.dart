@@ -158,3 +158,25 @@ extension FilesApi on CockpitApi {
   }
 }
 
+
+extension RemoteApi on CockpitApi {
+  /// POST /api/remote/tickets——换取终端 WS 子协议票据（body snake_case 对齐 web）。
+  Future<RemoteTicket> createRemoteTicket({
+    required String agentId,
+    required String host,
+    required int port,
+    String? username,
+    String? password,
+  }) async {
+    final r = await client.dio.post<Map<String, dynamic>>('/api/remote/tickets',
+        data: {
+          'agent_id': agentId,
+          'host': host,
+          'port': port,
+          'protocol': 'ssh',
+          'username': ?username,
+          'password': ?password,
+        });
+    return RemoteTicket.fromJson(r.data!);
+  }
+}
