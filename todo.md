@@ -765,6 +765,17 @@
 
 验收边界：`flutter analyze` 0 issue、`flutter test` 16/16、CI Mobile workflow 绿（Android APK 出包验证）。真机验收项已入 [acceptance-checklist](docs/guide/acceptance-checklist.md) 移动端节（12 项）；iOS 装机与 ntfy 推送送达需真机+凭据，挂起待验。
 
+**M2**（2026-09-22 完成六个功能批，逐笔 CI 绿）：
+
+4. ✅ **feat(mobile) 资源到期视图**（4d84df55）：域名/证书两 tab，后端 status/daysRemaining 直用不自算；`_AsyncList<T>` 泛型列表复用。
+5. ✅ **feat(mobile) 备份任务视图**（3ab28988）：资源页第三 tab；BackupConfig snake_case 与 BackupRun camelCase 混命名的模型分治；最近运行 + 手动触发（play → run → SnackBar → 刷新）。
+6. ✅ **feat(mobile) Cron 只读视图**（82d057c5）：主机行 cron 能力入口；cockpit 任务 + 外部条目（crontab 原生行）等宽只读展示，写操作留桌面端。
+7. ✅ **feat(mobile) 文件只读浏览**（a3f6810d）：POST files/list 目录导航（目录优先排序、symlink 标记）、点文件弹详情；主机行点开能力动作单（容器/定时任务/文件）。
+8. ✅ **feat(mobile) SSH 终端**（bd0bc2f1）：POST /api/remote/tickets 换票据、ticket 作 WS 子协议连 /api/remote/terminal、xterm 4.0 双向转发；自签开关作用于 wss；remote-services 上报 ssh host:port 入动作单首位。
+9. ✅ **feat(mobile) 生物识别锁**（a5c30d92）：local_auth 3.x 接口抽象；LockGate 盖已登录视图（失败/通道异常停留可重试）；设置开关设备不支持即禁用。
+
+验收边界同 M1：`flutter analyze` 0 issue、`flutter test` 34/34、CI 五 workflow 全绿逐笔验证。M2 验收项 7 条已补进 checklist 移动端节；真机项（终端连接、生物识别、ntfy 送达等）挂起待验。反代视图未做，顺延 M3 评估。
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
