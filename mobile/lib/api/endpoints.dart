@@ -147,3 +147,14 @@ extension CronApi on CockpitApi {
     return CronJobsResult.fromJson(r.data!);
   }
 }
+
+extension FilesApi on CockpitApi {
+  /// POST /api/agents/{id}/files/list——列目录直属条目（移动端只读浏览）。
+  Future<FileListResult> listFiles(String agentId, String dir) async {
+    final r = await client.dio.post<Map<String, dynamic>>(
+        '/api/agents/$agentId/files/list',
+        data: {'dir': dir});
+    return FileListResult.fromJson(r.data!);
+  }
+}
+

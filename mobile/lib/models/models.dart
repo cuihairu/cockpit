@@ -42,6 +42,8 @@ class Agent {
   bool get online => status == 'online';
   bool get hasDocker => capabilities.any((c) => c.type.startsWith('docker'));
   bool get hasCron => capabilities.any((c) => c.type == 'cron');
+  bool get hasFile => capabilities.any((c) => c.type == 'file');
+
 
   factory Agent.fromJson(Map<String, dynamic> j) => Agent(
         id: j['id'] as String,
@@ -431,3 +433,56 @@ class CronJobsResult {
         external: j['external'] as String? ?? '',
       );
 }
+
+/// 对齐 web FileEntry（isDir/isSymlink/mtime unix 秒；uid/gid 旧 agent 可缺省）。
+class FileEntry {
+  final String name;
+  final int size;
+  final String mode; // 八进制权限字符串，如 "0644"
+  final int uid;
+  final int gid;
+  final int mtime;
+  final bool isDir;
+  final bool isSymlink;
+  final String target;
+
+  FileEntry({
+    required this.name,
+    required this.size,
+    required this.mode,
+    required this.uid,
+    required this.gid,
+    required this.mtime,
+    required this.isDir,
+    required this.isSymlink,
+    required this.target,
+  });
+
+  factory FileEntry.fromJson(Map<String, dynamic> j) => FileEntry(
+        name: j['name'] as String? ?? '',
+        size: (j['size'] as num?)?.toInt() ?? 0,
+        mode: j['mode'] as String? ?? '',
+        uid: (j['uid'] as num?)?.toInt() ?? -1,
+        gid: (j['gid'] as num?)?.toInt() ?? -1,
+        mtime: (j['mtime'] as num?)?.toInt() ?? 0,
+        isDir: j['isDir'] as bool? ?? false,
+        isSymlink: j['isSymlink'] as bool? ?? false,
+        target: j['target'] as String? ?? '',
+      );
+}
+
+/// POST files/list 响应：{dir, entries}。
+class FileListResult {
+  final String dir;
+  final List<FileEntry> entries;
+
+  FileListResult({required this.dir, required this.entries});
+
+  factory FileListResult.fromJson(Map<String, dynamic> j) => FileListResult(
+        dir: j['dir'] as String? ?? '',
+        entries: (j['entries'] as List<dynamic>? ?? [])
+            .map((e) => FileEntry.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
