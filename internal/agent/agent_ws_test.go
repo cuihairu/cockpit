@@ -89,6 +89,26 @@ func TestSendMessageQueueFull(t *testing.T) {
 	}
 }
 
+// TestSendMessageAfterStopDeterministic 确定性命中 ctx.Done 分支：
+// outbound 填满后发送 case 不 ready，select 只能走 <-a.ctx.Done()。
+// 无 writeLoop 未启动（NewAgent 不 Run），填充不会被消费。
+func TestSendMessageAfterStopDeterministic(t *testing.T) {
+	a := NewAgent(Config{ServerURL: "ws://127.0.0.1:1"})
+	a.Stop()
+
+	for i := 0; i < cap(a.outbound); i++ {
+		select {
+		case a.outbound <- protocol.NewMessage(protocol.MessageTypePing, nil):
+		default:
+			t.Fatalf("outbound full at %d before test fills it", i)
+		}
+	}
+	err := a.sendMessage(protocol.NewMessage(protocol.MessageTypePing, nil))
+	if err == nil || err.Error() != "agent stopped" {
+		t.Errorf("sendMessage() = %v, want agent stopped", err)
+	}
+}
+
 func TestSendMessageAfterStop(t *testing.T) {
 	a := NewAgent(Config{ServerURL: "ws://127.0.0.1:1"})
 	a.Stop()
