@@ -119,6 +119,23 @@ void main() {
     expect(find.text('暂无定时任务'), findsOneWidget);
     expect(find.text('外部条目（只读）'), findsNothing);
   });
+
+  testWidgets('定时任务页：加载失败占位 + 下拉刷新恢复', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/cron/jobs', 404, {'error': 'x'})
+      ..on('GET', '/api/agents/ag-1/cron/jobs', 200, _jobsResult);
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('加载失败'), findsOneWidget);
+
+    await tester.fling(
+        find.textContaining('加载失败'), const Offset(0, 400), 1000);
+    await tester.pumpAndSettle();
+    expect(find.text('logrotate-nightly'), findsOneWidget);
+  });
 }
 
 class _FakeSettings extends SettingsNotifier {

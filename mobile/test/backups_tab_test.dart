@@ -129,6 +129,109 @@ void main() {
     expect(find.text('最近运行'), findsOneWidget);
     expect(find.text('失败'), findsOneWidget);
   });
+
+  testWidgets('备份 tab：加载失败占位', (tester) async {
+    final adapter = MockAdapter(); // configs/runs 全 404
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('加载失败'), findsOneWidget);
+    expect(find.text('备份任务'), findsNothing);
+  });
+
+  testWidgets('备份 tab：无任务与无运行', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/backups/configs', 200, {'configs': <Object?>[]})
+      ..on('GET', '/api/backups/runs', 200, {'runs': <Object?>[]});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('暂无备份任务'), findsOneWidget);
+    expect(find.text('最近运行'), findsNothing);
+  });
+
+  testWidgets('备份 tab：手动触发失败 → SnackBar 报错', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/backups/configs', 200, {'configs': [_config]})
+      ..on('GET', '/api/backups/runs', 200, {'runs': <Object?>[]})
+      ..on('POST', '/api/backups/configs/1/run', 500, {'error': 'busy'})
+      ..on('GET', '/api/backups/configs', 200, {'configs': <Object?>[]})
+      ..on('GET', '/api/backups/runs', 200, {'runs': <Object?>[]});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('触发失败'), findsOneWidget);
+  });
+
+  testWidgets('备份 tab：运行中/超时/未知状态与 GB 尺寸', (tester) async {
+    final bigRun = {
+      'id': 11,
+      'configId': 2,
+      'status': 'running',
+      'size': 5 * 1024 * 1024 * 1024,
+      'error': '',
+      'remoteStatus': 'ok',
+      'startedAt': 1758500000,
+      'finishedAt': 0,
+    };
+    final timeoutRun = {
+      'id': 12,
+      'configId': 2,
+      'status': 'timeout',
+      'size': 512,
+      'error': '',
+      'remoteStatus': '',
+      'startedAt': 1758500100,
+      'finishedAt': 1758500200,
+    };
+    final weirdRun = {
+      'id': 13,
+      'configId': 2,
+      'status': 'weird',
+      'size': 0,
+      'error': '',
+      'remoteStatus': '',
+      'startedAt': 1758500300,
+      'finishedAt': 1758500400,
+    };
+    final adapter = MockAdapter()
+      ..on('GET', '/api/backups/configs', 200, {
+        'configs': [
+          _config,
+          {
+            ..._config,
+            'id': 2,
+            'name': 'weird-task',
+            'schedule': 'manual',
+            'next_run_at': 0,
+            'last_status': 'weird',
+          },
+        ]
+      })
+      ..on('GET', '/api/backups/runs', 200,
+          {'runs': [bigRun, timeoutRun, weirdRun]});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    // 三种状态的 chip 文案
+    expect(find.text('运行中'), findsOneWidget);
+    expect(find.text('超时'), findsOneWidget);
+    expect(find.text('weird'), findsNWidgets(2)); // run chip + 任务 subtitle
+    // GB 级尺寸与异地已推送
+    expect(find.textContaining('5 GB'), findsOneWidget);
+    expect(find.textContaining('异地已推送'), findsOneWidget);
+  });
 }
 
 class _FakeSettings extends SettingsNotifier {

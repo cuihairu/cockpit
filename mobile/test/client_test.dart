@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -105,6 +106,61 @@ void main() {
       await expectLater(
           client.dio.get('/api/agents'), throwsA(isA<DioException>()));
       expect(unauthorized, isTrue);
+    });
+
+    test('刷新 200 但无 token → 视为刷新失败走登出', () async {
+      final adapter = MockAdapter()
+        ..on('GET', '/api/agents', 401, {'error': 'expired'})
+        ..on('POST', '/api/auth/refresh', 200, {'token': null});
+      final dio = Dio(BaseOptions(baseUrl: 'http://x'))
+        ..httpClientAdapter = adapter;
+      var unauthorized = false;
+      final client = ApiClient.createWith(
+          dio: dio,
+          initialToken: 'jwt-1',
+          onUnauthorized: () async => unauthorized = true);
+      await expectLater(
+          client.dio.get('/api/agents'), throwsA(isA<DioException>()));
+      expect(unauthorized, isTrue);
+    });
+
+    test('刷新响应非对象（解析异常）→ 通用 catch 走登出', () async {
+      final adapter = MockAdapter()
+        ..on('GET', '/api/agents', 401, {'error': 'expired'})
+        // 故意回 JSON 字符串：resp.data['token'] 抛 TypeError 而非 DioException
+        ..on('POST', '/api/auth/refresh', 200, 'plain');
+      final dio = Dio(BaseOptions(baseUrl: 'http://x'))
+        ..httpClientAdapter = adapter;
+      var unauthorized = false;
+      final client = ApiClient.createWith(
+          dio: dio,
+          initialToken: 'jwt-1',
+          onUnauthorized: () async => unauthorized = true);
+      await expectLater(
+          client.dio.get('/api/agents'), throwsA(isA<DioException>()));
+      expect(unauthorized, isTrue);
+    });
+
+    test('health()：create 真实链路（本地 server，自签开关两分支）', () async {
+      final server = await HttpServer.bind('127.0.0.1', 0);
+      server.listen((req) async {
+        req.response.statusCode = 200;
+        await req.response.close();
+      });
+      try {
+        final base = 'http://127.0.0.1:${server.port}';
+        final strict = await ApiClient.create(
+            baseUrl: '$base/', allowSelfSigned: false);
+        await strict.health();
+        expect(strict.dio.options.baseUrl, base);
+
+        final lax = await ApiClient.create(
+            baseUrl: base, allowSelfSigned: true, initialToken: 'jwt-1');
+        await lax.health();
+        expect(lax.dio.options.baseUrl, base);
+      } finally {
+        await server.close();
+      }
     });
   });
 }

@@ -170,6 +170,71 @@ void main() {
     expect(find.text('类型：链接'), findsOneWidget);
     expect(find.text('指向：/usr/share/zoneinfo/UTC'), findsOneWidget);
   });
+
+  testWidgets('文件页：加载失败与空目录占位', (tester) async {
+    final adapter = MockAdapter()
+      ..on('POST', '/api/agents/ag-1/files/list', 404, {'error': 'x'})
+      ..on('POST', '/api/agents/ag-1/files/list', 200,
+          {'dir': '/', 'entries': <Object?>[]});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('加载失败'), findsOneWidget);
+
+    await tester.fling(
+        find.textContaining('加载失败'), const Offset(0, 400), 1000);
+    await tester.pumpAndSettle();
+    expect(find.text('空目录'), findsOneWidget);
+  });
+
+  testWidgets('文件页：进子目录后系统返回键回上级（PopScope 拦截）',
+      (tester) async {
+    final adapter = MockAdapter()
+      ..on('POST', '/api/agents/ag-1/files/list', 200, _rootEntries)
+      ..on('POST', '/api/agents/ag-1/files/list', 200, _etcEntries)
+      ..on('POST', '/api/agents/ag-1/files/list', 200, _rootEntries);
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('etc'));
+    await tester.pumpAndSettle();
+    expect(find.text('文件 · etc'), findsOneWidget);
+
+    // 根 Navigator maybePop：子目录 canPop=false → 拦截并回上级
+    await tester
+        .state<NavigatorState>(find.byType(Navigator).first)
+        .maybePop();
+    await tester.pumpAndSettle();
+    expect(find.text('文件 · /'), findsOneWidget);
+  });
+
+  testWidgets('文件页：GB 级文件尺寸格式化', (tester) async {
+    final adapter = MockAdapter()
+      ..on('POST', '/api/agents/ag-1/files/list', 200, {
+        'dir': '/',
+        'entries': [
+          {
+            'name': 'huge.iso',
+            'size': 5 * 1024 * 1024 * 1024,
+            'mode': '0644',
+            'mtime': 1758400000,
+            'isDir': false,
+            'isSymlink': false,
+            'target': '',
+          },
+        ],
+      });
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('5 GB'), findsOneWidget);
+  });
 }
 
 class _FakeSettings extends SettingsNotifier {

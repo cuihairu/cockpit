@@ -142,6 +142,44 @@ void main() {
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
     expect(find.text('admin · login'), findsOneWidget);
   });
+
+  testWidgets('审计页：加载失败占位', (tester) async {
+    final adapter = MockAdapter(); // 404
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    final api = CockpitApi(ApiClient.forTest(dio));
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(() => _FakeSettings()),
+        apiProvider.overrideWith((ref) async => api),
+      ],
+      child: const MaterialApp(home: AuditPage()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('加载失败'), findsOneWidget);
+  });
+
+  testWidgets('审计页：空记录占位', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/admin/audit/logs', 200,
+          _page(0, <AuditLog>[]));
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    final api = CockpitApi(ApiClient.forTest(dio));
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(() => _FakeSettings()),
+        apiProvider.overrideWith((ref) async => api),
+      ],
+      child: const MaterialApp(home: AuditPage()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('暂无审计记录'), findsOneWidget);
+  });
 }
 
 class _FakeSettings extends SettingsNotifier {

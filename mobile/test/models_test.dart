@@ -152,5 +152,43 @@ void main() {
       expect(r.token, 'jwt-x');
       expect(r.role, 'admin');
     });
+
+    test('Agent：cron/file 能力判定', () {
+      final a = Agent.fromJson({
+        'id': 'ag-3',
+        'capabilities': [
+          {'type': 'cron'},
+          {'type': 'file'},
+        ],
+        'hostname': 'node-03',
+        'ip': '10.0.0.3',
+      });
+      expect(a.hasCron, isTrue);
+      expect(a.hasFile, isTrue);
+      expect(a.hasDocker, isFalse);
+    });
+
+    test('StatusSummary：子对象全缺省时落 0', () {
+      final s = StatusSummary.fromJson({});
+      expect(s.agentsTotal, 0);
+      expect(s.agentsOnline, 0);
+      expect(s.domainsValid, 0);
+      expect(s.domainsExpiring, 0);
+      expect(s.certsValid, 0);
+      expect(s.certsExpiring, 0);
+      expect(s.servicesDown, 0);
+      // 部分子对象缺省
+      final s2 = StatusSummary.fromJson({
+        'infrastructure': {'total': 2, 'online': 1},
+      });
+      expect(s2.agentsTotal, 2);
+      expect(s2.certsExpiring, 0);
+    });
+
+    test('RemoteTicket：缺省字段落空串', () {
+      final t = RemoteTicket.fromJson({});
+      expect(t.ticket, '');
+      expect(t.expiresAt, '');
+    });
   });
 }

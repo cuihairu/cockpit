@@ -146,6 +146,54 @@ void main() {
     expect(find.textContaining('到期 2026-10-15（剩 23 天）'), findsOneWidget);
     expect(find.text('临期'), findsOneWidget);
   });
+
+  testWidgets('资源页：已过期徽标 + 下拉刷新（invalidate 后重拉）', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/resources/domains', 200, {
+        'data': [
+          {
+            'id': 'dm-9',
+            'name': 'dead.io',
+            'registrar': '',
+            'expiryDate': '2020-01-01T00:00:00Z',
+            'autoRenew': false,
+            'dnsProvider': '',
+            'status': 'expired',
+          }
+        ],
+        'total': 1,
+      })
+      // 刷新后（invalidate 重建 apiProvider）的第二轮
+      ..on('GET', '/api/resources/domains', 200, {
+        'data': <Object?>[],
+        'total': 0,
+      })
+      ..on('GET', '/api/resources/certificates', 200, {
+        'data': <Object?>[],
+        'total': 0,
+      });
+
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await tester.pumpWidget(_wrap(CockpitApi(ApiClient.forTest(dio))));
+    await tester.pumpAndSettle();
+
+    expect(find.text('已过期'), findsOneWidget);
+
+    await tester.fling(find.text('dead.io'), const Offset(0, 400), 1000);
+    await tester.pumpAndSettle();
+    expect(find.text('暂无数据'), findsOneWidget);
+  });
+
+  testWidgets('资源页：接口失败占位', (tester) async {
+    final adapter = MockAdapter(); // 404
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await tester.pumpWidget(_wrap(CockpitApi(ApiClient.forTest(dio))));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('加载失败'), findsOneWidget);
+  });
 }
 
 class _FakeSettings extends SettingsNotifier {
