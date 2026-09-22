@@ -1,64 +1,103 @@
-# 移动端适配设计（M1：全局布局 + 关键页面）
+# 移动端方案：Flutter（iOS + Android）
 
-> 2026-09-15 立项。对应 todo「移动端适配：关键页面（Dashboard/Monitor）
-> 做移动端优化」。P2 最后一个独立功能条目。
+> 2026-09-22。用户指定技术栈 Flutter，双端覆盖。本文档定义选型依据、与既有
+> server 的边界、M1 最小可用范围与后续里程碑。
 
-## 痛点
+## 背景
 
-手机访问面板是真实场景（出门在外看告警、临时重启一个容器），但当前
-UI 只保证桌面可用：
+Cockpit web UI 是桌面优先（antd 数据密集表格、多栏工作台），手机浏览器体验差。
+而个人基础设施控制台最典型的移动场景恰是：
 
-- **mix 布局的顶部菜单在窄屏溢出**：16 个菜单项平铺 header，手机上
-  换行/挤出视口；
-- **Modal 默认 520px**：在 375px 宽的手机屏上直接超出视口；
-- **表格无 `scroll.x`**：多列表格（如 Dashboard Agent 5 列）窄屏
-  挤压换行成一团；
-- **固定宽度控件**：Monitor 的 Agent 下拉 `width: 250` 固定值。
+- **在外面看状态**：agent 在线吗、告警了吗、证书/域名快到期了吗；
+- **收告警**：磁盘 SMART 异常、agent 掉线、备份失败要能推到手机；
+- **少量关键操作**：重启一个容器/服务、确认一条告警，而不是完整运维。
 
-已有基础：Dashboard 统计卡 / Monitor 图表 / SystemInfoCard 栅格
-已按 `xs/sm/md/lg` 断点写好；`App.less` 已有一个 768px media 块
-（隐藏 header 搜索框、缩 stat-card）。
+移动端功能面天然是 web 的窄子集，方案设计围绕「薄客户端 + 复用一切既有设施」。
 
 ## 决策
 
-| # | 决策 | 内容 | 理由 / 备注 |
-|---|------|------|------------|
-| D1 | 范围 | 全局布局层（影响所有页面）+ Dashboard + Monitor + 全局兜底 CSS；不做全站逐页精调 | todo 原文就是「关键页面」；全局层一次解决最大公约数（菜单/Modal/padding） |
-| D2 | 窄屏判定 | `Grid.useBreakpoint()`，`isMobile = !screens.md`（< 768px）；布局切换必须 JS（`layout` prop），样式兜底继续用 media query | AntD 官方断点；与既有 768px media 块对齐 |
-| D3 | 布局切换 | `layout = isMobile \|\| compactMode ? 'side' : 'mix'`——mix 的顶部菜单窄屏溢出，强制切 side；side 布局下 ProLayout 内建窄屏 Drawer（hamburger 抽屉菜单） | mix 的 header 菜单无溢出收纳机制；side + 抽屉是移动端标准形态 |
-| D4 | Header 精简 | 搜索框已有 media 隐藏；「文档」按钮 < 768 只留图标（文字 span 加 class 隐藏）；用户名保留 | header 在窄屏只承担 logo + 通知 + 用户 |
-| D5 | Modal 兜底 | 全局 CSS：`.ant-modal { max-width: calc(100vw - 16px) }` | 一行兜底所有现存与未来 Modal，不逐个改组件 |
-| D6 | 表格策略 | AntD 无 `scroll.x` 时列内容自动换行不溢出（可接受兜底）；仅 Dashboard Agent 表（5 列）显式加 <span v-pre>`scroll={{ x: 640 }}`</span>（行内代码无 v-pre，JSX 花括号须手动包裹防 Vue 插值解析） | 全站补 scroll.x 是 M2 量级；M1 只修最挤的关键表 |
-| D7 | Dashboard | 统计卡 `xs` 24 → 12（窄屏 2 列）；页头标题行 `flex-wrap`（刷新按钮不掉出视口） | 卡片是小号统计数字，2 列是手机标准密度 |
-| D8 | Monitor | Agent 下拉固定 250px → 窄屏 `width: '100%'`；PageContainer extra 自身会 wrap | 其余栅格（图表 xs=24 lg=12、SystemInfoCard）已响应式 |
-| D9 | 间距密度 | 窄屏 `page-container`/`dashboard-container` padding 12px、card body 16px | 手机上 24px 边距浪费屏宽 |
-| D10 | 验证 | `pnpm build` + `pnpm lint`；真机 / DevTools 设备模拟验收留给使用者 | 本环境无浏览器实测手段，布局代码以断点逻辑正确性为保证 |
+- **D1 技术选型 Flutter**（用户指定）。备选对比：PWA/响应式改造 web 成本最低，
+  但 antd 表格小屏体验差、无推送通道、无原生手感，作为移动方案不达标；React
+  Native 与 web 共享 TS 生态，但个人项目维护第二前端的成本同样存在，且终端模拟
+  （xterm.dart）等原生组件 Flutter 侧更成熟。Flutter 代价是引入第三语言栈
+  （Go / TS / Dart），以 M1 功能面窄（只读为主 + 少量操作）换取长期维护面可控。
 
-## 不做（后续版本）
+- **D2 不建独立 BFF，直连既有 `/api/*`**：web 端 `services/api.ts` 已收敛 173 个
+  端点调用，认证（JWT + TOTP 双步）、agent、告警、Docker、审计全部现成。移动端
+  只做薄客户端；server 侧仅在确有聚合需求时补端点（M1 预计零新增）。API 对齐
+  纪律同 web：**字段以 Go model json tag 为准**，不从记忆或互相抄。
 
-- 全站每页 Table 补 `scroll.x`、列级 `responsive` 隐藏（M2 按需）；
-- 独立移动端导航（底部 Tab Bar）——Drawer 够用；
-- Workbench 终端/桌面的触屏交互优化（终端在手机上本就非目标场景）。
+- **D3 告警推送复用 ntfy 渠道，不接 FCM/APNs**：server 通知已有
+  herald / ntfy / webhook / telegram 四渠道（config.go），其中 ntfy 官方
+  Android/iOS app 就是现成的推送终端——server 配一条 ntfy 渠道即得手机推送，
+  省掉 FCM/APNs 的账号、签名与后端管道。App 内另做告警列表轮询兜底。
+  自托管 ntfy 的 iOS 即时送达有限制（后台轮询间隔），文档记录、不阻塞。
 
-## M1 清单
+- **D4 认证完全复用**：`POST /api/auth/login` → `requires_totp=true` 时以
+  `tmp_token` 走 `/api/auth/totp/verify` 换正式 JWT（web `LoginResponse` 同款
+  双步流程）；token 存 `flutter_secure_storage`（iOS Keychain / Android
+  Keystore），绝不落 SharedPreferences；`/api/auth/refresh` 续期由 dio 拦截器
+  自动完成（401 → refresh → 重放，失败登出回登录页）。
 
-- [x] App.tsx：useBreakpoint + 三态 layout + 文档按钮文字 class
-- [x] App.less：768px media 块扩充（Modal 兜底 / 文档文字隐藏 / 间距）
-- [x] Dashboard：统计卡 2 列 + Agent 表 scroll.x + 页头 wrap
-- [x] Monitor：Agent 下拉窄屏自适应宽度
-- [x] 验证：pnpm build + lint 通过
-- [x] 文档收尾（本清单勾选）+ todo.md 同步
+- **D5 自签 HTTPS 显式开关**：server 常部署在内网或自签证书后。默认严格校验；
+  设置页提供「允许自签证书」开关（`badCertificateCallback` 放行），开启时红字
+  提示中间人风险。不做证书导入（个人场景过度设计）。
 
-✅ M1 完成（2026-09-15）：`Grid.useBreakpoint()` 判定 < 768px，
-`layout = isMobile || compactMode ? 'side' : 'mix'`（mix 顶部菜单窄屏
-溢出 → side + ProLayout 内建抽屉）；768px media 块扩充 Modal
-`max-width: calc(100vw - 16px)` 兜底、文档按钮只留图标、容器/卡片
-间距收紧、表格 cell padding 8px；Dashboard 统计卡 xs=12（窄屏 2 列）
-+ Agent 表 <span v-pre>`scroll={{ x: 640 }}`</span> + 页头 flex-wrap；Monitor Agent
-下拉窄屏 100% 宽。Go 侧零改动。真机验收留给使用者（本环境无浏览器）。
+- **D6 状态管理 Riverpod + 网络 dio**：Riverpod 编译期安全、社区主流；dio 的
+  拦截器机制直接承载 D4 的刷新重放与 D5 的证书开关。数据轮询为主（M1 不接
+  WebSocket 指标流），仪表盘场景轮询省电且实现简单。
 
-## 参考
+- **D7 终端 / 桌面后置**：终端 M2 用 xterm.dart + 既有 remote ticket WebSocket；
+  VNC/桌面观看在 Flutter 侧生态弱（无 noVNC 等价物），列为探索项不承诺。
 
-- 内部：`web/src/App.less`（既有 768px media 块）、Settings 的
-  compactMode（同为布局形态切换先例）
-- 外部：Ant Design Grid.useBreakpoint、ProLayout 响应式行为
+- **D8 CI 独立 `mobile.yml`**：`paths: mobile/**` 触发，`flutter analyze` +
+  `flutter test` + APK 构建（`subosito/flutter-action`）。iOS 构建不进 CI
+  （需 macOS runner + 签名账号），本地/真机阶段再议。
+
+## 里程碑
+
+**M1 最小可用**（手机场景核心闭环）：
+
+| 页面 | 复用端点（对照 `web/src/services/api.ts`） |
+| --- | --- |
+| 引导：server URL 配置 + 连接测试 | `GET /health` |
+| 登录（含 TOTP 双步） | `/api/auth/login`、`/api/auth/totp/verify` |
+| 仪表盘：agent 在线/离线、未读告警、证书域名临期 | `/api/agents`、`/api/alerts`、资源列表 |
+| Agent 列表 + 详情指标 | `/api/agents`、metrics 端点 |
+| Docker 容器列表 + start/stop/restart | Docker 容器端点 |
+| 告警列表 + 全部已读 | `/api/alerts`、`PUT /api/alerts/read-all` |
+| 审计列表 | `/api/audit` |
+| 设置：server URL、自签开关、退出 | — |
+
+深色主题跟随系统；手机竖屏单栏布局。
+
+**M2**：反代/证书/域名视图、备份任务状态与手动触发、Cron、文件浏览（只读）、
+终端（xterm.dart）、生物识别解锁（local_auth）。
+
+**M3**：SMART/NAS/组网观测只读视图、Stacks 部署操作、VNC 探索项。
+
+## 目录结构
+
+```
+mobile/                  # Flutter 工程，与 web/ 平行
+  lib/
+    main.dart
+    api/                 # dio client、拦截器、端点封装
+    models/              # 手写与 Go json tag 对齐的模型
+    state/               # Riverpod providers（auth、agents、alerts…）
+    pages/               # 每页一目录，与 web pages 命名对齐
+    widgets/
+  test/                  # 单测：models 对齐、拦截器、页面 widget test
+```
+
+## 落地前提与验收
+
+- 本机需安装 Flutter SDK（stable）。本机为 Linux：**Android APK 可本地构建；
+  iOS 无法本地构建**（需 macOS + Xcode），iOS 侧交付形态为源码工程 + 真机验收
+  项挂起，待有 Mac 或 CI macOS runner 再闭环。
+- 自动化验收：`flutter analyze` 0 问题、`flutter test` 全绿、`mobile.yml` CI 绿。
+- 真机验收（补入 `docs/guide/acceptance-checklist.md` 移动端一节）：
+  - Android 真机安装 APK：登录 → TOTP → 仪表盘数据与 server 一致；
+  - 断网/错误 server URL 的错误呈现；token 过期自动续期无感；
+  - ntfy 渠道推送送达手机（server 侧触发告警）；
+  - 自签开关关闭时自签 server 连接被拒、开启后可用。
