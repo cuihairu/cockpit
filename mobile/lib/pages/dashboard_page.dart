@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/endpoints.dart';
+import '../models/models.dart';
 import '../state/settings.dart';
 
 /// 仪表盘：agent 在线/离线、未读告警、error 告警三卡片（M1 只读）。
@@ -16,7 +18,8 @@ class DashboardPage extends ConsumerWidget {
       data: (api) => RefreshIndicator(
         onRefresh: () async {},
         child: FutureBuilder(
-          future: Future.wait([api.agents(), api.alerts()]),
+          future: Future.wait(
+              [api.agents(), api.alerts(), api.status()]),
           builder: (context, snap) {
             if (snap.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
@@ -29,6 +32,7 @@ class DashboardPage extends ConsumerWidget {
             }
             final agents = snap.data![0] as List;
             final alerts = snap.data![1] as List;
+            final status = snap.data![2] as StatusSummary;
             final online = agents.where((a) => a.online).length;
             final unread = alerts.where((a) => !a.read).length;
             final errors = alerts
@@ -59,6 +63,32 @@ class DashboardPage extends ConsumerWidget {
                       value: '$errors',
                       sub: errors > 0 ? '尽快处理' : '无',
                       color: errors > 0 ? Colors.red : Colors.green),
+                  const SizedBox(width: 12),
+                  _Card(
+                      label: '服务宕机',
+                      value: '${status.servicesDown}',
+                      sub: status.servicesDown > 0 ? '需关注' : '正常',
+                      color: status.servicesDown > 0
+                          ? Colors.red
+                          : Colors.green),
+                ]),
+                const SizedBox(height: 12),
+                Row(children: [
+                  _Card(
+                      label: '域名临期',
+                      value: '${status.domainsExpiring}',
+                      sub: '/ ${status.domainsValid} 正常',
+                      color: status.domainsExpiring > 0
+                          ? Colors.orange
+                          : Colors.green),
+                  const SizedBox(width: 12),
+                  _Card(
+                      label: '证书临期',
+                      value: '${status.certsExpiring}',
+                      sub: '/ ${status.certsValid} 正常',
+                      color: status.certsExpiring > 0
+                          ? Colors.orange
+                          : Colors.green),
                 ]),
               ],
             );

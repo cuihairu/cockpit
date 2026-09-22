@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'agents_page.dart';
 import 'alerts_page.dart';
 import 'dashboard_page.dart';
+import 'resources_page.dart';
 import 'settings_page.dart';
 
 /// 登录后主框架：底部四 tab。
@@ -21,6 +22,7 @@ class _HomePageState extends State<HomePage> {
     final pages = [
       const DashboardPage(),
       const AgentsPage(),
+      const ResourcesPage(),
       const AlertsPage(),
       const SettingsPage(),
     ];
@@ -38,6 +40,10 @@ class _HomePageState extends State<HomePage> {
               icon: Icon(Icons.dns_outlined),
               selectedIcon: Icon(Icons.dns),
               label: '主机'),
+          NavigationDestination(
+              icon: Icon(Icons.folder_outlined),
+              selectedIcon: Icon(Icons.folder),
+              label: '资源'),
           NavigationDestination(
               icon: Icon(Icons.notifications_outlined),
               selectedIcon: Icon(Icons.notifications),

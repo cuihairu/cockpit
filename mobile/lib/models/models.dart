@@ -214,3 +214,105 @@ class AuditLog {
         createdAt: j['created_at'] as String? ?? '',
       );
 }
+
+/// 对齐 web Domain：status/daysRemaining 由后端算好，前端不重算。
+class Domain {
+  final String id;
+  final String name;
+  final String registrar;
+  final String expiryDate;
+  final bool autoRenew;
+  final String dnsProvider;
+  final String status; // valid / expiring / expired / 空=未知
+
+  Domain({
+    required this.id,
+    required this.name,
+    required this.registrar,
+    required this.expiryDate,
+    required this.autoRenew,
+    required this.dnsProvider,
+    required this.status,
+  });
+
+  factory Domain.fromJson(Map<String, dynamic> j) => Domain(
+        id: j['id'] as String,
+        name: j['name'] as String? ?? '',
+        registrar: j['registrar'] as String? ?? '',
+        expiryDate: j['expiryDate'] as String? ?? '',
+        autoRenew: j['autoRenew'] as bool? ?? false,
+        dnsProvider: j['dnsProvider'] as String? ?? '',
+        status: j['status'] as String? ?? '',
+      );
+}
+
+/// 对齐 web Certificate（移动端展示子集）。
+class Certificate {
+  final String id;
+  final String commonName;
+  final String type;
+  final String expiryDate;
+  final bool autoRenew;
+  final String? acmeProvider;
+  final int? daysRemaining;
+  final String status; // valid / expiring / expired / 空=未知
+
+  Certificate({
+    required this.id,
+    required this.commonName,
+    required this.type,
+    required this.expiryDate,
+    required this.autoRenew,
+    this.acmeProvider,
+    this.daysRemaining,
+    required this.status,
+  });
+
+  factory Certificate.fromJson(Map<String, dynamic> j) => Certificate(
+        id: j['id'] as String,
+        commonName: j['commonName'] as String? ?? '',
+        type: j['type'] as String? ?? '',
+        expiryDate: j['expiryDate'] as String? ?? '',
+        autoRenew: j['autoRenew'] as bool? ?? false,
+        acmeProvider: j['acmeProvider'] as String?,
+        daysRemaining: (j['daysRemaining'] as num?)?.toInt(),
+        status: j['status'] as String? ?? '',
+      );
+}
+
+/// 对齐 GET /api/status 聚合（仪表盘四组计数）。
+class StatusSummary {
+  final int agentsTotal;
+  final int agentsOnline;
+  final int domainsValid;
+  final int domainsExpiring;
+  final int certsValid;
+  final int certsExpiring;
+  final int servicesDown;
+
+  StatusSummary({
+    required this.agentsTotal,
+    required this.agentsOnline,
+    required this.domainsValid,
+    required this.domainsExpiring,
+    required this.certsValid,
+    required this.certsExpiring,
+    required this.servicesDown,
+  });
+
+  factory StatusSummary.fromJson(Map<String, dynamic> j) {
+    final infra = j['infrastructure'] as Map<String, dynamic>? ?? {};
+    final domains = j['domains'] as Map<String, dynamic>? ?? {};
+    final certs = j['certificates'] as Map<String, dynamic>? ?? {};
+    final services = j['services'] as Map<String, dynamic>? ?? {};
+    return StatusSummary(
+      agentsTotal: (infra['total'] as num?)?.toInt() ?? 0,
+      agentsOnline: (infra['online'] as num?)?.toInt() ?? 0,
+      domainsValid: (domains['valid'] as num?)?.toInt() ?? 0,
+      domainsExpiring: (domains['expiring'] as num?)?.toInt() ?? 0,
+      certsValid: (certs['valid'] as num?)?.toInt() ?? 0,
+      certsExpiring: (certs['expiring'] as num?)?.toInt() ?? 0,
+      servicesDown: (services['down'] as num?)?.toInt() ?? 0,
+    );
+  }
+}

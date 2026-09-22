@@ -84,3 +84,28 @@ extension AuditApi on CockpitApi {
     return AuditLogsPage(data: data, total: total);
   }
 }
+
+extension ResourceApi on CockpitApi {
+  /// GET /api/status（仪表盘聚合）。
+  Future<StatusSummary> status() async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/status');
+    return StatusSummary.fromJson(r.data!);
+  }
+
+  Future<List<Domain>> domains() async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/resources/domains');
+    final data = r.data!['data'] as List<dynamic>? ?? [];
+    return data.map((e) => Domain.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<List<Certificate>> certificates() async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/resources/certificates');
+    final data = r.data!['data'] as List<dynamic>? ?? [];
+    return data
+        .map((e) => Certificate.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+}
