@@ -1,12 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="top" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4080FF"/>
+      <stop offset="1" stop-color="#6BA3FF"/>
+    </linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#165DFF"/>
       <stop offset="1" stop-color="#4080FF"/>
     </linearGradient>
+    <linearGradient id="left" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0E42D2"/>
+      <stop offset="1" stop-color="#165DFF"/>
+    </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
-  <path d="M 17 39 A 15 15 0 1 1 47 39" stroke="#fff" stroke-width="5.5" fill="none" stroke-linecap="round" opacity="0.95"/>
-  <line x1="32" y1="39" x2="41" y2="27" stroke="#fff" stroke-width="5.5" stroke-linecap="round"/>
-  <circle cx="32" cy="39" r="3.4" fill="#fff"/>
+  <!-- 顶面 -->
+  <path d="M519.68 391.168l114.176 65.894-0.717 147.661-119.808 69.223-120.32-70.247-0.051-141.619 126.822-70.912z" fill="url(#top)"/>
+  <!-- 右面 -->
+  <path d="M785.203 242.842l106.496 61.44v151.244L710.298 560.23l-0.461-146.995-112.845-65.229 188.211-105.164z m-80.742-46.592L518.605 302.746 326.4 191.796 511.59 84.89 704.46 196.3z m449.433 196.863v199.885L711.117 847.411l-0.563-199.577 181.145-104.55z" fill="url(#right)"/>
+  <!-- 左面 -->
+  <path d="M316.416 849.92L131.584 743.168V542.72l185.088 106.189-0.256 201.011z m76.8 44.34l-0.102-201.524 120.268 68.966 119.348-68.915-0.922 200.448-120.269 69.325-118.323-68.3h-0.051z m49.05-547.84l-125.338 71.73-0.154 141.005-185.241-108.032V304.282l118.784-68.608 191.795 110.694h0.102z" fill="url(#left)"/>
 </svg>

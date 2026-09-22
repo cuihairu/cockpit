@@ -1,3 +1,5 @@
+<img src="web/public/logo.svg" alt="Cockpit Logo" width="100" height="100">
+
 # Cockpit
 
 个人混合基础设施控制台，用于把分散在本地机房、云 VPS、NAT 后节点上的资源收敛到一个轻量 Server + Agent 控制面。
