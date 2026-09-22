@@ -1,14 +1,6 @@
 name: Deploy to Dev
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'cmd/**'
-      - 'internal/**'
-      - 'web/**'
-      - 'go.mod'
-      - 'go.sum'
   workflow_dispatch:
 
 permissions:
