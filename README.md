@@ -8,11 +8,15 @@
 
 ## 当前能力
 
-- Server 提供 Web UI、HTTP API、Agent WebSocket、认证、审计、告警和 SQLite 持久化。
-- Agent 主动连接 Server，上报心跳、系统指标和能力信息。
-- Inventory YAML 可通过 `cockpit sync` 同步为运行时资源视图。
-- Web UI 支持资源、工作台、监控、设置、审计和远程连接入口。
-- 远程终端、VNC、桌面连接使用短期 ticket，经 Server 和 Agent 转发到目标服务。
+- **控制面基础**：Server 提供 Web UI、HTTP API、Agent WebSocket 接入、TOTP 两步验证、RBAC 用户/角色、审计日志与 SQLite 持久化；Agent 主动连出注册，上报心跳、系统指标与能力标签，NAT 后节点无需暴露入站端口。
+- **资源视图**：`cockpit sync` 把 Inventory YAML 同步为运行时资源视图（计算实例、域名、证书、服务、网关、存储），资源行带拨测心跳条与到期告警。
+- **远程操作**：终端 / VNC / 桌面经短期 ticket 转发，支持会话录制归档；agent 文件浏览与传输；journalctl / Docker 日志尾随与跨机联邦检索。
+- **容器与应用**：Docker 容器/镜像/网络/卷管理；Stacks 按 compose 部署应用（模板库、部署历史、restart/pull 动作）。
+- **备份恢复**：agent 侧定时打包、保留策略、双阶段安全恢复、rclone 异地推送与补传；server 侧面板数据库定时备份（`VACUUM INTO` + 异地推送）。
+- **Web 与证书**：反向代理站点管理（nginx / Traefik 双后端，语法自检、失败回滚）；ACME 证书签发与自动续期（Cloudflare / DNSPod / 阿里云 DNS-01），签发产物自动部署到 agent 指定路径。
+- **域名与 DNS**：多厂商 DNS 记录管理（Cloudflare / DNSPod / 阿里云，A/AAAA/CNAME/TXT/MX/CAA/SRV）、DDNS 动态域名、域名与证书到期台账。
+- **主机运维**：服务管理（systemd / Windows SCM / macOS launchd 三后端）、Cron 定时任务、SMART 磁盘健康巡检、NAS 观测（DSM / TrueNAS / OMV、mdadm / ZFS）、组网观测（WireGuard / ZeroTier / Tailscale / frp 运行态与云端纳管）。
+- **漂移与告警**：配置漂移检测与 CMDB 对照；告警通知多渠道（Herald / ntfy / webhook / Telegram）。
 
 ## 架构
 
@@ -119,6 +123,8 @@ export PRODUCTION=true
 ```
 
 对外部署时将 `server.host` 改为 `0.0.0.0`，并建议通过反向代理提供 HTTPS/WSS。
+
+通知渠道（Herald / ntfy / webhook / Telegram）、DNS 与 ACME 凭据（Cloudflare / DNSPod / 阿里云）、组网云 token（ZeroTier / Tailscale）等完整键位见 [`config/cockpit.yaml`](config/cockpit.yaml) 内注释；密钥类配置建议用环境变量注入（`CLOUDFLARE_API_TOKEN`、`DNSPOD_LOGIN_TOKEN`、`ALIYUN_ACCESS_KEY`、`ZEROTIER_API_TOKEN`、`TAILSCALE_API_TOKEN` 等）。
 
 Docker Compose 部署入口见 [deployments/docker/README.md](deployments/docker/README.md)。
 

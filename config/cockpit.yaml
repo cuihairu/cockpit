@@ -33,12 +33,29 @@ email:
     from_name: "Cockpit"
   base_url: "http://localhost:9000"
 
-# 通知配置（Herald 集成）
+# 通知配置（Herald / ntfy / webhook / Telegram，均可多个、可并存）
 notification:
-  enabled: false  # 默认关闭，需要 Herald 服务时启用
+  enabled: false  # 默认关闭，配置任一渠道后启用
   herald:
     base_url: "http://localhost:8080"
     timeout: 5s
+  # ntfy 渠道（可配多个）
+  # ntfy:
+  #   - server: "https://ntfy.sh"
+  #     topic: "cockpit-alerts"
+  #     token: ""        # 可选，私有主题鉴权
+  #     priority: ""     # 可选 min/low/default/high/urgent，空则按告警级别推导
+  #     timeout: 5s
+  # webhook 渠道（可配多个；secret 作为 X-Cockpit-Secret 头供接收方鉴权）
+  # webhook:
+  #   - url: "https://example.com/cockpit-hook"
+  #     secret: ""
+  #     timeout: 5s
+  # Telegram 渠道（可配多个）
+  # telegram:
+  #   - bot_token: ""
+  #     chat_id: ""
+  #     timeout: 5s
   # 事件类型映射
   events:
     certificate_expired:
@@ -79,9 +96,28 @@ remote_control:
   #       - 22
   #       - 3389
 
-# DNS 管理（Cloudflare API，/dns 页面）
-# token 建议用环境变量 CLOUDFLARE_API_TOKEN 注入（优先于此处）
+# DNS 管理（/dns 页面记录管理、DDNS；凭据同时服务 ACME DNS-01 签发）
+# 各厂商凭据建议用环境变量注入（优先于配置文件）：
+#   CLOUDFLARE_API_TOKEN / DNSPOD_LOGIN_TOKEN / ALIYUN_ACCESS_KEY(+_SECRET)
 dns:
+  # ACME DNS-01 provider：空 = cloudflare（向后兼容）/ dnspod / alidns
+  # provider: ""
   cloudflare:
     api_token: ""
+  # DNSPod 凭据（"ID,Token" 合并格式）
+  # dnspod:
+  #   login_token: ""
+  # 阿里云 AccessKey
+  # alidns:
+  #   access_key: ""
+  #   secret_key: ""
+
+# 组网云管理面（/network 页面云端视图；运行态观测在 agent，管理凭据由 server 直连云 API）
+# token 建议用环境变量 ZEROTIER_API_TOKEN / TAILSCALE_API_TOKEN 注入（优先于配置文件）
+# overlay:
+#   zerotier:
+#     api_token: ""
+#   tailscale:
+#     api_token: ""
+#     tailnet: ""  # 空 = "-"，即 token 所属默认 tailnet
 
