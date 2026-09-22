@@ -406,7 +406,7 @@ const MainLayout = () => {
       colorWeak={false}
       title={settings.siteName}
       logo={logo}
-      navTheme={resolvedTheme}
+      navTheme={resolvedTheme === 'dark' ? 'realDark' : 'light'}
       contentWidth="Fluid"
       location={{ pathname: location.pathname }}
       route={{ path: '/', routes: visibleRoutes } as ProLayoutProps['route']}

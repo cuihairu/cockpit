@@ -52,8 +52,8 @@ const ServerBackupCard = () => {
     queryFn: () => api.getServerBackupConfig(),
   })
 
-  // 编辑态：未改动时从服务端配置派生
-  const enabled = intervalHours ?? (cfg ? cfg.interval_hours > 0 : true)
+  // 编辑态：未改动时从服务端配置派生（Boolean 收敛 number|boolean 联合）
+  const enabled = Boolean(intervalHours ?? (cfg ? cfg.interval_hours > 0 : true))
   const effInterval = intervalHours ?? (cfg?.interval_hours || 24)
   const effRetention = retentionDays ?? (cfg?.retention_days ?? 7)
   const effRemoteDest = remoteDest ?? (cfg?.remote_dest || '')

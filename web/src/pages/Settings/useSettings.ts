@@ -42,7 +42,8 @@ export const useSettings = () => {
   const saveSettings = async (values: GeneralSettingsValues) => {
     setLoading(true)
     try {
-      await api.saveSettings(values)
+      // 表单 InputNumber 清空会产生 null，API 层不收 null → 剔除
+      await api.saveSettings({ ...values, refreshInterval: values.refreshInterval ?? undefined })
       updateSettings({
         siteName: values.siteName ?? settings.siteName,
         refreshInterval: values.refreshInterval ?? settings.refreshInterval,
