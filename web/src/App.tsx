@@ -60,6 +60,7 @@ const Domains = lazy(() => import('./pages/Domains'))
 const Acme = lazy(() => import('./pages/Acme'))
 const Recordings = lazy(() => import('./pages/Recordings'))
 const Settings = lazy(() => import('./pages/Settings'))
+const SetupTOTP = lazy(() => import('./pages/SetupTOTP'))
 const Profile = lazy(() => import('./pages/Profile'))
 const AuditLogs = lazy(() => import('./pages/AuditLogs'))
 const Users = lazy(() => import('./pages/Users'))
@@ -480,6 +481,7 @@ const MainLayout = () => {
             <Route path="/recordings" element={<Recordings />} />
             <Route path="/monitor" element={<Monitor />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/settings/setup-totp" element={<SetupTOTP />} />
             <Route path="/settings/audit-logs" element={<AuditLogs />} />
             <Route path="/access/users" element={<Users />} />
             <Route path="/access/roles" element={<Roles />} />
