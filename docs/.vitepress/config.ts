@@ -40,6 +40,7 @@ export default defineConfig({
           text: '规划',
           items: [
             { text: '参考项目对比与借鉴', link: '/guide/reference-projects' },
+            { text: '真机验收清单', link: '/guide/acceptance-checklist' },
             { text: 'P1 方案：应用部署', link: '/guide/stack-deploy-design' },
             { text: 'OpenWrt Agent 打包设计', link: '/guide/openwrt-agent-design' }
           ]
