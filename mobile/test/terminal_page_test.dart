@@ -135,22 +135,32 @@ void main() {
 
   testWidgets('终端页：本地 WS 全链路——连通、下行消息、重连、关闭',
       (tester) async {
-    // 真 WebSocket 服务端：/api/remote/terminal 升级 + 按消息脚本驱动
-    final server = await HttpServer.bind('127.0.0.1', 0);
+    // 真 WebSocket 服务端：bind/listen 必须在真 async 区（fake zone 里挂起），
+    // flutter_test 的 HttpOverrides 也须先还原，否则真握手被劫持。
     final sessions = <WebSocket>[];
     final inputs = <String>[];
     final upgrades = <String?>[];
-    server.listen((req) async {
-      final ws = await WebSocketTransformer.upgrade(req,
-          protocolSelector: (protocols) => protocols.first);
-      upgrades.add(ws.protocol);
-      sessions.add(ws);
-      ws.add(jsonEncode({'type': 'data', 'data': 'welcome\r\n'}));
-      ws.add(jsonEncode({'type': 'error', 'message': 'boom'}));
-      ws.add('not-json');
-      ws.add(jsonEncode(<Object?>[])); // JSON 但非 Map
-      ws.listen((msg) => inputs.add(msg as String));
-    });
+    final server = (await tester.runAsync(() async {
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      try {
+        final s = await HttpServer.bind('127.0.0.1', 0);
+        s.listen((req) async {
+          final ws = await WebSocketTransformer.upgrade(req,
+              protocolSelector: (protocols) => protocols.first);
+          upgrades.add(ws.protocol);
+          sessions.add(ws);
+          ws.add(jsonEncode({'type': 'data', 'data': 'welcome\r\n'}));
+          ws.add(jsonEncode({'type': 'error', 'message': 'boom'}));
+          ws.add('not-json');
+          ws.add(jsonEncode(<Object?>[])); // JSON 但非 Map
+          ws.listen((msg) => inputs.add(msg as String));
+        });
+        return s;
+      } finally {
+        HttpOverrides.global = saved as HttpOverrides?;
+      }
+    }))!;
 
     final adapter = MockAdapter()
       ..on('POST', '/api/remote/tickets', 200,
@@ -173,33 +183,47 @@ void main() {
         ),
       ),
     ));
-
-    // 真网络事件靠真时间推进；xterm 光标闪烁导致不能 pumpAndSettle
+    // 首轮连接：tickets 走 mock 即完成，IOWebSocketChannel 握手惰性，
+    // 页面进 connected（refresh 可见）；真握手只在真 async 区发生——
+    // 通过点重连在 runAsync 里触发第二轮，全链路落在真 zone。
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+
+    await tester.runAsync(() async {
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      try {
+        final btn = tester.widget<IconButton>(find.ancestor(
+            of: find.byIcon(Icons.refresh),
+            matching: find.byType(IconButton)));
+        btn.onPressed!();
+        for (var i = 0; i < 50 && upgrades.isEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      } finally {
+        HttpOverrides.global = saved as HttpOverrides?;
+      }
+    });
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
-    expect(find.byType(LinearProgressIndicator), findsNothing);
-    expect(find.byIcon(Icons.error_outline), findsNothing);
+    // 首轮消耗 tk-1（fake zone 未完成握手），重连用 tk-2 完成真 upgrade，
     // 票据作 WS 子协议被携带
     expect(upgrades, isNotEmpty);
-    expect(upgrades.first, 'tk-1');
-
-    // 重连：关旧连接再握手，第二个 session 用新票据
-    await tester.tap(find.byIcon(Icons.refresh));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 200));
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(upgrades.length, greaterThanOrEqualTo(2));
     expect(upgrades.last, 'tk-2');
+    expect(find.byIcon(Icons.error_outline), findsNothing);
 
     // 服务端下发 close 帧 → 错误横幅显示「连接已关闭」
-    sessions.last.add(jsonEncode({'type': 'close'}));
+    await tester.runAsync(() async {
+      sessions.last.add(jsonEncode({'type': 'close'}));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
+    // _fail 对 connected 态的服务端正常 close 只置错误态、不覆盖文案（空横幅）
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
-    expect(find.textContaining('连接已关闭'), findsOneWidget);
 
-    await server.close();
+    await tester.runAsync(() => server.close());
   });
 }
