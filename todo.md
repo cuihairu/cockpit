@@ -733,6 +733,15 @@
 - ✅ CI `test.yml` 新增 `go test -race -short ./...` 兜底步骤（此前只有普通 `go test`，这类竞态 CI 抓不到）。
 - ✅ 全仓 `-race -short` 终验通过。
 
+## web 前端存量收口（2026-09-22）
+
+全页面测试系列收官（33/33 页面有测试，Drift 页收尾）后，两笔清掉 web 侧全部存量：
+
+1. ✅ **Agent/资源地域字段对齐后端 API**（8f928baf）：后端 `storage.Agent`/`ComputeInstance` 顶层序列化 `region`/`zone`，从无 `location` 对象；前端类型错位导致 Agents 地域列与筛选、Dashboard 地域列、Docker 面包屑、Workbench 搜索与概览、Network 面板标签在真实环境**恒空**（页面测试 mock 沿用错位 shape 所以从未暴露——mock 数据应以后端真实序列化为准，不能互相抄）。`Agent`/`ComputeInstance` 类型改顶层可选 `region`/`zone`；`Gateway`/`Storage` 后端无地域字段，删除 `location`；`Location` interface 删除；10 处 reader（含 `src/workbench/`）、19 个测试文件 mock 同步迁移；Network 面板标签断言更新为「主机名 · 地域」（修复后地域首次真实显示）。
+2. ✅ **tsc 存量错误清零**（72adcbf8）：`tsc --noEmit` 全仓 0 错误（此前 7 个存量）。navTheme 映射 realDark、ErrorBoundary 未用 React 导入、ServerBackupCard enabled 收敛 Boolean、useSettings 剔除 null refreshInterval、新增 `vite-env.d.ts`（vite/client）。
+
+验收：`pnpm build` 通过；全量 vitest 68 文件 / 473 用例全绿、退出码 0 无 Errors。
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
