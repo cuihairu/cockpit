@@ -80,6 +80,11 @@ class ApiClient {
       },
       onError: (e, handler) async {
         if (e.response?.statusCode != 401) return handler.next(e);
+        // 刷新请求自身的 401 不再触发刷新（否则无限递归），直接交给 onUnauthorized。
+        if (e.requestOptions.extra['skipRefresh'] == true) {
+          await _onUnauthorized?.call();
+          return handler.next(e);
+        }
         // 401 → 尝试刷新一次并重放；刷新失败视为登出。
         try {
           final resp = await dio.post('/api/auth/refresh',
