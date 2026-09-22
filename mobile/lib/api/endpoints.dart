@@ -4,6 +4,8 @@ import 'client.dart';
 
 import '../models/models.dart';
 
+/// 分页响应壳：data + pagination.total。
+
 /// M1 端点封装。响应形状逐一对齐 web `services/api.ts`：
 /// `/agents` 裸数组、`/alerts` 包 `{data}`、Docker 走 `/docker/agents/{id}` 代理。
 class CockpitApi {
@@ -58,5 +60,27 @@ class CockpitApi {
     }
     await client.dio
         .post('/api/docker/agents/$agentId/containers/$containerId/$action');
+  }
+}
+
+class AuditLogsPage {
+  final List<AuditLog> data;
+  final int total;
+
+  AuditLogsPage({required this.data, required this.total});
+}
+
+extension AuditApi on CockpitApi {
+  /// GET /api/admin/audit/logs?page=&page_size=
+  Future<AuditLogsPage> auditLogs({int page = 1, int pageSize = 20}) async {
+    final r = await client.dio.get<Map<String, dynamic>>('/api/admin/audit/logs',
+        queryParameters: {'page': page, 'page_size': pageSize});
+    final d = r.data!;
+    final data = (d['data'] as List<dynamic>? ?? [])
+        .map((e) => AuditLog.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final total =
+        ((d['pagination'] as Map<String, dynamic>?)?['total'] as num?)?.toInt() ?? 0;
+    return AuditLogsPage(data: data, total: total);
   }
 }

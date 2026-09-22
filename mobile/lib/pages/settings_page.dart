@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/auth.dart';
 import '../state/settings.dart';
+import 'audit_page.dart';
 
 /// 设置：server 信息、自签开关、退出登录。
 class SettingsPage extends ConsumerWidget {
@@ -35,6 +36,15 @@ class SettingsPage extends ConsumerWidget {
           },
         ),
         const Divider(),
+        ListTile(
+          leading: const Icon(Icons.history),
+          title: const Text('审计日志'),
+          subtitle: const Text('操作留痕查询'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AuditPage()),
+          ),
+        ),
         ListTile(
           leading: const Icon(Icons.logout),
           title: const Text('退出登录'),

@@ -174,3 +174,43 @@ class TotpVerifyResponse {
         role: j['role'] as String? ?? '',
       );
 }
+
+/// 对齐 GET /api/admin/audit/logs 行（web AuditLog 同款 snake_case）。
+class AuditLog {
+  final int id;
+  final String userId;
+  final String username;
+  final String action;
+  final String resource;
+  final String resourceId;
+  final String details;
+  final String ip;
+  final String status;
+  final String createdAt;
+
+  AuditLog({
+    required this.id,
+    required this.userId,
+    required this.username,
+    required this.action,
+    required this.resource,
+    required this.resourceId,
+    required this.details,
+    required this.ip,
+    required this.status,
+    required this.createdAt,
+  });
+
+  factory AuditLog.fromJson(Map<String, dynamic> j) => AuditLog(
+        id: (j['id'] as num).toInt(),
+        userId: j['user_id'] as String? ?? '',
+        username: j['username'] as String? ?? '',
+        action: j['action'] as String? ?? '',
+        resource: j['resource'] as String? ?? '',
+        resourceId: j['resource_id'] as String? ?? '',
+        details: j['details'] as String? ?? '',
+        ip: j['ip'] as String? ?? '',
+        status: j['status'] as String? ?? '',
+        createdAt: j['created_at'] as String? ?? '',
+      );
+}

@@ -83,6 +83,26 @@ void main() {
       expect(r.tmpToken, 'tmp-x');
     });
 
+    test('AuditLog：admin/audit/logs 行 snake_case 字段', () {
+      final l = AuditLog.fromJson({
+        'id': 42,
+        'user_id': 'u-1',
+        'username': 'admin',
+        'action': 'login',
+        'resource': 'session',
+        'resource_id': '',
+        'details': '{}',
+        'ip': '192.168.1.5',
+        'user_agent': 'Dart/3.13',
+        'status': 'success',
+        'created_at': '2026-09-22T03:00:00Z',
+      });
+      expect(l.id, 42);
+      expect(l.username, 'admin');
+      expect(l.action, 'login');
+      expect(l.status, 'success');
+    });
+
     test('TotpVerifyResponse：换取正式 JWT', () {
       final r = TotpVerifyResponse.fromJson({
         'token': 'jwt-x',
