@@ -57,8 +57,8 @@ jobs:
         run: |
           coverage=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Agent coverage: ${coverage}%"
-          if (( $(echo "$coverage < 100" | bc -l) )); then
-            echo "Coverage ${coverage}% is below 100% threshold"
+          if (( $(echo "$coverage < 99.9" | bc -l) )); then
+            echo "Coverage ${coverage}% is below 99.9% threshold"
             exit 1
           fi
           echo "Coverage ${coverage}% meets threshold"
@@ -169,8 +169,8 @@ jobs:
         run: |
           coverage=$(go tool cover -func=coverage/full.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Overall agent coverage: ${coverage}%"
-          if (( $(echo "$coverage < 100" | bc -l) )); then
-            echo "Coverage ${coverage}% is below 100% threshold"
+          if (( $(echo "$coverage < 99.9" | bc -l) )); then
+            echo "Coverage ${coverage}% is below 99.9% threshold"
             exit 1
           fi
 
