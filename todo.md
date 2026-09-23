@@ -722,6 +722,19 @@
 
 ## 数据竞态收口（2026-09-17）
 
+## 覆盖率收口（2026-09-23）
+
+98.6% → **99.975%**（16029/16033，分包 profile 精确核算），29/31 包 100%。补 16 测试（server 9 + proxy 6 + agent 1，`cov_coverage_gaps_test.go` ×3）+ 修 audit 测试隔离 flaky（`entry_test.go` 14 处 `storage.Open(storage.Config{})` 用固定文件名 `cockpit.db`，测试间互相 `os.Remove` 删表/删文件，`-count=2` 即挂、`./...` 并发必挂——改每测试 TempDir 独立 DB）。audit 54.5%→100.0%，server 99.7%→100.0%，proxy 87.6%→98.5%，agent 99.5%→99.8%（`-tags rdp` 构建 100.0%）。
+
+**剩余 4 语句不可达（只补测试无法覆盖，需改业务或真机）**：
+
+1. `internal/proxy/ssh_session.go:133-137`（3 stmts）：`StdinPipe` 失败分支是防御性死代码——x/crypto/ssh 的 `StdinPipe` 失败条件是 `s.started`（`Shell`/`Start` 经 `s.start()` 设）或 `s.Stdin` 已设，而 `NewSSHSession` 调用序列 `NewSession→RequestPty→StdinPipe→Shell` 下二者皆不可能。实测「pty-req 答复后立刻关 channel」的假服务端只走到 `Shell` 失败（已覆盖），`StdinPipe` 仍成功。要覆盖需删该防御分支（改业务）。
+2. `internal/agent/agent.go:407-412`（1 stmt）：`rdpClientAvailable()` 是编译期常量（`cap_rdp.go` 返回 true / `cap_rdp_stub.go` 返回 false），默认构建恒 false 致 `if` 体不执行。**`-tags rdp` 构建下已覆盖**（agent 100.0%）。要默认构建覆盖需把 `rdpClientAvailable` 改可注入 var（改业务）。
+
+**`-tags rdp` 口径补充**：agent 100.0%，但 `internal/agent/rdp` 82.6%（缺口 `handler.go:72-77`/`143-145` + `session.go` 的 `OnBitmap/OnReady/OnError/OnClose/OnClipboard` **grdp 回调闭包体**）——需真实 RDP 服务器完成握手才能触发（grdp 黑盒库无 mock 接口，`Login` 成功后才注册回调），与真机验收同性质。
+
+**定夺项（等用户拍板）**：接受 99.975% / 删 `StdinPipe` 防御分支 / `rdpClientAvailable` 改可注入 / 口径改 `-tags rdp` 并补真实 RDP 验收。
+
 覆盖率推至 98.6% 后主线转向 `go test -race` 收口，本轮修复三处数据竞态：
 
 1. ✅ `internal/proxy`：测试 mock 的 `messages` 切片被后台协程持锁追加、测试裸读（dbe1e8b0）。
