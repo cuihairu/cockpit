@@ -59,8 +59,8 @@ func TestCovRemoteWSUpgradeFailures(t *testing.T) {
 	}
 	for _, c := range cases {
 		req := covReq(http.MethodGet, "/api/remote/x", nil)
-		req.Header["Sec-WebSocket-Protocol"] = []string{c.ticket} // 合法票据，通过校验进入升级
-		rec := covRec()                                           // recorder 不支持 Hijack → Upgrade 失败
+		req.Header.Add("Sec-WebSocket-Protocol", c.ticket) // 合法票据，通过校验进入升级
+		rec := covRec()                                    // recorder 不支持 Hijack → Upgrade 失败
 		c.handler(rec, req)
 		if rec.Code == 0 {
 			t.Errorf("%s: no status written", c.desc)

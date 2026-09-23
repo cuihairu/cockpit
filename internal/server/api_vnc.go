@@ -41,7 +41,7 @@ var vncUpgrader = websocket.Upgrader{
 // handleVNCWebSocket 处理 VNC WebSocket 连接（二进制透传）
 func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 从 Sec-WebSocket-Protocol 头获取票据
-	protocols := r.Header["Sec-WebSocket-Protocol"]
+	protocols := r.Header.Values("Sec-WebSocket-Protocol")
 	if len(protocols) == 0 {
 		http.Error(w, "Missing ticket in Sec-WebSocket-Protocol header", http.StatusBadRequest)
 		return

@@ -43,7 +43,7 @@ var (
 // handleTerminalWebSocket 处理终端 WebSocket 连接
 func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 从 Sec-WebSocket-Protocol 头获取票据
-	protocols := r.Header["Sec-WebSocket-Protocol"]
+	protocols := r.Header.Values("Sec-WebSocket-Protocol")
 	if len(protocols) == 0 {
 		http.Error(w, "Missing ticket in Sec-WebSocket-Protocol header", http.StatusBadRequest)
 		return
@@ -380,16 +380,16 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		AgentID  string `json:"agent_id"`
-		Host     string `json:"host"`
-		Port     int    `json:"port"`
-		Protocol string `json:"protocol"` // ssh, telnet, vnc, rdp
+		AgentID    string `json:"agent_id"`
+		Host       string `json:"host"`
+		Port       int    `json:"port"`
+		Protocol   string `json:"protocol"` // ssh, telnet, vnc, rdp
 		Username   string `json:"username,omitempty"`
-		Password   string `json:"password,omitempty"` // SSH 口令 / VNC 密码等
+		Password   string `json:"password,omitempty"`    // SSH 口令 / VNC 密码等
 		PrivateKey string `json:"private_key,omitempty"` // SSH PEM 私钥（优先于 Password）
 		Domain     string `json:"domain,omitempty"`
-		Width    int    `json:"width,omitempty"`
-		Height   int    `json:"height,omitempty"`
+		Width      int    `json:"width,omitempty"`
+		Height     int    `json:"height,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

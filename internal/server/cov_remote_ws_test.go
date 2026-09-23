@@ -3,7 +3,7 @@ package server
 // cov_remote_ws_test.go 覆盖 api_remote.go / api_desktop.go / api_vnc.go 的
 // 票据校验、会话生命周期、WebSocket 数据转发与保活循环（done 分支）。
 //
-// 说明：产品代码用 r.Header["Sec-WebSocket-Protocol"]（非规范大小写）直接取
+// 说明：产品代码用 r.Header.Values("Sec-WebSocket-Protocol")（canonical-safe）读取票据
 // 子协议头，而 net/http 会把请求头规范化为 "Sec-Websocket-Protocol"，真实
 // 网络请求永远取不到票据（见报告中的疑似产品 bug）。因此这里在进程内直接
 // 调用 handler，用 net.Pipe + 可 Hijack 的 ResponseWriter 构造完整
@@ -150,8 +150,10 @@ func covDirectWSChan(t *testing.T, handler http.HandlerFunc, path, ticket string
 	req.Header.Set("Upgrade", "websocket")
 	req.Header.Set("Sec-Websocket-Version", "13")
 	if ticket != "" {
-		// 非规范键：与产品代码 r.Header["Sec-WebSocket-Protocol"] 直取对应
-		req.Header["Sec-WebSocket-Protocol"] = []string{ticket}
+		// Header.Add 走 canonical 存储（Sec-Websocket-Protocol），与真实
+		// HTTP server 的 ReadMIMEHeader 行为一致；产品代码经 Header.Values
+		// 读取（同样 canonical-safe）
+		req.Header.Add("Sec-WebSocket-Protocol", ticket)
 	}
 
 	if !wantUpgrade {

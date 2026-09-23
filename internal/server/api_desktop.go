@@ -58,7 +58,7 @@ var desktopUpgrader = websocket.Upgrader{
 // handleDesktopWebSocket 处理桌面 WebSocket 连接
 func (s *Server) handleDesktopWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 从 Sec-WebSocket-Protocol 头获取票据
-	protocols := r.Header["Sec-WebSocket-Protocol"]
+	protocols := r.Header.Values("Sec-WebSocket-Protocol")
 	if len(protocols) == 0 {
 		http.Error(w, "Missing ticket in Sec-WebSocket-Protocol header", http.StatusBadRequest)
 		return
