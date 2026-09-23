@@ -4,6 +4,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -213,3 +215,23 @@ func TestHandleProxyNewSSHSessionFail(t *testing.T) {
 	}
 }
 
+
+// TestNewSSHSessionStdinPipeFail 覆盖 StdinPipe 失败分支（防御性错误处理）。
+// x/crypto/ssh 的 StdinPipe 失败条件是 s.started（仅 Shell→start() 设）或
+// s.Stdin 已设，NewSSHSession 调用序列 NewSession→RequestPty→StdinPipe→Shell
+// 下二者皆不可能——经 stdinPipeFn 注入点触发（与 rdpClientAvailable var 化
+// 同性质：行为中性的测试注入点，生产恒调 s.StdinPipe()）。
+func TestNewSSHSessionStdinPipeFail(t *testing.T) {
+	old := stdinPipeFn
+	stdinPipeFn = func(s *ssh.Session) (io.WriteCloser, error) {
+		return nil, errors.New("injected stdin pipe failure")
+	}
+	defer func() { stdinPipeFn = old }()
+
+	// NewSession/RequestPty 成功后走到 StdinPipe
+	ts := startRejectSSHServer(t, false, false, false)
+	_, err := NewSSHSession(ts.addr(), "u", "p", "", 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "stdin pipe") {
+		t.Errorf("err = %v, want stdin pipe failure", err)
+	}
+}

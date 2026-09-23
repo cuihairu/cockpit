@@ -70,6 +70,14 @@ func ResetTOFUHostKeys() {
 	tofuHostKeysMu.Unlock()
 }
 
+// stdinPipeFn StdinPipe 调用点。var 化（非内联）仅为测试注入失败分支——
+// x/crypto/ssh 的 StdinPipe 失败条件（s.started / Stdin 已设）在
+// NewSSHSession 调用序列下不可能成立，防御性错误处理无法经黑盒触发；
+// 生产行为不变（恒调 s.StdinPipe()）。
+var stdinPipeFn = func(s *ssh.Session) (io.WriteCloser, error) {
+	return s.StdinPipe()
+}
+
 // NewSSHSession 建立 SSH 终端会话。
 // target 形如 "host:22"；认证：PrivateKey（PEM）优先，其次 Password；
 // rows/cols 为 PTY 初始尺寸（<=0 取 24x80）。
@@ -129,7 +137,7 @@ func NewSSHSession(target, username, password, privateKey string, rows, cols int
 		return nil, fmt.Errorf("SSH request PTY failed: %w", err)
 	}
 
-	stdin, err := sess.StdinPipe()
+	stdin, err := stdinPipeFn(sess)
 	if err != nil {
 		_ = sess.Close()
 		_ = client.Close()
