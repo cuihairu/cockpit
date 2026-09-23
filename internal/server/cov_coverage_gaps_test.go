@@ -137,14 +137,14 @@ func TestGuacamoleHandshakeWriteFail(t *testing.T) {
 		covTicket(t, s, map[string]string{
 			"agent_id": "a", "host": "10.0.0.9", "port": "3389", "protocol": "rdp",
 		}))
-	t.Cleanup(func() { conn.Close() })
 	// net.Pipe 同步无缓冲：writeWS(uuid) 阻塞到读完，必须先消费首帧放行
 	_, _, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("read uuid frame: %v", err)
 	}
-	// 分支触发即达成覆盖（select 响应后 RST → handshake write 失败 → 记日志）；
-	// handler 退出时机受 RST 传播影响，不强等（net.Pipe deadline 10s 兜底）
+	// 分支触发即达成覆盖（select 响应后 RST → handshake write 失败）；
+	// 显式关 conn + 等 goroutine 退出，防测试间 net.Pipe 状态残留
+	conn.Close()
 	time.Sleep(500 * time.Millisecond)
 }
 
@@ -257,10 +257,19 @@ func TestStartWithDNSProviderEnabled(t *testing.T) {
 	}
 }
 
-// startClosingGuacd 假 guacd：回 select 响应后立即 RST 关闭——让网关的
-// select write + read select 成功、handshake（size+connect）write 失败，
-// 确定性触发 handshake-write-fail 分支（不依赖 RST 传播时序）。
-func startClosingGuacd(t *testing.T) string {
+// guacStubMode 假 guacd 的失败点（确定性触发 select 握手各错误分支）。
+type guacStubMode int
+
+const (
+	guacStubOK             guacStubMode = iota // 回 select 响应并保持连接
+	guacStubFailSelectWrite                    // Accept 后立即 RST：select write 失败
+	guacStubFailReadSelect                     // Accept 后 EOF：read select 响应失败
+	guacStubFailHandshakeWrite                 // 回 select 响应后 RST：handshake write 失败
+)
+
+// startGuacStub 确定性假 guacd：按 mode 精确控制握手失败点（不依赖 RST 传播
+// 时序——TCP 写缓冲让「Write 后立即 Close(RST)」的落点不确定，曾致 flaky）。
+func startGuacStub(t *testing.T, mode guacStubMode) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -273,16 +282,53 @@ func startClosingGuacd(t *testing.T) string {
 			if err != nil {
 				return
 			}
-			// 先回 select 响应（真 guacd 行为）：网关 read select 成功后
-			// 才发 size+connect——此时 RST 让 handshake write 失败
-			_, _ = c.Write([]byte("6.select,8.hostname,4.port;"))
-			// SetLinger(0) 让 Close 发 RST 而非 FIN：
-			// 否则首次 Write 进内核缓冲不报错，handshake 写失败分支走不到
-			if tc, ok := c.(*net.TCPConn); ok {
-				_ = tc.SetLinger(0)
+			// 失败模式同步处理（Accept 后立即 Close）：go 调度延迟会让
+			// RST 落点不确定（网关 Write 可能先于 Close），同步保时序确定
+			if mode == guacStubOK {
+				go serveGuacStub(c, mode)
+			} else {
+				serveGuacStub(c, mode)
 			}
-			_ = c.Close()
 		}
 	}()
 	return ln.Addr().String()
 }
+
+func serveGuacStub(c net.Conn, mode guacStubMode) {
+	defer c.Close()
+	if tc, ok := c.(*net.TCPConn); ok {
+		// SetLinger(0) 让 Close 发 RST 而非 FIN：FIN 不挡对端 Write，
+		// 首次 Write 进内核缓冲不报错，write-fail 分支走不到
+		_ = tc.SetLinger(0)
+	}
+	switch mode {
+	case guacStubFailSelectWrite:
+		// 立即 RST：网关 select write 失败
+		return
+	case guacStubFailReadSelect:
+		// 立即 FIN/RST 但不回数据：网关 read select 响应失败
+		return
+	case guacStubOK, guacStubFailHandshakeWrite:
+		// 先读掉 select 指令再回响应（确定性同步点）：网关 read select 成功
+		buf := make([]byte, 256)
+		_, _ = c.Read(buf)
+		_, _ = c.Write([]byte("6.select,8.hostname,4.port;"))
+		if mode == guacStubFailHandshakeWrite {
+			// 响应已写入内核缓冲 + RST：网关 read select 拿到响应后
+			// handshake write 撞 RST 失败
+			return
+		}
+		// guacStubOK：读掉 size+connect 保持连接（供全链路测试）
+		for {
+			if _, err := c.Read(buf); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// startClosingGuacd 兼容旧名（handshake-write-fail 场景）。
+func startClosingGuacd(t *testing.T) string {
+	return startGuacStub(t, guacStubFailHandshakeWrite)
+}
+

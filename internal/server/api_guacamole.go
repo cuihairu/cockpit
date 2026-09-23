@@ -448,10 +448,8 @@ func guacIsInternal(frame []byte) bool {
 // guacdToWS guacd → 浏览器：按 Guacamole 指令边界（分号结尾）切分后
 // 写 WS 文本帧。切分只做边界识别（分号），不解析参数内容。
 func (gs *GuacamoleSession) guacdToWS() {
+	// guacdRd 在握手阶段建立（select 响应消费用），总为非 nil
 	reader := gs.guacdRd
-	if reader == nil {
-		reader = bufio.NewReaderSize(gs.guacd, guacamoleReadBuf)
-	}
 	var pending []byte
 	buf := make([]byte, 32*1024)
 	for {
