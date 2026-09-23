@@ -199,9 +199,15 @@ func covStartGuacd(t *testing.T) *covGuacdServer {
 		for {
 			n, err := c.Read(buf)
 			if n > 0 {
+				got := string(buf[:n])
 				g.mu.Lock()
-				g.handled = append(g.handled, string(buf[:n]))
+				g.handled = append(g.handled, got)
 				g.mu.Unlock()
+				// Guacamole 协议握手：收到 select 后回参数列表指令
+				//（真 guacd 行为；网关读此响应后才发 size+connect）
+				if strings.Contains(got, "6.select,") {
+					_, _ = c.Write([]byte("6.select,8.hostname,4.port;"))
+				}
 			}
 			if err != nil {
 				return
@@ -263,8 +269,11 @@ func TestGuacamoleTunnelFullFlow(t *testing.T) {
 		return strings.Contains(g.handshakeText(), "7.connect")
 	})
 	hs := g.handshakeText()
-	if !strings.HasPrefix(hs, "4.size,4.1024,3.768") {
-		t.Errorf("handshake should start with size, got %q", hs)
+	if !strings.HasPrefix(hs, "6.select,3.rdp;") {
+		t.Errorf("handshake should start with select, got %q", hs)
+	}
+	if !strings.Contains(hs, "4.size,4.1024,3.768") {
+		t.Errorf("handshake missing size, got %q", hs)
 	}
 	for _, want := range []string{"username=admin", "password=pw", "hostname=10.0.0.9"} {
 		if !strings.Contains(hs, want) {

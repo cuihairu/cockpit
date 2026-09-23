@@ -71,6 +71,7 @@ type GuacamoleSession struct {
 	Port     int
 	ClientWS *websocket.Conn
 	guacd    net.Conn
+	guacdRd  *bufio.Reader // 握手阶段建立，guacdToWS 复用（select 响应不丢）
 	Created  time.Time
 
 	writeMu sync.Mutex // gorilla WS 单写者
@@ -324,8 +325,24 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	// 这是 tunnel 层（浏览器↔网关），不进 guacd。
 	session.writeWS([]byte(guacEncode("", sessionID)))
 
-	// 5b. 握手指令发 guacd：size → connect（音频/视频不传 = 不启用，
-	// 音频放阶段二，见设计风险章节）
+	// 5b. 握手（Guacamole 协议，设计 line 91 的 select/size/connect 序列）：
+	// select → guacd 回参数列表 → size + connect。音频/视频不传 = 不启用
+	//（音频放阶段二，见设计风险章节）。
+	hsReader := bufio.NewReaderSize(guacdConn, guacamoleReadBuf)
+	if _, err := guacdConn.Write([]byte(guacEncode("select", protocolStr))); err != nil {
+		log.Printf("Guacamole: select write failed: %v", err)
+		conn.Close()
+		_ = guacdConn.Close()
+		return
+	}
+	// 读 guacd 的 select 响应（参数名列表指令）——网关不解析内容，但必须
+	// 消费掉（共享 reader 才能继续读后续 img/sync 流）
+	if _, err := hsReader.ReadString(';'); err != nil {
+		log.Printf("Guacamole: read select response failed: %v", err)
+		conn.Close()
+		_ = guacdConn.Close()
+		return
+	}
 	if width <= 0 {
 		width = 1280
 	}
@@ -343,6 +360,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		_ = guacdConn.Close()
 		return
 	}
+	session.guacdRd = hsReader
 
 	// 5c. 录制元数据登记（M3 D2）：会话开始即登记（Format=guac），保持与
 	// .cast「进行中也在列」语义一致；文件由 guacd 落盘、会话结束时收集
@@ -430,7 +448,10 @@ func guacIsInternal(frame []byte) bool {
 // guacdToWS guacd → 浏览器：按 Guacamole 指令边界（分号结尾）切分后
 // 写 WS 文本帧。切分只做边界识别（分号），不解析参数内容。
 func (gs *GuacamoleSession) guacdToWS() {
-	reader := bufio.NewReaderSize(gs.guacd, guacamoleReadBuf)
+	reader := gs.guacdRd
+	if reader == nil {
+		reader = bufio.NewReaderSize(gs.guacd, guacamoleReadBuf)
+	}
 	var pending []byte
 	buf := make([]byte, 32*1024)
 	for {
