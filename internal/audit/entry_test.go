@@ -1,7 +1,7 @@
 package audit
 
 import (
-	"os"
+	"path/filepath"
 
 	"github.com/cuihairu/cockpit/internal/storage"
 )
@@ -237,15 +237,12 @@ func TestLogEntryAllCombinations(t *testing.T) {
 // ============ Logger Tests ============
 
 func TestNewLogger(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -259,15 +256,12 @@ func TestNewLogger(t *testing.T) {
 }
 
 func TestLoggerLogSuccess(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -279,15 +273,12 @@ func TestLoggerLogSuccess(t *testing.T) {
 }
 
 func TestLoggerLogFailure(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -299,15 +290,12 @@ func TestLoggerLogFailure(t *testing.T) {
 }
 
 func TestLoggerLogLoginSuccess(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -319,15 +307,12 @@ func TestLoggerLogLoginSuccess(t *testing.T) {
 }
 
 func TestLoggerLogLoginFailure(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -339,15 +324,12 @@ func TestLoggerLogLoginFailure(t *testing.T) {
 }
 
 func TestLoggerLogLogout(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -359,15 +341,12 @@ func TestLoggerLogLogout(t *testing.T) {
 }
 
 func TestLoggerLogResource(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -379,15 +358,12 @@ func TestLoggerLogResource(t *testing.T) {
 }
 
 func TestLoggerLogWithNilDetails(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -399,15 +375,12 @@ func TestLoggerLogWithNilDetails(t *testing.T) {
 }
 
 func TestLoggerLogAllActions(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -427,15 +400,12 @@ func TestLoggerLogAllActions(t *testing.T) {
 }
 
 func TestLoggerLogWithUserID(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -455,15 +425,12 @@ func TestLoggerLogWithUserID(t *testing.T) {
 }
 
 func TestLoggerLogTOTPEnabled(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -475,15 +442,12 @@ func TestLoggerLogTOTPEnabled(t *testing.T) {
 }
 
 func TestLoggerLogTOTPDisabled(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -495,15 +459,12 @@ func TestLoggerLogTOTPDisabled(t *testing.T) {
 }
 
 func TestLoggerLogTOTPVerified(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
@@ -522,15 +483,12 @@ func TestLoggerLogTOTPVerified(t *testing.T) {
 }
 
 func TestLoggerLogTOTPFailed(t *testing.T) {
-	db, err := storage.Open(storage.Config{})
+	db, err := storage.Open(storage.Config{Path: filepath.Join(t.TempDir(), "audit.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		db.Close()
-		os.Remove("cockpit.db")
-		os.Remove("cockpit.db-shm")
-		os.Remove("cockpit.db-wal")
 	}()
 
 	logger := NewLogger(db)
