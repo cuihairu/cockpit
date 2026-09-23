@@ -3,11 +3,15 @@ package server
 import (
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cuihairu/cockpit/internal/config"
+	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/gorilla/websocket"
 )
 
@@ -414,4 +418,180 @@ func TestGuacamoleTicketViaQuery(t *testing.T) {
 	})
 	conn.Close()
 	covWaitHandlerExit(t, "query ticket session close", tDone)
+}
+
+// ============ M3：.guac 录制收集与 Format 分流 ============
+
+func TestRecordingExt(t *testing.T) {
+	// cast=asciinema 流（含空值，兼容 M1/M2 旧数据）；guac=Guacamole 会话流
+	for _, c := range []struct {
+		format string
+		want   string
+	}{
+		{"guac", ".guac"},
+		{"cast", ".cast"},
+		{"", ".cast"},
+		{"other", ".cast"},
+	} {
+		if got := recordingExt(c.format); got != c.want {
+			t.Errorf("recordingExt(%q) = %q, want %q", c.format, got, c.want)
+		}
+	}
+}
+
+func TestGuacRecordingCollectAndFinish(t *testing.T) {
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+	g := covStartGuacd(t)
+	// guacd 录制目录与 server 收集源同一路径（M3 D3：两侧视角合一）
+	t.Setenv("GUACD_RECORDING_PATH", t.TempDir())
+
+	ticket := covTicket(t, s, map[string]string{
+		"agent_id": "agent-rec", "host": "10.0.0.9", "port": "3389", "protocol": "rdp",
+	})
+	conn, _, tDone := covDirectWSJoined(t, s.handleGuacamoleWebSocket, "/api/remote/guacamole", ticket)
+	t.Cleanup(func() { conn.Close() })
+
+	// tunnel UUID 帧（net.Pipe 同步语义下必须先消费）
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read uuid frame: %v", err)
+	}
+	covWaitGone(t, "handshake", func() bool {
+		return strings.Contains(g.handshakeText(), "7.connect")
+	})
+
+	// 会话开始登记元数据（Format=guac，进行中也在列）
+	var sid string
+	covWaitGone(t, "recording meta", func() bool {
+		list, err := s.db.ListTerminalRecordings(10)
+		if err != nil || len(list) == 0 {
+			return false
+		}
+		rec := list[0]
+		if rec.Format != "guac" || rec.Protocol != "rdp" {
+			t.Fatalf("recording meta = %+v, want format=guac protocol=rdp", rec)
+		}
+		if rec.DurationMs != 0 {
+			t.Errorf("in-progress duration = %d, want 0", rec.DurationMs)
+		}
+		sid = rec.SessionID
+		return true
+	})
+
+	// 模拟 guacd 落盘 <sid>.guac（真实 guacd 写该文件；测试直接造）
+	guacDir := guacamoleRecordingPath()
+	if err := os.MkdirAll(guacDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	guacSrc := filepath.Join(guacDir, sid+".guac")
+	if err := os.WriteFile(guacSrc, []byte("fake-guac-bytes"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 关闭会话 → 收集到 recordingsDir + 回填 duration/bytes
+	conn.Close()
+	covWaitHandlerExit(t, "guac recording session close", tDone)
+
+	covWaitGone(t, "collected .guac", func() bool {
+		dst := filepath.Join(s.recordingsDir(), sid+".guac")
+		info, err := os.Stat(dst)
+		return err == nil && info.Size() == int64(len("fake-guac-bytes"))
+	})
+	// 源文件已清（防 guacd 卷膨胀）
+	if _, err := os.Stat(guacSrc); !os.IsNotExist(err) {
+		t.Errorf("source .guac should be removed after collect, stat err = %v", err)
+	}
+	// 元数据回填
+	covWaitGone(t, "recording meta finished", func() bool {
+		rec, err := s.db.GetTerminalRecording(sid)
+		return err == nil && rec.DurationMs > 0 && rec.Bytes == int64(len("fake-guac-bytes"))
+	})
+}
+
+func TestGuacRecordingDisabledNotRegistered(t *testing.T) {
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+	g := covStartGuacd(t)
+	t.Setenv("GUACD_RECORDING_PATH", t.TempDir())
+	// 关闭录制开关（M3 D6：复用 recording.enabled）
+	if err := s.db.SetSetting(RecordingEnabledSettingKey, "false"); err != nil {
+		t.Fatal(err)
+	}
+
+	ticket := covTicket(t, s, map[string]string{
+		"agent_id": "agent-norec", "host": "10.0.0.9", "port": "5900", "protocol": "vnc",
+	})
+	conn, _, tDone := covDirectWSJoined(t, s.handleGuacamoleWebSocket, "/api/remote/guacamole", ticket)
+	t.Cleanup(func() { conn.Close() })
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read uuid frame: %v", err)
+	}
+	covWaitGone(t, "handshake", func() bool {
+		return strings.Contains(g.handshakeText(), "7.connect")
+	})
+	// 关闭录制 → 不登记元数据、connect 指令不带 recording-*
+	if strings.Contains(g.handshakeText(), "recording-") {
+		t.Errorf("recording disabled should not carry recording-*: %q", g.handshakeText())
+	}
+	conn.Close()
+	covWaitHandlerExit(t, "no-recording session close", tDone)
+	list, err := s.db.ListTerminalRecordings(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Errorf("recording disabled should not register meta: %+v", list)
+	}
+}
+
+func TestRecordingFormatSuffixInREST(t *testing.T) {
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+
+	// guac 形态：/{sid}/cast 按 Format 分流读 .guac（URL 不变，语义是取录制内容）
+	sid := "11111111-2222-4333-8444-555555555555"
+	if err := s.db.CreateTerminalRecording(&storage.TerminalRecording{
+		SessionID: sid, Username: "u", AgentID: "a", Host: "h", Port: 3389,
+		Protocol: "rdp", Format: "guac", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(s.recordingsDir(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.recordingsDir(), sid+".guac"), []byte("guac-bytes"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := covRec()
+	s.handleRecordingCast(rec, covReq(http.MethodGet, "/api/recordings/"+sid+"/cast", nil), sid)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("guac content code = %d", rec.Code)
+	}
+	if rec.Body.String() != "guac-bytes" {
+		t.Errorf("guac content = %q, want guac-bytes", rec.Body.String())
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, ".guac") {
+		t.Errorf("Content-Disposition = %q, want .guac", cd)
+	}
+
+	// cast 形态（空 Format 兼容旧数据）走 .cast
+	sid2 := "22222222-3333-4444-8555-666666666666"
+	if err := s.db.CreateTerminalRecording(&storage.TerminalRecording{
+		SessionID: sid2, Username: "u", AgentID: "a", Host: "h", Port: 22,
+		Protocol: "ssh", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.recordingsDir(), sid2+".cast"), []byte("cast-bytes"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rec2 := covRec()
+	s.handleRecordingCast(rec2, covReq(http.MethodGet, "/api/recordings/"+sid2+"/cast", nil), sid2)
+	if rec2.Body.String() != "cast-bytes" {
+		t.Errorf("cast content = %q, want cast-bytes", rec2.Body.String())
+	}
+	if cd := rec2.Header().Get("Content-Disposition"); !strings.Contains(cd, ".cast") {
+		t.Errorf("Content-Disposition = %q, want .cast", cd)
+	}
 }

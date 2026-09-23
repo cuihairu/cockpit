@@ -12,13 +12,16 @@ import (
 
 // TerminalRecording 终端会话录制元数据
 type TerminalRecording struct {
-	ID         uint      `gorm:"primarykey" json:"id"`
-	SessionID  string    `gorm:"uniqueIndex;size:64" json:"sessionId"`
-	Username   string    `gorm:"index;size:64" json:"username"`
-	AgentID    string    `gorm:"size:64" json:"agentId"`
-	Host       string    `gorm:"size:255" json:"host"`
-	Port       int       `json:"port"`
-	Protocol   string    `gorm:"size:16" json:"protocol"`
+	ID        uint   `gorm:"primarykey" json:"id"`
+	SessionID string `gorm:"uniqueIndex;size:64" json:"sessionId"`
+	Username  string `gorm:"index;size:64" json:"username"`
+	AgentID   string `gorm:"size:64" json:"agentId"`
+	Host      string `gorm:"size:255" json:"host"`
+	Port      int    `json:"port"`
+	Protocol  string `gorm:"size:16" json:"protocol"`
+	// Format 录制内容形态：cast（asciinema v2 终端流，默认，空值兼容旧数据）
+	// 或 guac（Guacamole 会话流，guacd 落盘后收集，见 todo.md M3 D1）
+	Format     string    `gorm:"size:8" json:"format"`
 	StartedAt  time.Time `json:"startedAt"`
 	DurationMs int64     `json:"durationMs"` // 结束时回填，0 = 进行中
 	Bytes      int64     `json:"bytes"`      // 结束时回填

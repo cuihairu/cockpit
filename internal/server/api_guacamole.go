@@ -8,12 +8,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/audit"
+	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -140,9 +142,67 @@ func guacConnectArgs(protocol, host string, port int, params map[string]string, 
 	return args
 }
 
-// guacamoleRecordingPath guacd 侧录制目录（容器内路径，对应
-// deployments/guacd 的 guacd-recordings 卷挂载点）。
-func guacamoleRecordingPath() string { return "/var/lib/guacamole" }
+// guacdRecordingPathEnv guacd 录制目录（M3 D3）：同一路径同时作 guacd 的
+// recording-path 参数（guacd 内路径）与 server 的收集源路径——同机部署即
+// 同目录；Docker 部署把同一卷挂到两侧同路径（deployments/guacd 的
+// guacd-recordings 卷挂载点）。两侧视角合一避免双配置漂移。
+const guacdRecordingPathEnv = "GUACD_RECORDING_PATH"
+
+// guacamoleRecordingPath guacd 侧录制目录（可经 GUACD_RECORDING_PATH 覆盖）。
+func guacamoleRecordingPath() string {
+	if v := os.Getenv(guacdRecordingPathEnv); v != "" {
+		return v
+	}
+	return "/var/lib/guacamole"
+}
+
+// collectGuacRecording 会话结束时把 guacd 卷里的 <sid>.guac 收到
+// recordingsDir（M3 D2）并回填元数据。跨分区用 copy+remove（非 rename）；
+// 源文件缺失静默跳过（guacd 未写或已被外部清理），失败只记日志不阻塞
+// 会话出口路径（与 .cast 的「写失败停录不影响转发」同纪律）。
+func (s *Server) collectGuacRecording(gs *GuacamoleSession) {
+	src := filepath.Join(guacamoleRecordingPath(), gs.ID+".guac")
+	info, err := os.Stat(src)
+	if err != nil {
+		// 未开录制（connect 指令未带 recording-*）或 guacd 未落盘
+		return
+	}
+	dst := filepath.Join(s.recordingsDir(), gs.ID+".guac")
+	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+		log.Printf("Guacamole: create recordings dir failed: %v", err)
+		return
+	}
+	if err := copyFile(src, dst, 0600); err != nil {
+		log.Printf("Guacamole: collect %s failed: %v", gs.ID, err)
+		return
+	}
+	_ = os.Remove(src) // 收完即清 guacd 卷，防卷膨胀
+	duration := time.Since(gs.Created).Milliseconds()
+	if err := s.db.FinishTerminalRecording(gs.ID, duration, info.Size()); err != nil {
+		log.Printf("Guacamole: finish recording meta %s failed: %v", gs.ID, err)
+	}
+	// 异地归档（不拖会话出口路径，与 .cast M2 D16 同款）
+	go s.pushRecordingRemote(gs.ID)
+}
+
+// copyFile 跨分区复制（guacd 卷 → recordingsDir 可能不同挂载点，
+// os.Rename 跨设备会失败）。
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
 
 // registerGuacamoleAPI 注册 Guacamole 隧道端点
 func (s *Server) registerGuacamoleAPI(mux *http.ServeMux) {
@@ -283,6 +343,23 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// 5c. 录制元数据登记（M3 D2）：会话开始即登记（Format=guac），保持与
+	// .cast「进行中也在列」语义一致；文件由 guacd 落盘、会话结束时收集
+	if s.recordingEnabled() {
+		if err := s.db.CreateTerminalRecording(&storage.TerminalRecording{
+			SessionID: sessionID,
+			Username:  ticket.Username,
+			AgentID:   agentID,
+			Host:      host,
+			Port:      port,
+			Protocol:  protocolStr,
+			Format:    "guac",
+			StartedAt: time.Now(),
+		}); err != nil {
+			log.Printf("Guacamole: create recording meta %s failed: %v", sessionID, err)
+		}
+	}
+
 	// 6. 审计开始（复用 auditRemoteStart；不含口令——connect 参数的
 	// password 不进审计详情）
 	s.auditRemoteStart(audit.ActionRemoteStart, ticket.UserID, ticket.Username,
@@ -403,6 +480,10 @@ func (s *Server) closeGuacamoleSession(gs *GuacamoleSession) {
 		gs.ClientWS.Close()
 		_ = gs.guacd.Close()
 		log.Printf("Guacamole session closed: %s", gs.ID)
+
+		// M3 D2：收集 guacd 卷里的 .guac → recordingsDir（先于审计，
+		// 文件与元数据同刻回填；失败只记日志不阻塞审计出口）
+		s.collectGuacRecording(gs)
 
 		// 审计结束（含 duration；不含口令）
 		s.auditRemoteEnd(gs.UserID, gs.Username, "", "",

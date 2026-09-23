@@ -27,6 +27,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import { formatBytes, formatDuration } from '@/utils/format'
+import GuacPlayer from '@/components/GuacPlayer'
 import type { TerminalRecording } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 import { PermGuard } from '@/components/PermGuard'
@@ -71,6 +72,44 @@ const parseCast = (text: string): CastFile => {
 interface PlayerProps {
   recording: TerminalRecording | null
   onClose: () => void
+}
+
+// GuacPlaybackModal 轻量 .guac 回放：Guacamole.SessionRecording 承担解析与
+// 回放（todo.md M3 D5），本 Modal 只负责取二进制内容 + 挂 GuacPlayer
+const GuacPlaybackModal = ({ recording, onClose }: PlayerProps) => {
+  const [blob, setBlob] = useState<Blob | null>(null)
+
+  useEffect(() => {
+    if (!recording) return
+    let cancelled = false
+    void api
+      .getRecordingBlob(recording.sessionId)
+      .then((b) => {
+        if (!cancelled) setBlob(b)
+      })
+      .catch((err) => {
+        if (!cancelled) message.error(getApiErrorMessage(err, '加载录制内容失败'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [recording])
+
+  return (
+    <Modal
+      title={`会话录制回放（Guacamole）· ${recording?.host ?? ''}`}
+      open={!!recording}
+      onCancel={onClose}
+      footer={null}
+      width={1080}
+    >
+      {blob ? (
+        <GuacPlayer blob={blob} />
+      ) : (
+        <div style={{ color: '#888', padding: 24 }}>加载录制内容…</div>
+      )}
+    </Modal>
+  )
 }
 
 // PlaybackModal 轻量 cast 回放：逐事件按时间差写 xterm，倍速切换即重启
@@ -276,7 +315,7 @@ const Recordings = () => {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${rec.sessionId}.cast`
+      a.download = `${rec.sessionId}${rec.format === 'guac' ? '.guac' : '.cast'}`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
@@ -293,6 +332,13 @@ const Recordings = () => {
       dataIndex: 'protocol',
       width: 90,
       render: (p: string) => <Tag color={PROTOCOL_COLOR[p] ?? 'default'}>{p}</Tag>,
+    },
+    {
+      title: '格式',
+      dataIndex: 'format',
+      width: 80,
+      render: (f?: string) =>
+        f === 'guac' ? <Tag color="purple">guac</Tag> : <Tag>cast</Tag>,
     },
     {
       title: '时长',
@@ -392,7 +438,12 @@ const Recordings = () => {
         录制终端输出流（asciinema v2 格式，可用 asciinema play 离线回放）；
         出于安全不录制键盘输入（含密码）。默认保留 7 天，过期自动清理。
       </Typography.Text>
-      <PlaybackModal recording={playing} onClose={() => setPlaying(null)} />
+      {playing && playing.format !== 'guac' && (
+        <PlaybackModal recording={playing} onClose={() => setPlaying(null)} />
+      )}
+      {playing && playing.format === 'guac' && (
+        <GuacPlaybackModal recording={playing} onClose={() => setPlaying(null)} />
+      )}
     </Card>
   )
 }

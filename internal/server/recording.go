@@ -50,22 +50,36 @@ func (s *Server) recordingRemoteDest() string {
 	return v
 }
 
+// recordingExt 按录制内容形态定文件后缀（M3 D4）：guac = Guacamole 会话流，
+// 其余（含空值）= asciinema v2 .cast（兼容 M1/M2 旧数据）。
+func recordingExt(format string) string {
+	if format == "guac" {
+		return ".guac"
+	}
+	return ".cast"
+}
+
 // pushRecordingRemote 录制结束后的异地归档（M2 D16 异步调用：不拖会话
 // 出口路径）。remote_dest 未配置时静默跳过；失败发 recording.remote-failed。
+// 后缀按录制形态（M3 D4：.cast / .guac 同目录同索引，仅内容形态不同）。
 func (s *Server) pushRecordingRemote(sessionID string) {
 	remoteDest := s.recordingRemoteDest()
 	if remoteDest == "" {
 		return
 	}
-	local := filepath.Join(s.recordingsDir(), sessionID+".cast")
-	log.Printf("[remote] rclone copy %s.cast → %s", sessionID, remoteDest)
+	ext := ".cast"
+	if rec, err := s.db.GetTerminalRecording(sessionID); err == nil && rec != nil {
+		ext = recordingExt(rec.Format)
+	}
+	local := filepath.Join(s.recordingsDir(), sessionID+ext)
+	log.Printf("[remote] rclone copy %s%s → %s", sessionID, ext, remoteDest)
 	if err := rcloneCopyLocalFile(local, remoteDest); err != nil {
 		log.Printf("[remote] recording archive push failed: %v", err)
 		if s.notifier != nil {
 			s.notifier.SendNonBlocking(&notification.Notification{
 				EventType:    notification.RecordingRemoteFailed,
 				Title:        "会话录制异地归档失败",
-				Message:      fmt.Sprintf("%s.cast: %v", sessionID, err),
+				Message:      fmt.Sprintf("%s%s: %v", sessionID, ext, err),
 				Level:        "warning",
 				ResourceType: "recording",
 				ResourceID:   sessionID,
@@ -74,7 +88,7 @@ func (s *Server) pushRecordingRemote(sessionID string) {
 		}
 		return
 	}
-	log.Printf("[remote] recording archived: %s.cast", sessionID)
+	log.Printf("[remote] recording archived: %s%s", sessionID, ext)
 }
 
 // recordingEnabled 录制开关，默认开启
@@ -250,7 +264,7 @@ func (s *Server) cleanupExpiredRecordings() {
 		return
 	}
 	for _, rec := range expired {
-		path := filepath.Join(s.recordingsDir(), rec.SessionID+".cast")
+		path := filepath.Join(s.recordingsDir(), rec.SessionID+recordingExt(rec.Format))
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			log.Printf("Remove recording file %s failed: %v", path, err)
 			continue

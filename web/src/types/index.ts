@@ -604,6 +604,8 @@ export interface TerminalRecording {
   host: string
   port: number
   protocol: string
+  /** 录制内容形态：cast（asciinema 终端流，默认）| guac（Guacamole 会话流） */
+  format?: string
   startedAt: string
   durationMs: number // 0 = 进行中
   bytes: number

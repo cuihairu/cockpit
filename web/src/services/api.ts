@@ -641,6 +641,13 @@ class ApiService {
   }
 
   // 取 .cast 内容（回放数据源，同下载）
+  /** 取录制内容（二进制，.guac 用；.cast 文本走 getRecordingCast） */
+  async getRecordingBlob(sessionId: string): Promise<Blob> {
+    return this.client.get(`/recordings/${encodeURIComponent(sessionId)}/cast`, {
+      responseType: 'blob',
+    })
+  }
+
   async getRecordingCast(sessionId: string): Promise<string> {
     const resp = await this.client.get(`/recordings/${encodeURIComponent(sessionId)}/cast`, {
       responseType: 'text',

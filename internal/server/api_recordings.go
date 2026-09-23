@@ -81,13 +81,17 @@ func (s *Server) handleRecordingsList(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"data": list})
 }
 
-// handleRecordingCast 流式返回 .cast 文件（回放与下载同源）
+// handleRecordingCast 流式返回录制文件（回放与下载同源）。
+// URL 沿用 /{sid}/cast（语义是「取录制内容」）；后缀按 rec.Format 分流
+// （M3 D4：cast=asciinema 流、guac=Guacamole 会话流），前端零改动。
 func (s *Server) handleRecordingCast(w http.ResponseWriter, r *http.Request, sessionID string) {
-	if _, err := s.db.GetTerminalRecording(sessionID); err != nil {
+	rec, err := s.db.GetTerminalRecording(sessionID)
+	if err != nil {
 		s.handleError(w, r, http.StatusNotFound, "recording not found")
 		return
 	}
-	path := filepath.Join(s.recordingsDir(), sessionID+".cast")
+	ext := recordingExt(rec.Format)
+	path := filepath.Join(s.recordingsDir(), sessionID+ext)
 	f, err := os.Open(path)
 	if err != nil {
 		s.handleError(w, r, http.StatusNotFound, "recording file missing")
@@ -98,7 +102,7 @@ func (s *Server) handleRecordingCast(w http.ResponseWriter, r *http.Request, ses
 	s.auditRecording(r, audit.ActionView, sessionID, nil)
 
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+sessionID+`.cast"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+sessionID+ext+`"`)
 	io.Copy(w, f)
 }
 
@@ -108,7 +112,11 @@ func (s *Server) handleRecordingDelete(w http.ResponseWriter, r *http.Request, s
 		s.handleError(w, r, http.StatusNotFound, "recording not found")
 		return
 	}
-	path := filepath.Join(s.recordingsDir(), sessionID+".cast")
+	ext := ".cast"
+	if rec, err := s.db.GetTerminalRecording(sessionID); err == nil && rec != nil {
+		ext = recordingExt(rec.Format)
+	}
+	path := filepath.Join(s.recordingsDir(), sessionID+ext)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		s.handleError(w, r, http.StatusInternalServerError, "failed to remove recording file")
 		return
@@ -204,7 +212,11 @@ func (s *Server) handleRecordingSyncRemote(w http.ResponseWriter, r *http.Reques
 		s.handleError(w, r, http.StatusNotFound, "recording not found")
 		return
 	}
-	if _, err := os.Stat(filepath.Join(s.recordingsDir(), sessionID+".cast")); err != nil {
+	ext := ".cast"
+	if rec, err := s.db.GetTerminalRecording(sessionID); err == nil && rec != nil {
+		ext = recordingExt(rec.Format)
+	}
+	if _, err := os.Stat(filepath.Join(s.recordingsDir(), sessionID+ext)); err != nil {
 		s.handleError(w, r, http.StatusNotFound, "recording file missing")
 		return
 	}

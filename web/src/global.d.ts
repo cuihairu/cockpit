@@ -90,6 +90,20 @@ declare module 'guacamole-common-js' {
       ondata?: (chunk: string) => void
       onend?: () => void
     }
+    /** .guac 会话录制回放：内部建 PlaybackTunnel + Client、自动 keyframe 帧索引 */
+    SessionRecording: new (source: Blob) => {
+      play(): void
+      pause(): void
+      seek(position: number, callback?: () => void): void
+      getDisplay(): DisplayElement
+      getDuration(): number
+      getPosition(): number
+      isPlaying(): boolean
+      onplay?: () => void
+      onpause?: () => void
+      onseek?: (position: number) => void
+      onerror?: (status: { code: number; message: string }) => void
+    }
   }
 
   export default Guacamole
