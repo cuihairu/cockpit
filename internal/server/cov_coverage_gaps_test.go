@@ -138,8 +138,13 @@ func TestGuacamoleHandshakeWriteFail(t *testing.T) {
 			"agent_id": "a", "host": "10.0.0.9", "port": "3389", "protocol": "rdp",
 		}))
 	t.Cleanup(func() { conn.Close() })
-	// 分支触发即达成覆盖（handshake 写失败 → 记日志后 return）；
-	// handler 退出时机受 TCP RST 传播影响，不在此强等
+	// net.Pipe 同步无缓冲：writeWS(uuid) 阻塞到读完，必须先消费首帧放行
+	_, _, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read uuid frame: %v", err)
+	}
+	// 分支触发即达成覆盖（select 响应后 RST → handshake write 失败 → 记日志）；
+	// handler 退出时机受 RST 传播影响，不强等（net.Pipe deadline 10s 兜底）
 	time.Sleep(500 * time.Millisecond)
 }
 
@@ -252,7 +257,9 @@ func TestStartWithDNSProviderEnabled(t *testing.T) {
 	}
 }
 
-// startClosingGuacd 起一个「接受连接后立即关闭」的假 guacd，返回地址。
+// startClosingGuacd 假 guacd：回 select 响应后立即 RST 关闭——让网关的
+// select write + read select 成功、handshake（size+connect）write 失败，
+// 确定性触发 handshake-write-fail 分支（不依赖 RST 传播时序）。
 func startClosingGuacd(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -266,6 +273,9 @@ func startClosingGuacd(t *testing.T) string {
 			if err != nil {
 				return
 			}
+			// 先回 select 响应（真 guacd 行为）：网关 read select 成功后
+			// 才发 size+connect——此时 RST 让 handshake write 失败
+			_, _ = c.Write([]byte("6.select,8.hostname,4.port;"))
 			// SetLinger(0) 让 Close 发 RST 而非 FIN：
 			// 否则首次 Write 进内核缓冲不报错，handshake 写失败分支走不到
 			if tc, ok := c.(*net.TCPConn); ok {
