@@ -228,6 +228,23 @@ describe('UserContext', () => {
     expect(localStorage.getItem('role')).toBe('user')
   })
 
+  it('updateUser 回归：只更新资料字段时保留 permissions（否则菜单被 fail-closed 全裁）', async () => {
+    // 复现线上「左侧菜单整个消失」：/api/me 载入 permissions 后，Profile 资料
+    // 同步调 updateUser 只传 id/username/…/role，若 setUser 整体替换会把
+    // permissions 抹成 undefined → filterMenuRoutes 全裁 → 侧栏导航项全没了
+    localStorage.setItem('token', 'tk')
+    localStorage.setItem('username', 'admin')
+    localStorage.setItem('role', 'admin')
+    apiMock.getCurrentUser.mockResolvedValue(me) // me.permissions = ['users:admin']
+    render(<UserProvider><Probe /></UserProvider>)
+    await waitFor(() => expect(screen.getByTestId('user').textContent).toBe('admin:1'))
+
+    // 模拟 Profile 的 applyProfile：不带 permissions 的资料更新
+    fireEvent.click(screen.getByText('update'))
+    await waitFor(() => expect(localStorage.getItem('role')).toBe('user'))
+    expect(screen.getByTestId('user').textContent).toBe('admin:1')
+  })
+
   it('logout：清全部键、user/token 归 null、ready 保持 true', () => {
     localStorage.setItem('token', 't')
     localStorage.setItem('username', 'u')

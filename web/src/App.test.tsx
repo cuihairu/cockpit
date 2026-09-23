@@ -160,6 +160,36 @@ describe('App', () => {
     expect(await screen.findByTestId('page-Resources')).toBeInTheDocument()
   })
 
+  it('菜单渲染回归：权限就绪后侧栏导航项存在且数量正确（防「菜单全空也能过」）', async () => {
+    // 线上回归自证：负断言（queryByText(...).not.toBe）在菜单全空时同样通过，
+    // 必须补正向计数断言。ADMIN_PERMS = inventory:read + docker:read +
+    // users:admin + roles:admin（AND 语义，见 utils/perm.ts）下应剩 7 项：
+    // 总览（无 perm）、资源管理（compute/domains/certificates 均 inventory:read）、
+    // 工作台（inventory:read）、容器管理（docker:read）、系统监控（inventory:read）、
+    // 设置（无 perm）、访问控制（users:admin+roles:admin）
+    await renderAt('/')
+    expect(await screen.findByTestId('page-Dashboard')).toBeInTheDocument()
+    const labels = Array.from(
+      document.querySelectorAll('.ant-menu-item, .ant-menu-submenu-title'),
+    )
+      .map((el) => (el.textContent || '').trim())
+      .filter(Boolean)
+    expect(labels.length).toBe(7)
+    for (const name of ['总览', '资源管理', '工作台', '容器管理', '系统监控', '设置', '访问控制']) {
+      expect(labels).toContain(name)
+    }
+  })
+
+  it('菜单渲染回归：permissions 未载入（undefined）时 fail-closed 全裁，不闪现', async () => {
+    userMock.user = { username: 'admin', permissions: undefined }
+    await renderAt('/')
+    expect(await screen.findByTestId('page-Dashboard')).toBeInTheDocument()
+    const labels = Array.from(
+      document.querySelectorAll('.ant-menu-item, .ant-menu-submenu-title'),
+    ).filter((el) => (el.textContent || '').trim())
+    expect(labels).toHaveLength(0)
+  })
+
   it('用户下拉：hover 展开后个人中心跳转', async () => {
     await renderAt('/')
     expect(await screen.findByTestId('page-Dashboard')).toBeInTheDocument()
