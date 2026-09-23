@@ -56,6 +56,7 @@ const _agent = {
     {'type': 'docker-api'},
     {'type': 'cron'},
     {'type': 'file'},
+    {'type': 'nginx-proxy', 'metadata': {'version': 'nginx/1.24.0'}},
     {
       'type': 'remote-services',
       'metadata': {
@@ -125,7 +126,7 @@ void main() {
     expect(find.textContaining('加载失败'), findsOneWidget);
   });
 
-  testWidgets('主机行点开能力动作单，四入口齐全', (tester) async {
+  testWidgets('主机行点开能力动作单，五入口齐全', (tester) async {
     final a = MockAdapter()..on('GET', '/api/agents', 200, [_agent]);
     await _pump(tester, _api(a));
     await tester.pumpAndSettle();
@@ -139,6 +140,42 @@ void main() {
     expect(find.text('容器'), findsOneWidget);
     expect(find.text('定时任务'), findsOneWidget);
     expect(find.text('文件'), findsOneWidget);
+    expect(find.text('反代'), findsOneWidget);
+  });
+
+  testWidgets('动作单进反代页：状态卡与站点列表', (tester) async {
+    final a = MockAdapter()
+      ..on('GET', '/api/agents', 200, [_agent])
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, {
+        'backend': 'nginx',
+        'installed': true,
+        'version': 'nginx/1.24.0',
+        'confDir': '/etc/nginx/conf.d',
+        'siteCount': 1,
+        'reloadMode': 'systemctl',
+      })
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200, {
+        'sites': [
+          {
+            'name': 'blog',
+            'serverNames': ['blog.example.com'],
+            'upstream': '127.0.0.1:3000',
+            'scheme': 'http',
+            'websocket': false,
+          },
+        ],
+      });
+    await _pump(tester, _api(a));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('web-1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('反代'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('反代 · web-1'), findsOneWidget);
+    expect(find.textContaining('后端 Nginx'), findsOneWidget);
+    expect(find.text('blog'), findsOneWidget);
   });
 
   testWidgets('动作单进容器页：列表 + 停止动作 SnackBar + 刷新', (tester) async {

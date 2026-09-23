@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../state/settings.dart';
 import 'cron_page.dart';
 import 'files_page.dart';
+import 'proxy_page.dart';
 import 'terminal_page.dart';
 
 /// 主机列表：hostname · region/zone · 在线徽标 · docker/cron/file 能力入口。
@@ -35,7 +36,8 @@ class _AgentsPageState extends ConsumerState<AgentsPage> {
     showModalBottomSheet<void>(
       context: context,
       builder: (sheetContext) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
           const Padding(
             padding: EdgeInsets.all(12),
             child: Text('选择功能',
@@ -66,8 +68,15 @@ class _AgentsPageState extends ConsumerState<AgentsPage> {
               title: const Text('文件'),
               onTap: () => _push(sheetContext, FilesPage(agent: a)),
             ),
+          if (a.hasProxy)
+            ListTile(
+              leading: const Icon(Icons.lan),
+              title: const Text('反代'),
+              onTap: () => _push(sheetContext, ProxyPage(agent: a)),
+            ),
           const SizedBox(height: 8),
         ]),
+        ),
       ),
     );
   }
@@ -127,6 +136,16 @@ class _AgentsPageState extends ConsumerState<AgentsPage> {
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => ContainersPage(agent: a),
+                        ),
+                      ),
+                    ),
+                  if (a.hasProxy)
+                    IconButton(
+                      icon: const Icon(Icons.lan),
+                      tooltip: '反代',
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ProxyPage(agent: a),
                         ),
                       ),
                     ),

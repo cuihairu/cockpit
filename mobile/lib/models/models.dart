@@ -43,6 +43,8 @@ class Agent {
   bool get hasDocker => capabilities.any((c) => c.type.startsWith('docker'));
   bool get hasCron => capabilities.any((c) => c.type == 'cron');
   bool get hasFile => capabilities.any((c) => c.type == 'file');
+  bool get hasProxy => capabilities.any(
+      (c) => c.type == 'nginx-proxy' || c.type == 'traefik-proxy');
 
   /// remote-services capability 里的 SSH 服务（agent 上报 running 才返回）。
   SshService? get sshService {
@@ -525,4 +527,113 @@ class RemoteTicket {
         ticket: j['ticket'] as String? ?? '',
         expiresAt: j['expires_at'] as String? ?? '',
       );
+}
+
+
+/// 对齐 agent proxy.status（nginx_provider.go / traefik_provider.go 输出）。
+/// backend 旧 agent 可缺省——按 nginx 兜底。
+class ProxyStatus {
+  final String? backend;
+  final bool installed;
+  final String version;
+  final String confDir;
+  final int siteCount;
+  final String reloadMode;
+
+  ProxyStatus({
+    this.backend,
+    required this.installed,
+    required this.version,
+    required this.confDir,
+    required this.siteCount,
+    required this.reloadMode,
+  });
+
+  factory ProxyStatus.fromJson(Map<String, dynamic> j) => ProxyStatus(
+        backend: j['backend'] as String?,
+        installed: j['installed'] as bool? ?? false,
+        version: j['version'] as String? ?? '',
+        confDir: j['confDir'] as String? ?? '',
+        siteCount: (j['siteCount'] as num?)?.toInt() ?? 0,
+        reloadMode: j['reloadMode'] as String? ?? '',
+      );
+
+  bool get isTraefik => backend == 'traefik';
+
+  /// 对齐 web 状态卡文案：systemctl / 热加载（file provider）/ nginx -s reload。
+  String get reloadModeLabel {
+    switch (reloadMode) {
+      case 'systemctl':
+        return 'systemctl';
+      case 'hot':
+        return '热加载（file provider）';
+      default:
+        return 'nginx -s reload';
+    }
+  }
+}
+
+/// 对齐 agent ProxySite（json tag 即 camelCase）。
+/// 列表响应是裁剪版（无 tlsCert/tlsKey/extra），详情/证书路径必须走 site.get。
+class ProxySite {
+  final String name;
+  final List<String> serverNames;
+  final String upstream;
+  final String scheme;
+  final String? tlsCert;
+  final String? tlsKey;
+  final bool websocket;
+  final String extra;
+
+  ProxySite({
+    required this.name,
+    required this.serverNames,
+    required this.upstream,
+    required this.scheme,
+    this.tlsCert,
+    this.tlsKey,
+    required this.websocket,
+    required this.extra,
+  });
+
+  factory ProxySite.fromJson(Map<String, dynamic> j) => ProxySite(
+        name: j['name'] as String? ?? '',
+        serverNames: (j['serverNames'] as List<dynamic>? ?? [])
+            .map((e) => e as String? ?? '')
+            .where((e) => e.isNotEmpty)
+            .toList(),
+        upstream: j['upstream'] as String? ?? '',
+        scheme: j['scheme'] as String? ?? 'http',
+        tlsCert: j['tlsCert'] as String?,
+        tlsKey: j['tlsKey'] as String?,
+        websocket: j['websocket'] as bool? ?? false,
+        extra: j['extra'] as String? ?? '',
+      );
+}
+
+/// 对齐 proxy.site.get 响应：{name, site, content}。
+class ProxySiteDetail {
+  final String name;
+  final ProxySite site;
+  final String content;
+
+  ProxySiteDetail({
+    required this.name,
+    required this.site,
+    required this.content,
+  });
+
+  factory ProxySiteDetail.fromJson(Map<String, dynamic> j) => ProxySiteDetail(
+        name: j['name'] as String? ?? '',
+        site: ProxySite.fromJson(j['site'] as Map<String, dynamic>? ?? {}),
+        content: j['content'] as String? ?? '',
+      );
+}
+
+/// proxy 页并发拉取的聚合（status + sites）。
+class ProxyViewData {
+  final ProxyStatus status;
+  final List<ProxySite> sites;
+
+  ProxyViewData({required this.status, required this.sites});
 }

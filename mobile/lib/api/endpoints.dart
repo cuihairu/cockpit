@@ -159,6 +159,32 @@ extension FilesApi on CockpitApi {
 }
 
 
+extension ProxyApi on CockpitApi {
+  /// GET /api/agents/{id}/proxy/status——反代后端概览。
+  Future<ProxyStatus> proxyStatus(String agentId) async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/agents/$agentId/proxy/status');
+    return ProxyStatus.fromJson(r.data!);
+  }
+
+  /// GET /api/agents/{id}/proxy/sites——站点列表（裁剪版，无 tls/extra）。
+  Future<List<ProxySite>> proxySites(String agentId) async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/agents/$agentId/proxy/sites');
+    final data = r.data!['sites'] as List<dynamic>? ?? [];
+    return data
+        .map((e) => ProxySite.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// GET /api/agents/{id}/proxy/sites/{name}——站点详情 + 渲染后配置全文。
+  Future<ProxySiteDetail> proxySite(String agentId, String name) async {
+    final r = await client.dio.get<Map<String, dynamic>>(
+        '/api/agents/$agentId/proxy/sites/$name');
+    return ProxySiteDetail.fromJson(r.data!);
+  }
+}
+
 extension RemoteApi on CockpitApi {
   /// POST /api/remote/tickets——换取终端 WS 子协议票据（body snake_case 对齐 web）。
   Future<RemoteTicket> createRemoteTicket({
