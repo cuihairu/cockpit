@@ -138,9 +138,11 @@ const RemoteToolbar: React.FC<RemoteToolbarProps> = ({
 
         {extraActions.map((action) => (
           <Tooltip key={action.key} title={action.label}>
+            {/* icon-only 按钮需 aria-label（无障碍 + 测试可定位） */}
             <Button
               size="small"
               type="text"
+              aria-label={action.label}
               icon={action.icon}
               danger={action.danger}
               disabled={action.disabled}

@@ -23,6 +23,9 @@ const clientMock = vi.hoisted(() => ({
 
 vi.mock('guacamole-common-js', () => ({
   default: {
+    AudioContextFactory: {
+      getAudioContext: () => acMock,
+    },
     WebSocketTunnel: vi.fn(function (url: string) {
       created.push({ url })
       return {}
@@ -40,6 +43,12 @@ vi.mock('guacamole-common-js', () => ({
       return { ondata: undefined, onend: undefined }
     }),
   },
+}))
+
+const acMock = vi.hoisted(() => ({
+  suspend: vi.fn().mockResolvedValue(undefined),
+  resume: vi.fn().mockResolvedValue(undefined),
+  state: 'running',
 }))
 
 const createRemoteTicket = vi.hoisted(() => vi.fn())
@@ -61,6 +70,8 @@ describe('GuacamoleModal', () => {
     vi.clearAllMocks()
     created.length = 0
     clientMock.getDisplay.mockReturnValue({ getElement: () => document.createElement('canvas') })
+    acMock.suspend.mockClear()
+    acMock.resume.mockClear()
     createRemoteTicket.mockResolvedValue({ ticket: 'tk-1', expiresAt: '' })
   })
 
@@ -161,5 +172,41 @@ describe('GuacamoleModal', () => {
     unmount()
     expect(clientMock.disconnect).toHaveBeenCalled()
     void msgError
+  })
+
+  it('静音按钮：suspend/resume 切换（AudioContext 单例全局静音）', async () => {
+    render(<GuacamoleModal {...props} />)
+    fireEvent.change(screen.getByPlaceholderText('administrator'), {
+      target: { value: 'alice' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+
+    // RemoteToolbar 的静音按钮（extraActions）
+    fireEvent.click(screen.getByRole('button', { name: /静\s*音/ }))
+    await waitFor(() => expect(acMock.suspend).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: /取消静音/ }))
+    await waitFor(() => expect(acMock.resume).toHaveBeenCalled())
+  })
+
+  it('AudioContext 不可用（jsdom/旧浏览器）静音不炸', async () => {
+    const Guacamole = (await import('guacamole-common-js')).default
+    const orig = Guacamole.AudioContextFactory
+    ;(Guacamole as unknown as { AudioContextFactory: unknown }).AudioContextFactory = {
+      getAudioContext: () => null,
+    }
+    try {
+      render(<GuacamoleModal {...props} />)
+      fireEvent.change(screen.getByPlaceholderText('administrator'), {
+        target: { value: 'alice' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+      await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole('button', { name: /静\s*音/ }))
+      // 不抛错即可（无 ctx 时静默返回）
+    } finally {
+      ;(Guacamole as unknown as { AudioContextFactory: unknown }).AudioContextFactory = orig
+    }
   })
 })

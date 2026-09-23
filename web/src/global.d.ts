@@ -90,6 +90,14 @@ declare module 'guacamole-common-js' {
       ondata?: (chunk: string) => void
       onend?: () => void
     }
+    /** Web Audio API AudioContext 单例工厂（RawAudioPlayer 内部播放用） */
+    AudioContextFactory: {
+      getAudioContext(): {
+        suspend(): Promise<void>
+        resume(): Promise<void>
+        state: string
+      } | null
+    }
     /** .guac 会话录制回放：内部建 PlaybackTunnel + Client、自动 keyframe 帧索引 */
     SessionRecording: new (source: Blob) => {
       play(): void

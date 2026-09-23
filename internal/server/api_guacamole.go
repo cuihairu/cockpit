@@ -111,8 +111,9 @@ func guacConnectArgs(protocol, host string, port int, params map[string]string, 
 	}
 	switch protocol {
 	case "rdp":
-		// 办公场景验收（设计风险章节）：色深 32、忽略证书（自签/内网常见），
-		// 音频留阶段二（不传 audio 即不启用）
+		// 办公场景验收（设计风险章节）：色深 32、忽略证书（自签/内网常见）。
+		// 音频：不传 disable-audio（guacd 默认启用），音频流由服务端主动推
+		// audio 指令 + blob 流，自动经本网关字节管道透传（见 todo.md M4 D1）
 		args = append(args,
 			"security=any",
 			"ignore-cert=true",

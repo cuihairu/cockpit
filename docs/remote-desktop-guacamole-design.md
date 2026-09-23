@@ -407,6 +407,13 @@ guacd 的 `disable-audio`/`color-depth`/`resize-method` 参数，再考虑
 
 ### 音频放阶段二
 
+**（实现期源码核实修正）** 音频流走 Guacamole 协议的 `audio,<streamIndex>,<mimetype>;`
+流创建指令 + `blob` 数据流，由**服务端主动推**（非 connect 参数），自动经 Go
+网关的字节管道透传——网关零改动；客户端用 `onaudio` 或
+`Guacamole.AudioPlayer.getInstance(stream, mimetype)` 播放，内置 `RawAudioPlayer`
+支持 `audio/L8`/`audio/L16`（raw PCM）。设计骨架里「connect 指令的 audio 参数」
+表述已按源码核实修正。
+
 Guacamole 支持音频（RDP 的 `rdpsnd`、VNC 无音频），但：
 
 1. 浏览器音频播放需用户手势解锁（iOS Safari 尤其严格），静音/音量控制
@@ -415,8 +422,10 @@ Guacamole 支持音频（RDP 的 `rdpsnd`、VNC 无音频），但：
    的播放链路要对齐；
 3. 运维场景下桌面音频价值低（不像远程影音）。
 
-**收益/成本比低**，故明确推迟。架构上不留死角：`connect` 指令的 `audio`
-参数本就是可选列表，阶段二加上即可，不影响阶段一的协议路径。
+**收益/成本比低**，故明确推迟。架构上不留死角（源码核实）：音频流本就在
+字节管道里透传，`guacConnectArgs` 不传 `disable-audio` 即默认启用，
+阶段二只加静音/音量控制 UI（静音用 `AudioContext.suspend()/resume()`，
+音量需自定义 AudioPlayer 插 GainNode）即可，不影响阶段一的协议路径。
 
 ### 隧道二进制帧 chunk/base64 规则照抄官方 Tunnel 实现
 

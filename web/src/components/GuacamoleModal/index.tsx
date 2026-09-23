@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Modal, Form, Input, message, Alert, Button, Space } from 'antd'
+import { SoundOutlined, AudioMutedOutlined } from '@ant-design/icons'
 import RemoteToolbar, { type ConnectionState } from '../RemoteToolbar'
 import Guacamole from 'guacamole-common-js'
 import { useConnectionTimeout } from '@/hooks/useConnectionTimeout'
@@ -39,6 +40,8 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [resolution, setResolution] = useState('1280x800')
   const [error, setError] = useState<string | null>(null)
+  // 静音（M4 D2）：AudioContext 单例 suspend/resume 全局静音音频流
+  const [muted, setMuted] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const displayRef = useRef<HTMLDivElement>(null)
   const clientRef = useRef<InstanceType<typeof Guacamole.Client> | null>(null)
@@ -200,6 +203,21 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
     setResolution(`${width}x${height}`)
   }, [])
 
+  // 静音：AudioContext 单例 suspend/resume（RawAudioPlayer 内部直连
+  // context.destination，从外部插 GainNode 必须照抄其播放逻辑，属
+  // 「自由发挥」禁区——见 todo.md M4 D2）
+  const toggleMute = useCallback(() => {
+    const ctx = Guacamole.AudioContextFactory?.getAudioContext()
+    if (!ctx) return
+    if (muted) {
+      void ctx.resume()
+      setMuted(false)
+    } else {
+      void ctx.suspend()
+      setMuted(true)
+    }
+  }, [muted])
+
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement)
     document.addEventListener('fullscreenchange', handler)
@@ -289,6 +307,14 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
           onToggleFullscreen={handleToggleFullscreen}
           onDisconnect={handleDisconnect}
           onResolutionChange={handleResolutionChange}
+          extraActions={[
+            {
+              key: 'mute',
+              label: muted ? '取消静音' : '静音',
+              icon: muted ? <AudioMutedOutlined /> : <SoundOutlined />,
+              onClick: toggleMute,
+            },
+          ]}
         >
           {error && <span style={{ color: '#ff4d4f' }}>{error}</span>}
         </RemoteToolbar>
