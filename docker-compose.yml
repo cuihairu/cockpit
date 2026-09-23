@@ -20,8 +20,41 @@ services:
       PRODUCTION: "${PRODUCTION:-true}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
       TZ: "${TZ:-Asia/Shanghai}"
+      # 远程桌面网关（guacd）启用时设为 guacd:4822（同网络 DNS 名）；
+      # 留空 = 不启用 Guacamole 远程桌面（RDP/VNC 入口隐藏）
+      # 见 docs/remote-desktop-guacamole-design.md（D1/D2）
+      GUACD_ADDR: "${GUACD_ADDR:-}"
     volumes:
       - cockpit-data:/data
+    networks:
+      - cockpit-net
+
+  # guacd 远程桌面网关（预留服务位）——Apache Guacamole 协议守护进程，
+  # 把 RDP/VNC 翻译成 Guacamole 指令流（跳过 guacamole-web Java 层）。
+  # 启用：docker compose --profile guacd up -d  （并设 GUACD_ADDR=guacd:4822）
+  # 文档：deployments/guacd/README.md 与 docs/remote-desktop-guacamole-design.md
+  # 要点：无用户概念/无状态（会话·权限·审计在 Cockpit server）；端口不对外
+  # 暴露（Go 网关同网络反代，浏览器走 /api/remote/guacamole WS）；
+  # GUACD_LOG_LEVEL 别开 debug（会打 connect 参数含口令）
+  guacd:
+    profiles: ["guacd"]
+    image: guacamole/guacd:1.5.5
+    container_name: cockpit-guacd
+    restart: unless-stopped
+    networks:
+      - cockpit-net
+    volumes:
+      # guacd session recording 落盘（connect 的 recording-path 指向这里，
+      # 白捡桌面会话审计回放，见设计「guacd session recording」节）
+      - guacd-recordings:/var/lib/guacamole
+    environment:
+      GUACD_LOG_LEVEL: "${GUACD_LOG_LEVEL:-info}"
+      TZ: "${TZ:-Asia/Shanghai}"
+
+networks:
+  cockpit-net:
+    driver: bridge
 
 volumes:
   cockpit-data:
+  guacd-recordings:

@@ -130,7 +130,29 @@ export PRODUCTION=true
 
 通知渠道（Herald / ntfy / webhook / Telegram）、DNS 与 ACME 凭据（Cloudflare / DNSPod / 阿里云）、组网云 token（ZeroTier / Tailscale）等完整键位见 [`config/cockpit.yaml`](config/cockpit.yaml) 内注释；密钥类配置建议用环境变量注入（`CLOUDFLARE_API_TOKEN`、`DNSPOD_LOGIN_TOKEN`、`ALIYUN_ACCESS_KEY`、`ZEROTIER_API_TOKEN`、`TAILSCALE_API_TOKEN` 等）。
 
-Docker Compose 部署入口见 [deployments/docker/README.md](deployments/docker/README.md)。
+## Docker 部署
+
+多阶段构建（Node 编 web → Go 编 server → debian-slim 运行），web 产物由 server 直接托管（`static_dir: /app/web`），无独立 nginx 层。一键起：
+
+```bash
+cp deployments/docker/.env.example .env
+vi .env    # ADMIN_PASSWORD / JWT_SECRET 必填；TOTP_ENCRYPTION_KEY 在 PRODUCTION=true 时必填
+docker compose up -d --build
+# podman 用户：podman build --format docker -t cockpit:local . && podman compose up -d
+#（HEALTHCHECK 需 docker 镜像格式，默认 OCI 会忽略）
+```
+
+访问 `http://<server-ip>:9000`；健康检查 `GET /health`（Dockerfile HEALTHCHECK 30s 周期 curl，本地实测 `{"agents":0,"status":"ok"}`）。数据持久化在 volume `cockpit-data`（SQLite `/data/cockpit.db`）。
+
+**远程桌面网关（guacd）预留服务位**：compose 内置 `guacd` 服务（`--profile guacd` 启用），与 `cockpit-server` 同网络 `cockpit-net`——server 经 `GUACD_ADDR=guacd:4822` 同网络 DNS 名反代，浏览器走 `/api/remote/guacamole` WS（guacd 端口不对外）。启用：
+
+```bash
+GUACD_ADDR=guacd:4822 docker compose --profile guacd up -d
+```
+
+guacd 把 RDP/VNC 翻译成 Guacamole 指令流（跳过 guacamole-web Java 层），录制落盘卷 `guacd-recordings`。详见 [deployments/guacd/README.md](deployments/guacd/README.md) 与 [docs/remote-desktop-guacamole-design.md](docs/remote-desktop-guacamole-design.md)。
+
+完整配置与常用命令见 [deployments/docker/README.md](deployments/docker/README.md)。
 
 ## 端到端冒烟脚本
 
