@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -332,3 +333,39 @@ func startClosingGuacd(t *testing.T) string {
 	return startGuacStub(t, guacStubFailHandshakeWrite)
 }
 
+
+// failWriteConn Write 必失败的 net.Conn mock（覆盖 select write 失败分支）。
+type failWriteConn struct{ net.Conn }
+
+func (c failWriteConn) Write(p []byte) (int, error) {
+	return 0, errors.New("injected write failure")
+}
+
+// TestGuacamoleSelectWriteFailInjected 覆盖 select write 失败分支（340-345）。
+// dialGuacd 注入 mock conn（Write 必失败）——TCP RST 时序不可稳定，var 注入
+// 确定性触发（与 stdinPipeFn/rdpClientAvailable 同性质：行为中性测试注入点）。
+func TestGuacamoleSelectWriteFailInjected(t *testing.T) {
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
+	old := dialGuacd
+	dialGuacd = func(addr string, timeout time.Duration) (net.Conn, error) {
+		return failWriteConn{c1}, nil
+	}
+	t.Cleanup(func() { dialGuacd = old })
+
+	conn, _, _ := covDirectWSJoined(t, s.handleGuacamoleWebSocket, "/api/remote/guacamole",
+		covTicket(t, s, map[string]string{
+			"agent_id": "a", "host": "10.0.0.9", "port": "3389", "protocol": "rdp",
+		}))
+	// net.Pipe 同步无缓冲：writeWS(uuid) 阻塞到读完，先消费首帧放行
+	_, _, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read uuid frame: %v", err)
+	}
+	// select write 失败（mock conn）→ 记日志后 return；显式关 conn 防污染
+	conn.Close()
+	time.Sleep(300 * time.Millisecond)
+}

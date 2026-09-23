@@ -39,6 +39,14 @@ const guacdDefaultAddr = "127.0.0.1:4822"
 // guacdDialTimeout 拨 guacd 超时
 const guacdDialTimeout = 10 * time.Second
 
+// dialGuacd 拨 guacd TCP 调用点。var 化（非内联）仅为测试注入 mock conn——
+// select write 失败分支需 guacdConn.Write 立即 error，而 TCP RST 时序
+// （loopback 写缓冲 + goroutine 调度）本质不确定；生产行为不变
+// （恒调 net.DialTimeout）。
+var dialGuacd = func(addr string, timeout time.Duration) (net.Conn, error) {
+	return net.DialTimeout("tcp", addr, timeout)
+}
+
 // guacamoleReadBuf guacd→WS 段读缓冲（Guacamole 指令是文本行，含 base64
 // blob，单条可较大）
 const guacamoleReadBuf = 256 * 1024
@@ -280,7 +288,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	}
 
 	// 3. 拨 guacd TCP（不暴露 guacd 端口给浏览器——网关反代，见设计 D2）
-	guacdConn, err := net.DialTimeout("tcp", guacdAddr(), guacdDialTimeout)
+	guacdConn, err := dialGuacd(guacdAddr(), guacdDialTimeout)
 	if err != nil {
 		log.Printf("Guacamole: dial guacd %s failed: %v", guacdAddr(), err)
 		s.auditRemoteFailure(ticket.UserID, ticket.Username, r.RemoteAddr, r.UserAgent(),
