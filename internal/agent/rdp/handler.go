@@ -117,17 +117,9 @@ func (h *Handler) HandleDesktopData(msg *protocol.Message) {
 			wheelDelta = int(v)
 		}
 		action, _ := payload["action"].(string)
-		// buttons 位标志: 1=left, 2=right, 4=middle -> grdp: 0=left, 1=middle, 2=right
-		button := 0
-		switch {
-		case buttons&1 != 0:
-			button = 0
-		case buttons&4 != 0:
-			button = 1
-		case buttons&2 != 0:
-			button = 2
-		}
-		session.HandleMouse(x, y, button, wheelDelta, action)
+		// buttons 即按钮索引（DOM e.button：0=左, 1=中, 2=右），与 grdp
+		// mouseButtonFlag 同语义（0→BUTTON1 左, 1→BUTTON3 中, 2→BUTTON2 右），直传。
+		session.HandleMouse(x, y, buttons, wheelDelta, action)
 
 	case protocol.DesktopMsgClipboardData:
 		text, _ := payload["text"].(string)

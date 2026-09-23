@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"image"
 	"log/slog"
+	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
 	grdp "github.com/nakagami/grdp"
@@ -37,7 +39,10 @@ func NewSession(sessionID, target, domain, username, password string, width, hei
 		screen:    image.NewRGBA(image.Rect(0, 0, width, height)),
 	}
 
-	client := grdp.NewRdpClient(target, width, height)
+	// grdp v0.9.11+ 需显式 dialer（nil 会 panic）；10s 连接超时对齐 proxy 侧
+	client := grdp.NewRdpClient(target, width, height, func(addr string) (net.Conn, error) {
+		return net.DialTimeout("tcp", addr, 10*time.Second)
+	})
 	s.client = client
 
 	// 登录（grdp v0.6.7 的 On* 方法内部访问 g.pdu，Login 前为 nil）
@@ -215,7 +220,8 @@ func (s *Session) HandleMouse(x, y, button, wheelDelta int, action string) {
 	}
 
 	if wheelDelta != 0 {
-		s.client.MouseWheel(wheelDelta)
+		// grdp MouseWheel 以「格」为单位（1.0=120 WHEEL_DELTA），web 端已归一 ±1
+		s.client.MouseWheel(float64(wheelDelta))
 	}
 }
 

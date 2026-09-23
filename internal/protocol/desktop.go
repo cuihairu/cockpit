@@ -84,7 +84,7 @@ type DesktopMousePayload struct {
 	SessionID  string `json:"sessionId"`
 	X          int    `json:"x"`
 	Y          int    `json:"y"`
-	Buttons    int    `json:"buttons"`    // 位标志: 1=左, 2=右, 4=中
+	Buttons    int    `json:"buttons"`    // 按钮索引（DOM e.button 语义）: 0=左, 1=中, 2=右
 	WheelDelta int    `json:"wheelDelta"` // 滚轮量
 	Action     string `json:"action"`     // move, down, up
 }

@@ -1110,12 +1110,13 @@ func TestHandleDesktopNewZeroResolution(t *testing.T) {
 // ============ HandleDesktopData Mouse Button Mapping ============
 
 func TestHandleDesktopDataMouseButtonMapping(t *testing.T) {
+	// buttons 即 DOM e.button 按钮索引（0=左, 1=中, 2=右），直传 grdp
 	tests := []struct {
 		name    string
 		buttons float64
 	}{
-		{"left", 1},
-		{"middle", 4},
+		{"left", 0},
+		{"middle", 1},
 		{"right", 2},
 		{"none", 0},
 	}
