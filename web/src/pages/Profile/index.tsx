@@ -74,7 +74,10 @@ const Profile = () => {
     return () => {
       ignore = true
     }
-  }, [user])
+    // 依赖用户身份而非对象引用：applyProfile → updateUser 会 setUser 出新
+    // 对象，若以 user 为依赖则资料同步触发下一轮拉取（无限 /api/me 循环）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id])
 
   const handleProfileSave = async (values: ProfileFormValues) => {
     setLoading(true)

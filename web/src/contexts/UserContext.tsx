@@ -110,7 +110,11 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   }, [])
 
   const updateUser = useCallback((updatedUser: User) => {
-    setUser(updatedUser)
+    // 合并而非整体替换：调用方（Profile 资料同步/保存）只传 id/username/
+    // email/phone/department/role，若 setUser 整体替换会把 /api/me 载入的
+    // permissions 抹成 undefined —— filterMenuRoutes 对 undefined fail-closed
+    // 全裁，左侧菜单整条消失（线上回归）。未提及的键一律保留。
+    setUser((prev) => (prev ? { ...prev, ...updatedUser } : updatedUser))
     setOptionalStorage('email', updatedUser.email)
     setOptionalStorage('phone', updatedUser.phone)
     setOptionalStorage('department', updatedUser.department)
