@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'pages/home_page.dart';
@@ -9,6 +10,16 @@ import 'state/settings.dart';
 import 'widgets/lock_gate.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // 状态栏/导航栏兜底样式：具体亮暗随主题由 MaterialApp.theme 的
+  // appBarTheme / NavigationBar 覆盖（见下方 ThemeData）。
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    statusBarBrightness: Brightness.light,
+    systemNavigationBarColor: Color(0xFFFFFFFF),
+    systemNavigationBarIconBrightness: Brightness.dark,
+  ));
   runApp(const ProviderScope(child: CockpitApp()));
 }
 
@@ -62,10 +73,29 @@ class _CockpitAppState extends ConsumerState<CockpitApp> {
 
     return MaterialApp(
       title: 'Cockpit',
-      theme: ThemeData(colorSchemeSeed: const Color(0xFF1E88E5)),
+      theme: ThemeData(
+        colorSchemeSeed: const Color(0xFF1E88E5),
+        // 浅色：深色状态栏图标 + 浅色导航栏
+        appBarTheme: const AppBarTheme(
+          systemOverlayStyle: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: Brightness.dark,
+            statusBarBrightness: Brightness.light,
+          ),
+        ),
+      ),
       darkTheme: ThemeData(
-          brightness: Brightness.dark,
-          colorSchemeSeed: const Color(0xFF1E88E5)),
+        brightness: Brightness.dark,
+        colorSchemeSeed: const Color(0xFF1E88E5),
+        // 深色：浅色状态栏图标 + 深色导航栏
+        appBarTheme: const AppBarTheme(
+          systemOverlayStyle: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: Brightness.light,
+            statusBarBrightness: Brightness.dark,
+          ),
+        ),
+      ),
       themeMode: ThemeMode.system,
       home: page,
     );

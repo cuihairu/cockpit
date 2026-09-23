@@ -49,32 +49,41 @@ class _LockGateState extends ConsumerState<LockGate> {
   @override
   Widget build(BuildContext context) {
     if (!_locked) return widget.child;
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.fingerprint,
-                size: 72,
-                color: Theme.of(context).colorScheme.primary),
-            const SizedBox(height: 12),
-            const Text('已锁定',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text(_hint.isEmpty ? '验证以继续使用' : _hint,
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _checking ? null : _verify,
-              icon: _checking
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.fingerprint),
-              label: const Text('解锁'),
-            ),
-          ],
+    // 锁定态拦截系统返回/手势：不能靠「返回」绕过解锁门直接退出到桌面，
+    // 也不能让它弹出空白路由。解锁后交回默认行为。
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        // 未解锁时忽略返回，保持蒙层
+      },
+      child: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.fingerprint,
+                  size: 72,
+                  color: Theme.of(context).colorScheme.primary),
+              const SizedBox(height: 12),
+              const Text('已锁定',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(_hint.isEmpty ? '验证以继续使用' : _hint,
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _checking ? null : _verify,
+                icon: _checking
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.fingerprint),
+                label: const Text('解锁'),
+              ),
+            ],
+          ),
         ),
       ),
     );

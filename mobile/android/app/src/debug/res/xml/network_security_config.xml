@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  debug 构建放行 cleartext：本地 http server / 模拟器 10.0.2.2 调试用。
+  release 走 main/res/xml/network_security_config.xml（禁止 cleartext）。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

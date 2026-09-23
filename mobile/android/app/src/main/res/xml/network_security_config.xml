@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全配置（Android 7.0+ 生效）。
+
+  - 默认禁止明文（cleartext）：server 地址应为 https / wss
+  - clearTextTrafficPermitted="false" 强制 TLS；自签证书场景由应用内
+    「允许自签证书」开关在 HttpClient.badCertificateCallback 放行证书校验，
+    **不**在此处放行 cleartext（自签 ≠ 明文，两件事分开管）
+  - debug 构建另行放行 cleartext（本地 http server 调试用），见
+    src/debug/AndroidManifest.xml
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

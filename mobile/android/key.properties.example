@@ -1,0 +1,16 @@
+# Release 签名配置模板。
+#
+# 用法：
+#   1. keytool -genkey -v -keystore ~/keys/cockpit-release.jks -keyalg RSA \
+#        -keysize 2048 -validity 10000 -alias cockpit
+#   2. cp key.properties.example key.properties  （key.properties 已在 .gitignore）
+#   3. 填入下列四项
+#
+# 缺省（不提供 key.properties）时 release 回退 debug 签名，
+# 本地开发出包即可安装；上架/分发前必须换成正式签名。
+#
+# 警告：keystore 与 key.properties 绝不入库。丢失 keystore 即无法更新该应用。
+storeFile=/home/YOUR_USER/keys/cockpit-release.jks
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=cockpit
+keyPassword=YOUR_KEY_PASSWORD

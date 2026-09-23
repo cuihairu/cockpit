@@ -4,6 +4,18 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// 签名配置：优先读 key.properties（已 gitignore），缺失或不全则回退 debug 签名，
+// 保证「暂无私钥也能 flutter build apk --release 出包」。模板见 key.properties.example。
+import java.util.Properties
+import java.io.FileInputStream
+
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("key.properties")
+    if (f.exists()) FileInputStream(f).use { load(it) }
+}
+val hasReleaseSigning = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+    .all { keystoreProps.getProperty(it)?.isNotBlank() == true }
+
 android {
     namespace = "io.github.cuihairu.cockpit_mobile"
     compileSdk = flutter.compileSdkVersion
@@ -15,25 +27,39 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "io.github.cuihairu.cockpit_mobile"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
-        // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
-        // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
-        // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile")!!)
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // 有 key.properties 用正式签名；否则回退 debug 签名（本地出包可装）
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+            // R8 混淆 + 资源收缩；规则见 proguard-rules.pro（dio/xterm/local_auth 等）
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
