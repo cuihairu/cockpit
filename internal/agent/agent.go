@@ -401,6 +401,16 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		})
 	}
 
+	// rdp-client capability：RDP 桌面代理客户端可用性（-tags rdp 非 darwin 构建）。
+	// stub 构建不上报，Web 据此禁用 RDP 入口而非连上后才吃 error
+	// （见 agent-egress-sdwan.md D124 记录的缺口）。
+	if rdpClientAvailable() {
+		capabilities = append(capabilities, protocol.Capability{
+			Type:    "rdp-client",
+			Version: "1",
+		})
+	}
+
 	return capabilities
 }
 

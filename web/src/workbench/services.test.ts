@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent } from '@/types'
-import { getRemoteServices } from './services'
+import { getRemoteServices, hasRdpClient } from './services'
 
 // workbench getRemoteServices：remote-services 元数据提取——协议白名单/
 // 非对象值过滤、运行态与端口校验、host/name 缺省回退
@@ -68,5 +68,20 @@ describe('getRemoteServices', () => {
       ssh: null,
     })
     expect(getRemoteServices(agent)).toEqual([])
+  })
+})
+
+describe('hasRdpClient', () => {
+  it('agent 为空 / 无 capabilities / 无 rdp-client 返回 false', () => {
+    expect(hasRdpClient(null)).toBe(false)
+    expect(hasRdpClient(baseAgent({ capabilities: undefined as never }))).toBe(false)
+    expect(hasRdpClient(baseAgent())).toBe(false)
+  })
+
+  it('有 rdp-client capability 返回 true', () => {
+    const agent = baseAgent({
+      capabilities: [{ type: 'rdp-client' }] as Agent['capabilities'],
+    })
+    expect(hasRdpClient(agent)).toBe(true)
   })
 })

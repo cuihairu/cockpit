@@ -21,6 +21,7 @@ import LogsPanel from '@/workbench/LogsPanel'
 import OverviewPanel from '@/workbench/OverviewPanel'
 import { getRemoteServices } from '@/workbench/services'
 import type { SessionConfig, WorkbenchTab } from '@/workbench/types'
+import { hasRdpClient } from '@/workbench/services'
 
 const protocolTabs: Array<{ key: WorkbenchTab; label: string; icon: React.ReactNode }> = [
   { key: 'overview', label: '概览', icon: <SettingOutlined /> },
@@ -77,6 +78,13 @@ const Workbench = () => {
     const service = remoteServices.find((item) => item.protocol === protocol)
     if (!service) {
       message.warning(`未检测到可用的 ${protocol.toUpperCase()} 服务`)
+      return
+    }
+
+    // RDP 需 agent 构建带 -tags rdp（rdp-client capability）；stub 构建连上
+    // 也只会回 error，前置拦截给出可操作提示
+    if (service.protocol === 'rdp' && !hasRdpClient(selectedAgent)) {
+      message.warning('该 Agent 未启用 RDP 客户端：请用 -tags rdp 重新构建 cockpit-agent')
       return
     }
 

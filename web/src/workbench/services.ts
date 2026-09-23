@@ -24,3 +24,12 @@ export const getRemoteServices = (agent: Agent | null): RemoteService[] => {
     })
     .filter((service): service is RemoteService => Boolean(service))
 }
+
+/**
+ * agent 是否带 RDP 客户端（-tags rdp 非 darwin 构建上报 rdp-client capability）。
+ * stub 构建不上报——RDP 入口据此禁用，而非连上后才吃 agent 的 error。
+ */
+export const hasRdpClient = (agent: Agent | null): boolean => {
+  if (!agent || !agent.capabilities) return false
+  return agent.capabilities.some((cap) => cap.type === 'rdp-client')
+}

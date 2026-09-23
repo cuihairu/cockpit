@@ -277,6 +277,8 @@ describe('Workbench', () => {
               vnc: { host: '10.0.0.1', port: 5900, name: 'VNC', running: true },
             },
           },
+          // RDP 入口前置拦截：无 rdp-client capability（stub 构建）时禁用
+          { type: 'rdp-client' },
         ],
       },
     ] as unknown as Agent[])
@@ -314,5 +316,37 @@ describe('Workbench', () => {
     fireEvent.click(screen.getByText('close-vnc'))
     await waitFor(() => expect(screen.queryByTestId('vnc-modal')).toBeNull())
     expect(msgWarning).not.toHaveBeenCalled()
+  })
+
+  it('RDP 无 rdp-client capability：前置拦截提示，不开 DesktopModal', async () => {
+    msgWarning.mockClear()
+    renderPage([
+      {
+        id: 'ag-stub',
+        hostname: 'stub-host',
+        ip: '10.0.0.1',
+        region: 'cn-bj',
+        status: 'online',
+        lastSeen: '0',
+        capabilities: [
+          {
+            type: 'remote-services',
+            metadata: {
+              rdp: { host: '10.0.0.1', port: 3389, name: 'RDP', running: true },
+            },
+          },
+          // 无 rdp-client：agent 为 stub 构建（未开 -tags rdp）
+        ],
+      },
+    ] as unknown as Agent[])
+    // 等 agent 列表就绪（否则 selectedAgent 为空，走「请先选择服务器」分支）
+    await waitFor(() => expect(screen.getByTestId('overview')).toHaveTextContent('ag-stub'))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /RDP/ }))
+    })
+    expect(msgWarning).toHaveBeenCalledWith(
+      expect.stringContaining('RDP 客户端'),
+    )
+    expect(screen.queryByTestId('desktop-modal')).toBeNull()
   })
 })
