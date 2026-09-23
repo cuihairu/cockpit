@@ -197,22 +197,32 @@ jobs:
     strategy:
       matrix:
         include:
+          # tags：RDP 桌面客户端（grdp）仅 64 位 int 平台可编译——grdp
+          # v0.9.11 plugin/channel.go 把 CHANNEL_OPTION_*（uint32 语义，
+          # 最大 3231711232 > 2^31-1）放进 map[...]int 字面量，32 位 int
+          # 平台（mips/mipsle/arm）编译期溢出。32 位留空即落 rdp_stub，
+          # agent 上报无 rdp-client capability，web 据此不开放 RDP 入口。
           - goarch: mipsle
             gomips: softfloat
             arch: mipsel
+            tags: ""
           - goarch: mips
             gomips: softfloat
             arch: mips
+            tags: ""
           - goarch: arm64
             gomips: ""
             arch: aarch64_generic
+            tags: "-tags rdp"
           - goarch: arm
             gomips: ""
             goarm: "7"
             arch: arm_cortex-a7_neon-vfpv4
+            tags: ""
           - goarch: amd64
             gomips: ""
             arch: x86_64
+            tags: "-tags rdp"
 
     steps:
       - name: Checkout code
@@ -230,9 +240,10 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GOMIPS: ${{ matrix.gomips }}
           GOARM: ${{ matrix.goarm }}
+          RDP_TAGS: ${{ matrix.tags }}
         run: |
           mkdir -p dist
-          go build -tags rdp -trimpath -ldflags="-s -w" -o dist/cockpit-agent ./cmd/cockpit-agent
+          go build ${RDP_TAGS} -trimpath -ldflags="-s -w" -o dist/cockpit-agent ./cmd/cockpit-agent
 
       - name: Package ipk + tar.gz
         run: |
