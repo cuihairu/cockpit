@@ -212,7 +212,8 @@ describe('Services', () => {
     expect(await screen.findByText('bad')).toBeInTheDocument()
     fireEvent.click(iconBtnIn(rowOf('nginx'), 'anticon-file')!)
     expect(await screen.findByText('编辑 unit 文件：nginx.service')).toBeInTheDocument()
-    expect(screen.getByText('/lib/systemd/system/nginx.service')).toBeInTheDocument()
+    // 等 unit 文件加载完成（fileLoading=false 后 fragmentPath 才渲染）
+    expect(await screen.findByText('/lib/systemd/system/nginx.service')).toBeInTheDocument()
     const textarea = document.querySelector('.ant-modal textarea') as HTMLTextAreaElement
     expect(textarea.value).toContain('Description=old')
     fireEvent.change(textarea, { target: { value: '[Unit]\nDescription=new\n' } })
@@ -374,6 +375,10 @@ describe('Services', () => {
     fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }))
     fireEvent.click(iconBtnIn(rowOf('nginx'), 'anticon-file')!)
     await screen.findByText('编辑 unit 文件：nginx.service')
+    // 等 unit 文件加载完成：fileLoading=false 后 fragmentPath 才渲染，
+    // 「保存并重载」disabled={fileLoading} 才解除——否则点击不触发 onClick，
+    // message.error('保存失败') 永不调用（CI 高负载下的 flaky 根因）
+    await screen.findByText('/lib/systemd/system/nginx.service')
     // 保存失败 → fallback 文案
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /保存并重载/ }))
