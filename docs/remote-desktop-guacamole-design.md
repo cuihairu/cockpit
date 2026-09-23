@@ -109,6 +109,29 @@ Guacamole 隧道**复用同一条签发票据的端点与审计**，票据仍是
 的重连行为一致（`TerminalModal` 的「重连」按钮就是重新 `createRemoteTicket`）。
 把票据改成会话级长效凭证只会扩大泄漏窗口，收益为零。
 
+**票据传递走双通道**（实现期核实 common-js 后的对齐）：guacamole-common-js 的
+`WebSocketTunnel.connect(data)` 是 `new WebSocket(url + "?" + data, "guacamole")`
+——**subprotocol 硬编码 `"guacamole"`**，`data` 拼进 URL query，无法自定义
+subprotocol 传票据。故网关读票据两路都认：
+
+- URL query `?ticket=`（**首选**）：前端 `client.connect("ticket=" + ticket)`
+  即落到 query；票据仍是一次性 5 分钟票据，泄漏窗口不变；
+- `Sec-WebSocket-Protocol[0]`（兼容位）：自定义 Tunnel 或不走 common-js 时
+  沿用 terminal/desktop 的同款形状。
+
+query 形态票据不进审计/日志（WS 路径被 `AuditMiddleware` 跳过，由专门的
+远控审计覆盖；`auditRemoteStart` 只记 ticket.ID 不记 URL）。
+
+**隧道内部控制指令由网关终结**（协议分层）：`WebSocketTunnel` 会周期发
+`ping`（opcode 为空 = `Guacamole.Tunnel.INTERNAL_DATA_OPCODE`），期望服务端
+「respond with an identical ping」；`receiveTimeout=15s` 无数据即关隧道、
+`unstableThreshold=1.5s` 判连接不稳。静止桌面下不回显 ping 必然断线，故网关
+在 `wsToGuacd` 拦断 opcode 长度为 0 的指令并原样回显（只读首段长度前缀判
+opcode 是否为空，不解析参数内容），**绝不转发 guacd**（guacd 不认识 tunnel
+层指令）。握手时网关另发 `0.,N.<sessionID>;` 作 tunnel UUID（内部指令单元素
+→ `setUUID`）。这层拦截是「照抄官方 Tunnel 分层」的必要组成，不是自由发挥
+——guacamole-web 的 WebSocketTunnelEndpoint 同样在此分层。
+
 401 递归刷新链路照搬现有实现，两侧都有先例：
 
 - web `services/api.ts:124` 的 401 拦截 + `refreshToken()`（`/auth/refresh`），
@@ -258,7 +281,8 @@ type GuacamoleSession struct {
 }
 
 // handleGuacamoleWebSocket 浏览器 ↔ server 段：WS 文本帧即 Guacamole 协议指令。
-// ticket 经 Sec-WebSocket-Protocol 传递（与 terminal/desktop 同款）。
+// 票据走双通道：URL query ?ticket=（首选，common-js 硬编码 subprotocol
+// "guacamole" 且 connect 数据拼 query）/ Sec-WebSocket-Protocol（兼容位）。
 func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 1. 票据：Sec-WebSocket-Protocol[0] → ValidateTicket（一次性消费）
 	// 2. 权限：terminal:write + matchRemoteEgress(agentID, host, port)
@@ -279,11 +303,13 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 // 管道转发用 bufio.Reader 流式透传即可，无需解析。
 ```
 
-**为什么 Go 侧不解析指令内容**（除握手构造外）：Guacamole 协议是
-guacamole-common-js 与 guacd 之间的私有协议，版本随 Guacamole 发行版演进。
-Go 网关如果解析指令（如为了「审计键入内容」），就要跟着协议版本改，且会
-重新引入「输入含密码」的泄漏面（见 `recording-design.md` D4）。**网关只做
-字节管道**，协议演进由 Guacamole 两端自己对齐。
+**为什么 Go 侧不解析指令内容**（除握手构造与隧道内部指令判别外）：Guacamole
+协议是 guacamole-common-js 与 guacd 之间的私有协议，版本随 Guacamole 发行版
+演进。Go 网关如果解析指令（如为了「审计键入内容」），就要跟着协议版本改，且
+会重新引入「输入含密码」的泄漏面（见 `recording-design.md` D4）。**网关只做
+字节管道**，协议演进由 Guacamole 两端自己对齐；唯一的最小解析是读首段长度
+前缀判定 opcode 是否为空（隧道内部指令，见 D3），该分层与 guacamole-web 的
+WebSocketTunnelEndpoint 同构。
 
 ### 3. 前端 guacamole-common-js 接入骨架
 
@@ -307,14 +333,15 @@ const GuacamoleModal: React.FC<Props> = ({ visible, onClose, agentId, host, port
       username, password,
     })
 
-    // 2. 隧道：WS URL + 票据作子协议（与 TerminalModal 同款握手）
+    // 2. 隧道：票据走 URL query（common-js 的 WebSocketTunnel 硬编码
+    // subprotocol "guacamole" 且把 connect(data) 拼进 URL query，无法用
+    // Sec-WebSocket-Protocol 传票据——上游实现约束，见 D3「票据双通道」）
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const tunnel = new Guacamole.WebSocketTunnel(
       `${wsProtocol}//${window.location.host}/api/remote/guacamole`,
     )
     // guacamole-common-js 的 WebSocketTunnel 自己处理 Guacamole 协议
-    // 的 chunk/base64 编解码——不要在这里自由发挥（见风险章节）
-    ;(tunnel as unknown as { wsProtocols?: string[] }).wsProtocols = [ticket]
+    // 的 chunk/base64 编解码与 ping 保活——不要在这里自由发挥（见风险章节）
 
     // 3. 客户端：Display/Keyboard/Mouse 全由 common-js 承担
     const client = new Guacamole.Client(tunnel)
@@ -341,7 +368,9 @@ const GuacamoleModal: React.FC<Props> = ({ visible, onClose, agentId, host, port
       reader.onend = () => navigator.clipboard.writeText(text)
     }
 
-    client.connect() // 参数已含在服务端 connect 指令里（ticket 携带）
+    // connect(data) 的 data 落到 WS URL query；网关凭票据换出真凭据，
+    // 浏览器侧零凭据（见「为什么参数由服务端放进 connect 指令」）
+    client.connect(`ticket=${encodeURIComponent(ticket)}`)
   }, [agentId, host, port, protocol, username, password])
 
   useEffect(() => () => clientRef.current?.disconnect(), [])

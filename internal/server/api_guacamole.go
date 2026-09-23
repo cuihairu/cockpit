@@ -150,15 +150,31 @@ func (s *Server) registerGuacamoleAPI(mux *http.ServeMux) {
 }
 
 // handleGuacamoleWebSocket 浏览器 ↔ server 段：WS 文本帧即 Guacamole 协议指令。
-// ticket 经 Sec-WebSocket-Protocol 传递（与 terminal/desktop 同款一次性票据）。
+//
+// 票据传递走双通道（与 terminal/desktop 的 Sec-WebSocket-Protocol 同款一次性
+// 票据，复用 ticket.go）：
+//   - URL query ?ticket=（首选）：guacamole-common-js 的 WebSocketTunnel 把
+//     client.connect(data) 的数据拼进 URL query 且**硬编码 subprotocol
+//     "guacamole"**（new WebSocket(url + "?" + data, "guacamole")），无法自定义
+//     subprotocol 传票据——这是上游实现约束，不是自由发挥；
+//   - Sec-WebSocket-Protocol[0]（兼容位）：自定义 Tunnel 或不走 common-js 时
+//     可沿用 terminal/desktop 的同款形状。
+//
+// 票据仍是一次性 5 分钟票据，泄漏窗口不变；WS 路径不进通用审计
+// （AuditMiddleware 跳过），由专门的远控审计覆盖。
 func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// 1. 票据：Sec-WebSocket-Protocol[0]（复用 ticket.go，ValidateTicket 即消费）
-	protocols := r.Header.Values("Sec-WebSocket-Protocol")
-	if len(protocols) == 0 {
+	// 1. 票据：query 优先，子协议兜底（复用 ticket.go，ValidateTicket 即消费）
+	ticketID := r.URL.Query().Get("ticket")
+	if ticketID == "" {
+		if protocols := r.Header.Values("Sec-WebSocket-Protocol"); len(protocols) > 0 {
+			ticketID = protocols[0]
+		}
+	}
+	if ticketID == "" {
 		http.Error(w, `{"error":"Missing ticket"}`, http.StatusUnauthorized)
 		return
 	}
-	ticket, ok := s.ticketMgr.ValidateTicket(protocols[0])
+	ticket, ok := s.ticketMgr.ValidateTicket(ticketID)
 	if !ok {
 		http.Error(w, `{"error":"Invalid or expired ticket"}`, http.StatusUnauthorized)
 		return
@@ -241,7 +257,13 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		done:     make(chan struct{}),
 	}
 
-	// 5. 握手指令发 guacd：size → connect（音频/视频不传 = 不启用，
+	// 5a. tunnel UUID 先发浏览器（INTERNAL_DATA 单元素指令，即
+	// Guacamole.Tunnel.INTERNAL_DATA_OPCODE 空 opcode）：common-js 首条指令
+	// 若为内部指令单元素则 setUUID，否则仅置 OPEN（uuid 留 null）。
+	// 这是 tunnel 层（浏览器↔网关），不进 guacd。
+	session.writeWS([]byte(guacEncode("", sessionID)))
+
+	// 5b. 握手指令发 guacd：size → connect（音频/视频不传 = 不启用，
 	// 音频放阶段二，见设计风险章节）
 	if width <= 0 {
 		width = 1280
@@ -285,7 +307,11 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	s.closeGuacamoleSession(session)
 }
 
-// wsToGuacd 浏览器 → guacd：WS 文本帧内容直写 TCP
+// wsToGuacd 浏览器 → guacd：WS 文本帧内容直写 TCP。
+// 隧道内部控制指令（opcode 空 = Guacamole.Tunnel.INTERNAL_DATA_OPCODE）在此
+// 终结：common-js 的 WebSocketTunnel 会周期发 ping（sendPing），期望服务端
+// "respond with an identical ping"；不回显则 receiveTimeout（15s）判上游超时
+// 关隧道、unstableThreshold（1.5s）判连接不稳。该层指令 guacd 不认识，绝不转发。
 func (gs *GuacamoleSession) wsToGuacd() {
 	defer close(gs.done)
 	for {
@@ -293,10 +319,34 @@ func (gs *GuacamoleSession) wsToGuacd() {
 		if err != nil {
 			return
 		}
+		if guacIsInternal(data) {
+			// 原样回显（identical ping）；uuid 等其他内部指令客户端自行忽略
+			gs.writeWS(data)
+			continue
+		}
 		if _, err := gs.guacd.Write(data); err != nil {
 			return
 		}
 	}
+}
+
+// guacIsInternal 判定指令是否为隧道内部控制指令（opcode 长度 0）。
+// 只读首段长度前缀，不解析参数内容——协议私有，网关不自由发挥（设计风险
+// 章节「照抄官方 Tunnel」）。
+func guacIsInternal(frame []byte) bool {
+	dot := indexByte(frame, '.')
+	if dot <= 0 {
+		return false
+	}
+	n := 0
+	for i := 0; i < dot; i++ {
+		c := frame[i]
+		if c < '0' || c > '9' {
+			return false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n == 0
 }
 
 // guacdToWS guacd → 浏览器：按 Guacamole 指令边界（分号结尾）切分后

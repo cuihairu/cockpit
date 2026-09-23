@@ -240,6 +240,20 @@ func TestGuacamoleTunnelFullFlow(t *testing.T) {
 	conn, _, tDone := covDirectWSJoined(t, s.handleGuacamoleWebSocket, "/api/remote/guacamole", ticket)
 	t.Cleanup(func() { conn.Close() })
 
+	// 首条帧 = tunnel UUID（INTERNAL_DATA 单元素指令，common-js 首条指令
+	// setUUID；opcode 长度 0）。net.Pipe 同步无缓冲——writeWS 会阻塞到客户端
+	// 读完，必须先消费掉才能放行后续 guacd handshake 写入。
+	_, uuidFrame, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read uuid frame: %v", err)
+	}
+	if !strings.HasPrefix(string(uuidFrame), "0.,") {
+		t.Errorf("tunnel uuid frame should be INTERNAL_DATA (empty opcode), got %q", uuidFrame)
+	}
+	if !strings.Contains(string(uuidFrame), ";") {
+		t.Errorf("uuid frame should be a complete instruction, got %q", uuidFrame)
+	}
+
 	// 等 guacd 收到握手：size + connect（含凭据与分辨率，不解析参数内容）
 	covWaitGone(t, "handshake", func() bool {
 		return strings.Contains(g.handshakeText(), "7.connect")
@@ -291,4 +305,113 @@ func guacReqWithTicket(ticket string) *http.Request {
 	r := covReq(http.MethodGet, "/api/remote/guacamole", nil)
 	r.Header.Set("Sec-WebSocket-Protocol", ticket)
 	return r
+}
+
+// ============ 隧道内部控制指令（INTERNAL_DATA_OPCODE） ============
+
+func TestGuacIsInternal(t *testing.T) {
+	// opcode 长度 0 = Guacamole.Tunnel.INTERNAL_DATA_OPCODE
+	if !guacIsInternal([]byte("0.,4.ping,13.12345;")) {
+		t.Error("empty-opcode instruction should be internal")
+	}
+	if !guacIsInternal([]byte("0.,36.3f8f0a9b-c1d2-4e5f-8a9b-0c1d2e3f4a5b;")) {
+		t.Error("tunnel uuid (internal single-element) should be internal")
+	}
+	// 普通指令 opcode 非空
+	for _, frame := range []string{"4.sync,1.0;", "4.size,4.1024,3.768;", "4.move,3.100,2.50;", "10.clipboard,x;"} {
+		if guacIsInternal([]byte(frame)) {
+			t.Errorf("%q should not be internal", frame)
+		}
+	}
+	// 非法帧（无长度前缀/非数字前缀）不判为 internal（走 guacd，交上游裁决）
+	for _, frame := range []string{"", ".", "a.b;", "..x;"} {
+		if guacIsInternal([]byte(frame)) {
+			t.Errorf("%q should not be internal", frame)
+		}
+	}
+}
+
+func TestGuacamoleInternalPingEchoedNotForwarded(t *testing.T) {
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+	g := covStartGuacd(t)
+
+	ticket := covTicket(t, s, map[string]string{
+		"agent_id": "agent-p", "host": "10.0.0.9", "port": "5900", "protocol": "vnc",
+	})
+	conn, _, tDone := covDirectWSJoined(t, s.handleGuacamoleWebSocket, "/api/remote/guacamole", ticket)
+	t.Cleanup(func() { conn.Close() })
+
+	// 消费 tunnel UUID 帧（见 TestGuacamoleTunnelFullFlow 时序说明）
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read uuid frame: %v", err)
+	}
+	covWaitGone(t, "handshake", func() bool {
+		return strings.Contains(g.handshakeText(), "7.connect")
+	})
+	before := g.handshakeText()
+
+	// ping（INTERNAL_DATA）→ 原样回显给浏览器，绝不进 guacd
+	ping := "0.,4.ping,13.175000000000;"
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(ping)); err != nil {
+		t.Fatalf("write ping: %v", err)
+	}
+	_, echo, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read ping echo: %v", err)
+	}
+	if string(echo) != ping {
+		t.Errorf("ping echo = %q, want identical %q", echo, ping)
+	}
+	if got := g.handshakeText(); got != before {
+		t.Errorf("internal instruction must not reach guacd: %q", got[len(before):])
+	}
+
+	// 同理 tunnel uuid / 其他 internal 也回显不转发
+	other := "0.,5.uuid1;"
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(other)); err != nil {
+		t.Fatalf("write internal: %v", err)
+	}
+	_, echo2, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read internal echo: %v", err)
+	}
+	if string(echo2) != other {
+		t.Errorf("internal echo = %q, want %q", echo2, other)
+	}
+
+	// 普通指令仍转发 guacd
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("4.sync,9.175000000;")); err != nil {
+		t.Fatalf("write sync: %v", err)
+	}
+	covWaitGone(t, "sync forwarded", func() bool {
+		return strings.Contains(g.handshakeText(), "4.sync,9.175000000;")
+	})
+
+	conn.Close()
+	covWaitHandlerExit(t, "guacamole ping session close", tDone)
+}
+
+func TestGuacamoleTicketViaQuery(t *testing.T) {
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+	g := covStartGuacd(t)
+
+	// common-js WebSocketTunnel 硬编码 subprotocol "guacamole"，
+	// 票据只能走 URL query（client.connect(data) → new WebSocket(url+"?"+data)）
+	ticket := covTicket(t, s, map[string]string{
+		"agent_id": "agent-q", "host": "10.0.0.9", "port": "5900", "protocol": "vnc",
+	})
+	conn, _, tDone := covDirectWSJoined(t, s.handleGuacamoleWebSocket,
+		"/api/remote/guacamole?ticket="+ticket, ticket)
+	t.Cleanup(func() { conn.Close() })
+
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read uuid frame: %v", err)
+	}
+	covWaitGone(t, "handshake via query ticket", func() bool {
+		return strings.Contains(g.handshakeText(), "7.connect")
+	})
+	conn.Close()
+	covWaitHandlerExit(t, "query ticket session close", tDone)
 }
