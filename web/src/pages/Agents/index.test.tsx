@@ -4,8 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Agents from './index'
 import type { Agent } from '@/types'
 
-// Agents：搜索/三维筛选（地域/状态/类型）+ 详情链路 + 远程连接三协议分流
-// （Terminal/Desktop/VNC Modal 有独立测试，mock 成轻量桩）
+// Agents：搜索/三维筛选（地域/状态/类型）+ 详情链路 + 远程连接分流
+// （Terminal/Guacamole Modal 有独立测试，mock 成轻量桩；RDP/VNC 走 Guacamole）
 
 const apiMock = vi.hoisted(() => ({ getAgents: vi.fn() }))
 vi.mock('@/services/api', () => ({ api: apiMock }))
@@ -14,8 +14,7 @@ const modalStubs = vi.hoisted(() => ({
   opened: [] as string[],
   closed: [] as string[],
   TerminalModal: vi.fn(),
-  DesktopModal: vi.fn(),
-  VNCModal: vi.fn(),
+  GuacamoleModal: vi.fn(),
 }))
 vi.mock('@/components/TerminalModal', () => ({
   default: (props: { title?: string; agentId?: string; onClose?: () => void }) => {
@@ -32,30 +31,15 @@ vi.mock('@/components/TerminalModal', () => ({
     )
   },
 }))
-vi.mock('@/components/DesktopModal', () => ({
-  default: (props: { title?: string; onClose?: () => void }) => {
-    const key = `desktop:${props.title}`
+vi.mock('@/components/GuacamoleModal', () => ({
+  default: (props: { title?: string; protocol?: string; onClose?: () => void }) => {
+    const key = `guac:${props.protocol}:${props.title}`
     if (!modalStubs.opened.includes(key)) modalStubs.opened.push(key)
     return (
       <div
-        data-testid="desktop-modal"
+        data-testid="guac-modal"
         onClick={() => {
-          modalStubs.closed.push('desktop')
-          props.onClose?.()
-        }}
-      />
-    )
-  },
-}))
-vi.mock('@/components/VNCModal', () => ({
-  default: (props: { title?: string; onClose?: () => void }) => {
-    const key = `vnc:${props.title}`
-    if (!modalStubs.opened.includes(key)) modalStubs.opened.push(key)
-    return (
-      <div
-        data-testid="vnc-modal"
-        onClick={() => {
-          modalStubs.closed.push('vnc')
+          modalStubs.closed.push('guac')
           props.onClose?.()
         }}
       />
@@ -266,14 +250,14 @@ describe('Agents', () => {
     await screen.findByTestId('terminal-modal')
     expect(modalStubs.opened).toEqual([
       'terminal:SSH - 7.7.7.7:22',
-      'desktop:RDP - 7.7.7.7:3389',
-      'vnc:VNC - 7.7.7.7:5900',
+      'guac:rdp:RDP - 7.7.7.7:3389',
+      'guac:vnc:VNC - 7.7.7.7:5900',
     ])
     // 三个 Modal 的 onClose 各自触发（visible 置 false 的 setter）
     fireEvent.click(screen.getByTestId('terminal-modal'))
-    fireEvent.click(screen.getByTestId('desktop-modal'))
-    fireEvent.click(screen.getByTestId('vnc-modal'))
-    expect(modalStubs.closed).toEqual(['terminal', 'desktop', 'vnc'])
+    fireEvent.click(screen.getByTestId('guac-modal'))
+    fireEvent.click(screen.getByTestId('guac-modal'))
+    expect(modalStubs.closed).toEqual(['terminal', 'guac', 'guac'])
     // 详情 Modal 的 X → onClose
     fireEvent.click(document.querySelector('.ant-modal-close')!)
   })

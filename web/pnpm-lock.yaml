@@ -54,6 +54,9 @@ importers:
       echarts:
         specifier: ^6.1.0
         version: 6.1.0
+      guacamole-common-js:
+        specifier: 1.5.0
+        version: 1.5.0
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
@@ -1317,6 +1320,9 @@ packages:
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
+
+  guacamole-common-js@1.5.0:
+    resolution: {integrity: sha512-zxztif3GGhKbg1RgOqwmqot8kXgv2HmHFg1EvWwd4q7UfEKvBcYZ0f+7G8HzvU+FUxF0Psqm9Kl5vCbgfrRgJg==}
 
   has-symbols@1.1.0:
     resolution: {integrity: sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==}
@@ -3716,6 +3722,8 @@ snapshots:
 
   graceful-fs@4.2.11:
     optional: true
+
+  guacamole-common-js@1.5.0: {}
 
   has-symbols@1.1.0: {}
 

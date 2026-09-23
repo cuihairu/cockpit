@@ -6,8 +6,7 @@ import type { ColumnsType } from 'antd/es/table'
 import type { Agent } from '@/types'
 import { api } from '@/services/api'
 import TerminalModal from '@/components/TerminalModal'
-import DesktopModal from '@/components/DesktopModal'
-import VNCModal from '@/components/VNCModal'
+import GuacamoleModal from '@/components/GuacamoleModal'
 import type { RemoteProtocol } from '@/services/remote'
 import { buildAgentColumns } from './columns'
 import { AgentDetailModal } from './AgentDetailModal'
@@ -162,25 +161,15 @@ const Agents = () => {
         />
       )}
 
-      {modals.desktopConfig && (
-        <DesktopModal
-          visible={modals.desktopVisible}
-          onClose={() => modals.setDesktopVisible(false)}
-          agentId={modals.desktopConfig.agentId}
-          host={modals.desktopConfig.host}
-          port={modals.desktopConfig.port}
-          title={modals.desktopConfig.title}
-        />
-      )}
-
-      {modals.vncConfig && (
-        <VNCModal
-          visible={modals.vncVisible}
-          onClose={() => modals.setVncVisible(false)}
-          agentId={modals.vncConfig.agentId}
-          host={modals.vncConfig.host}
-          port={modals.vncConfig.port}
-          title={modals.vncConfig.title}
+      {modals.guacConfig && (
+        <GuacamoleModal
+          visible={modals.guacVisible}
+          onClose={() => modals.setGuacVisible(false)}
+          agentId={modals.guacConfig.agentId}
+          host={modals.guacConfig.host}
+          port={modals.guacConfig.port}
+          protocol={modals.guacConfig.protocol}
+          title={modals.guacConfig.title}
         />
       )}
     </div>

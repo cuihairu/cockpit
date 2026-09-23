@@ -24,22 +24,12 @@ vi.mock('@/components/TerminalModal', () => ({
     )
   },
 }))
-vi.mock('@/components/DesktopModal', () => ({
-  default: (props: { title?: string; onClose?: () => void }) => {
-    opened.titles.push(`desktop:${props.title}`)
+vi.mock('@/components/GuacamoleModal', () => ({
+  default: (props: { title?: string; protocol?: string; onClose?: () => void }) => {
+    opened.titles.push(`guac:${props.protocol}:${props.title}`)
     return (
-      <div data-testid="desktop-modal">
-        <button onClick={props.onClose}>close-desktop</button>
-      </div>
-    )
-  },
-}))
-vi.mock('@/components/VNCModal', () => ({
-  default: (props: { title?: string; onClose?: () => void }) => {
-    opened.titles.push(`vnc:${props.title}`)
-    return (
-      <div data-testid="vnc-modal">
-        <button onClick={props.onClose}>close-vnc</button>
+      <div data-testid="guac-modal">
+        <button onClick={props.onClose}>close-guac</button>
       </div>
     )
   },
@@ -195,16 +185,16 @@ describe('Workbench', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /VNC/ }))
     })
-    await screen.findByTestId('vnc-modal')
+    await screen.findByTestId('guac-modal')
     expect(opened.titles).toEqual(expect.arrayContaining([
       'terminal:SSH - web-01',
-      'vnc:VNC - web-01',
+      'guac:vnc:VNC - web-01',
     ]))
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /RDP/ }))
     })
     expect(msgWarning).toHaveBeenCalledWith('未检测到可用的 RDP 服务')
-    expect(opened.titles.filter((t) => t.startsWith('desktop:'))).toEqual([])
+    expect(opened.titles.filter((t) => t.startsWith('guac:rdp:'))).toEqual([])
   })
 
   it('概览/文件/日志按钮只切 Tab 不弹窗', async () => {
@@ -259,7 +249,7 @@ describe('Workbench', () => {
     expect(screen.getByTestId('sidebar-count')).toHaveTextContent('0')
   })
 
-  it('RDP 有服务时开 DesktopModal；面板 connect 按钮分流三协议；关闭各自 Modal', async () => {
+  it('RDP 有服务时开 GuacamoleModal；面板 connect 按钮分流三协议；关闭各自 Modal', async () => {
     renderPage([
       {
         id: 'ag-1',
@@ -289,17 +279,17 @@ describe('Workbench', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /RDP/ }))
     })
-    await screen.findByTestId('desktop-modal')
-    expect(opened.titles).toEqual(expect.arrayContaining(['desktop:RDP - ag-1']))
-    fireEvent.click(screen.getByText('close-desktop'))
-    await waitFor(() => expect(screen.queryByTestId('desktop-modal')).toBeNull())
+    await screen.findByTestId('guac-modal')
+    expect(opened.titles).toEqual(expect.arrayContaining(['guac:rdp:RDP - ag-1']))
+    fireEvent.click(screen.getByText('close-guac'))
+    await waitFor(() => expect(screen.queryByTestId('guac-modal')).toBeNull())
     // RDP Tab 面板的连接按钮（ConnectionPanel onConnect → openConnection('rdp')）
     await act(async () => {
       fireEvent.click(screen.getByTestId('panel-rdp'))
     })
-    await screen.findByTestId('desktop-modal')
-    fireEvent.click(screen.getByText('close-desktop'))
-    await waitFor(() => expect(screen.queryByTestId('desktop-modal')).toBeNull())
+    await screen.findByTestId('guac-modal')
+    fireEvent.click(screen.getByText('close-guac'))
+    await waitFor(() => expect(screen.queryByTestId('guac-modal')).toBeNull())
     // SSH/VNC 面板连接按钮（切 Tab 后挂载）
     fireEvent.click(screen.getByRole('tab', { name: 'SSH' }))
     await act(async () => {
@@ -312,13 +302,13 @@ describe('Workbench', () => {
     await act(async () => {
       fireEvent.click(await screen.findByTestId('panel-vnc'))
     })
-    await screen.findByTestId('vnc-modal')
-    fireEvent.click(screen.getByText('close-vnc'))
-    await waitFor(() => expect(screen.queryByTestId('vnc-modal')).toBeNull())
+    await screen.findByTestId('guac-modal')
+    fireEvent.click(screen.getByText('close-guac'))
+    await waitFor(() => expect(screen.queryByTestId('guac-modal')).toBeNull())
     expect(msgWarning).not.toHaveBeenCalled()
   })
 
-  it('RDP 无 rdp-client capability：前置拦截提示，不开 DesktopModal', async () => {
+  it('RDP 入口走 GuacamoleModal（guacd 终结协议，无需 agent rdp-client capability）', async () => {
     msgWarning.mockClear()
     renderPage([
       {
@@ -344,9 +334,8 @@ describe('Workbench', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /RDP/ }))
     })
-    expect(msgWarning).toHaveBeenCalledWith(
-      expect.stringContaining('RDP 客户端'),
-    )
-    expect(screen.queryByTestId('desktop-modal')).toBeNull()
+    // Guacamole 路径：协议由 guacd 终结，agent 是否带 -tags rdp 不再前置拦截
+    expect(msgWarning).not.toHaveBeenCalled()
+    await screen.findByTestId('guac-modal')
   })
 })

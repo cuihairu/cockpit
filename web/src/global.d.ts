@@ -34,3 +34,64 @@ declare module '@novnc/novnc' {
     removeEventListener(event: string, handler: (e: Event) => void): void
   }
 }
+
+declare module 'guacamole-common-js' {
+  // guacamole-common-js 1.5.0 无类型声明（UMD/ESM bundle，仅 export default）。
+  // 按 @novnc/novnc 同款做法：只声明本项目用到的 API，不自由发挥协议细节。
+  // 设计见 docs/remote-desktop-guacamole-design.md（D1/D2/D3）。
+
+  export interface Tunnel {
+    connect(data?: string): void
+    disconnect(): void
+    sendMessage(...elements: unknown[]): void
+    oninstruction?: (opcode: string, parameters: string[]) => void
+    onerror?: (status: { code: number; message: string }) => void
+    onstatechange?: (state: number) => void
+  }
+
+  export interface DisplayElement {
+    getElement(): HTMLElement
+  }
+
+  export interface MouseState {
+    x: number
+    y: number
+    button: number
+    buttons: number
+  }
+
+  const Guacamole: {
+    /** WS 隧道：connect(data) 落到 URL query `?`+data，subprotocol 硬编码 "guacamole" */
+    WebSocketTunnel: new (tunnelURL: string) => Tunnel
+    Client: new (tunnel: Tunnel) => {
+      connect(data?: string): void
+      disconnect(): void
+      getDisplay(): DisplayElement
+      sendMouseState(state: MouseState): void
+      sendKeyEvent(pressed: 0 | 1, keysym: number): void
+      sendSize(width: number, height: number): void
+      onclipboard?: (
+        streams: Record<string, unknown>,
+        mimetype: string,
+      ) => void
+      onstatechange?: (state: number) => void
+      onerror?: (status: { code: number; message: string }) => void
+    }
+    Mouse: new (element: HTMLElement) => {
+      onmousedown?: (state: MouseState) => void
+      onmouseup?: (state: MouseState) => void
+      onmousemove?: (state: MouseState) => void
+    }
+    Keyboard: new (element: HTMLElement | Document) => {
+      onkeydown?: (keysym: number) => void
+      onkeyup?: (keysym: number) => void
+    }
+    StringReader: new (stream: unknown) => {
+      ondata?: (chunk: string) => void
+      onend?: () => void
+    }
+  }
+
+  export default Guacamole
+}
+

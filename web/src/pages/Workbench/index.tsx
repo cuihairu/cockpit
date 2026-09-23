@@ -12,8 +12,7 @@ import {
 import { api } from '@/services/api'
 import FileBrowser from '@/components/FileBrowser'
 import TerminalModal from '@/components/TerminalModal'
-import DesktopModal from '@/components/DesktopModal'
-import VNCModal from '@/components/VNCModal'
+import GuacamoleModal from '@/components/GuacamoleModal'
 import AgentSidebar from '@/workbench/AgentSidebar'
 import ConnectionPanel from '@/workbench/ConnectionPanel'
 import { PermGuard } from '@/components/PermGuard'
@@ -21,7 +20,6 @@ import LogsPanel from '@/workbench/LogsPanel'
 import OverviewPanel from '@/workbench/OverviewPanel'
 import { getRemoteServices } from '@/workbench/services'
 import type { SessionConfig, WorkbenchTab } from '@/workbench/types'
-import { hasRdpClient } from '@/workbench/services'
 
 const protocolTabs: Array<{ key: WorkbenchTab; label: string; icon: React.ReactNode }> = [
   { key: 'overview', label: '概览', icon: <SettingOutlined /> },
@@ -37,8 +35,9 @@ const Workbench = () => {
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<WorkbenchTab>('overview')
   const [terminalConfig, setTerminalConfig] = useState<SessionConfig | null>(null)
-  const [desktopConfig, setDesktopConfig] = useState<SessionConfig | null>(null)
-  const [vncConfig, setVncConfig] = useState<SessionConfig | null>(null)
+  // RDP/VNC 走 Guacamole 网关（guacd + guacamole-common-js，见
+  // docs/remote-desktop-guacamole-design.md）；SSH 仍走 TerminalModal（xterm.js）
+  const [guacConfig, setGuacConfig] = useState<SessionConfig | null>(null)
 
   const { data: agents = [], isFetching: loading, refetch: loadAgents } = useQuery({
     queryKey: ['workbench-agents'],
@@ -81,13 +80,8 @@ const Workbench = () => {
       return
     }
 
-    // RDP 需 agent 构建带 -tags rdp（rdp-client capability）；stub 构建连上
-    // 也只会回 error，前置拦截给出可操作提示
-    if (service.protocol === 'rdp' && !hasRdpClient(selectedAgent)) {
-      message.warning('该 Agent 未启用 RDP 客户端：请用 -tags rdp 重新构建 cockpit-agent')
-      return
-    }
-
+    // RDP/VNC 经 Guacamole 网关由 guacd 终结协议，agent 不参与（无需
+    // rdp-client capability）；出口策略与审计仍在 server 侧（D3/D4）
     const config: SessionConfig = {
       agentId: selectedAgent.id,
       host: service.host,
@@ -96,10 +90,8 @@ const Workbench = () => {
       title: `${service.protocol.toUpperCase()} - ${selectedAgent.hostname || selectedAgent.id}`,
     }
 
-    if (service.protocol === 'rdp') {
-      setDesktopConfig(config)
-    } else if (service.protocol === 'vnc') {
-      setVncConfig(config)
+    if (service.protocol === 'rdp' || service.protocol === 'vnc') {
+      setGuacConfig(config)
     } else {
       setTerminalConfig(config)
     }
@@ -215,25 +207,15 @@ const Workbench = () => {
         />
       )}
 
-      {desktopConfig && (
-        <DesktopModal
-          visible={Boolean(desktopConfig)}
-          onClose={() => setDesktopConfig(null)}
-          agentId={desktopConfig.agentId}
-          host={desktopConfig.host}
-          port={desktopConfig.port}
-          title={desktopConfig.title}
-        />
-      )}
-
-      {vncConfig && (
-        <VNCModal
-          visible={Boolean(vncConfig)}
-          onClose={() => setVncConfig(null)}
-          agentId={vncConfig.agentId}
-          host={vncConfig.host}
-          port={vncConfig.port}
-          title={vncConfig.title}
+      {guacConfig && (guacConfig.protocol === 'rdp' || guacConfig.protocol === 'vnc') && (
+        <GuacamoleModal
+          visible={Boolean(guacConfig)}
+          onClose={() => setGuacConfig(null)}
+          agentId={guacConfig.agentId}
+          host={guacConfig.host}
+          port={guacConfig.port}
+          protocol={guacConfig.protocol}
+          title={guacConfig.title}
         />
       )}
     </Layout>

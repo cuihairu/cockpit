@@ -2,28 +2,32 @@ import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { useRemoteModals } from './useRemoteModals'
 
-// useRemoteModals：三协议分流开关 Terminal/Desktop/VNC
+// useRemoteModals：协议分流开关——RDP/VNC 走 GuacamoleModal，SSH/telnet 走 TerminalModal
 
 describe('useRemoteModals', () => {
-  it('rdp 分流 Desktop，标题带 RDP 前缀', () => {
+  it('rdp 分流 Guacamole，标题带 RDP 前缀', () => {
     const { result } = renderHook(() => useRemoteModals())
     act(() => result.current.open('rdp', 'ag1', '10.0.0.1', 3389))
-    expect(result.current.desktopVisible).toBe(true)
-    expect(result.current.desktopConfig).toEqual({
+    expect(result.current.guacVisible).toBe(true)
+    expect(result.current.guacConfig).toEqual({
       agentId: 'ag1',
       host: '10.0.0.1',
       port: 3389,
+      protocol: 'rdp',
       title: 'RDP - 10.0.0.1:3389',
     })
     expect(result.current.terminalConfig).toBeNull()
-    expect(result.current.vncConfig).toBeNull()
   })
 
-  it('vnc 分流 VNC', () => {
+  it('vnc 分流 Guacamole，标题带 VNC 前缀', () => {
     const { result } = renderHook(() => useRemoteModals())
     act(() => result.current.open('vnc', 'ag1', '10.0.0.2', 5900))
-    expect(result.current.vncVisible).toBe(true)
-    expect(result.current.vncConfig).toMatchObject({ port: 5900, title: 'VNC - 10.0.0.2:5900' })
+    expect(result.current.guacVisible).toBe(true)
+    expect(result.current.guacConfig).toMatchObject({
+      protocol: 'vnc',
+      port: 5900,
+      title: 'VNC - 10.0.0.2:5900',
+    })
   })
 
   it('ssh/telnet 走 Terminal，标题大写协议并携带 protocol', () => {
@@ -41,8 +45,8 @@ describe('useRemoteModals', () => {
   it('setVisible 可关闭而不清空目标', () => {
     const { result } = renderHook(() => useRemoteModals())
     act(() => result.current.open('rdp', 'ag1', '10.0.0.1', 3389))
-    act(() => result.current.setDesktopVisible(false))
-    expect(result.current.desktopVisible).toBe(false)
-    expect(result.current.desktopConfig).not.toBeNull()
+    act(() => result.current.setGuacVisible(false))
+    expect(result.current.guacVisible).toBe(false)
+    expect(result.current.guacConfig).not.toBeNull()
   })
 })

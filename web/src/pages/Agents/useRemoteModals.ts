@@ -14,19 +14,23 @@ export interface RemoteTarget {
 export const useRemoteModals = () => {
   const [terminalVisible, setTerminalVisible] = useState(false)
   const [terminalConfig, setTerminalConfig] = useState<RemoteTarget | null>(null)
-  const [desktopVisible, setDesktopVisible] = useState(false)
-  const [desktopConfig, setDesktopConfig] = useState<RemoteTarget | null>(null)
-  const [vncVisible, setVncVisible] = useState(false)
-  const [vncConfig, setVncConfig] = useState<RemoteTarget | null>(null)
+  // RDP/VNC 走 Guacamole 网关（guacd + guacamole-common-js）
+  const [guacVisible, setGuacVisible] = useState(false)
+  const [guacConfig, setGuacConfig] = useState<
+    (RemoteTarget & { protocol: 'rdp' | 'vnc' }) | null
+  >(null)
 
   // 根据协议分流打开对应的 modal
   const open = (protocol: RemoteProtocol, agentId: string, host: string, port: number) => {
-    if (protocol === 'rdp') {
-      setDesktopConfig({ agentId, host, port, title: `RDP - ${host}:${port}` })
-      setDesktopVisible(true)
-    } else if (protocol === 'vnc') {
-      setVncConfig({ agentId, host, port, title: `VNC - ${host}:${port}` })
-      setVncVisible(true)
+    if (protocol === 'rdp' || protocol === 'vnc') {
+      setGuacConfig({
+        agentId,
+        host,
+        port,
+        protocol,
+        title: `${protocol.toUpperCase()} - ${host}:${port}`,
+      })
+      setGuacVisible(true)
     } else {
       setTerminalConfig({
         agentId,
@@ -42,13 +46,10 @@ export const useRemoteModals = () => {
   return {
     terminalVisible,
     terminalConfig,
-    desktopVisible,
-    desktopConfig,
-    vncVisible,
-    vncConfig,
+    guacVisible,
+    guacConfig,
     setTerminalVisible,
-    setDesktopVisible,
-    setVncVisible,
+    setGuacVisible,
     open,
   }
 }
