@@ -170,7 +170,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o "dist/cockpit-agent${{ matrix.ext }}" ./cmd/cockpit-agent
+          go build -tags rdp -trimpath -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o "dist/cockpit-agent${{ matrix.ext }}" ./cmd/cockpit-agent
 
       - name: Package agent (tar.gz / zip)
         run: |
@@ -232,7 +232,7 @@ jobs:
           GOARM: ${{ matrix.goarm }}
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags="-s -w" -o dist/cockpit-agent ./cmd/cockpit-agent
+          go build -tags rdp -trimpath -ldflags="-s -w" -o dist/cockpit-agent ./cmd/cockpit-agent
 
       - name: Package ipk + tar.gz
         run: |

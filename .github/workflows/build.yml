@@ -59,10 +59,10 @@ jobs:
           mkdir -p dist
           if [ "${{ matrix.os }}" = "windows" ]; then
             go build -ldflags="-s -w" -o dist/cockpit.exe ./cmd/cockpit
-            go build -ldflags="-s -w" -o dist/cockpit-agent.exe ./cmd/cockpit-agent
+            go build -tags rdp -ldflags="-s -w" -o dist/cockpit-agent.exe ./cmd/cockpit-agent
           else
             go build -ldflags="-s -w" -o dist/cockpit ./cmd/cockpit
-            go build -ldflags="-s -w" -o dist/cockpit-agent ./cmd/cockpit-agent
+            go build -tags rdp -ldflags="-s -w" -o dist/cockpit-agent ./cmd/cockpit-agent
           fi
 
       - name: Upload artifacts

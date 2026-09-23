@@ -33,9 +33,17 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      - name: Run go vet (rdp tag)
+        run: go vet -tags rdp ./...
+
       - name: Run tests with coverage
         run: |
           go test -short ./... -coverprofile=coverage.out -covermode=atomic -timeout 600s
+
+      # RDP 桌面客户端（grdp）仅在 -tags rdp 构建编译；默认 stub 分支已在
+      # 上一步覆盖，此处验证真实现分支可编译且测试全绿
+      - name: Run RDP-tagged tests
+        run: go test -tags rdp -short ./internal/agent/rdp/ ./internal/agent/ -timeout 600s
 
       - name: Check coverage threshold
         run: |

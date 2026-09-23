@@ -42,9 +42,16 @@ jobs:
       - name: Run go vet
         run: go vet ./internal/agent/... ./cmd/cockpit-agent/...
 
+      - name: Run go vet (rdp tag)
+        run: go vet -tags rdp ./internal/agent/... ./cmd/cockpit-agent/...
+
       - name: Run tests with coverage
         run: |
           go test -short ./internal/agent/... ./cmd/cockpit-agent/... -coverprofile=coverage.out -covermode=atomic -v -timeout 600s
+
+      # RDP 桌面客户端仅在 -tags rdp 构建编译；验证真实现分支测试全绿
+      - name: Run RDP-tagged tests
+        run: go test -tags rdp -short ./internal/agent/rdp/ ./internal/agent/ -timeout 600s
 
       - name: Check coverage threshold (20%)
         run: |
@@ -100,7 +107,7 @@ jobs:
         run: go mod download
 
       - name: Build agent
-        run: go build -o dist/cockpit-agent ./cmd/cockpit-agent
+        run: go build -tags rdp -o dist/cockpit-agent ./cmd/cockpit-agent
 
       - name: Run agent
         run: |
