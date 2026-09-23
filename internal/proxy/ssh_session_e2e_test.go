@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,13 +13,47 @@ import (
 )
 
 // sshTestServer 内存 SSH 服务端：接受口令认证，回显 PTY shell。
+// gotPty/gotWin/gotInput 由 accept 侧 goroutine 写、测试 goroutine 读，
+// 一律经 mu 保护的 record*/snapshot* 访问（race 检测下裸读写会报竞态）。
 type sshTestServer struct {
-	ln       net.Listener
-	hostKey  ssh.Signer
+	ln      net.Listener
+	hostKey ssh.Signer
+	quit    chan struct{}
+
+	mu       sync.Mutex
 	gotPty   *ptyRequest
 	gotWin   []windowChangeRequest
 	gotInput []string
-	quit     chan struct{}
+}
+
+func (ts *sshTestServer) recordPty(p *ptyRequest) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.gotPty = p
+}
+
+func (ts *sshTestServer) recordWin(w windowChangeRequest) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.gotWin = append(ts.gotWin, w)
+}
+
+func (ts *sshTestServer) recordInput(s string) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.gotInput = append(ts.gotInput, s)
+}
+
+func (ts *sshTestServer) ptySnapshot() *ptyRequest {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return ts.gotPty
+}
+
+func (ts *sshTestServer) winSnapshot() []windowChangeRequest {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return append([]windowChangeRequest(nil), ts.gotWin...)
 }
 
 type ptyRequest struct {
@@ -117,7 +152,7 @@ func (ts *sshTestServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request)
 				Rows    uint32
 			}
 			_ = ssh.Unmarshal(req.Payload, &payload)
-			ts.gotPty = &ptyRequest{term: payload.Term, rows: int(payload.Rows), cols: int(payload.Columns)}
+			ts.recordPty(&ptyRequest{term: payload.Term, rows: int(payload.Rows), cols: int(payload.Columns)})
 			if req.WantReply {
 				_ = req.Reply(true, nil)
 			}
@@ -127,7 +162,7 @@ func (ts *sshTestServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request)
 				Rows    uint32
 			}
 			_ = ssh.Unmarshal(req.Payload, &payload)
-			ts.gotWin = append(ts.gotWin, windowChangeRequest{rows: int(payload.Rows), cols: int(payload.Columns)})
+			ts.recordWin(windowChangeRequest{rows: int(payload.Rows), cols: int(payload.Columns)})
 			if req.WantReply {
 				_ = req.Reply(true, nil)
 			}
@@ -141,7 +176,7 @@ func (ts *sshTestServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request)
 				for {
 					n, err := ch.Read(buf)
 					if n > 0 {
-						ts.gotInput = append(ts.gotInput, string(buf[:n]))
+						ts.recordInput(string(buf[:n]))
 						// 回显，模拟 shell
 						_, _ = ch.Write(buf[:n])
 					}
@@ -172,19 +207,24 @@ func TestNewSSHSessionEndToEnd(t *testing.T) {
 	}
 	defer sess.Close()
 
-	// PTY 尺寸已上报
+	// PTY 尺寸已上报（快照读，服务端 goroutine 并发写入）
 	deadline := time.Now().Add(3 * time.Second)
-	for ts.gotPty == nil && time.Now().Before(deadline) {
+	var gotPty *ptyRequest
+	for time.Now().Before(deadline) {
+		gotPty = ts.ptySnapshot()
+		if gotPty != nil {
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if ts.gotPty == nil {
+	if gotPty == nil {
 		t.Fatal("server did not receive pty-req")
 	}
-	if ts.gotPty.rows != 30 || ts.gotPty.cols != 100 {
-		t.Errorf("pty size = %dx%d, want 100x30", ts.gotPty.cols, ts.gotPty.rows)
+	if gotPty.rows != 30 || gotPty.cols != 100 {
+		t.Errorf("pty size = %dx%d, want 100x30", gotPty.cols, gotPty.rows)
 	}
-	if ts.gotPty.term != "xterm-256color" {
-		t.Errorf("term = %q, want xterm-256color", ts.gotPty.term)
+	if gotPty.term != "xterm-256color" {
+		t.Errorf("term = %q, want xterm-256color", gotPty.term)
 	}
 
 	// 输入经 Stream 写入 → 服务端回显 → Stream 读回
@@ -219,14 +259,19 @@ func TestNewSSHSessionEndToEnd(t *testing.T) {
 		t.Fatalf("WindowChange: %v", err)
 	}
 	deadline = time.Now().Add(3 * time.Second)
-	for len(ts.gotWin) == 0 && time.Now().Before(deadline) {
+	var wins []windowChangeRequest
+	for time.Now().Before(deadline) {
+		wins = ts.winSnapshot()
+		if len(wins) > 0 {
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(ts.gotWin) == 0 {
+	if len(wins) == 0 {
 		t.Fatal("server did not receive window-change")
 	}
-	if ts.gotWin[0].rows != 50 || ts.gotWin[0].cols != 200 {
-		t.Errorf("window change = %dx%d, want 200x50", ts.gotWin[0].cols, ts.gotWin[0].rows)
+	if wins[0].rows != 50 || wins[0].cols != 200 {
+		t.Errorf("window change = %dx%d, want 200x50", wins[0].cols, wins[0].rows)
 	}
 
 	// Close 幂等
