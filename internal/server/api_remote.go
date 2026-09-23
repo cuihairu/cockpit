@@ -130,14 +130,28 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 	log.Printf("Terminal session created: %s for user %s", sessionID, ticket.Username)
 
 	target := host + ":" + portStr
-	msg := protocol.NewMessage(protocol.MessageTypeProxyNew, map[string]interface{}{
+	proxyNew := map[string]interface{}{
 		"proxyId":   "terminal-" + connID,
 		"proxyType": "tcp",
 		"target":    target,
 		"terminal":  true,
 		"connId":    connID,
 		"protocol":  string(remoteProtocol),
-	})
+	}
+	// SSH 凭据随 proxy_new 下发到 agent（agent 侧终结 SSH 协议）。
+	// 口令只经加密 WS 通道传输，不落盘、不进日志/审计。
+	if remoteProtocol == protocol.RemoteProtocolSSH {
+		if v := ticket.Params["username"]; v != "" {
+			proxyNew["username"] = v
+		}
+		if v := ticket.Params["password"]; v != "" {
+			proxyNew["password"] = v
+		}
+		if v := ticket.Params["private_key"]; v != "" {
+			proxyNew["privateKey"] = v
+		}
+	}
+	msg := protocol.NewMessage(protocol.MessageTypeProxyNew, proxyNew)
 
 	if err := agent.SendMessage(msg); err != nil {
 		log.Printf("Failed to send proxy start message: %v", err)
@@ -370,9 +384,10 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 		Host     string `json:"host"`
 		Port     int    `json:"port"`
 		Protocol string `json:"protocol"` // ssh, telnet, vnc, rdp
-		Username string `json:"username,omitempty"`
-		Password string `json:"password,omitempty"` // VNC密码等
-		Domain   string `json:"domain,omitempty"`
+		Username   string `json:"username,omitempty"`
+		Password   string `json:"password,omitempty"` // SSH 口令 / VNC 密码等
+		PrivateKey string `json:"private_key,omitempty"` // SSH PEM 私钥（优先于 Password）
+		Domain     string `json:"domain,omitempty"`
 		Width    int    `json:"width,omitempty"`
 		Height   int    `json:"height,omitempty"`
 	}
@@ -460,6 +475,9 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Password != "" {
 		params["password"] = req.Password
+	}
+	if req.PrivateKey != "" {
+		params["private_key"] = req.PrivateKey
 	}
 	if req.Domain != "" {
 		params["domain"] = req.Domain

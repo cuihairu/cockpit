@@ -460,3 +460,70 @@ func TestMessageTimestamp(t *testing.T) {
 		t.Errorf("Timestamp = %v, want between %d and %d", msg.Timestamp, before, after)
 	}
 }
+
+func TestProxyNewPayloadSSHCredentials(t *testing.T) {
+	payload := ProxyNewPayload{
+		ProxyID:    "proxy-1",
+		ProxyType:  "tcp",
+		Target:     "192.168.1.100:22",
+		Terminal:   true,
+		Protocol:   "ssh",
+		Username:   "root",
+		Password:   "secret",
+		PrivateKey: "-----BEGIN...",
+	}
+
+	if payload.Username != "root" {
+		t.Errorf("Username = %v, want root", payload.Username)
+	}
+	if payload.Password != "secret" {
+		t.Errorf("Password = %v, want secret", payload.Password)
+	}
+	if payload.PrivateKey != "-----BEGIN..." {
+		t.Errorf("PrivateKey = %v", payload.PrivateKey)
+	}
+}
+
+func TestProxyDataPayloadResize(t *testing.T) {
+	payload := ProxyDataPayload{
+		ProxyID: "proxy-1",
+		ConnID:  "conn-1",
+		Resize:  true,
+		Rows:    30,
+		Cols:    120,
+	}
+
+	if !payload.Resize {
+		t.Error("Resize should be true")
+	}
+	if payload.Rows != 30 || payload.Cols != 120 {
+		t.Errorf("size = %dx%d, want 120x30", payload.Cols, payload.Rows)
+	}
+}
+
+func TestProxyPayloadJSONRoundTrip(t *testing.T) {
+	// 凭据与 resize 字段必须可经 JSON 通道透传（server → agent）
+	newMsg := NewMessage(MessageTypeProxyNew, map[string]interface{}{
+		"proxyId": "p", "target": "h:22", "connId": "c",
+		"terminal": true, "protocol": "ssh",
+		"username": "u", "password": "pw", "privateKey": "KEY",
+	})
+	got, err := DecodeProxyNew(newMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Username != "u" || got.Password != "pw" || got.PrivateKey != "KEY" {
+		t.Errorf("credentials not round-tripped: %+v", got)
+	}
+
+	dataMsg := NewMessage(MessageTypeProxyData, map[string]interface{}{
+		"proxyId": "p", "connId": "c", "resize": true, "rows": 40, "cols": 100,
+	})
+	data, err := DecodeProxyData(dataMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !data.Resize || data.Rows != 40 || data.Cols != 100 {
+		t.Errorf("resize not round-tripped: %+v", data)
+	}
+}

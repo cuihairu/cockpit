@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TerminalModal from './index'
 
@@ -12,6 +12,8 @@ const terminalMock = vi.hoisted(() => ({
   onData: vi.fn(),
   reset: vi.fn(),
   dispose: vi.fn(),
+  rows: 24,
+  cols: 80,
 }))
 const fitMock = vi.hoisted(() => ({ fit: vi.fn() }))
 // new Terminal() 须返回 mock 对象：普通 function 构造器显式 return
@@ -71,6 +73,9 @@ describe('TerminalModal', () => {
     host: '10.0.0.1',
     port: 22,
     protocol: 'ssh' as const,
+    // SSH 需要认证凭据；传入 username 跳过凭据表单直接连接
+    username: 'testuser',
+    password: 'testpass',
   }
 
   it('打开即建终端、输出欢迎语并凭票据连 WS', async () => {
@@ -80,6 +85,7 @@ describe('TerminalModal', () => {
     expect(terminalMock.writeln).toHaveBeenCalledWith(expect.stringContaining('Cockpit 远程终端'))
     expect(createRemoteTicket).toHaveBeenCalledWith({
       agentId: 'ag1', host: '10.0.0.1', port: 22, protocol: 'ssh',
+      username: 'testuser', password: 'testpass',
     })
     const ws = FakeWebSocket.instances[0]
     expect(ws.url).toBe('ws://localhost:3000/api/remote/terminal')
@@ -221,5 +227,72 @@ describe('TerminalModal', () => {
       onDataCb('ls\n') // CONNECTING 状态
     })
     expect(ws.sent).toHaveLength(0)
+  })
+
+  // ============ SSH 凭据表单 ============
+
+  it('SSH 无 username：先出凭据表单，提交后才建终端', async () => {
+    render(<TerminalModal {...props} username={undefined} password={undefined} />)
+    // 表单阶段不建终端、不取票据
+    expect(terminalMock.open).not.toHaveBeenCalled()
+    expect(createRemoteTicket).not.toHaveBeenCalled()
+    expect(screen.getByText('用户名')).toBeInTheDocument()
+    expect(screen.getByText('口令')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByPlaceholderText('登录口令'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    // antd Form onFinish 异步 → effect 建终端，等重渲染
+    await waitFor(() => expect(terminalMock.open).toHaveBeenCalled())
+    expect(createRemoteTicket).toHaveBeenCalledWith({
+      agentId: 'ag1', host: '10.0.0.1', port: 22, protocol: 'ssh',
+      username: 'alice', password: 'pw',
+    })
+  })
+
+  it('凭据表单空用户名拦截，不建终端', async () => {
+    render(<TerminalModal {...props} username={undefined} password={undefined} />)
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    expect(await screen.findByText('请输入用户名')).toBeInTheDocument()
+    expect(terminalMock.open).not.toHaveBeenCalled()
+    expect(createRemoteTicket).not.toHaveBeenCalled()
+  })
+
+  it('telnet 免认证：无 username 也直接建终端（不进凭据表单）', async () => {
+    render(<TerminalModal {...props} protocol="telnet" username={undefined} password={undefined} />)
+    await flush()
+    expect(screen.queryByText('用户名')).not.toBeInTheDocument()
+    expect(terminalMock.open).toHaveBeenCalled()
+    expect(createRemoteTicket).toHaveBeenCalledWith({
+      agentId: 'ag1', host: '10.0.0.1', port: 22, protocol: 'telnet',
+    })
+  })
+
+  // ============ PTY 尺寸上报 ============
+
+  it('窗口变化发 resize（rows/cols）到服务端', async () => {
+    // ResizeObserver 手工驱动，验证 fit + resize 上报
+    let roCb: ResizeObserverCallback | null = null
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: ResizeObserverCallback) { roCb = cb }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+
+    render(<TerminalModal {...props} />)
+    await flush()
+    const ws = FakeWebSocket.instances[0]
+    await act(async () => {
+      ws.readyState = FakeWebSocket.OPEN
+      ws.onopen!()
+    })
+    ws.sent.length = 0
+
+    await act(async () => {
+      roCb?.([], {} as ResizeObserver)
+    })
+    expect(fitMock.fit).toHaveBeenCalled()
+    expect(ws.sent).toContain(JSON.stringify({ type: 'resize', rows: 24, cols: 80 }))
   })
 })

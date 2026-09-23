@@ -23,15 +23,24 @@ type Handler struct {
 	running  atomic.Bool
 }
 
-// AgentTargetConn Agent 端的连接
+// AgentTargetConn Agent 端的连接。
+// Conn 抽象为 io.ReadWriteCloser：裸 TCP 目标是 net.Conn，SSH 目标是
+// PTY 会话适配流（sshStream），二者共用 readFromTarget 转发管道。
 type AgentTargetConn struct {
 	ID      string
 	ProxyID string
 	Target  string
-	Conn    net.Conn
+	Conn    io.ReadWriteCloser
 	Created time.Time
+	// sshSess 非空时表示 SSH 终端会话，用于 PTY WindowChange
+	sshSess *SSHSession
 	mu      sync.RWMutex
 	closed  atomic.Bool
+}
+
+// windowResizer 可调整终端窗口尺寸的目标连接（SSH PTY）。
+type windowResizer interface {
+	WindowChange(rows, cols int) error
 }
 
 // NewHandler 创建 Agent 端代理处理器
@@ -91,7 +100,13 @@ func (h *Handler) HandleProxyNew(msg *protocol.Message) error {
 		return fmt.Errorf("invalid proxy new message: missing required fields")
 	}
 
-	// 连接到目标服务
+	// SSH 终端：agent 侧终结 SSH 协议（Dial → 认证 → PTY → Shell），
+	// 之后的 proxy_data 双向流即 PTY 字节流。telnet 等仍走裸 TCP。
+	if p.Terminal && p.Protocol == string(protocol.RemoteProtocolSSH) {
+		return h.openSSHProxy(p)
+	}
+
+	// 裸 TCP 目标（telnet / 普通 TCP 代理）
 	targetConn, err := net.DialTimeout("tcp", p.Target, 10*time.Second)
 	if err != nil {
 		log.Printf("Failed to connect to target %s: %v", p.Target, err)
@@ -120,6 +135,33 @@ func (h *Handler) HandleProxyNew(msg *protocol.Message) error {
 	return nil
 }
 
+// openSSHProxy 建立 SSH 终端代理：SSH 会话即 Conn，转发管道复用裸 TCP 路径。
+func (h *Handler) openSSHProxy(p protocol.ProxyNewPayload) error {
+	sshSess, err := NewSSHSession(p.Target, p.Username, p.Password, p.PrivateKey, 24, 80)
+	if err != nil {
+		log.Printf("Failed to establish SSH session to %s: %v", p.Target, err)
+		h.SendError(p.ProxyID, p.ConnID, err.Error())
+		return err
+	}
+
+	agentConn := &AgentTargetConn{
+		ID:      p.ConnID,
+		ProxyID: p.ProxyID,
+		Target:  p.Target,
+		Conn:    sshSess.Stream(),
+		Created: time.Now(),
+		sshSess: sshSess,
+	}
+
+	h.mu.Lock()
+	h.conns[p.ConnID] = agentConn
+	h.mu.Unlock()
+
+	log.Printf("Agent: New SSH proxy session %s -> %s", p.ConnID, p.Target)
+	go h.readFromTarget(agentConn)
+	return nil
+}
+
 // HandleProxyData 处理来自 Server 的数据
 func (h *Handler) HandleProxyData(msg *protocol.Message) error {
 	p, err := protocol.DecodeProxyData(msg)
@@ -137,6 +179,24 @@ func (h *Handler) HandleProxyData(msg *protocol.Message) error {
 
 	if conn.closed.Load() {
 		return fmt.Errorf("connection %s already closed", p.ConnID)
+	}
+
+	// 终端窗口尺寸变更：调 PTY WindowChange，不写数据。
+	// SSH 会话的 WindowChange 在 SSHSession 上（Stream 是纯 IO 适配器，
+	// 不实现 windowResizer），优先走 sshSess；其余目标按接口探测。
+	if p.Resize {
+		var rz windowResizer
+		if conn.sshSess != nil {
+			rz = conn.sshSess
+		} else if r, ok := conn.Conn.(windowResizer); ok {
+			rz = r
+		} else {
+			return nil // 裸 TCP 目标无 PTY 概念，静默忽略
+		}
+		if err := rz.WindowChange(p.Rows, p.Cols); err != nil {
+			log.Printf("Window change error on %s: %v", p.ConnID, err)
+		}
+		return nil
 	}
 
 	// 写入数据到目标
@@ -243,6 +303,10 @@ func (h *Handler) SendClose(proxyID, connID, reason string) {
 func (ac *AgentTargetConn) Close() error {
 	if !ac.closed.CompareAndSwap(false, true) {
 		return nil // 已经关闭
+	}
+	if ac.sshSess != nil {
+		// SSH：关会话（PTY/shell）+ 底层连接，幂等
+		return ac.sshSess.Close()
 	}
 	return ac.Conn.Close()
 }

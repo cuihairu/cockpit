@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, Button, Space } from 'antd';
+import { Modal, Button, Space, Form, Input, Alert } from 'antd';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -16,6 +16,10 @@ interface TerminalModalProps {
   port: number;
   protocol: RemoteProtocol;
   title?: string;
+  /** SSH 登录用户名（调用方已知时传入，跳过凭据表单） */
+  username?: string;
+  /** SSH 登录口令（仅经加密 WS 通道转发，不落盘） */
+  password?: string;
 }
 
 const TerminalModal: React.FC<TerminalModalProps> = ({
@@ -26,6 +30,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   port,
   protocol,
   title,
+  username,
+  password,
 }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
@@ -33,12 +39,18 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
+  // SSH 需要登录凭据；调用方未提供时先出表单（telnet 等裸协议免认证）
+  const needsCredentials = protocol === 'ssh' && !username;
+  const [authPending, setAuthPending] = useState(needsCredentials);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [credentials, setCredentials] = useState({ username: username || '', password: password || '' });
+
   // 用 ref 保存连接参数，避免 useEffect 依赖变化导致重建
-  const paramsRef = useRef({ agentId, host, port, protocol });
+  const paramsRef = useRef({ agentId, host, port, protocol, username, password });
 
   useEffect(() => {
-    paramsRef.current = { agentId, host, port, protocol };
-  }, [agentId, host, port, protocol]);
+    paramsRef.current = { agentId, host, port, protocol, username: credentials.username, password: credentials.password };
+  }, [agentId, host, port, protocol, credentials.username, credentials.password]);
 
   const connectWebSocket = useCallback(async (terminal: Terminal) => {
     const params = paramsRef.current;
@@ -46,7 +58,15 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     let ticket: string;
 
     try {
-      const result = await createRemoteTicket(params);
+      // 空凭据不入参：保持无认证协议（telnet 等）的调用形状不变
+      const result = await createRemoteTicket({
+        agentId: params.agentId,
+        host: params.host,
+        port: params.port,
+        protocol: params.protocol,
+        ...(params.username ? { username: params.username } : {}),
+        ...(params.password ? { password: params.password } : {}),
+      });
       ticket = result.ticket;
     } catch {
       terminal.writeln('\r\n\x1b[1;31m创建连接票据失败\x1b[0m\r\n');
@@ -111,7 +131,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   }, []);
 
   useEffect(() => {
-    if (visible && terminalRef.current && !terminalInstanceRef.current) {
+    if (visible && !authPending && terminalRef.current && !terminalInstanceRef.current) {
       // 创建终端实例
       const terminal = new Terminal({
         cursorBlink: true,
@@ -166,9 +186,13 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
         }
       });
 
-      // 窗口大小变化时适配
+      // 窗口大小变化时适配本地渲染，并同步 PTY 尺寸到远端（agent 调 WindowChange）
       const resizeObserver = new ResizeObserver(() => {
         fitAddon.fit();
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', rows: terminal.rows, cols: terminal.cols }));
+        }
       });
       resizeObserver.observe(terminalRef.current);
 
@@ -181,7 +205,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
         terminalInstanceRef.current = null;
       };
     }
-  }, [connectWebSocket, visible]);
+  }, [connectWebSocket, visible, authPending]);
 
   useEffect(() => {
     if (!visible && terminalInstanceRef.current) {
@@ -203,6 +227,15 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     }
   };
 
+  const handleAuthSubmit = () => {
+    if (!credentials.username.trim()) {
+      setAuthError('请输入用户名');
+      return;
+    }
+    setAuthError(null);
+    setAuthPending(false);
+  };
+
   return (
     <Modal
       title={title || `${protocol.toUpperCase()} - ${host}:${port}`}
@@ -212,35 +245,71 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       footer={null}
       styles={{ body: { padding: 0, background: '#1e1e1e' } }}
     >
-      <div style={{ height: 500, background: '#1e1e1e' }}>
-        <div
-          ref={terminalRef}
-          style={{
-            height: '100%',
-            padding: '8px',
-          }}
-        />
-        <div
-          style={{
-            position: 'absolute',
-            top: 60,
-            right: 40,
-            zIndex: 10,
-          }}
-        >
-          <Space>
-            <Button
-              size="small"
-              type="primary"
-              ghost={!connected}
-              disabled={connected}
-              onClick={handleReconnect}
-            >
-              {connected ? '已连接' : '重连'}
-            </Button>
-          </Space>
+      {authPending ? (
+        <div style={{ padding: 24, background: '#1e1e1e', color: '#d4d4d4' }}>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={`登录 ${host}:${port}`}
+            description="SSH 需要认证凭据；口令仅经加密通道转发到目标主机，不落盘、不进日志。"
+          />
+          <Form layout="vertical" onFinish={(e) => { e.preventDefault?.(); handleAuthSubmit(); }}>
+            <Form.Item label="用户名" required>
+              <Input
+                autoFocus
+                value={credentials.username}
+                onChange={(e) => setCredentials((c) => ({ ...c, username: e.target.value }))}
+                placeholder="root"
+              />
+            </Form.Item>
+            <Form.Item label="口令">
+              <Input.Password
+                value={credentials.password}
+                onChange={(e) => setCredentials((c) => ({ ...c, password: e.target.value }))}
+                placeholder="登录口令"
+              />
+            </Form.Item>
+            {authError && <Alert type="error" showIcon message={authError} style={{ marginBottom: 16 }} />}
+            <Space>
+              <Button type="primary" onClick={handleAuthSubmit}>
+                连接
+              </Button>
+              <Button onClick={onClose}>取消</Button>
+            </Space>
+          </Form>
         </div>
-      </div>
+      ) : (
+        <div style={{ height: 500, background: '#1e1e1e' }}>
+          <div
+            ref={terminalRef}
+            style={{
+              height: '100%',
+              padding: '8px',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              top: 60,
+              right: 40,
+              zIndex: 10,
+            }}
+          >
+            <Space>
+              <Button
+                size="small"
+                type="primary"
+                ghost={!connected}
+                disabled={connected}
+                onClick={handleReconnect}
+              >
+                {connected ? '已连接' : '重连'}
+              </Button>
+            </Space>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 };

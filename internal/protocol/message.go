@@ -155,6 +155,12 @@ type ProxyNewPayload struct {
 	ConnID    string `json:"connId,omitempty"`   // 连接ID（运行时附加）
 	Terminal  bool   `json:"terminal,omitempty"` // 终端会话标记
 	Protocol  string `json:"protocol,omitempty"` // 远程协议（ssh/telnet/rdp/vnc…）
+
+	// SSH 认证凭据（protocol=ssh 时生效；telnet 等裸 TCP 协议忽略）。
+	// 口令与私钥仅经加密 WS 通道下发到 agent，不落盘、不进日志/审计。
+	Username   string `json:"username,omitempty"`   // 登录用户名
+	Password   string `json:"password,omitempty"`   // 口令认证（与 PrivateKey 二选一）
+	PrivateKey string `json:"privateKey,omitempty"` // PEM 格式私钥（优先于 Password）
 }
 
 // ProxyDataPayload 代理数据转发负载
@@ -168,6 +174,12 @@ type ProxyDataPayload struct {
 
 	// 运行时附加：标记 terminal/vnc 等特殊通道，避免依赖 proxyId 前缀
 	Terminal bool `json:"terminal,omitempty"` // 终端会话标记
+
+	// 终端窗口尺寸变更（terminal 会话专用；Data 为空）。
+	// server 已按浏览器 {type:"resize",rows,cols} 转发，agent 调 PTY WindowChange。
+	Resize bool `json:"resize,omitempty"` // 是否为窗口尺寸变更
+	Rows   int  `json:"rows,omitempty"`   // 行数
+	Cols   int  `json:"cols,omitempty"`   // 列数
 }
 
 // ProxyClosePayload 关闭代理连接负载

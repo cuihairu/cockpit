@@ -62,6 +62,10 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
       _terminal.onOutput = (data) {
         channel.sink.add(jsonEncode({'type': 'input', 'data': data}));
       };
+      // PTY 尺寸同步：xterm 回调 (cols, rows) → resize 消息 → agent WindowChange
+      _terminal.onResize = (width, height, pixelWidth, pixelHeight) {
+        channel.sink.add(jsonEncode({'type': 'resize', 'rows': height, 'cols': width}));
+      };
       // 保存 subscription 以便 dispose 时取消：WS 回调落在真 async 区，
       // 测试/页面销毁后仍会触发 _fail → setState(defunct)。
       _sub = channel.stream.listen(

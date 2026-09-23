@@ -10,6 +10,8 @@ export interface RemoteTicketRequest {
   protocol: RemoteProtocol
   username?: string
   password?: string
+  /** SSH PEM 私钥（优先于 password） */
+  privateKey?: string
   domain?: string
   width?: number
   height?: number
@@ -82,6 +84,7 @@ export async function createRemoteTicket(params: RemoteTicketRequest): Promise<R
     protocol: params.protocol,
     username: params.username,
     password: params.password,
+    private_key: params.privateKey,
     domain: params.domain,
     width: params.width,
     height: params.height,

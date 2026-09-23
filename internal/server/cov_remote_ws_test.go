@@ -887,3 +887,54 @@ func TestCovRemoteSessionsAPI(t *testing.T) {
 		t.Error("Delete on missing session should return false")
 	}
 }
+
+// ============ SSH 凭据下发 ============
+
+func TestCovTerminalSSHForwardsCredentials(t *testing.T) {
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+	agent := covRegisterBareAgent(t, s, "agent-ssh-cred")
+
+	conn, _, tDone := covDirectWSJoined(t, s.handleTerminalWebSocket, "/api/remote/terminal",
+		covTicket(t, s, map[string]string{
+			"agent_id": "agent-ssh-cred", "host": "127.0.0.1", "port": "22", "protocol": "ssh",
+			"username": "root", "password": "s3cret", "private_key": "PEM",
+		}))
+	t.Cleanup(func() { conn.Close() })
+
+	var connect map[string]interface{}
+	covWSReadJSON(t, conn, &connect)
+
+	newMsg := covAgentRecv(t, agent, "proxy_new")
+	if newMsg.Type != protocol.MessageTypeProxyNew {
+		t.Fatalf("agent msg type = %s", newMsg.Type)
+	}
+	// SSH 凭据必须随 proxy_new 下发到 agent（agent 侧终结 SSH 协议）
+	if newMsg.Payload["username"] != "root" || newMsg.Payload["password"] != "s3cret" {
+		t.Fatalf("SSH credentials not forwarded: %+v", newMsg.Payload)
+	}
+	if newMsg.Payload["privateKey"] != "PEM" {
+		t.Fatalf("privateKey not forwarded: %+v", newMsg.Payload)
+	}
+
+	// telnet 不带凭据（裸 TCP 协议无认证）
+	covClearSessions()
+	agent2 := covRegisterBareAgent(t, s, "agent-telnet-noauth")
+	conn2, _, tDone2 := covDirectWSJoined(t, s.handleTerminalWebSocket, "/api/remote/terminal",
+		covTicket(t, s, map[string]string{
+			"agent_id": "agent-telnet-noauth", "host": "127.0.0.1", "port": "23", "protocol": "telnet",
+			"username": "u", "password": "p",
+		}))
+	t.Cleanup(func() { conn2.Close() })
+	var connect2 map[string]interface{}
+	covWSReadJSON(t, conn2, &connect2)
+	newMsg2 := covAgentRecv(t, agent2, "proxy_new")
+	if _, ok := newMsg2.Payload["username"]; ok {
+		t.Fatalf("telnet should not forward SSH credentials: %+v", newMsg2.Payload)
+	}
+
+	conn.Close()
+	conn2.Close()
+	<-tDone
+	<-tDone2
+}
