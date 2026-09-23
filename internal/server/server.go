@@ -269,6 +269,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 注册 VNC 连接 API
 	s.registerVNCAPI(mux)
 
+	// 注册 Guacamole 桌面隧道 API（guacd + guacamole-common-js 路线，
+	// 见 docs/remote-desktop-guacamole-design.md）
+	s.registerGuacamoleAPI(mux)
+
 	// 公开路由
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/health", s.handleHealth)
