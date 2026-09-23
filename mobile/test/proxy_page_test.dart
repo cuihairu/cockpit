@@ -14,6 +14,8 @@ import 'package:cockpit_mobile/state/settings.dart';
 
 class MockAdapter implements HttpClientAdapter {
   final responses = <String, List<ResponseBody>>{};
+  int puts = 0;
+  int deletes = 0;
 
   void on(String method, String path, int status, Object? body) {
     responses.putIfAbsent('$method $path', () => []).add(
@@ -28,6 +30,8 @@ class MockAdapter implements HttpClientAdapter {
       RequestOptions options,
       Stream<Uint8List>? requestStream,
       Future<void>? cancelFuture) async {
+    if (options.method == 'PUT') puts++;
+    if (options.method == 'DELETE') deletes++;
     final key = '${options.method} ${options.path}';
     final queue = responses[key];
     if (queue == null || queue.isEmpty) {
@@ -117,13 +121,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('反代 · web-1'), findsOneWidget);
-    // 状态卡
     expect(find.textContaining('后端 Nginx'), findsOneWidget);
     expect(find.textContaining('nginx/1.24.0'), findsOneWidget);
     expect(find.textContaining('目录 /etc/nginx/conf.d'), findsOneWidget);
     expect(find.textContaining('站点 2'), findsOneWidget);
     expect(find.textContaining('生效 systemctl'), findsOneWidget);
-    // 站点行
     expect(find.text('blog'), findsOneWidget);
     expect(find.text('blog.example.com'), findsOneWidget);
     expect(find.text('www.example.com'), findsOneWidget);
@@ -137,10 +139,8 @@ void main() {
 
   testWidgets('反代页：空数据占位', (tester) async {
     final adapter = MockAdapter()
-      ..on('GET', '/api/agents/ag-1/proxy/status', 200, {
-        ..._status,
-        'siteCount': 0,
-      })
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200,
+          {..._status, 'siteCount': 0})
       ..on('GET', '/api/agents/ag-1/proxy/sites', 200,
           {'sites': <Object?>[]});
     final dio = Dio(BaseOptions(baseUrl: 'http://test'))
@@ -153,7 +153,8 @@ void main() {
 
   testWidgets('反代页：加载失败占位 + 下拉刷新恢复', (tester) async {
     final adapter = MockAdapter()
-      ..on('GET', '/api/agents/ag-1/proxy/status', 503, {'error': 'agent offline'})
+      ..on('GET', '/api/agents/ag-1/proxy/status', 503,
+          {'error': 'agent offline'})
       ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
       ..on('GET', '/api/agents/ag-1/proxy/sites', 200, _sites);
     final dio = Dio(BaseOptions(baseUrl: 'http://test'))
@@ -190,6 +191,190 @@ void main() {
     await tester.tap(find.text('关闭'));
     await tester.pumpAndSettle();
     expect(find.text('配置预览：blog'), findsNothing);
+  });
+
+  testWidgets('反代页：新建站点表单校验失败文案', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200,
+          {'sites': <Object?>[]});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('新建站点'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('新建站点'), findsOneWidget);
+    expect(find.text('站点名称'), findsOneWidget);
+
+    await tester.ensureVisible(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    expect(find.text('请输入站点名称'), findsOneWidget);
+    expect(find.text('请输入上游地址'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextFormField).first, 'Bad Name');
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    expect(find.text('小写字母/数字开头，可用 - 和 _，最长 64 字符'),
+        findsOneWidget);
+  });
+
+  testWidgets('反代页：新建站点成功 → SnackBar + 列表刷新', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200,
+          {'sites': <Object?>[]})
+      ..on('PUT', '/api/agents/ag-1/proxy/sites/blog', 200,
+          {'name': 'blog', 'file': 'cockpit-site-blog.conf'})
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200, {
+        'sites': [
+          {
+            'name': 'blog',
+            'serverNames': ['blog.example.com'],
+            'upstream': '127.0.0.1:3000',
+            'scheme': 'http',
+            'websocket': false,
+          },
+        ],
+      });
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('新建站点'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextFormField).at(0), 'blog');
+    await tester.enterText(
+        find.byType(TextFormField).at(1), 'blog.example.com');
+    await tester.tap(find.byTooltip('添加域名'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byType(TextFormField).at(2), '127.0.0.1:3000');
+
+    await tester.ensureVisible(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+
+    expect(find.text('站点 blog 已应用'), findsOneWidget);
+    expect(adapter.puts, 1);
+    expect(find.text('blog'), findsOneWidget);
+  });
+
+  testWidgets('反代页：编辑预填 + name 禁用', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200, _sites)
+      ..on('GET', '/api/agents/ag-1/proxy/sites/blog', 200, _siteDetail);
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('编辑').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('编辑站点 blog'), findsOneWidget);
+    final nameField =
+        tester.widget<TextFormField>(find.byType(TextFormField).first);
+    expect(nameField.controller!.text, 'blog');
+    expect(nameField.enabled, isFalse);
+  });
+
+  testWidgets('反代页：删除确认 + 成功', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200, _sites)
+      ..on('DELETE', '/api/agents/ag-1/proxy/sites/blog', 200, {})
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200,
+          {'sites': <Object?>[]});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('删除').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('删除站点'), findsOneWidget);
+    expect(find.text('将从 Nginx 移除 blog，确认？'), findsOneWidget);
+
+    await tester.tap(find.text('删除').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('站点 blog 已删除'), findsOneWidget);
+    expect(adapter.deletes, 1);
+    expect(find.text('暂无站点'), findsOneWidget);
+  });
+
+  testWidgets('反代页：应用失败 → 表单内 Alert 展示错误原文', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200,
+          {'sites': <Object?>[]})
+      ..on('PUT', '/api/agents/ag-1/proxy/sites/blog', 502, {
+        'error': 'nginx -t failed: unknown directive "foo"',
+      });
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('新建站点'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextFormField).at(0), 'blog');
+    await tester.enterText(
+        find.byType(TextFormField).at(1), 'blog.example.com');
+    await tester.tap(find.byTooltip('添加域名'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byType(TextFormField).at(2), '127.0.0.1:3000');
+
+    await tester.ensureVisible(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+
+    expect(find.text('应用失败'), findsOneWidget);
+    expect(find.textContaining('nginx -t failed: unknown directive'),
+        findsOneWidget);
+    expect(find.text('创建'), findsOneWidget);
+  });
+
+  testWidgets('反代页：Traefik 后端 extra 禁用', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, {
+        ..._status,
+        'backend': 'traefik',
+        'reloadMode': 'hot',
+        'confDir': '/etc/traefik/dynamic',
+      })
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200,
+          {'sites': <Object?>[]});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('新建站点'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Traefik 后端不支持高级指令，留空即可'), findsOneWidget);
+    final extraField =
+        tester.widget<TextFormField>(find.byType(TextFormField).last);
+    expect(extraField.enabled, isFalse);
   });
 }
 

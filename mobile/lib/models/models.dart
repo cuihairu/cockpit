@@ -609,6 +609,19 @@ class ProxySite {
         websocket: j['websocket'] as bool? ?? false,
         extra: j['extra'] as String? ?? '',
       );
+
+  /// PUT body（json key 对齐 Go proxySitePayload tag）。
+  /// 项目约定：写操作在 endpoints 手拼 map，此处提供组装方法保持字段同源。
+  Map<String, dynamic> toPayload() => {
+        'name': name,
+        'serverNames': serverNames,
+        'upstream': upstream,
+        'scheme': scheme,
+        if (tlsCert != null && tlsCert!.isNotEmpty) 'tlsCert': tlsCert,
+        if (tlsKey != null && tlsKey!.isNotEmpty) 'tlsKey': tlsKey,
+        'websocket': websocket,
+        if (extra.isNotEmpty) 'extra': extra,
+      };
 }
 
 /// 对齐 proxy.site.get 响应：{name, site, content}。
@@ -636,4 +649,17 @@ class ProxyViewData {
   final List<ProxySite> sites;
 
   ProxyViewData({required this.status, required this.sites});
+}
+
+/// PUT proxy/sites/{name} 响应：{name, file}（file = 片段文件 basename）。
+class ProxyApplyResult {
+  final String name;
+  final String file;
+
+  ProxyApplyResult({required this.name, required this.file});
+
+  factory ProxyApplyResult.fromJson(Map<String, dynamic> j) => ProxyApplyResult(
+        name: j['name'] as String? ?? '',
+        file: j['file'] as String? ?? '',
+      );
 }

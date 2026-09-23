@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/endpoints.dart';
 import '../models/models.dart';
 import '../state/settings.dart';
+import 'proxy_editor.dart';
 
 /// 反代只读视图（M4）：状态卡 + 站点列表 + 配置预览。
 /// 写操作（新建/编辑/删除）不在移动端提供——桌面端做。
@@ -18,6 +19,7 @@ class ProxyPage extends ConsumerStatefulWidget {
 
 class _ProxyPageState extends ConsumerState<ProxyPage> {
   late Future<ProxyViewData> _future;
+  bool _isTraefik = false;
 
   @override
   void initState() {
@@ -36,7 +38,16 @@ class _ProxyPageState extends ConsumerState<ProxyPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('反代 · ${widget.agent.hostname}')),
+      appBar: AppBar(
+        title: Text('反代 · ${widget.agent.hostname}'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: '新建站点',
+            onPressed: () => _showEditor(null, _isTraefik),
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: () async => setState(_reload),
         child: FutureBuilder<ProxyViewData>(
@@ -53,6 +64,7 @@ class _ProxyPageState extends ConsumerState<ProxyPage> {
             }
             final d = snap.data!;
             final isTraefik = d.status.isTraefik;
+            _isTraefik = isTraefik;
             return ListView(
               children: [
                 _statusCard(d.status),
@@ -72,7 +84,7 @@ class _ProxyPageState extends ConsumerState<ProxyPage> {
                     padding: EdgeInsets.all(32),
                     child: Center(child: Text('暂无站点')),
                   ),
-                for (final s in d.sites) _siteRow(s),
+                for (final s in d.sites) _siteRow(s, isTraefik),
               ],
             );
           },
@@ -120,7 +132,7 @@ class _ProxyPageState extends ConsumerState<ProxyPage> {
     );
   }
 
-  Widget _siteRow(ProxySite s) {
+  Widget _siteRow(ProxySite s, bool isTraefik) {
     return ListTile(
       title: Text(s.name),
       subtitle: Column(
@@ -149,21 +161,37 @@ class _ProxyPageState extends ConsumerState<ProxyPage> {
               style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
         ],
       ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            s.scheme == 'https' ? 'HTTPS' : 'HTTP',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: s.scheme == 'https' ? Colors.green : Colors.blue,
-            ),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                s.scheme == 'https' ? 'HTTPS' : 'HTTP',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: s.scheme == 'https' ? Colors.green : Colors.blue,
+                ),
+              ),
+              if (s.websocket)
+                Text('WS',
+                    style:
+                        TextStyle(fontSize: 11, color: Colors.purple.shade700)),
+            ],
           ),
-          if (s.websocket)
-            Text('WS',
-                style: TextStyle(fontSize: 11, color: Colors.purple.shade700)),
+          IconButton(
+            icon: const Icon(Icons.edit, size: 20),
+            tooltip: '编辑',
+            onPressed: () => _showEditor(s.name, isTraefik),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+            tooltip: '删除',
+            onPressed: () => _confirmDelete(s.name, isTraefik),
+          ),
         ],
       ),
       onTap: () => _showPreview(s.name),
@@ -218,4 +246,72 @@ class _ProxyPageState extends ConsumerState<ProxyPage> {
       ),
     );
   }
-}
+
+  /// 新建/编辑表单（M5）：editing 传站点名 = 编辑（拉详情预填，列表是裁剪版
+  /// 无 tlsCert/tlsKey/extra，必须走 site.get 才能预填全量）。
+  Future<void> _showEditor(String? name, bool isTraefik) async {
+    final api = await ref.read(apiProvider.future);
+    ProxySite? editing;
+    if (name != null) {
+      try {
+        editing = (await api.proxySite(widget.agent.id, name)).site;
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('读取站点失败：$e')));
+        return;
+      }
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => ProxyEditor(
+        editing: editing,
+        isTraefik: isTraefik,
+        onSave: (site) async {
+          await api.applyProxySite(widget.agent.id, site.name, site.toPayload());
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('站点 ${site.name} 已应用')));
+          }
+          setState(_reload);
+        },
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(String name, bool isTraefik) async {
+    final backendName = isTraefik ? 'Traefik' : 'Nginx';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除站点'),
+        content: Text('将从 $backendName 移除 $name，确认？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final api = await ref.read(apiProvider.future);
+    try {
+      await api.deleteProxySite(widget.agent.id, name);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('站点 $name 已删除')));
+      setState(_reload);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('删除失败：$e')));
+    }
+  }}

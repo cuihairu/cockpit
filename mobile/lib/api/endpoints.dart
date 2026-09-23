@@ -183,6 +183,22 @@ extension ProxyApi on CockpitApi {
         '/api/agents/$agentId/proxy/sites/$name');
     return ProxySiteDetail.fromJson(r.data!);
   }
+
+  /// PUT /api/agents/{id}/proxy/sites/{name}——应用站点。
+  /// body 完整 ProxySite；**URL name 与 body name 必须一致**（Go 侧
+  /// `payload.Name != name` 即 400 `site name in URL and body must match`）。
+  Future<ProxyApplyResult> applyProxySite(
+      String agentId, String name, Map<String, dynamic> body) async {
+    final r = await client.dio.put<Map<String, dynamic>>(
+        '/api/agents/$agentId/proxy/sites/$name',
+        data: body);
+    return ProxyApplyResult.fromJson(r.data!);
+  }
+
+  /// DELETE /api/agents/{id}/proxy/sites/{name}——删除站点。
+  Future<void> deleteProxySite(String agentId, String name) async {
+    await client.dio.delete('/api/agents/$agentId/proxy/sites/$name');
+  }
 }
 
 extension RemoteApi on CockpitApi {
