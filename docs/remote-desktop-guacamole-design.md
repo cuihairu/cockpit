@@ -200,7 +200,7 @@ guacd 是独立 C 守护进程，官方镜像 `apache/guacamole`（含 guacd）�
 ### 1. guacd docker-compose
 
 ```yaml
-# deploy/guacd/docker-compose.yml
+# deployments/guacd/docker-compose.yml（按仓库 deployments/ 约定）
 services:
   guacd:
     image: guacamole/guacd:1.5.5
@@ -470,7 +470,7 @@ Guacamole 路线下这个成本**几乎为零**：guacd 写 `.guac` 文件，我
 
 **阶段 1：连得上、操作得了**（本设计的验收范围）
 
-1. guacd docker-compose 落地（`deploy/guacd/docker-compose.yml`）；
+1. guacd docker-compose 落地（`deployments/guacd/docker-compose.yml`）；
 2. Go WS 网关反代（`internal/server/api_guacamole.go`）+ 票据/审计/出口策略；
 3. web `GuacamoleModal`（guacamole-common-js）替换 `DesktopModal` 的 RDP/
    VNC 入口（或并列入口灰度）；

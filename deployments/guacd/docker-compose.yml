@@ -1,0 +1,40 @@
+# guacd：Apache Guacamole 协议守护进程（RDP/VNC → Guacamole 指令流翻译）
+#
+# 见 docs/remote-desktop-guacamole-design.md（D1/D5）：
+# - guacd 无用户概念、无状态——会话/权限/审计在 Cockpit server（Go 网关）
+# - Go 网关反代此端口（浏览器不直连 guacd），端口只绑回环/内网
+# - GUACD_LOG_LEVEL 别开 debug：debug 会打印 connect 指令参数（含口令）
+#
+# 部署：docker compose up -d
+# 交叉验证：docker compose config
+
+services:
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: cockpit-guacd
+    restart: unless-stopped
+    ports:
+      # Go 网关同机反代：绑回环，不对外暴露（guacd 不是 HTTP 服务，
+      # 也不是浏览器可达的端点——浏览器走 /api/remote/guacamole WS）
+      # 跨机部署时改绑内网地址（如 "192.168.x.x:4822:4822"）并靠防火墙收口
+      - "${GUACD_BIND:-127.0.0.1}:${GUACD_PORT:-4822}:4822"
+    volumes:
+      # guacd session recording 落盘目录（connect 指令的 recording-path 指向这里，
+      # 白捡桌面会话审计回放，见设计「guacd session recording」节）
+      - guacd-recordings:/var/lib/guacamole:rw
+      # 阶段二文件传输（RDP 驱动器重定向）预留
+      - guacd-drive:/var/lib/guacamole/drive:rw
+    environment:
+      # info 即可；debug 会打出 connect 指令参数（含口令），是泄漏面
+      GUACD_LOG_LEVEL: ${GUACD_LOG_LEVEL:-info}
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      # guacd 无 HTTP 健康端点；用 TCP 探活 4822
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822 || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  guacd-recordings:
+  guacd-drive:
