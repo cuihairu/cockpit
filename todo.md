@@ -740,7 +740,7 @@
 - `37583ec1`：阈值 99%→100%（CI 红：实测 99.9%）
 - `8dfe7c11`：阈值定 **99.9%**（对齐实测值）——**CI 三 workflow 全绿**（Test/Agent Test/Build success）
 
-**覆盖率最终状态**：非 `-short` 口径 **31/31 包 100%**；CI 门禁口径（`-short`）**99.9%**（差 0.1%：集成测试 `testing.Short()` 跳过 + 少量 `-short` 跳过分支）；agent 口径 99.9%（proxy/agent 分包 100%）。`StdinPipe` 防御分支经 `stdinPipeFn` var 注入覆盖（行为中性）；`rdpClientAvailable` var 注入覆盖默认构建分支。CodeCov「62%+」系 profile 不完整误读（某包 FAIL 致 profile 13 字节、total 显示 0%），已随 flaky 修复消除。
+**覆盖率最终状态**：非 `-short` 口径 **31/31 包 100%**；CI 门禁口径（`-short`）**100.0%**（「差 0.1%」的 `-short` 跳过分支后续提交已全部补齐，2026-09-24 本地以 CI 同口径 coverprofile 复核，`test.yml`/`agent-test.yml` 阈值随之上探 100%，24f48442）。`StdinPipe` 防御分支经 `stdinPipeFn` var 注入覆盖（行为中性）；`rdpClientAvailable` var 注入覆盖默认构建分支。CodeCov「62%+」系 profile 不完整误读（某包 FAIL 致 profile 13 字节、total 显示 0%），已随 flaky 修复消除。
 
 剩余 21 语句（`-tags rdp` 口径 `agent/rdp` 88.0%）：grdp 回调闭包体需真实 RDP 服务器，与真机验收同性质，挂起。
 
