@@ -104,7 +104,8 @@ func (s *Server) handleDNSZones(w http.ResponseWriter, r *http.Request) {
 	for _, z := range zones {
 		out = append(out, dnsZoneOut{Zone: z, InCMDB: cmdb[strings.ToLower(z.Name)]})
 	}
-	s.writeJSON(w, http.StatusOK, out)
+	// {data} 包装对齐 web getDNSZones 的 resp.data 解构（P0 响应结构一致性）
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"data": out})
 }
 
 // handleDNSZoneRecords /api/dns/zones/{zid}/records[/{rid}]
@@ -157,7 +158,8 @@ func (s *Server) handleDNSRecordsList(w http.ResponseWriter, r *http.Request, zo
 		s.handleDNSUpstreamError(w, r, err)
 		return
 	}
-	s.writeJSON(w, http.StatusOK, result)
+	// {data} 包装对齐 web getDNSRecords 的 resp.data 解构（P0 响应结构一致性）
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"data": result})
 }
 
 // handleDNSRecordCreate POST records

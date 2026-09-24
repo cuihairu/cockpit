@@ -64,6 +64,8 @@ const ddnsConfigs = [
 
 const renderPage = (provider = 'cloudflare') => {
   apiMock.getDNSStatus.mockResolvedValue({ configured: true, provider })
+  // mock 整个 API 方法：mock 值 = 方法返回值（内部已解构 resp.data），
+  // 非 {data} 包装——拦截器 unwrap 后 API 方法再解构一层（P0 响应结构一致性）
   apiMock.getDNSZones.mockResolvedValue(zones)
   apiMock.getDNSRecords.mockResolvedValue(records)
   apiMock.getDDNSConfigs.mockResolvedValue(ddnsConfigs)
