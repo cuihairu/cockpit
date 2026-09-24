@@ -53,12 +53,12 @@ jobs:
       - name: Run RDP-tagged tests
         run: go test -tags rdp -short ./internal/agent/rdp/ ./internal/agent/ -timeout 600s
 
-      - name: Check coverage threshold (20%)
+      - name: Check coverage threshold (100%)
         run: |
           coverage=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Agent coverage: ${coverage}%"
-          if (( $(echo "$coverage < 99.9" | bc -l) )); then
-            echo "Coverage ${coverage}% is below 99.9% threshold"
+          if (( $(echo "$coverage < 100" | bc -l) )); then
+            echo "Coverage ${coverage}% is below 100% threshold"
             exit 1
           fi
           echo "Coverage ${coverage}% meets threshold"
