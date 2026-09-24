@@ -440,19 +440,14 @@ func (s *Server) CallAgent(agentID, method string, params map[string]interface{}
 func toStorageAgent(agent *Agent) *storage.Agent {
 	capabilities := make([]storage.Capability, len(agent.Capabilities))
 	for i, cap := range agent.Capabilities {
-		// 将 Metadata 转换为 Config (map[string]interface{})
-		config := make(map[string]interface{})
-		for k, v := range cap.Metadata {
-			config[k] = v
-		}
-		if cap.Endpoint != "" {
-			config["endpoint"] = cap.Endpoint
-		}
-
+		// Endpoint/Metadata 直接映射（对齐 protocol.Capability 与 web 类型，
+		// REST 响应的 metadata/endpoint 字段——P0 前后端协议一致性）。
+		// 此前扁平化塞进 Config 导致 web 的 cap.metadata 全部失效。
 		capabilities[i] = storage.Capability{
-			Type:    cap.Type,
-			Version: cap.Version,
-			Config:  config,
+			Type:     cap.Type,
+			Version:  cap.Version,
+			Endpoint: cap.Endpoint,
+			Metadata: cap.Metadata,
 		}
 	}
 

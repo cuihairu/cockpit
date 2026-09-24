@@ -387,8 +387,8 @@ func TestToStorageAgent(t *testing.T) {
 	if sa.Capabilities[0].Type != "proxy" {
 		t.Errorf("Capability[0].Type = %q", sa.Capabilities[0].Type)
 	}
-	if sa.Capabilities[0].Config["endpoint"] != "0.0.0.0:8080" {
-		t.Errorf("Capability[0] endpoint = %v", sa.Capabilities[0].Config["endpoint"])
+	if sa.Capabilities[0].Endpoint != "0.0.0.0:8080" {
+		t.Errorf("Capability[0] endpoint = %v", sa.Capabilities[0].Endpoint)
 	}
 }
 

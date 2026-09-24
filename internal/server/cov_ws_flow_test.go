@@ -586,8 +586,12 @@ func TestCovToStorageAgent(t *testing.T) {
 	if len(got.Capabilities) != 1 {
 		t.Fatalf("capabilities = %+v", got.Capabilities)
 	}
-	cfg := got.Capabilities[0].Config
-	if cfg["endpoint"] != "unix:///var/run/docker.sock" || cfg["m"] != "n" {
-		t.Errorf("capability config = %+v", cfg)
+	// Endpoint/Metadata 对齐 protocol.Capability（P0 前后端协议一致性）
+	if got.Capabilities[0].Endpoint != "unix:///var/run/docker.sock" {
+		t.Errorf("capability endpoint = %q", got.Capabilities[0].Endpoint)
+	}
+	md := got.Capabilities[0].Metadata
+	if md["m"] != "n" {
+		t.Errorf("capability metadata = %+v", md)
 	}
 }

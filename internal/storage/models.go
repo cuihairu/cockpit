@@ -42,9 +42,15 @@ type Agent struct {
 
 // Capability 能力定义
 type Capability struct {
-	Type    string                 `json:"type"`
-	Version string                 `json:"version"`
-	Config  map[string]interface{} `json:"config"`
+	Type    string `json:"type"`
+	Version string `json:"version"`
+	// Endpoint/Metadata 对齐 protocol.Capability 与 web Capability 类型——
+	// REST 响应的 metadata/endpoint 字段（P0 前后端协议一致性，2026-09-24）。
+	// Config 保留给 inventory 声明的 capability config（inventory/sync.go），
+	// 与 agent 上报的 metadata 语义不同、并存不互斥。
+	Endpoint string                 `json:"endpoint,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Config   map[string]interface{} `json:"config,omitempty"`
 }
 
 // ComputeInstance 计算实例

@@ -744,6 +744,8 @@
 
 剩余 21 语句（`-tags rdp` 口径 `agent/rdp` 88.0%）：grdp 回调闭包体需真实 RDP 服务器，与真机验收同性质，挂起。
 
+**grdp 路线去留已拍板（2026-09-24）**：**保留兜底、维持并存期**——不删、不迁，DesktopModal/VNCModal（grdp/noVNC 自研路线）与 GuacamoleModal（guacd + guacamole-common-js）两套并存；等 Guacamole 方案真要落地时再单独评估去留。当前 RDP 入口走 GuacamoleModal，grdp 路线作为兜底保留（`internal/agent/rdp` 的 grdp 客户端 + `web/src/components/DesktopModal`）。
+
 覆盖率推至 98.6% 后主线转向 `go test -race` 收口，本轮修复三处数据竞态：
 
 1. ✅ `internal/proxy`：测试 mock 的 `messages` 切片被后台协程持锁追加、测试裸读（dbe1e8b0）。
