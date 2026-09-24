@@ -59,6 +59,8 @@ jobs:
           echo "Agent coverage: ${coverage}%"
           if (( $(echo "$coverage < 100" | bc -l) )); then
             echo "Coverage ${coverage}% is below 100% threshold"
+            echo '--- functions below 100% ---'
+            go tool cover -func=coverage.out | awk '{gsub(/%/, "", $3)} $3 + 0 < 100 {print}' | head -50
             exit 1
           fi
           echo "Coverage ${coverage}% meets threshold"
