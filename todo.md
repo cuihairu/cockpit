@@ -740,7 +740,7 @@
 - `37583ec1`：阈值 99%→100%（CI 红：实测 99.9%）
 - `8dfe7c11`：阈值定 **99.9%**（对齐实测值）——**CI 三 workflow 全绿**（Test/Agent Test/Build success）
 
-**覆盖率最终状态**：非 `-short` 口径 **31/31 包 100%**；CI 门禁口径（`-short`）**100.0%**（「差 0.1%」的 `-short` 跳过分支后续提交已全部补齐，2026-09-24 本地以 CI 同口径 coverprofile 复核，`test.yml`/`agent-test.yml` 阈值随之上探 100%，24f48442）。`StdinPipe` 防御分支经 `stdinPipeFn` var 注入覆盖（行为中性）；`rdpClientAvailable` var 注入覆盖默认构建分支。CodeCov「62%+」系 profile 不完整误读（某包 FAIL 致 profile 13 字节、total 显示 0%），已随 flaky 修复消除。
+**覆盖率最终状态**：非 `-short` 口径 **31/31 包 100%**；CI 门禁口径（`-short`）**100.0%（完整值精确 100%，非四舍五入压线）**。教训：`go tool cover -func` 的 total 一位小数四舍五入，99.96% 会显示成 100.0%——本地"复核 100%"曾被此误导；真正收口靠门禁阈值 100%（bc 完整值判定）+ 失败时输出缺口函数清单，定位出 4 处真实分支缺口（ticket PrivateKey/Domain 参数、guacd select 读失败、DDNS 族超时、docker Detect/ScanRange 环境依赖分支），以环境确定性测试 + 行为中性 var 化补齐（a95b3375，2026-09-24），CI 实测 `Agent coverage: 100.0%`。另：rdp_stub 若干函数 `-func` 显示 0.0% 系 numStmt=0 显示怪癖，不计入语句总量。`StdinPipe` 防御分支经 `stdinPipeFn` var 注入覆盖（行为中性）；`rdpClientAvailable` var 注入覆盖默认构建分支。CodeCov「62%+」系 profile 不完整误读（某包 FAIL 致 profile 13 字节、total 显示 0%），已随 flaky 修复消除。
 
 剩余 21 语句（`-tags rdp` 口径 `agent/rdp` 88.0%）：grdp 回调闭包体需真实 RDP 服务器，与真机验收同性质，挂起。
 
