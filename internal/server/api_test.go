@@ -2394,3 +2394,45 @@ func (s *Server) makePasswordHandler(id string) http.HandlerFunc {
 		s.handleUserChangePassword(w, r, id)
 	}
 }
+
+// TestHandleTicketCreateForwardsDomainParams 覆盖 req.Domain → params["domain"]
+// 与 req.PrivateKey → params["private_key"] 两个可选参数分支（api_remote.go）：
+// RDP 连接可带 domain（AD 域）、SSH 可带 PEM 私钥，都必须原样进票据。
+func TestHandleTicketCreateForwardsDomainParams(t *testing.T) {
+	s := newTestServerWithDB(t)
+	s.ticketMgr = NewTicketManager()
+	s.cfg = &config.Config{
+		RemoteControl: &config.RemoteControlConfig{
+			AllowedTargets: []string{"192.168.10.0/24"},
+		},
+	}
+	if err := s.registry.Register(NewAgent("agent-rdp", nil)); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	body := []byte(`{"agent_id":"agent-rdp","host":"192.168.10.42","port":3389,"protocol":"rdp","domain":"EXAMPLE","private_key":"PEM"}`)
+	req := authenticateAdminRequest(t, s, httptest.NewRequest(http.MethodPost, "/api/remote/tickets", bytes.NewReader(body)))
+	rec := httptest.NewRecorder()
+
+	s.authService().Middleware(s.handleTicketCreate)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp struct {
+		Ticket string `json:"ticket"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	ticket, ok := s.ticketMgr.ValidateTicket(resp.Ticket)
+	if !ok {
+		t.Fatal("ValidateTicket failed")
+	}
+	if ticket.Params["domain"] != "EXAMPLE" {
+		t.Errorf("params[domain] = %q, want EXAMPLE", ticket.Params["domain"])
+	}
+	if ticket.Params["private_key"] != "PEM" {
+		t.Errorf("params[private_key] = %q, want PEM", ticket.Params["private_key"])
+	}
+}

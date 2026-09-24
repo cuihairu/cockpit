@@ -40,6 +40,13 @@ var (
 		"https://ipv6.icanhazip.com",
 		"https://6.ipw.cn",
 	}
+	// ddnsFamilyContext 族总超时的 ctx 构造（测试注入短超时覆盖
+	// ctx.Done 分支，默认实现行为不变）
+	ddnsFamilyContext = func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), ddnsFamilyTimeout)
+	}
+	// ddnsFetchOne 单源探测（测试可替换为挂起/固定响应）
+	ddnsFetchOne = (*DDNSProvider).fetchOne
 )
 
 // DDNSProvider 公网 IP 探测
@@ -80,7 +87,7 @@ func (p *DDNSProvider) probeIPs() (interface{}, error) {
 
 // probeFamily 一族源按序尝试，首个通过校验的响应生效
 func (p *DDNSProvider) probeFamily(sources []string, wantV6 bool) string {
-	ctx, cancel := context.WithTimeout(context.Background(), ddnsFamilyTimeout)
+	ctx, cancel := ddnsFamilyContext()
 	defer cancel()
 
 	for _, src := range sources {
@@ -89,7 +96,7 @@ func (p *DDNSProvider) probeFamily(sources []string, wantV6 bool) string {
 			return "" // 族总超时，后续源不再尝试
 		default:
 		}
-		if ip := p.fetchOne(ctx, src, wantV6); ip != "" {
+		if ip := ddnsFetchOne(p, ctx, src, wantV6); ip != "" {
 			return ip
 		}
 	}

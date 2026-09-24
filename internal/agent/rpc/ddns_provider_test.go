@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -112,5 +113,25 @@ func TestDDNSUnsupportedAction(t *testing.T) {
 	}
 	if p.Type() != "ddns" {
 		t.Errorf("Type() = %q, want ddns", p.Type())
+	}
+}
+
+// TestDDNSFamilyTimeoutCancelsRest 覆盖 probeFamily 的 ctx.Done 分支：
+// 注入 50ms 族超时 + 挂起的单源探测，首个源耗尽族预算后后续源直接短路
+// （与 stdinPipeFn/dialGuacd 同性质的行为中性测试注入点）。
+func TestDDNSFamilyTimeoutCancelsRest(t *testing.T) {
+	oldCtx, oldFetch := ddnsFamilyContext, ddnsFetchOne
+	ddnsFamilyContext = func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), 50*time.Millisecond)
+	}
+	ddnsFetchOne = func(p *DDNSProvider, ctx context.Context, src string, wantV6 bool) string {
+		<-ctx.Done() // 挂起直到族超时
+		return ""
+	}
+	t.Cleanup(func() { ddnsFamilyContext, ddnsFetchOne = oldCtx, oldFetch })
+
+	p := NewDDNSProvider(nil)
+	if ip := p.probeFamily([]string{"src-1", "src-2", "src-3"}, false); ip != "" {
+		t.Errorf("probeFamily after timeout = %q, want empty", ip)
 	}
 }

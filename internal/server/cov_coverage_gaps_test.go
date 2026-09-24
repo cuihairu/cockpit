@@ -369,3 +369,38 @@ func TestGuacamoleSelectWriteFailInjected(t *testing.T) {
 	conn.Close()
 	time.Sleep(300 * time.Millisecond)
 }
+
+// failReadConn Read 必失败（Write 吞掉不落底层 pipe，防 net.Pipe 同步阻塞）。
+type failReadConn struct{ net.Conn }
+
+func (c failReadConn) Write(p []byte) (int, error) { return len(p), nil }
+func (c failReadConn) Read(p []byte) (int, error)  { return 0, errors.New("injected read failure") }
+
+// TestGuacamoleSelectReadFailInjected 覆盖 select 响应读取失败分支
+// （api_guacamole.go 348-353）：select 写「成功」（mock 吞掉）后
+// ReadString 注入失败 → 关双连接并 return。与 failWriteConn 同性质。
+func TestGuacamoleSelectReadFailInjected(t *testing.T) {
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
+	old := dialGuacd
+	dialGuacd = func(addr string, timeout time.Duration) (net.Conn, error) {
+		return failReadConn{c1}, nil
+	}
+	t.Cleanup(func() { dialGuacd = old })
+
+	conn, _, _ := covDirectWSJoined(t, s.handleGuacamoleWebSocket, "/api/remote/guacamole",
+		covTicket(t, s, map[string]string{
+			"agent_id": "a", "host": "10.0.0.9", "port": "3389", "protocol": "rdp",
+		}))
+	// net.Pipe 同步无缓冲：writeWS(uuid) 阻塞到读完，先消费首帧放行
+	_, _, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read uuid frame: %v", err)
+	}
+	// select 响应读取失败 → 记日志后 return；显式关 conn 防污染
+	conn.Close()
+	time.Sleep(300 * time.Millisecond)
+}

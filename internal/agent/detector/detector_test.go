@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -332,13 +333,22 @@ func TestDockerDetectorPriority(t *testing.T) {
 }
 
 func TestDockerDetectorDetect(t *testing.T) {
+	// 环境确定性：强制无 DOCKER_HOST、候选 socket 全不存在，断言
+	// 「候选全败 → 循环后 return nil」。不能依赖默认环境——CI runner
+	// 自带 /var/run/docker.sock，会让探测提前命中、该分支在 CI 漂移成缺口。
+	t.Setenv("DOCKER_HOST", "")
+	covSetStrs(t, &dockerSocketCandidates, []string{
+		filepath.Join(t.TempDir(), "nope.sock"),
+	})
+
 	d := &DockerDetector{}
 	cap, err := d.Detect()
 	if err != nil {
 		t.Errorf("Detect() error = %v", err)
 	}
-	// May return nil if Docker not available
-	_ = cap
+	if cap != nil {
+		t.Errorf("Detect() capability = %+v, want nil when no socket exists", cap)
+	}
 }
 
 func TestDockerDetectorTestSocket(t *testing.T) {
@@ -483,6 +493,24 @@ func TestRemoteServiceDetectorScanRange(t *testing.T) {
 	// Verify it returns a non-nil slice (empty is fine when no services are running)
 	if len(openPorts) != 0 {
 		t.Logf("ScanRange() found open ports: %v (unexpected on CI)", openPorts)
+	}
+}
+
+// TestRemoteServiceDetectorScanRangeHitsOpenPort 覆盖 ScanRange 的端口开放
+// 分支（err==nil → append + Close）：真 listener 进扫描范围必命中，环境无关
+// （CI runner 常驻服务与本地不同，不能依赖偶然开放端口）。
+func TestRemoteServiceDetectorScanRangeHitsOpenPort(t *testing.T) {
+	d := &RemoteServiceDetector{}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	open := d.ScanRange("127.0.0.1", port, port)
+	if len(open) != 1 || open[0] != port {
+		t.Errorf("ScanRange() = %v, want [%d]", open, port)
 	}
 }
 
