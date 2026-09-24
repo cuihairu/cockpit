@@ -94,6 +94,14 @@ void main() {
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
     expect(find.text('Server'), findsOneWidget);
+
+    // 非首页 tab 系统返回：PopScope 拦截，回首页 tab 不退出
+    await tester.state<NavigatorState>(find.byType(Navigator).first)
+        .maybePop();
+    await tester.pumpAndSettle();
+    expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0);
   });
 
   testWidgets('CockpitApp：apiProvider 错误 → 回到引导页', (tester) async {

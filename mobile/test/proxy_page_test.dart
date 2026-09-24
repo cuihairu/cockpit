@@ -353,6 +353,222 @@ void main() {
     expect(find.text('创建'), findsOneWidget);
   });
 
+  testWidgets('反代页：点站点行读取配置失败 → SnackBar', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200, _sites)
+      ..on('GET', '/api/agents/ag-1/proxy/sites/blog', 500,
+          {'error': 'disk on fire'});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('blog'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('读取配置失败'), findsOneWidget);
+  });
+
+  testWidgets('反代页：编辑拉取详情失败 → SnackBar', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200, _sites)
+      ..on('GET', '/api/agents/ag-1/proxy/sites/blog', 500,
+          {'error': 'gone'});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('编辑').first);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('读取站点失败'), findsOneWidget);
+    // 编辑器未打开
+    expect(find.text('编辑站点 blog'), findsNothing);
+  });
+
+  testWidgets('反代页：删除确认弹窗点取消 → 不发删除请求', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200, _sites);
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('删除').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('删除站点'), findsNothing);
+    expect(adapter.deletes, 0);
+    expect(find.text('blog'), findsOneWidget);
+  });
+
+  testWidgets('反代页：删除接口失败 → SnackBar 删除失败', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200, _sites)
+      ..on('DELETE', '/api/agents/ag-1/proxy/sites/blog', 500,
+          {'error': 'locked'});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('删除').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除').last);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('删除失败'), findsOneWidget);
+    expect(find.text('blog'), findsOneWidget);
+  });
+
+  testWidgets('编辑器：应用请求失败且无 error 字段 → 展示异常 toString',
+      (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200,
+          {'sites': <Object?>[]})
+      ..on('PUT', '/api/agents/ag-1/proxy/sites/blog', 502,
+          <String, dynamic>{});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('新建站点'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).at(0), 'blog');
+    await tester.enterText(
+        find.byType(TextFormField).at(1), 'blog.example.com');
+    await tester.tap(find.byTooltip('添加域名'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byType(TextFormField).at(2), '127.0.0.1:3000');
+    await tester.ensureVisible(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+
+    // 响应体无 error 字段 → _extractError 回退 e.toString()
+    expect(find.text('应用失败'), findsOneWidget);
+    expect(find.textContaining('DioException'), findsOneWidget);
+  });
+
+  testWidgets('编辑器：未填域名直接应用 → 请至少填写一个域名', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200,
+          {'sites': <Object?>[]});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('新建站点'));
+    await tester.pumpAndSettle();
+    // 名称与上游填好（表单校验通过），但 serverNames 留空
+    await tester.enterText(find.byType(TextFormField).at(0), 'blog');
+    await tester.enterText(
+        find.byType(TextFormField).at(2), '127.0.0.1:3000');
+    await tester.ensureVisible(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+
+    expect(find.text('请至少填写一个域名'), findsOneWidget);
+    expect(adapter.puts, 0);
+  });
+
+  testWidgets('编辑器：切 HTTPS → 证书/私钥必填校验 + WebSocket 开关切换',
+      (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200,
+          {'sites': <Object?>[]});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('新建站点'));
+    await tester.pumpAndSettle();
+
+    // WebSocket 开关：默认关，点开后打开
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+
+    // 切到 HTTPS：证书/私钥字段出现（segment label 经内部包装，
+    // 用 buttonStyle 文本兜底直接按文本找）
+    await tester.tap(find.text('HTTPS'));
+    await tester.pumpAndSettle();
+    expect(find.text('证书路径'), findsOneWidget);
+    expect(find.text('私钥路径'), findsOneWidget);
+
+    // 证书/私钥留空提交 → 两个 validator 报错
+    await tester.enterText(find.byType(TextFormField).at(0), 'blog');
+    await tester.enterText(
+        find.byType(TextFormField).at(1), 'blog.example.com');
+    await tester.tap(find.byTooltip('添加域名'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byType(TextFormField).at(2), '127.0.0.1:3000');
+    await tester.ensureVisible(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(FilledButton));
+    await tester.pumpAndSettle();
+
+    expect(find.text('https 需要证书绝对路径'), findsOneWidget);
+    expect(find.text('https 需要私钥绝对路径'), findsOneWidget);
+    expect(adapter.puts, 0);
+  });
+
+  testWidgets('编辑器：回车添加域名 + 删除 chip + 非法域名提示', (tester) async {
+    final adapter = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/proxy/status', 200, _status)
+      ..on('GET', '/api/agents/ag-1/proxy/sites', 200,
+          {'sites': <Object?>[]});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('新建站点'));
+    await tester.pumpAndSettle();
+
+    // 域名输入框回车（onFieldSubmitted）添加 chip
+    await tester.enterText(
+        find.byType(TextFormField).at(1), 'blog.example.com');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.byType(InputChip), findsOneWidget);
+
+    // 添加一个非法域名 → 红字格式提示
+    await tester.enterText(
+        find.byType(TextFormField).at(1), 'bad domain!');
+    await tester.tap(find.byTooltip('添加域名'));
+    await tester.pumpAndSettle();
+    expect(find.text('域名只能含字母/数字/点/连字符/通配符 *'), findsOneWidget);
+
+    // 删除 chip（chip 内删除图标不固定，用 chip 内 Icon 定位）
+    // → 全空后回到「请输入至少一个域名」提示
+    for (var i = 0; i < 2; i++) {
+      await tester.tap(find.descendant(
+              of: find.byType(InputChip), matching: find.byType(Icon))
+          .first);
+      await tester.pumpAndSettle();
+    }
+    expect(find.byType(InputChip), findsNothing);
+    expect(find.text('请输入至少一个域名'), findsOneWidget);
+  });
+
   testWidgets('反代页：Traefik 后端 extra 禁用', (tester) async {
     final adapter = MockAdapter()
       ..on('GET', '/api/agents/ag-1/proxy/status', 200, {

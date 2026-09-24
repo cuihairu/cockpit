@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -6,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xterm/xterm.dart';
 
 import 'package:cockpit_mobile/api/client.dart';
 import 'package:cockpit_mobile/api/endpoints.dart';
@@ -60,14 +62,38 @@ Agent _agentWithSsh() => Agent.fromJson({
       ],
     });
 
+/// 挂起到 gate 放行才返回 ticket 响应的 adapter。
+class _GatedAdapter implements HttpClientAdapter {
+  _GatedAdapter(this.gate);
+
+  final Completer<void> gate;
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    await gate.future;
+    return ResponseBody.fromString(
+        jsonEncode(
+            {'ticket': 'tk-9', 'expires_at': '2030-01-01T00:00:00Z'}),
+        200,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        });
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 class _UrlSettings extends SettingsNotifier {
-  _UrlSettings(this.url);
+  _UrlSettings(this.url, {this.selfSigned = false});
 
   final String url;
+  final bool selfSigned;
 
   @override
   SettingsState build() =>
-      SettingsState(serverUrl: url, loaded: true);
+      SettingsState(serverUrl: url, allowSelfSigned: selfSigned, loaded: true);
 }
 
 void main() {
@@ -214,12 +240,25 @@ void main() {
     expect(upgrades.last, 'tk-2');
     expect(find.byIcon(Icons.error_outline), findsNothing);
 
-    // 服务端下发 close 帧 → 错误横幅显示「连接已关闭」
+    // 键盘输出回调 → input 消息发往服务端（onOutput 转发链）
     await tester.runAsync(() async {
-      sessions.last.add(jsonEncode({'type': 'close'}));
+      final tv = tester.widget<TerminalView>(find.byType(TerminalView));
+      tv.terminal.onOutput!('ls\r\n');
       await Future<void>.delayed(const Duration(milliseconds: 200));
     });
+    expect(
+        inputs.any((m) => m.contains('"type":"input"') && m.contains('ls')),
+        isTrue);
+
+    // 服务端下发 close 帧 → 错误横幅（真 zone 消息派发需多等几拍）。
+    // 首轮 fake-zone 握手被推迟到真 zone：tk-2 先被 accept，活跃连接是
+    // sessions.first（sessions.last 是 refresh 时已关闭的 tk-1 连接）。
+    await tester.runAsync(() async {
+      sessions.first.add(jsonEncode({'type': 'close'}));
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+    });
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.pump(const Duration(milliseconds: 200));
     // _fail 对 connected 态的服务端正常 close 只置错误态、不覆盖文案（空横幅）
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
@@ -230,4 +269,115 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
     await tester.runAsync(() => server.close());
   });
+
+  testWidgets('终端页：ticket 返回前页面已退出 → 放弃连接并关闭 channel',
+      (tester) async {
+    // 门控 adapter：tickets 请求挂起，页面卸载后放行 → !mounted 分支
+    final gate = Completer<void>();
+    final adapter = _GatedAdapter(gate);
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(() => _UrlSettings('http://127.0.0.1:9')),
+        apiProvider.overrideWith(
+            (ref) async => CockpitApi(ApiClient.forTest(dio))),
+      ],
+      child: MaterialApp(
+        home: TerminalPage(
+          agent: _agentWithSsh(),
+          ssh: SshService(host: '10.0.0.1', port: 22),
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // 认证期间退出页面；放行 ticket 后 _connect 恢复 → mounted=false →
+    // 关闭刚打开的 channel，不 setState
+    await tester.pumpWidget(const SizedBox());
+    gate.complete();
+    // sink.close 的超时 Timer 需要推进 fake 时间才能清干净
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pump(const Duration(milliseconds: 200));
+  });
+
+  testWidgets('终端页：https 自签 → wss 分支连通', (tester) async {
+    final ctx = SecurityContext()
+      ..useCertificateChain(
+          '${Directory.current.path}/test/fixtures/localhost-cert.pem')
+      ..usePrivateKey(
+          '${Directory.current.path}/test/fixtures/localhost-key.pem');
+    final upgrades2 = <String?>[];
+    final server = (await tester.runAsync(() async {
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      try {
+        final s = await HttpServer.bindSecure('127.0.0.1', 0, ctx);
+        s.listen((req) async {
+          final ws = await WebSocketTransformer.upgrade(req,
+              protocolSelector: (protocols) => protocols.first);
+          upgrades2.add(ws.protocol);
+          ws.listen((_) {});
+        });
+        return s;
+      } finally {
+        HttpOverrides.global = saved;
+      }
+    }))!;
+
+    // 首轮 tickets 不注册（404）→ 页面停在错误态且未创建 channel，
+    // 避免 fake zone 的 mock 握手留下无人处理的 WS error
+    final adapter = MockAdapter();
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(() =>
+            _UrlSettings('https://127.0.0.1:${server.port}',
+                selfSigned: true)),
+        apiProvider.overrideWith(
+            (ref) async => CockpitApi(ApiClient.forTest(dio))),
+      ],
+      child: MaterialApp(
+        home: TerminalPage(
+          agent: _agentWithSsh(),
+          ssh: SshService(host: '10.0.0.1', port: 22),
+        ),
+      ),
+    ));
+    // 首轮 ticket 404 收尾（fake zone 微任务即可完成）
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    // 注入 refresh 用的 ticket 响应（首轮 404 已被消费为错误态）
+    adapter.on('POST', '/api/remote/tickets', 200,
+        {'ticket': 'tk-wss', 'expires_at': '2030-01-01T00:00:00Z'});
+
+    // 重连触发真 wss 握手（allowSelfSigned → badCertificateCallback 放行；
+    // customClient 绕过 flutter_test 的 HttpOverrides，需留在真 zone）
+    await tester.runAsync(() async {
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      try {
+        final btn = tester.widget<IconButton>(find.ancestor(
+            of: find.byIcon(Icons.refresh),
+            matching: find.byType(IconButton)));
+        btn.onPressed!();
+        for (var i = 0; i < 50 && upgrades2.isEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      } finally {
+        HttpOverrides.global = saved;
+      }
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(upgrades2, isNotEmpty);
+    expect(upgrades2.last, 'tk-wss');
+
+    await tester.runAsync(() => server.close());
+  });
+
 }

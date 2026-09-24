@@ -86,6 +86,24 @@ const _rootEntries = {
       'isSymlink': true,
       'target': '/usr/share/zoneinfo/UTC',
     },
+    {
+      'name': 'mid.bin',
+      'size': 5 * 1024 * 1024,
+      'mode': '0644',
+      'mtime': 1758500000,
+      'isDir': false,
+      'isSymlink': false,
+      'target': '',
+    },
+    {
+      'name': 'huge.bin',
+      'size': 2 * 1024 * 1024 * 1024 * 1024,
+      'mode': '0644',
+      'mtime': 1758500000,
+      'isDir': false,
+      'isSymlink': false,
+      'target': '',
+    },
   ],
 };
 
@@ -131,7 +149,10 @@ void main() {
         tester.getTopLeft(find.text('hosts')).dy, isTrue);
     // 文件行 subtitle：大小 · 权限 · 时间
     expect(find.textContaining('221 B'), findsOneWidget);
-    expect(find.textContaining('0644'), findsOneWidget);
+    expect(find.textContaining('0644'), findsNWidgets(3));
+    // MB / TB 档位格式化
+    expect(find.textContaining('5.0 MB'), findsOneWidget);
+    expect(find.textContaining('2.00 TB'), findsOneWidget);
   });
 
   testWidgets('文件页：点目录进入子目录，文件弹详情', (tester) async {

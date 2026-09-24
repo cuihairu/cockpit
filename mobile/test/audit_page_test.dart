@@ -76,6 +76,45 @@ Map<String, dynamic> _page(int total, List<AuditLog> logs) => {
     };
 
 void main() {
+  testWidgets('审计页：下拉刷新重拉第一页', (tester) async {
+    // 首屏 [1,2] → hasMore 预取追加 [3] → 下拉刷新 reset 换成 [3] 单条
+    final adapter = MockAdapter()
+      ..on('GET', '/api/admin/audit/logs', 200,
+          _page(3, [_log(1), _log(2)]))
+      ..on('GET', '/api/admin/audit/logs', 200, _page(3, [_log(3)]))
+      // reset 拉回的第一页恰好取满 total=2，避免 hasMore 预取无限循环
+      ..on('GET', '/api/admin/audit/logs', 200, _page(2, [_log(2), _log(3)]));
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    final api = CockpitApi(ApiClient.forTest(dio));
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(() => _FakeSettings()),
+        apiProvider.overrideWith((ref) async => api),
+      ],
+      // AlwaysScrollable：数据不足一屏时 RefreshIndicator 也能下拉
+      child: MaterialApp(
+        scrollBehavior: const MaterialScrollBehavior()
+            .copyWith(physics: const AlwaysScrollableScrollPhysics()),
+        home: const AuditPage(),
+      ),
+    ));
+    // 收敛首屏 + hasMore 预取，列表为 [1,2,3]
+    await tester.pumpAndSettle();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('admin · action-1'), findsOneWidget);
+
+    await tester.fling(
+        find.byType(Scrollable).first, const Offset(0, 400), 1200);
+    await tester.pumpAndSettle();
+
+    // reset 后重拉第一页：旧列表被整体替换
+    expect(find.textContaining('admin · action-1'), findsNothing);
+    expect(find.textContaining('admin · action-3'), findsOneWidget);
+  });
+
+
   testWidgets('审计页：首屏渲染 + 滚动加载更多', (tester) async {
     final adapter = MockAdapter()
       ..on('GET', '/api/admin/audit/logs', 200,

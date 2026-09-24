@@ -193,6 +193,16 @@ void main() {
       'startedAt': 1758500100,
       'finishedAt': 1758500200,
     };
+    final tbRun = {
+      'id': 14,
+      'configId': 2,
+      'status': 'success',
+      'size': 2 * 1024 * 1024 * 1024 * 1024,
+      'error': '',
+      'remoteStatus': 'ok',
+      'startedAt': 1758500500,
+      'finishedAt': 1758500600,
+    };
     final weirdRun = {
       'id': 13,
       'configId': 2,
@@ -218,7 +228,7 @@ void main() {
         ]
       })
       ..on('GET', '/api/backups/runs', 200,
-          {'runs': [bigRun, timeoutRun, weirdRun]});
+          {'runs': [bigRun, timeoutRun, weirdRun, tbRun]});
     final dio = Dio(BaseOptions(baseUrl: 'http://test'))
       ..httpClientAdapter = adapter;
     await _pump(tester, CockpitApi(ApiClient.forTest(dio)));
@@ -232,7 +242,9 @@ void main() {
     expect(find.textContaining('weird'), findsNWidgets(3));
     // GB 级尺寸与异地已推送
     expect(find.textContaining('5.00 GB'), findsOneWidget);
-    expect(find.textContaining('异地已推送'), findsOneWidget);
+    expect(find.textContaining('异地已推送'), findsNWidgets(2));
+    // TB 级尺寸
+    expect(find.textContaining('2.00 TB'), findsOneWidget);
   });
 }
 

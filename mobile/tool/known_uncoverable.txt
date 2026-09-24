@@ -1,0 +1,30 @@
+# KNOWN_UNCOVERABLE 登记表（coverage_check.sh 门禁依据）
+#
+# 格式：每行 `lib/相对路径:行号 理由…`；`#` 开头为注释，空行忽略。
+# 规则：flutter test --coverage 解析出的未覆盖行必须全部登记于此，
+# 否则门禁失败；登记行若实际已覆盖会提示清理。
+#
+# 登记分两类：
+#   [工具漏计] 运行时路径已被专门用例验证命中，lcov 因行内表达式形态
+#              （const 常量化 / await 挂起点）不记为覆盖；
+#   [环境不可达] 需要 testWidgets 无法提供的运行条件（真实 TCP 异常等）。
+
+# [工具漏计] apiAsync.when(loading:) 的 const Center(CircularProgressIndicator())。
+# 「apiProvider 未就绪 → loading 占位」用例以永不完成的 Completer future
+# 驱动，并断言页面停在 loading 分支（data 卡片文案 findsNothing + 进度条
+# findsOneWidget）；lambda 返回 const 常量实例，lcov 不将该行记为命中。
+pages/dashboard_page.dart:19 const 构造行，loading 分支运行时已被用例验证，lcov 漏计
+
+# [工具漏计] _connect 中 !mounted 分支的 await channel.sink.close()。
+# 「ticket 返回前页面已退出」用例用门控 adapter 在页面卸载后放行 ticket；
+# 若该分支未走，后续 setState(connected) 会因 defunct state 报错使测试失败
+# （用例通过即证明命中）。await 在未就绪 channel 上挂起，行计数不被记录。
+pages/terminal_page.dart:56 await 挂起行，!mounted 分支已被用例验证，lcov 漏计
+
+# [环境不可达] channel.stream.listen 的 onError 回调。
+# 可实验证实：IOWebSocketChannel.connect 的握手失败落在 ready future 上，
+# 不会进入 stream onError（flutter_test 的 HttpOverrides 400 亦然）；
+# 二进制帧等畸形消息经 dart:io WebSocket 正常 yield 不产生 error 事件。
+# 触发 onError 需真实 TCP 异常（RST/协议违例），testWidgets 的
+# fake-async 事件循环无法注入。
+pages/terminal_page.dart:73 真实 WS stream error 无法在 fake-async 测试环境注入

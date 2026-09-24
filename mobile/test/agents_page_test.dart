@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:cockpit_mobile/api/client.dart';
 import 'package:cockpit_mobile/api/endpoints.dart';
 import 'package:cockpit_mobile/pages/agents_page.dart';
+import 'package:cockpit_mobile/pages/proxy_page.dart';
 import 'package:cockpit_mobile/state/settings.dart';
 
 class MockAdapter implements HttpClientAdapter {
@@ -88,6 +89,21 @@ Future<void> _pump(WidgetTester tester, CockpitApi api,
 }
 
 void main() {
+  testWidgets('主机列表：反代入口图标 → 打开 ProxyPage', (tester) async {
+    // 列表 fixture 自带 nginx-proxy capability → 行尾出现反代图标
+    final a = MockAdapter()
+      ..on('GET', '/api/agents', 200, [_agent]);
+    await _pump(tester, _api(a));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.lan).first);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ProxyPage), findsOneWidget);
+  });
+
+
   testWidgets('主机列表：在线/离线渲染 + 能力捷径按钮', (tester) async {
     final a = MockAdapter()
       ..on('GET', '/api/agents', 200, [

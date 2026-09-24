@@ -36,8 +36,8 @@ unregistered=$(comm -23 <(printf '%s\n' "$missed" | sed '/^$/d') \
 stale=$(comm -13 <(printf '%s\n' "$missed" | sed '/^$/d') \
   <(printf '%s\n' "$registered" | sed '/^$/d'))
 
-lf=$(awk '/^LF:/ { s += $2 } END { print s }' "$LCOV")
-lh=$(awk '/^LH:/ { s += $2 } END { print s }' "$LCOV")
+lf=$(awk -F: '/^LF:/ { s += $2 } END { print s + 0 }' "$LCOV")
+lh=$(awk -F: '/^LH:/ { s += $2 } END { print s + 0 }' "$LCOV")
 printf '行覆盖：%d/%d（%.2f%%），未覆盖 %d 行，已登记 %d 行\n' \
   "$lh" "$lf" "$(awk "BEGIN { printf \"%.2f\", 100 * $lh / $lf }")" \
   "$total_missed" "$total_known"

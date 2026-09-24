@@ -177,4 +177,50 @@ void main() {
       HttpOverrides.global = savedOverrides;
     }
   });
+
+  test('apiProvider 401 → refresh 成功 → saveToken 并重放成功', () async {
+    // 原请求带旧 token 收 401 → refresh 发新 token → saveToken 落盘 →
+    // 原请求带新 token 重放成功。服务端按 Authorization 头区分。
+    final savedOverrides = HttpOverrides.current;
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind('127.0.0.1', 0);
+    server.listen((req) async {
+      final auth = req.headers.value('Authorization');
+      req.response.headers.contentType = ContentType.json;
+      if (req.method == 'POST' && req.uri.path == '/api/auth/refresh') {
+        req.response.statusCode = 200;
+        req.response.write('{"token":"jwt-new"}');
+        await req.response.close();
+        return;
+      }
+      if (auth == 'Bearer jwt-new') {
+        req.response.statusCode = 200;
+        req.response.write('[]');
+      } else {
+        req.response.statusCode = 401;
+        req.response.write('{"error":"expired"}');
+      }
+      await req.response.close();
+    });
+    SharedPreferences.setMockInitialValues({
+      'server_url': 'http://127.0.0.1:${server.port}',
+      'allow_self_signed': false,
+    });
+    final store = <String, String>{'auth_token': 'jwt-1'};
+    _mockSecureStorage(store);
+    final c = ProviderContainer();
+    try {
+      await _settle(c);
+      final api = await c.read(apiProvider.future);
+      // 原请求 401 → refresh → 重放 200，无异常冒出
+      final agents = await api.agents();
+      expect(agents, isEmpty);
+      expect(store['auth_token'], 'jwt-new',
+          reason: 'onTokenRefreshed 应 saveToken 落盘');
+    } finally {
+      c.dispose();
+      await server.close();
+      HttpOverrides.global = savedOverrides;
+    }
+  });
 }

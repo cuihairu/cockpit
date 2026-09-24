@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -112,6 +113,23 @@ void main() {
 
     expect(find.text('清爽'), findsOneWidget);
     expect(find.text('无'), findsOneWidget);
+  });
+
+  testWidgets('仪表盘：apiProvider 未就绪 → loading 占位', (tester) async {
+    // override 返回永不完成的 future：任何帧都是 loading 分支
+    // （async 闭包会在微任务内完成，捕捉不到 loading 帧）
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(() => _FakeSettings()),
+        apiProvider.overrideWith((ref) => Completer<CockpitApi>().future),
+      ],
+      child: const MaterialApp(home: Scaffold(body: DashboardPage())),
+    ));
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    // data 分支的卡片文案未出现 → 页面确实停在 apiProvider loading
+    expect(find.text('主机在线'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('仪表盘：接口失败 → 加载失败占位', (tester) async {
