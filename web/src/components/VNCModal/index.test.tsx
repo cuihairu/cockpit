@@ -123,6 +123,27 @@ describe('VNCModal', () => {
 // RemoteToolbar 断开按钮为 icon-only（无可访问名）——取工具栏最后一个按钮
   })
 
+  it('连接挂起 30s 超时：提示超时并清理回到已断开（fake timers 推进）', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      render(<VNCModal {...props} />)
+      fireEvent.click(screen.getByText('连 接').closest('button')!)
+      await waitFor(() => expect(FakeRFB.instances.length).toBe(1))
+      const rfb = FakeRFB.instances[0]
+      // 不 emit connect：停在 connecting，等 useConnectionTimeout 计时到点
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30000)
+      })
+      expect(msgError).toHaveBeenCalledWith('连接超时，请检查网络或重试')
+      expect(rfb.disconnect).toHaveBeenCalled()
+      // showCredentials 从未置 false：超时后回凭据表单分支而非桌面 UI
+      expect(screen.getByPlaceholderText('(可选) VNC 密码')).toBeInTheDocument()
+      expect(screen.queryByText(/正在连接到/)).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('断开按钮清理 RFB 回到凭据表单', async () => {
     render(<VNCModal {...props} />)
     fireEvent.click(screen.getByText('连 接').closest('button')!)

@@ -121,6 +121,25 @@ describe('DesktopModal', () => {
     expect(JSON.stringify(saved)).not.toContain('secret')
   })
 
+  it('连接挂起 30s 超时：提示超时并回凭据表单（fake timers 推进）', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      render(<DesktopModal {...props} />)
+      clickConnect()
+      await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1))
+      // 不 push connected 消息：state 停在 connecting，启动定时器到点触发
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30000)
+      })
+      expect(msgError).toHaveBeenCalledWith('连接超时，请检查网络或重试')
+      // disconnect + setShowCredentials(true)：凭据表单重新显示
+      expect(screen.getByPlaceholderText('administrator')).toBeInTheDocument()
+      expect(screen.queryByText(/正在连接到/)).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('connected 切桌面分支：canvas 挂载、toolbar 已连接、分辨率文本', async () => {
     render(<DesktopModal {...props} />)
     clickConnect()

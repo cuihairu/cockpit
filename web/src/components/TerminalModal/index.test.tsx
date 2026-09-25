@@ -307,6 +307,23 @@ describe('TerminalModal', () => {
     }
   })
 
+  it('WS 停在 CONNECTING 30s：超时关闭并写提示（fake timers 推进）', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      render(<TerminalModal {...props} />)
+      await flush()
+      // FakeWebSocket 默认 readyState=CONNECTING：不触发 onopen，等超时到点
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30000)
+      })
+      expect(FakeWebSocket.instances[0].close).toHaveBeenCalled()
+      expect(terminalMock.writeln).toHaveBeenCalledWith(
+        expect.stringContaining('连接超时，请检查网络或重试'))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('WS 未建立时窗口变化只本地 fit 不上报', async () => {
     let roCb: ResizeObserverCallback | null = null
     vi.stubGlobal('ResizeObserver', class {

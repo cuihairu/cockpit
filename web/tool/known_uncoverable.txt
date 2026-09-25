@@ -19,7 +19,7 @@ pages/Cron/index.tsx:210 同上（deleteJob）
 pages/Docker/index.tsx:44 cleanDockerLog 空串早退：调用侧对空日志已短路，防御分支不可达
 components/GuacPlayer/index.tsx:26 displayRef null 早退：弹窗未挂载不触发 effect，防御
 components/MetricsChart/index.tsx:50 containerRef null 早退：echarts init 前置防御，React 保证挂载后 effect 才跑
-components/VNCModal/index.tsx:67 vncContainerRef null 早退：RFB 挂载点前置防御
+components/VNCModal/index.tsx:71 vncContainerRef null 早退：RFB 挂载点在凭据阶段预挂载，ref 恒有值，前置防御不可达（原 67，vncStateRef 插入后漂移）
 pages/Recordings/index.tsx:83 recording null 早退：回放入口由行内按钮发起，recording 必已选中
 pages/Recordings/index.tsx:166 recording/termDivRef null 早退：弹窗内容未挂载时不建终端，防御
 pages/Backups/index.tsx:376 restoreTarget null 早退：恢复按钮仅在选中目标后可点
@@ -27,22 +27,16 @@ pages/AuditLogs/index.tsx:59 parseAuditDetails 空串早退：详情为空的行
 workbench/LogsPanel.tsx:207 frames.pop() ?? '' 兜底：split 结果至少一个元素，pop 永不返回 undefined
 
 # ---- 生命周期/时序在 jsdom 下不可注入或与真实语义互斥 ----
-components/DesktopModal/index.tsx:118 连接超时回调：CONNECTION_TIMEOUT(15s) 真实等待不可接受；state 机保证仅 connecting 态触发，正常/失败路径已全测
-components/DesktopModal/index.tsx:119 同上回调体（disconnect + 错误提示）
-components/DesktopModal/index.tsx:120 同上回调体（showCredentials）
-components/DesktopModal/index.tsx:121 同上回调收尾
-components/VNCModal/index.tsx:52 VNC 连接超时回调：同 DesktopModal，15s 真时不可等待，其余 state 迁移已全测
-components/VNCModal/index.tsx:53 同上（cleanup 调用）
-components/VNCModal/index.tsx:54 同上（置 disconnected）
-components/VNCModal/index.tsx:55 同上（超时错误提示）
-components/TerminalModal/index.tsx:83 卸载清理中 ws 处于 CONNECTING 的分支：mock 与真实生命周期均在 open/error 后才进入清理，CONNECTING 态互斥
+components/DesktopModal/index.tsx:122 超时回调 if 条件行：回调体（disconnect/错误提示/回表单）已由 30s 超时用例断言，v8 对命中分支条件行漏计
+components/VNCModal/index.tsx:56 超时回调 if 条件行：同 DesktopModal 122，cleanup/置断开/错误提示已由 30s 超时用例断言
+components/TerminalModal/index.tsx:83 连接超时 if 条件行：close 调用 + 超时提示已由 CONNECTING 30s 用例断言，v8 条件行漏计
 components/TerminalModal/index.tsx:104 fitAddonRef 判空：赋值位于同 effect 后文，首次触发时必为 null，赋值先于可达路径
-components/TerminalModal/index.tsx:211 弹窗关闭清理入口：Modal 关闭即卸载组件，!visible 时 ref 已随卸载清空，分支不可达
-components/TerminalModal/index.tsx:213 同上清理体（wsRef 判空）
-components/TerminalModal/index.tsx:214 同上（close 调用）
-components/TerminalModal/index.tsx:215 同上（置 null）
-components/TerminalModal/index.tsx:217 同上（terminal reset）
-components/TerminalModal/index.tsx:218 同上（setConnected(false)）
+components/TerminalModal/index.tsx:211 !visible 清理入口：主 effect（[connectWebSocket, visible, authPending]）cleanup 先行 dispose 并置 null，本 effect（[visible]）后跑时 terminalInstanceRef.current 恒 null，判空恒 false
+components/TerminalModal/index.tsx:213 同 211 死代码清理体（wsRef 判空）
+components/TerminalModal/index.tsx:214 同 211（close 调用）
+components/TerminalModal/index.tsx:215 同 211（置 null）
+components/TerminalModal/index.tsx:217 同 211（terminal reset）
+components/TerminalModal/index.tsx:218 同 211（setConnected(false)）
 components/TerminalModal/index.tsx:223 卸载时 terminalInstanceRef 判空防御：同 211 家族
 components/TerminalModal/index.tsx:257 表单 onFinish 内联回调（preventDefault + 提交）：提交行为已实证，JSX 内联箭头 v8 漏计
 pages/Docker/index.tsx:237 requestAnimationFrame 回调内滚动防御：jsdom rAF 触发时序不稳定，滚动语义属浏览器行为
