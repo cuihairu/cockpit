@@ -48,13 +48,17 @@ const VNCModal: React.FC<VNCModalProps> = ({
     }
   }, []);
 
+  // 超时回调读取最新连接态：useCallback 捕获的 vncState 在 timer 到点时已过期
+  const vncStateRef = useRef(vncState);
+  vncStateRef.current = vncState;
+
   const handleTimeout = useCallback(() => {
-    if (vncState === 'connecting') {
+    if (vncStateRef.current === 'connecting') {
       cleanup();
       setVncState('disconnected');
       message.error('连接超时，请检查网络或重试');
     }
-  }, [vncState, cleanup]);
+  }, [cleanup]);
 
   const { start: startTimeout, clear: clearTimeout } = useConnectionTimeout({
     timeout: CONNECTION_TIMEOUT,

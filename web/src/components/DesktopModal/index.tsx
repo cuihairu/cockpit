@@ -84,6 +84,10 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
     },
   });
 
+  // 超时回调读取最新连接态：直接比较 useState 值会捕获点击时的过期闭包
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   const { setCanvas } = useInputCapture({
     sendKeyboard,
     sendMouse,
@@ -115,7 +119,7 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
 
       // 启动超时定时器
       const timer = setTimeout(() => {
-        if (state === 'connecting') {
+        if (stateRef.current === 'connecting') {
           disconnect();
           message.error('连接超时，请检查网络或重试');
           setShowCredentials(true);
