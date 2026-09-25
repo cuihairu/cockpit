@@ -200,6 +200,9 @@ describe('Docker', () => {
       fireEvent.click(document.querySelector('.ant-modal-confirm-btns .ant-btn-primary')!)
     })
     await waitFor(() => expect(apiMock.stopContainer).toHaveBeenCalledWith('ag-docker', 'c-run', 10))
+    // 操作成功后 500ms 防抖刷新容器列表
+    const before = apiMock.getContainers.mock.calls.length
+    await waitFor(() => expect(apiMock.getContainers.mock.calls.length).toBeGreaterThan(before))
   })
 
   it('非危险操作直发：启动 exited 容器不弹确认', async () => {

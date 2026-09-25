@@ -57,7 +57,10 @@ describe('ConsistencyTab', () => {
       agents: [
         { id: 'ag-a', status: 'mismatch',
           declared: { hostname: 'ha' }, actual: { hostname: 'hb' },
-          mismatch: [{ field: 'ip', declared: '1.1.1.1', actual: '2.2.2.2' }] },
+          mismatch: [
+            { field: 'hostname', declared: 'ha', actual: 'hb' },
+            { field: 'ip', declared: '1.1.1.1', actual: '2.2.2.2' },
+          ] },
         // status mismatch 但无 mismatch 明细 → rowExpandable 右分支 false
         { id: 'ag-b', status: 'mismatch', declared: { hostname: 'hc' }, actual: { hostname: 'hd' } },
       ],
@@ -68,8 +71,8 @@ describe('ConsistencyTab', () => {
     fireEvent.click(ra.querySelector('.ant-table-row-expand-icon')!)
     expect(await screen.findByText('IP')).toBeInTheDocument()
     expect(screen.getByText('1.1.1.1')).toBeInTheDocument()
-    // 展开表字段名映射：hostname → 主机名
-    expect(screen.queryByText('主机名')).not.toBeInTheDocument()
+    // 展开表字段名映射：hostname → 主机名、其余 → IP
+    expect(screen.getByText('主机名')).toBeInTheDocument()
     // 无 mismatch 明细 → 展开图标置灰（spaced）
     expect(rowOf('ag-b').querySelector('.ant-table-row-expand-icon')!.className).toContain('spaced')
   })
