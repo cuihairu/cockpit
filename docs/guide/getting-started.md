@@ -161,9 +161,24 @@ server:
 
 建议通过反向代理终止 TLS，并让 Agent 使用 `wss://.../ws` 连接。
 
+## 不想编译？用 Docker
+
+官方镜像由 CI 推到 `ghcr.io/cuihairu/cockpit`（多 tag：`latest` / `main` /
+`v1.2.3` / 短 sha），部署机只要有 Docker 即可：
+
+```bash
+cp deployments/docker/.env.example deployments/docker/.env
+vi deployments/docker/.env   # ADMIN_PASSWORD / JWT_SECRET 必填
+docker compose -f deployments/docker/docker-compose.yml up -d
+```
+
+完整部署指南（tag 策略、远控 guacd、反向代理、备份回滚、排障）：
+[Docker 部署](/operations/deploy-docker)。
+
 ## 下一步
 
 - [核心概念](/guide/concepts)
 - [架构与边界](/guide/architecture)
 - [Agent 出口与 SD-WAN 能力边界](/guide/agent-egress-sdwan)
 - [协议与 API 边界](/guide/protocol)
+- [Docker 部署](/operations/deploy-docker)

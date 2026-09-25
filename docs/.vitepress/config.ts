@@ -46,6 +46,14 @@ export default defineConfig({
             { text: 'OpenWrt Agent 打包设计', link: '/guide/openwrt-agent-design' }
           ]
         }
+      ],
+      '/operations/': [
+        {
+          text: '运维',
+          items: [
+            { text: 'Docker 部署', link: '/operations/deploy-docker' }
+          ]
+        }
       ]
     },
 

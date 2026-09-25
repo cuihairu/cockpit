@@ -1,0 +1,155 @@
+name: Docker
+
+# 镜像构建与推送（ghcr.io/cuihairu/cockpit）。
+# 结构对齐同组织 croupier 仓库的 .github/workflows/docker.yml：GitHub-hosted
+# runner + buildx，多 tag 一次构建，PR 只构建不推送。
+# 与 croupier 的差异：Cockpit 走 CGO（mattn/go-sqlite3），多架构需交叉工具链，
+# 故只出 linux/amd64（要多架构见 README「镜像」节的说明）。
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set build metadata
+        run: |
+          set -euo pipefail
+          # 无 VERSION 文件时退化为 dev；tag 触发以 tag 名为准
+          VERSION="$(cat VERSION 2>/dev/null || echo dev)"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          {
+            echo "APP_VERSION=${VERSION}"
+            echo "GIT_COMMIT=${GITHUB_SHA}"
+            echo "BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')"
+          } >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/cockpit
+          # 多 tag：分支名 / PR 号 / 语义化版本（含 major.minor 滚动 tag）/
+          # 短 sha / main 分支额外打 latest。部署侧可锁 tag 也可跟 latest。
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=Cockpit
+            org.opencontainers.image.description=个人混合基础设施控制台（Server + Agent + Web）
+            org.opencontainers.image.vendor=cuihairu
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          # PR：load 进本地 docker 供下方冒烟；main/tag：推 GHCR。两者互斥，
+          # 同时为 true 会被 buildx 拒绝
+          load: ${{ github.event_name == 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ env.APP_VERSION }}
+          cache-from: type=gha,scope=cockpit
+          cache-to: type=gha,scope=cockpit,mode=max
+
+      # 「Dockerfile 可直接跑」的 CI 证据：真起容器 + 打 /health。
+      # 只在 PR 跑（main/tag 已推镜像，跑的是 registry 上的旧镜像，无意义）。
+      - name: Smoke test image (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          # load 进本地时用的就是 metadata 生成的 tag 列表，取其一即可
+          IMAGE=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep '^ghcr\.io/.*/cockpit:' | head -1)
+          echo "Smoke testing ${IMAGE}"
+          # 校验 VERSION build-arg 真的进了二进制（main.version 由 -X 注入）
+          docker run --rm --entrypoint cockpit "${IMAGE}" version
+
+          docker run -d --name cockpit-smoke -p 19000:9000 \
+            -e ADMIN_USERNAME=admin \
+            -e ADMIN_PASSWORD=ci-smoke-password \
+            -e JWT_SECRET=ci-smoke-jwt-secret-0123456789 \
+            -e PRODUCTION=false \
+            "${IMAGE}"
+          trap 'docker logs cockpit-smoke || true; docker rm -f cockpit-smoke || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:19000/health >/dev/null; then
+              echo "Health check passed"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Health check failed"
+          exit 1
+
+      - name: Make GHCR package public
+        if: github.event_name != 'pull_request'
+        env:
+          GH_OWNER: ${{ github.repository_owner }}
+          GH_OWNER_SCOPE: ${{ github.event.repository.owner.type == 'Organization' && 'orgs' || 'users' }}
+          # 优先 PAT，缺省回退 GITHUB_TOKEN（后者可能无改可见性权限）
+          TOKEN: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_TOKEN || github.token }}
+          PKG: cockpit
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          echo "Ensuring GHCR package visibility: ghcr.io/${GH_OWNER}/${PKG} -> public"
+          scope="${GH_OWNER_SCOPE}/${GH_OWNER}"
+          # 包刚推完，等它出现（最多约 60s）
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "https://api.github.com/${scope}/packages/container/${PKG}" || true)
+            echo "Probe ${scope}/packages/container/${PKG} -> $code"
+            [ "$code" = "200" ] && break
+            sleep 5
+          done
+          code=$(curl -s -o /dev/null -w "%{http_code}" -L -X PUT \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/${scope}/packages/container/${PKG}/visibility" \
+              -d '{"visibility":"public"}' || true)
+          if [ "$code" = "204" ] || [ "$code" = "200" ]; then
+            echo "Package ${PKG} set to public via ${scope}"
+          else
+            echo "Skipping GHCR visibility update for ${PKG} (HTTP $code)"
+          fi

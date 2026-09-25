@@ -1,0 +1,77 @@
+# 生产部署 compose：拉 ghcr.io 发布的镜像，不在部署机本地构建。
+#
+# 与仓库根 docker-compose.yml 的分工：
+#   - 根目录那份：给「要改代码的人」用（build: . + image: cockpit:local，
+#     改完前端直接重建）
+#   - 本文件：给「部署者」用（image: ghcr.io/cuihairu/cockpit:<tag>，
+#     部署机只要有 Docker）
+#
+# 配套文档：docs/operations/deploy-docker.md（完整部署与排障）
+# 变量清单：deployments/docker/.env.example
+#
+# 部署：docker compose up -d
+# 交叉验证：docker compose config
+
+services:
+  cockpit-server:
+    # 锁 tag 部署（推荐）：COCKPIT_IMAGE_TAG=0.1.0；留空跟 latest
+    image: ghcr.io/cuihairu/cockpit:${COCKPIT_IMAGE_TAG:-latest}
+    container_name: cockpit-server
+    restart: unless-stopped
+    ports:
+      - "${COCKPIT_HTTP_PORT:-9000}:9000"
+    environment:
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}"
+      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in .env}"
+      TOTP_ENCRYPTION_KEY: "${TOTP_ENCRYPTION_KEY:-}"
+      PRODUCTION: "${PRODUCTION:-true}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
+      BASE_URL: "${BASE_URL:-}"
+      TZ: "${TZ:-Asia/Shanghai}"
+      # 远程桌面/终端网关（guacd）地址：启用 guacd profile 时设为 guacd:4822
+      # （同网络 DNS 名）；留空 = 不启用 Guacamole 远控入口
+      # 见 docs/remote-desktop-guacamole-design.md 与
+      # docs/remote-access-integration-design.md
+      GUACD_ADDR: "${GUACD_ADDR:-}"
+      # guacd 录制目录。必须与 guacd 容器里的挂载点**同一个卷同一个路径**：
+      # guacd 按 connect 指令的 recording-path 往这儿写 <session>.guac，
+      # Go 网关会话结束时从同一路径收走归档到 /data/recordings
+      # （collectGuacRecording）。两侧路径不一致 = 录制文件永远收不到。
+      GUACD_RECORDING_PATH: "${GUACD_RECORDING_PATH:-/var/lib/guacamole}"
+    volumes:
+      # 数据卷：SQLite 库 /data/cockpit.db、清单、备份、录制归档
+      - cockpit-data:/data
+      # guacd 录制卷（与下方 guacd 服务共用，见 GUACD_RECORDING_PATH 注释）
+      - guacd-recordings:/var/lib/guacamole
+    networks:
+      - cockpit-net
+
+  # guacd：Apache Guacamole 协议守护进程，把 RDP/VNC/SSH 翻译成 Guacamole
+  # 指令流（跳过 guacamole-web 的 Java 层）。无用户概念、无状态——会话/权限/
+  # 审计都在 Go 网关侧。
+  # 启用：docker compose --profile guacd up -d（并设 GUACD_ADDR=guacd:4822）
+  # 要点：端口不对外暴露（Go 网关同网络反代，浏览器走
+  # /api/remote/guacamole 的 WebSocket）；GUACD_LOG_LEVEL 别开 debug
+  # （debug 会打印 connect 指令参数，含口令/私钥）。
+  guacd:
+    profiles: ["guacd"]
+    image: guacamole/guacd:1.5.5
+    container_name: cockpit-guacd
+    restart: unless-stopped
+    networks:
+      - cockpit-net
+    volumes:
+      # 与 cockpit-server 同一个卷：guacd 写 .guac，Go 网关收走归档
+      - guacd-recordings:/var/lib/guacamole
+    environment:
+      GUACD_LOG_LEVEL: "${GUACD_LOG_LEVEL:-info}"
+      TZ: "${TZ:-Asia/Shanghai}"
+
+networks:
+  cockpit-net:
+    driver: bridge
+
+volumes:
+  cockpit-data:
+  guacd-recordings:

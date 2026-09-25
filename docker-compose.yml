@@ -21,11 +21,18 @@ services:
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
       TZ: "${TZ:-Asia/Shanghai}"
       # 远程桌面网关（guacd）启用时设为 guacd:4822（同网络 DNS 名）；
-      # 留空 = 不启用 Guacamole 远程桌面（RDP/VNC 入口隐藏）
-      # 见 docs/remote-desktop-guacamole-design.md（D1/D2）
+      # 留空 = 不启用 Guacamole 远程桌面（RDP/VNC/SSH 入口隐藏）
+      # 见 docs/remote-desktop-guacamole-design.md（D1/D2）与
+      # docs/remote-access-integration-design.md（D1）
       GUACD_ADDR: "${GUACD_ADDR:-}"
+      # guacd 录制目录：须与 guacd 服务的挂载点同卷同路径——guacd 按 connect
+      # 指令的 recording-path 写 <session>.guac，Go 网关会话结束时从同一路径
+      # 收走归档到 /data/recordings（collectGuacRecording）
+      GUACD_RECORDING_PATH: "${GUACD_RECORDING_PATH:-/var/lib/guacamole}"
     volumes:
       - cockpit-data:/data
+      # 与 guacd 服务共用录制卷（少了这份挂载，.guac 归档永远收不到）
+      - guacd-recordings:/var/lib/guacamole
     networks:
       - cockpit-net
 

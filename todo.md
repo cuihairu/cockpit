@@ -774,6 +774,22 @@
 6. ✅ **补测试（含发现并修掉的存量回归）**：`web/src/test/setup.ts` 加 ResizeObserver 可观测桩（jsdom 无实现）+ `window.__triggerResize(w,h)` 触发器。GuacamoleModal 新增 5 用例（尺寸同步去抖取末次/0 尺寸跳过、RDP 不挂 RO、终端 paste 反向含空与无 clipboardData 两条静默分支、工具栏按钮正向与读失败兜底、SSH 隐藏分辨率下拉 vs RDP 保留、卸载 cleanup 断 RO）。**发现上一轮漏改 `web/src/pages/Agents/index.test.tsx`**：两处仍断言 ssh 分流到 `terminal-modal`（D3 改成 guac 后必挂），本轮一并修正。
    - 验收边界：`go build/vet/test ./...` 全绿（32 包）；web tsc 0 错、ESLint 0 error（2 存量 warning 非本次引入）、`pnpm build` 过、全量 vitest（909 用例）过 + `tool/coverage_check.sh` 通过（有效覆盖 100%）。真机验收项挂起（真 guacd + 真 sshd：口令/私钥认证、终端渲染、`.guac` 录制回放、剪贴板；已入 acceptance-checklist「远控三协议」节）。移动端不动（D6：xterm.dart 走 agent 通道独立链路）。
 
+## Docker 镜像与 docker 部署（2026-09-25）
+
+仓库此前已有 Dockerfile 与 compose（本地构建向），但**没有一条把镜像发出去的链路**——部署机想用只能自己 build。本次补齐「推镜像 → 拉镜像部署」的闭环。
+
+1. ✅ **`.github/workflows/docker.yml`**（新建）：GitHub-hosted runner + buildx，推 `ghcr.io/cuihairu/cockpit`。结构对齐同组织 croupier 仓库的同名 workflow：checkout@v7 / setup-buildx@v4 / login@v4 / metadata@v6 / build-push@v7 + 一段「把 GHCR 包可见性改 public」best-effort 步骤（`continue-on-error`，优先 `GHCR_TOKEN` secret、缺省回退 `GITHUB_TOKEN`），否则 `docker pull` 得先登录。
+   - **多 tag**：`latest`（main 分支）/ `main` / `v1.2.3`·`1.2.3`·`1.2`·`1`（semver 系列）/ 短 sha / `pr-N`。锁 sha 或 semver 即得不可变部署点。
+   - **只出 linux/amd64**：Server 走 CGO（SQLite 绑死在 cgo），多架构要交叉工具链，不在本轮范围（文档里写明）。
+   - **PR 只构建不推送**（`load` 与 `push` 互斥），并跑一次真容器冒烟：`cockpit version` 校验 VERSION build-arg 真的进了二进制 → 起容器 → 轮询 `/health`。这是「Dockerfile 可直接跑」的 CI 证据。
+   - GHA 缓存（`cache-from/to: type=gha,scope=cockpit,mode=max`）。
+2. ✅ **Dockerfile 可直接跑**：`--build-arg VERSION` 注入 `main.version`（`cockpit version` 可见，此前镜像里版本号恒为源码默认值）；**pnpm 版本钉死 `pnpm@11.19.0`**——仓库无 `packageManager` 字段，原来的 `corepack enable` 会挑「corepack 已知最新版」pnpm，哪天上游发新版就可能把 `--frozen-lockfile` 掀了；改走 `npm install -g`（corepack `prepare` 在新版 corepack 已废弃，且与本仓 `deploy-dev.yml` 的做法一致）。
+3. ✅ **docker compose**（`deployments/docker/docker-compose.yml` 新建）：**拉镜像**的部署向编排（`COCKPIT_IMAGE_TAG` 可锁 tag，缺省 latest），与仓库根那份**本地构建**向 compose 职责分工，两份服务定义同源。顺带修一个真缺陷：原根 compose 只把 `guacd-recordings` 卷挂给 guacd、**没挂给 server**——guacd 按 `recording-path` 写 `<sid>.guac`，Go 网关会话结束时从**同一路径**收走归档（`collectGuacRecording`），不共挂则远控/终端录制的 `.guac` 永远收不进 `/recordings`。两份 compose 现都同卷同路径挂载并显式设 `GUACD_RECORDING_PATH`。
+4. ✅ **`docs/operations/deploy-docker.md`**（新建）+ 文档网接入：VitePress sidebar 新增「运维」分组（`/operations/` 前缀），快速开始页加「不想编译？用 Docker」入口与下一步链接；`deployments/docker/README.md` 改成两套姿势分工 + 指向新指南；README 的 Docker 章节补镜像地址、tag 策略、拉镜像命令与 guacd 共卷说明；`.env.example` 补 `COCKPIT_IMAGE_TAG` / `GUACD_ADDR` / `GUACD_RECORDING_PATH` / `GUACD_LOG_LEVEL`。
+5. ✅ **顺带修一处反代缺口**：`deployments/nginx/cockpit.cuihairu.site.conf` 的远控 WS location 正则 `^/api/remote/(terminal|desktop|vnc)` **漏了 `guacamole`**——走该配置部署时 Guacamole 隧道（RDP/VNC/SSH）建不起来。已补，并加注释说明漏它的后果。
+
+文档纪律：VitePress 只校验 docs 目录内的相对链接，`.yml` 之外的越界链接（`../../deployments/**`）会被判死链导致 `docs.yml` 构建失败——按同组织 croupier 文档的既有做法，仓内文件一律用行内 code 路径引用而非链接。
+
 ## 真机验收清单（2026-09-22）
 
 各功能散落的「剩余：真实环境验收」已汇总为 `docs/guide/acceptance-checklist.md`（12 功能域、可勾选、含通用前置与回填约定，sidebar 规划分组可导航）。后续拿到测试机/凭据按清单推进，验收一项回填一处；本文件各条目的「剩余」字样以清单为准逐项消化。

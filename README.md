@@ -132,11 +132,21 @@ export PRODUCTION=true
 
 ## Docker 部署
 
-多阶段构建（Node 编 web → Go 编 server → debian-slim 运行），web 产物由 server 直接托管（`static_dir: /app/web`），无独立 nginx 层。一键起：
+多阶段构建（Node 编 web → Go 编 server → debian-slim 运行），web 产物由 server 直接托管（`static_dir: /app/web`），无独立 nginx 层。
+
+官方镜像由 [`.github/workflows/docker.yml`](.github/workflows/docker.yml) 推到 `ghcr.io/cuihairu/cockpit`（一次构建多 tag：`latest` / `main` / `v1.2.3` / `1.2` / 短 sha）。部署机不装编译环境也能起：
+
+```bash
+cp deployments/docker/.env.example deployments/docker/.env
+vi deployments/docker/.env   # ADMIN_PASSWORD / JWT_SECRET 必填；TOTP_ENCRYPTION_KEY 在 PRODUCTION=true 时必填
+docker compose -f deployments/docker/docker-compose.yml up -d
+```
+
+要在部署机本地构建（改代码自测）用仓库根 compose：
 
 ```bash
 cp deployments/docker/.env.example .env
-vi .env    # ADMIN_PASSWORD / JWT_SECRET 必填；TOTP_ENCRYPTION_KEY 在 PRODUCTION=true 时必填
+vi .env
 docker compose up -d --build
 # podman 用户：podman build --format docker -t cockpit:local . && podman compose up -d
 #（HEALTHCHECK 需 docker 镜像格式，默认 OCI 会忽略）
@@ -150,9 +160,9 @@ docker compose up -d --build
 GUACD_ADDR=guacd:4822 docker compose --profile guacd up -d
 ```
 
-guacd 把 RDP/VNC 翻译成 Guacamole 指令流（跳过 guacamole-web Java 层），录制落盘卷 `guacd-recordings`。详见 [deployments/guacd/README.md](deployments/guacd/README.md) 与 [docs/remote-desktop-guacamole-design.md](docs/remote-desktop-guacamole-design.md)。
+guacd 把 RDP/VNC/SSH 翻译成 Guacamole 指令流（跳过 guacamole-web Java 层），录制落盘卷 `guacd-recordings`（server 与 guacd 同卷同路径，Go 网关会话结束时收走归档进 `/data/recordings`）。详见 [deployments/guacd/README.md](deployments/guacd/README.md)、[docs/remote-desktop-guacamole-design.md](docs/remote-desktop-guacamole-design.md) 与 [docs/remote-access-integration-design.md](docs/remote-access-integration-design.md)。
 
-完整配置与常用命令见 [deployments/docker/README.md](deployments/docker/README.md)。
+完整部署指南（镜像 tag 策略、反向代理、备份回滚、排障）：**[docs/operations/deploy-docker.md](docs/operations/deploy-docker.md)**；配置与常用命令见 [deployments/docker/README.md](deployments/docker/README.md)。
 
 ## 端到端冒烟脚本
 
