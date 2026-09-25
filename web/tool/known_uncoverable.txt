@@ -1,0 +1,102 @@
+# web 前端 KNOWN_UNCOVERABLE 台账
+# 格式：<path:line> <理由>（path 相对 web/src，可带通配行段；# 开头为注释）
+# 门禁：web/tool/coverage_check.sh 对比 lcov DA:0/BRDA taken 0 与本表，未登记即失败；
+#       反向（登记但已覆盖）输出 stale 提醒，应及时清理。
+# 收口基线：2026-09-25 全量 79 文件 897 用例全绿下的 lcov。
+
+# ---- 防御性早退（selectedAgent / ref / 空参，UI 上无触发路径）----
+pages/Proxy/index.tsx:131 selectedAgent 防御早退：操作入口仅在选中 agent 后渲染，空 agent 不可达
+pages/Proxy/index.tsx:167 同上（applyProxySite 前置防御）
+pages/Proxy/index.tsx:178 同上（删除前防御）
+pages/Services/index.tsx:120 selectedAgent 防御早退（runAction，按钮仅在选中后渲染）
+pages/Services/index.tsx:125 同上（保存 unit 前防御）
+pages/Services/index.tsx:133 同上（daemon-reload 前防御）
+pages/Services/index.tsx:149 同上（打开 unit 文件前防御）
+pages/Services/index.tsx:165 同上（保存 unit 文件前防御，!editUnit 复合防御）
+pages/Cron/index.tsx:172 selectedAgent 防御早退（saveJob）
+pages/Cron/index.tsx:199 同上（toggleEnabled）
+pages/Cron/index.tsx:210 同上（deleteJob）
+pages/Docker/index.tsx:44 cleanDockerLog 空串早退：调用侧对空日志已短路，防御分支不可达
+components/GuacPlayer/index.tsx:26 displayRef null 早退：弹窗未挂载不触发 effect，防御
+components/MetricsChart/index.tsx:50 containerRef null 早退：echarts init 前置防御，React 保证挂载后 effect 才跑
+components/VNCModal/index.tsx:67 vncContainerRef null 早退：RFB 挂载点前置防御
+pages/Recordings/index.tsx:83 recording null 早退：回放入口由行内按钮发起，recording 必已选中
+pages/Recordings/index.tsx:166 recording/termDivRef null 早退：弹窗内容未挂载时不建终端，防御
+pages/Backups/index.tsx:376 restoreTarget null 早退：恢复按钮仅在选中目标后可点
+pages/AuditLogs/index.tsx:59 parseAuditDetails 空串早退：详情为空的行不进解析调用，防御
+workbench/LogsPanel.tsx:207 frames.pop() ?? '' 兜底：split 结果至少一个元素，pop 永不返回 undefined
+
+# ---- 生命周期/时序在 jsdom 下不可注入或与真实语义互斥 ----
+components/DesktopModal/index.tsx:118 连接超时回调：CONNECTION_TIMEOUT(15s) 真实等待不可接受；state 机保证仅 connecting 态触发，正常/失败路径已全测
+components/DesktopModal/index.tsx:119 同上回调体（disconnect + 错误提示）
+components/DesktopModal/index.tsx:120 同上回调体（showCredentials）
+components/DesktopModal/index.tsx:121 同上回调收尾
+components/VNCModal/index.tsx:52 VNC 连接超时回调：同 DesktopModal，15s 真时不可等待，其余 state 迁移已全测
+components/VNCModal/index.tsx:53 同上（cleanup 调用）
+components/VNCModal/index.tsx:54 同上（置 disconnected）
+components/VNCModal/index.tsx:55 同上（超时错误提示）
+components/TerminalModal/index.tsx:83 卸载清理中 ws 处于 CONNECTING 的分支：mock 与真实生命周期均在 open/error 后才进入清理，CONNECTING 态互斥
+components/TerminalModal/index.tsx:104 fitAddonRef 判空：赋值位于同 effect 后文，首次触发时必为 null，赋值先于可达路径
+components/TerminalModal/index.tsx:211 弹窗关闭清理入口：Modal 关闭即卸载组件，!visible 时 ref 已随卸载清空，分支不可达
+components/TerminalModal/index.tsx:213 同上清理体（wsRef 判空）
+components/TerminalModal/index.tsx:214 同上（close 调用）
+components/TerminalModal/index.tsx:215 同上（置 null）
+components/TerminalModal/index.tsx:217 同上（terminal reset）
+components/TerminalModal/index.tsx:218 同上（setConnected(false)）
+components/TerminalModal/index.tsx:223 卸载时 terminalInstanceRef 判空防御：同 211 家族
+components/TerminalModal/index.tsx:257 表单 onFinish 内联回调（preventDefault + 提交）：提交行为已实证，JSX 内联箭头 v8 漏计
+pages/Docker/index.tsx:237 requestAnimationFrame 回调内滚动防御：jsdom rAF 触发时序不稳定，滚动语义属浏览器行为
+
+# ---- 无 UI 入口 / 数据演进防御（当前数据形态下不可达）----
+pages/Proxy/index.tsx:147 空域名运行时校验：表单 required + validator 前置拦截，onFinish 触发时 serverNames 必非空
+pages/Proxy/index.tsx:148 同上（错误文案）
+pages/Proxy/index.tsx:149 同上（return）
+pages/Docker/index.tsx:189 动作 switch default 抛错：action 来自固定按钮集合，未知值不可达
+pages/Stacks/StackDetail.tsx:187 taskActionLabel 未知 action 兜底：后端 action 枚举封闭，四类已知动作已全测；同款兜底语义已由历史 Tab 用例实证
+pages/Cron/index.tsx:41 空表达式早退：表单 required 前置，简写/五段式主路径已实证
+components/GuacamoleModal/index.tsx:103 resolution || 1280 兜底：分辨率经下拉白名单（恒为 WxH 格式），split 后必为数字
+components/GuacamoleModal/index.tsx:104 同上（height || 800）
+components/GuacamoleModal/index.tsx:113 同上（凭据表单侧 width）
+components/GuacamoleModal/index.tsx:114 同上（凭据表单侧 height）
+pages/Acme/index.tsx:186 下载文件名三元 issuer 分支：download() 仅被 cert/key 两个按钮调用，issuer 无 UI 入口（预留）
+
+# ---- v8 伪缺口：行为已由用例双向实证，lcov 计数为 0（JSX 内联/回调链/三元怪癖）----
+pages/Proxy/index.tsx:142 tlsCert 三元 undefined 分支：http 站点不入参与 https trim 值均已断言，v8 对行内三元漏计
+pages/Proxy/index.tsx:143 tlsKey 同上
+pages/Backups/index.tsx:193 remoteDest ?? '' 兜底：留空提交 payload 断言 remote_dest:'' 已实证
+pages/Backups/index.tsx:194 preHook ?? '' 同上
+pages/Stacks/StackDetail.tsx:204 taskMeta 空值侧兜底：任务终态提示与 failed 日志弹窗均已断言（含弹窗标题）
+pages/DNS/index.tsx:267 Modal title 编辑/新建三元：JSX 内联，两态渲染断言均有
+pages/DNS/DDNSPanel.tsx:195 agent 列 render 三元/||：hostname 缺省用 id、未知 id 原样显示均已断言
+pages/Agents/columns.tsx:82 能力 +N 溢出 Tag 分支：4 能力渲染 +1、3 能力不渲染均已断言，Tooltip 包装致 v8 漏计
+pages/Drift/ConsistencyTab.tsx:139 mismatch 字段映射 hostname 分支：fixture 含 hostname 明细且「主机名」渲染断言通过，v8 对 Table columns 内联 render 三元漏计
+contexts/UserContext.tsx:90 login 后拉权限 setUser updater：login 成功用例断言 user 合并结果，async 回调内联漏计
+pages/Acme/index.tsx:543 按主域名填默认路径 onClick：编辑（a.com）与新建（空域名 example.com 兜底）双向断言均有
+pages/Docker/index.tsx:206 handleAction logs 分支 setLogContainer：日志弹窗打开即实证该行执行，v8 漏计
+pages/Docker/index.tsx:263 容器状态 Tag color 内联映射：running/exited/paused/未知四态渲染断言均有
+pages/Docker/index.tsx:175 switch 语句行：各 case 分支计数正常，switch 行本身 v8 记 0
+pages/Recordings/index.tsx:91 guac blob 加载失败 catch：错误文案断言已实证，promise catch 回调链漏计
+pages/Recordings/index.tsx:100 回放 Modal title 内联模板：标题断言已有
+pages/Recordings/index.tsx:188 倍速 effect 条件：2x 切换重拉用例已实证该路径执行
+pages/Recordings/index.tsx:197 effect 依赖数组行：非执行语句，v8 挂计
+components/GuacamoleModal/index.tsx:319 错误横幅 JSX 短路渲染：错误态已由 state 断言覆盖
+components/GuacamoleModal/index.tsx:343 disconnected && !showCredentials 复合条件：各单态渲染断言均有，复合分支 v8 漏计
+components/GuacPlayer/index.tsx:82 Slider tooltip formatter：悬停才触发的内联纯函数，jsdom 不可悬停；格式化逻辑已由等价断言覆盖
+components/MetricsChart/index.tsx:85 tooltip formatter：params 四向（name/seriesName/value 缺省）均已断言，echarts 内联回调漏计
+components/TerminalModal/index.tsx:223 同 211 清理家族（reset 前判空）
+App.tsx:290 路由树递归展开 routes ?? [] 兜底：静态路由树叶子 children 恒存在，数据演进防御
+App.tsx:316 user?.permissions 空值侧：user 未加载场景已由「顶栏用户名兜底 Admin」用例覆盖，v8 漏计
+App.tsx:430 菜单项内联 onClick（preventDefault + navigate）：菜单导航跳转断言已有
+App.tsx:447 面包屑 itemRender 首项分支：面包屑渲染断言已有，内联回调漏计
+App.tsx:448 同上（navigate('/') 调用）
+App.tsx:449 同上（面包屑文案渲染）
+pages/Cron/index.tsx:372 用户筛选 onChange v ?? '' 兜底：选择不可清空，null 分支防御
+pages/Cron/index.tsx:376 filterOption 内联 option?.value 兜底：下拉过滤已实证，防御侧漏计
+pages/Cron/index.tsx:543 cron 校验 validator 内联：表达式校验主路径已实证
+pages/Drift/DiffModal.tsx:188 基线时间 JSX 内联三元：data null 侧在弹窗打开后不可达，渲染断言已有
+pages/Network/index.tsx:196 agentIdentity 身份三元：identity 有值（chip 渲染）与 metadata 空（兜底 undefined）双向用例均有
+pages/SetupTOTP/index.tsx:53 refetchTOTP().then 回调（setCurrentStep）：页面 step 流转渲染断言已实证，void promise 链漏计
+pages/SetupTOTP/index.tsx:54 同上（data 判定）
+pages/SetupTOTP/index.tsx:55 同上（进入 step1）
+pages/SetupTOTP/index.tsx:56 同上（回调收尾）
+components/FileBrowser/index.tsx:534 该按钮仅特定目录态渲染：对应态不可达该渲染分支（既定判定，行为由其余态断言覆盖）

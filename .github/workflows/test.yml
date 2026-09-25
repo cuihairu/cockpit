@@ -79,8 +79,8 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - name: Run web unit tests
+      - name: Run web unit tests with coverage gate
         run: |
           cd web
           pnpm install --frozen-lockfile
-          pnpm test
+          bash tool/coverage_check.sh

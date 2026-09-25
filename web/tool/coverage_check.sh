@@ -3,6 +3,7 @@
 # 未覆盖行与未覆盖分支必须全部登记在 known_uncoverable.txt（附理由），否则失败。
 # 用法：web/tool/coverage_check.sh [--skip-test]（已有 lcov 时跳过跑测试）
 set -euo pipefail
+export LC_ALL=C  # comm 依赖字节序，sort 默认 locale 排序与其不一致
 cd "$(dirname "$0")/.."
 
 if [[ "${1:-}" != "--skip-test" ]]; then
