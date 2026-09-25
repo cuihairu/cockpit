@@ -53,6 +53,17 @@
 - [ ] 终端/桌面会话录制归档后异步推送 rclone 真远端成功
 - [ ] 推送失败发 `recording.remote-failed` 通知，本地档保留、retention 窗口内「补推」成功
 
+## 远控三协议（Guacamole SSH 接入）
+
+设计：[remote-access-integration-design](../remote-access-integration-design.md)。
+
+- [ ] 真 guacd + 真 sshd：口令认证连上、私钥认证连上（`private-key` base64 透传）
+- [ ] SSH 终端渲染正常（vim/top 全屏程序），窗口 `size` 变更后列/行随之变化
+- [ ] SSH 会话 `.guac` 录制收集进 `/recordings` 且 SessionRecording 回放正常
+- [ ] SSH 剪贴板双向（浏览器 ↔ sshd）
+- [ ] 「内置终端（经 Agent）」兜底入口仍可用（guacd 停机时退路）
+- [ ] RDP/VNC 既有链路无回归（三协议同栈并存）
+
 ## 反向代理
 
 设计：[proxy-design](./proxy-design.md)。前置：nginx 宿主机裸装一台；Traefik 容器挂载宿主动态目录一台。

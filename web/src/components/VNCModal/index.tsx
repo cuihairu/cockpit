@@ -48,9 +48,13 @@ const VNCModal: React.FC<VNCModalProps> = ({
     }
   }, []);
 
-  // 超时回调读取最新连接态：useCallback 捕获的 vncState 在 timer 到点时已过期
+  // 超时回调读取最新连接态：useCallback 捕获的 vncState 在 timer 到点时已过期。
+  // ref 在 commit 后同步（render 期写 ref 违反 react-hooks/refs；超时回调
+  // 读取时已提交完毕，时序等价）
   const vncStateRef = useRef(vncState);
-  vncStateRef.current = vncState;
+  useEffect(() => {
+    vncStateRef.current = vncState;
+  }, [vncState]);
 
   const handleTimeout = useCallback(() => {
     if (vncStateRef.current === 'connecting') {

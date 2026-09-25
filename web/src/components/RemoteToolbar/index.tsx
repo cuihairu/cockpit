@@ -117,6 +117,7 @@ const RemoteToolbar: React.FC<RemoteToolbarProps> = ({
                 <Button
                   size="small"
                   type="text"
+                  aria-label="粘贴到远程"
                   icon={<CopyOutlined />}
                   style={{ color: '#ccc' }}
                   onClick={onClipboardPaste}

@@ -70,6 +70,11 @@ declare module 'guacamole-common-js' {
       sendMouseState(state: MouseState): void
       sendKeyEvent(pressed: 0 | 1, keysym: number): void
       sendSize(width: number, height: number): void
+      /**
+       * 建远端剪贴板写入流（内部发 `clipboard` 指令）——剪贴板反向
+       * （浏览器 → 远端）用，返回流配 StringWriter 写文本
+       */
+      createClipboardStream(mimetype: string): unknown
       onclipboard?: (
         streams: Record<string, unknown>,
         mimetype: string,
@@ -89,6 +94,11 @@ declare module 'guacamole-common-js' {
     StringReader: new (stream: unknown) => {
       ondata?: (chunk: string) => void
       onend?: () => void
+    }
+    /** 往输出流写文本（配 Client.createClipboardStream 的返回值） */
+    StringWriter: new (stream: unknown) => {
+      send(data: string): void
+      onack?: (status: { code: number; message: string }) => void
     }
     /** Web Audio API AudioContext 单例工厂（RawAudioPlayer 内部播放用） */
     AudioContextFactory: {

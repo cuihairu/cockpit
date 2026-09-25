@@ -496,10 +496,16 @@ Guacamole 路线下这个成本**几乎为零**：guacd 写 `.guac` 文件，我
 - **剪贴板富格式**（RTF/HTML）：阶段一纯文本；
 - **Web `.guac` 回放器**：阶段一用官方 `guacplay` 离线回放，Web 回放器
   阶段二（可复用 `/recordings` 页面的播放器骨架）；
-- **SSH/telnet 走 Guacamole**：SSH 已自研打通（`internal/proxy/ssh_session.go`，
-  agent 侧 `crypto/ssh` + PTY + TOFU host key），xterm.js 体验优于
-  Guacamole 的终端仿真；telnet 同理。**桌面协议（RDP/VNC）走 Guacamole，
-  字符终端（SSH/telnet）走 xterm.js**——两者不互相绑架；
+- ~~**SSH/telnet 走 Guacamole**~~（**2026-09-25 废止 SSH 部分**：三协议统一
+  第三方栈的新方向已落地 SSH 接入，见
+  [remote-access-integration-design](./remote-access-integration-design.md)；
+  体验差异（guacd 服务端渲染图块 vs xterm.js 字符网格）经「内置终端（经
+  Agent）」兜底入口消化，agent 通道不删。**telnet 维持不做**——无加密、
+  遗留调试用，继续走 xterm.js）：原理由——SSH 已自研打通
+  （`internal/proxy/ssh_session.go`，agent 侧 `crypto/ssh` + PTY + TOFU
+  host key），xterm.js 体验优于 Guacamole 的终端仿真；telnet 同理。
+  **桌面协议（RDP/VNC）走 Guacamole，字符终端（SSH/telnet）走 xterm.js**
+  ——两者不互相绑架；
 - **替换 agent 侧 RDP（grdp）**：阶段一 Guacamole 路线**新增**到 server 侧，
   agent 侧 grdp 保留为「无 guacd 部署时的降级路径」或按阶段一验收结果
   决定废弃。两套并存期不宜过长，阶段一验收后定夺。

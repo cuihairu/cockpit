@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"net"
 	"net/http"
 	"os"
@@ -99,6 +100,75 @@ func TestGuacConnectArgsNoCredentials(t *testing.T) {
 	}
 }
 
+// ssh connect 参数映射（docs/remote-access-integration-design.md D2）：
+// username/password 直传；私钥 PEM 原文 → private-key base64；width/height/
+// domain 不进 connect（字符终端 + SSH 无域概念）
+func TestGuacConnectArgsSSH(t *testing.T) {
+	pem := "-----BEGIN OPENSSH PRIVATE KEY-----\nTEST\n-----END OPENSSH PRIVATE KEY-----\n"
+	args := guacConnectArgs("ssh", "10.0.0.4", 22, map[string]string{
+		"username": "ops", "password": "pw", "private_key": pem,
+	}, 1280, 800, false, "s")
+	joined := strings.Join(args, ";")
+
+	for _, want := range []string{
+		"hostname=10.0.0.4", "port=22", "username=ops", "password=pw",
+		"private-key=" + base64.StdEncoding.EncodeToString([]byte(pem)),
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("ssh connect args missing %q: %q", want, joined)
+		}
+	}
+	for _, bad := range []string{"width=", "height=", "domain=", "color-depth=", "security="} {
+		if strings.Contains(joined, bad) {
+			t.Errorf("ssh connect args should not emit %q: %q", bad, joined)
+		}
+	}
+
+	// 无私钥：不 emit private-key（guacd 走口令认证）
+	args = guacConnectArgs("ssh", "h", 22, map[string]string{"username": "ops"}, 0, 0, false, "s")
+	if joined := strings.Join(args, ";"); strings.Contains(joined, "private-key=") {
+		t.Errorf("no private key should not emit private-key: %q", joined)
+	}
+}
+
+// ssh 全链路：select ssh 握手 + connect 携带 base64 私钥（协仪白名单放行）
+func TestGuacamoleTunnelSSHFullFlow(t *testing.T) {
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+	g := covStartGuacd(t)
+
+	pem := "-----BEGIN OPENSSH PRIVATE KEY-----\nKEY\n-----END OPENSSH PRIVATE KEY-----\n"
+	ticket := covTicket(t, s, map[string]string{
+		"agent_id": "agent-s", "host": "10.0.0.4", "port": "22", "protocol": "ssh",
+		"username": "ops", "private_key": pem,
+	})
+
+	conn, _, tDone := covDirectWSJoined(t, s.handleGuacamoleWebSocket, "/api/remote/guacamole", ticket)
+	t.Cleanup(func() { conn.Close() })
+
+	// 先消费 tunnel UUID 帧（同步管道，见 TestGuacamoleTunnelFullFlow 注释）
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read uuid frame: %v", err)
+	}
+
+	covWaitGone(t, "handshake", func() bool {
+		return strings.Contains(g.handshakeText(), "7.connect")
+	})
+	hs := g.handshakeText()
+	if !strings.HasPrefix(hs, "6.select,3.ssh;") {
+		t.Errorf("handshake should start with select ssh, got %q", hs)
+	}
+	if !strings.Contains(hs, "username=ops") {
+		t.Errorf("handshake missing username: %q", hs)
+	}
+	if !strings.Contains(hs, "private-key="+base64.StdEncoding.EncodeToString([]byte(pem))) {
+		t.Errorf("handshake missing base64 private-key: %q", hs)
+	}
+
+	conn.Close()
+	covWaitHandlerExit(t, "ssh session close", tDone)
+}
+
 // ============ HTTP 失败分支（升级前） ============
 
 func TestGuacamoleWebSocketBadRequests(t *testing.T) {
@@ -134,8 +204,9 @@ func TestGuacamoleWebSocketBadRequests(t *testing.T) {
 	})))
 	covWantCode(t, "port out of range", rec, http.StatusBadRequest)
 
-	// 协议不支持（ssh/telnet 走 TerminalModal，见设计「不做」）
-	for _, proto := range []string{"ssh", "telnet"} {
+	// 协议不支持：telnet 走 TerminalModal（ssh 已接入 Guacamole 栈，
+	// docs/remote-access-integration-design.md D1）
+	for _, proto := range []string{"telnet", "ftp", "rdp "} {
 		rec = covRec()
 		s.handleGuacamoleWebSocket(rec, guacReqWithTicket(covTicket(t, s, map[string]string{
 			"agent_id": "a", "host": "h", "port": "22", "protocol": proto,

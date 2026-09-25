@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/config"
+	"github.com/cuihairu/cockpit/internal/health"
 	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
@@ -336,7 +337,16 @@ func TestProbeServiceTCPFallbackToName(t *testing.T) {
 func TestRunAllChecksDomainDNSFailure(t *testing.T) {
 	r, db := newTestRunner(t)
 
-	// .invalid TLD is guaranteed to never resolve
+	// 环境确定性：fake-IP 解析器（Clash/MOS 等）会把 .invalid TLD 也解析
+	// 成 198.18.x.x，真实 DNS 查询不再可靠——注入 DNS 失败结果，
+	// 与 cov_runner_test 的 fake 注入同款（.invalid 兜底注释作废）。
+	r.healthChecker = &fakeHealthChecker{
+		dns: &health.Result{
+			Status:  health.StatusUnhealthy,
+			Message: "DNS resolution failed",
+		},
+	}
+
 	domain := &storage.Domain{ID: "d-1", Domain: "nonexistent-domain.invalid", Status: "active"}
 	if err := db.UpsertDomain(domain); err != nil {
 		t.Fatalf("UpsertDomain() error = %v", err)

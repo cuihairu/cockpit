@@ -10,6 +10,7 @@ import { message as messageError } from 'antd'
 
 const created: Array<{ url?: string; connectData?: string }> = []
 const readers: Array<{ ondata?: (c: string) => void; onend?: () => void }> = []
+const writers: Array<{ send: (c: string) => void }> = []
 const mice: Array<Record<string, unknown>> = []
 const keyboards: Array<Record<string, unknown>> = []
 // 超时回调手动触发（start 只登记不启动，避免污染其他用例）
@@ -23,6 +24,7 @@ const clientMock = vi.hoisted(() => ({
   sendMouseState: vi.fn(),
   sendKeyEvent: vi.fn(),
   sendSize: vi.fn(),
+  createClipboardStream: vi.fn(),
   onclipboard: undefined as unknown,
   onerror: undefined as unknown,
   onstatechange: undefined as unknown,
@@ -55,6 +57,11 @@ vi.mock('guacamole-common-js', () => ({
       readers.push(inst)
       return inst
     }),
+    StringWriter: vi.fn(function () {
+      const inst: { send: (c: string) => void } = { send: vi.fn() }
+      writers.push(inst)
+      return inst
+    }),
   },
 }))
 
@@ -79,6 +86,7 @@ vi.mock('@/hooks/useConnectionTimeout', () => ({
 
 const msgError = vi.spyOn(console, 'error').mockImplementation(() => {})
 const msgMessageError = vi.spyOn(messageError, 'error')
+const msgMessageWarning = vi.spyOn(messageError, 'warning')
 
 const props = {
   visible: true,
@@ -94,10 +102,12 @@ describe('GuacamoleModal', () => {
     vi.clearAllMocks()
     created.length = 0
     readers.length = 0
+    writers.length = 0
     mice.length = 0
     keyboards.length = 0
     timeoutCtl.onTimeout = null
     msgMessageError.mockClear()
+    msgMessageWarning.mockClear()
     clientMock.getDisplay.mockReturnValue({ getElement: () => document.createElement('canvas') })
     acMock.suspend.mockClear()
     acMock.resume.mockClear()
@@ -124,6 +134,52 @@ describe('GuacamoleModal', () => {
     render(<GuacamoleModal {...props} protocol="vnc" port={5900} />)
     expect(screen.getByText('VNC 密码')).toBeInTheDocument()
     expect(screen.queryByText('用户名')).not.toBeInTheDocument()
+  })
+
+  it('SSH 表单：用户名必填 + 可选口令/私钥（无私钥域不传 private_key）', async () => {
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    expect(screen.getByText('用户名')).toBeInTheDocument()
+    expect(screen.getByText('密码')).toBeInTheDocument()
+    expect(screen.getByText('私钥')).toBeInTheDocument()
+    expect(screen.queryByText('域')).not.toBeInTheDocument()
+    expect(screen.queryByText('VNC 密码')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+    expect(createRemoteTicket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: 'ssh',
+        port: 22,
+        username: 'ops',
+        privateKey: undefined,
+      }),
+    )
+  })
+
+  it('SSH 提交私钥：privateKey 进票据（服务端转 guacd private-key base64）', async () => {
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    const pem = '-----BEGIN OPENSSH PRIVATE KEY-----\nKEY\n-----END OPENSSH PRIVATE KEY-----'
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.change(
+      screen.getByPlaceholderText('(可选) -----BEGIN OPENSSH PRIVATE KEY-----'),
+      { target: { value: pem } },
+    )
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+    expect(createRemoteTicket).toHaveBeenCalledWith(
+      expect.objectContaining({ protocol: 'ssh', username: 'ops', privateKey: pem }),
+    )
+  })
+
+  it('SSH 空用户名拦截（必填校验与 RDP 同款）', async () => {
+    // 前一用例提交成功后 saveDesktopConfig 落了同键最近配置（username=ops），
+    // 会经 getRecentDesktopConfig 预填绕过必填校验——先清存储再验拦截
+    localStorage.clear()
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    expect(await screen.findByText('请输入用户名')).toBeInTheDocument()
+    expect(createRemoteTicket).not.toHaveBeenCalled()
   })
 
   it('空用户名拦截，不取票据', async () => {
@@ -425,4 +481,147 @@ describe('GuacamoleModal', () => {
       ;(Guacamole as unknown as { AudioContextFactory: unknown }).AudioContextFactory = orig
     }
   })
+
+  // ---- SSH 终端专属通道：尺寸同步（size → guacd 换算列/行）+ 剪贴板反向 ----
+
+  it('SSH 尺寸同步：容器 resize 去抖后发 sendSize（末次尺寸），未布局的 0 尺寸跳过', async () => {
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+
+    // jsdom 无排版，clientWidth/Height 为 0 → 建连后那次补发被跳过
+    expect(clientMock.sendSize).not.toHaveBeenCalled()
+
+    // 连续两次 resize：去抖合并成一条，只发最后一次（vim/top 换列/行靠它）
+    expect(triggerResize(800, 600)).toBe(1)
+    triggerResize(1440.4, 900.6)
+    await waitFor(() => expect(clientMock.sendSize).toHaveBeenCalledTimes(1))
+    expect(clientMock.sendSize).toHaveBeenCalledWith(1440, 901)
+  })
+
+  it('SSH 尺寸同步：RDP 不挂 ResizeObserver（分辨率仍由工具栏下拉驱动）', async () => {
+    render(<GuacamoleModal {...props} />)
+    fireEvent.change(screen.getByPlaceholderText('administrator'), {
+      target: { value: 'alice' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+    expect(resizeObserverCount()).toBe(0)
+    expect(triggerResize(1440, 900)).toBe(0)
+    expect(clientMock.sendSize).not.toHaveBeenCalled()
+  })
+
+  it('SSH 剪贴板反向：终端区域 paste 推 text/plain 流到远端（空/无数据不发）', async () => {
+    const canvas = document.createElement('canvas')
+    clientMock.getDisplay.mockReturnValue({ getElement: () => canvas })
+    // 手动放行票据：等桌面分支（display 容器挂载）提交后再 resolve，
+    // 否则 appendChild 静默跳过、拿不到 display 容器（见「断开清理」用例注释）
+    let resolveTicket!: (v: { ticket: string }) => void
+    createRemoteTicket.mockImplementation(
+      () => new Promise((r) => { resolveTicket = r }),
+    )
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    expect(await screen.findByText(/正在连接到 10\.0\.0\.9:22/)).toBeInTheDocument()
+    resolveTicket({ ticket: 'tk-1' })
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+    const displayEl = canvas.parentElement!
+
+    // 无 clipboardData / 空文本：静默不发流
+    displayEl.dispatchEvent(pasteEvent(undefined))
+    displayEl.dispatchEvent(pasteEvent({ getData: () => '' }))
+    expect(clientMock.createClipboardStream).not.toHaveBeenCalled()
+
+    displayEl.dispatchEvent(pasteEvent({ getData: () => 'ls -al\n' }))
+    expect(clientMock.createClipboardStream).toHaveBeenCalledWith('text/plain')
+    expect(writers.length).toBe(1)
+    expect(writers[0].send).toHaveBeenCalledWith('ls -al\n')
+  })
+
+  it('SSH 工具栏「粘贴到远程」：读浏览器剪贴板推远端；读失败兜底提示', async () => {
+    const readText = vi.fn().mockResolvedValue('pasted-from-browser')
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { readText, writeText },
+      configurable: true,
+    })
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: '粘贴到远程' }))
+    await waitFor(() => expect(writers.length).toBe(1))
+    expect(writers[0].send).toHaveBeenCalledWith('pasted-from-browser')
+
+    // 空剪贴板：不开流、不写远端
+    readText.mockResolvedValue('')
+    fireEvent.click(screen.getByRole('button', { name: '粘贴到远程' }))
+    await waitFor(() => expect(readText).toHaveBeenCalledTimes(2))
+    expect(writers.length).toBe(1)
+
+    // Clipboard API 拒绝（未授权/非安全上下文）→ 提示走终端内 Ctrl+V
+    readText.mockRejectedValue(new Error('denied'))
+    fireEvent.click(screen.getByRole('button', { name: '粘贴到远程' }))
+    await waitFor(() =>
+      expect(msgMessageWarning).toHaveBeenCalledWith('读取浏览器剪贴板失败，可在终端内按 Ctrl+V 粘贴'),
+    )
+  })
+
+  it('SSH 隐藏分辨率下拉/尺寸文本（尺寸跟窗口走）；RDP 保留桌面形态', async () => {
+    const { unmount } = render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+    expect(screen.queryByText('分辨率')).toBeNull()
+    expect(screen.queryByText('1280x800')).toBeNull()
+    // 卸载时 effect cleanup：timer 未挂（无 resize）→ 不 clearTimeout 分支，
+    // 且 ResizeObserver 已断开
+    unmount()
+    expect(resizeObserverDisconnected()).toBe(true)
+
+    render(<GuacamoleModal {...props} />)
+    fireEvent.change(screen.getByPlaceholderText('administrator'), {
+      target: { value: 'alice' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+    expect(screen.getByText('分辨率')).toBeInTheDocument()
+    // 桌面协议不接剪贴板反向（维持既有仅正向行为）
+    expect(screen.queryByRole('button', { name: '粘贴到远程' })).toBeNull()
+  })
 })
+
+// 触发窗口内所有仍挂载的 ResizeObserver 桩回调（jsdom 无 ResizeObserver，
+// 桩与触发器见 src/test/setup.ts）
+function triggerResize(width: number, height: number): number {
+  return (window as unknown as { __triggerResize: (w: number, h: number) => number }).__triggerResize(
+    width,
+    height,
+  )
+}
+
+function resizeObservers(): Array<{ disconnected: boolean; targets: Set<Element> }> {
+  return (window as unknown as { __resizeObservers: Array<{ disconnected: boolean; targets: Set<Element> }> })
+    .__resizeObservers
+}
+
+function resizeObserverCount(): number {
+  return resizeObservers().filter((ro) => ro.targets.size > 0).length
+}
+
+function resizeObserverDisconnected(): boolean {
+  const all = resizeObservers()
+  return all.length > 0 && all.every((ro) => ro.disconnected)
+}
+
+// 构造带（或刻意不带）clipboardData 的 paste 事件
+function pasteEvent(data?: { getData: (t: string) => string }): ClipboardEvent {
+  const ev = new Event('paste') as ClipboardEvent
+  if (data) {
+    Object.defineProperty(ev, 'clipboardData', { value: data })
+  }
+  return ev
+}

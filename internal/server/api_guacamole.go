@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -73,7 +74,7 @@ type GuacamoleSession struct {
 	ID       string
 	UserID   string
 	Username string
-	Protocol string // rdp / vnc
+	Protocol string // rdp / vnc / ssh
 	AgentID  string
 	Host     string
 	Port     int
@@ -138,6 +139,15 @@ func guacConnectArgs(protocol, host string, port int, params map[string]string, 
 			// VNC 的 password 即 connect 的 password 参数（上面已传），
 			// 这里不重复
 			_ = v
+		}
+	case "ssh":
+		// guacd ssh 插件（libssh2，docs/remote-access-integration-design.md D2）：
+		// username/password 上面已统一传；私钥走 private-key 参数（guacd 约定
+		// base64 编码的 PEM 内容，ticket 存原文、编码在网关侧完成）。
+		// width/height 不进 connect——字符终端，尺寸经隧道层 size 指令由
+		// guacd 按字体度量换算列/行；domain 是 RDP 专属概念不传。
+		if v := params["private_key"]; v != "" {
+			args = append(args, "private-key="+base64.StdEncoding.EncodeToString([]byte(v)))
 		}
 	}
 	// 桌面会话录制（设计「guacd session recording 白捡」）：recording-path/
@@ -266,8 +276,9 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"Invalid port"}`, http.StatusBadRequest)
 		return
 	}
-	// Guacamole 承接桌面协议（rdp/vnc）；ssh/telnet 走 TerminalModal（xterm.js）
-	if protocolStr != "rdp" && protocolStr != "vnc" {
+	// Guacamole 承接 rdp/vnc/ssh 三协议（docs/remote-access-integration-design.md
+	// D1）；telnet 走 TerminalModal（xterm.js）
+	if protocolStr != "rdp" && protocolStr != "vnc" && protocolStr != "ssh" {
 		http.Error(w, `{"error":"Unsupported protocol for Guacamole tunnel"}`, http.StatusBadRequest)
 		return
 	}

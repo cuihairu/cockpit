@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+// domainLookupIP DNS 解析调用点。var 化（非内联）仅为测试注入——
+// fake-IP 解析器（Clash/MOS 等）会把 .invalid TLD 经搜索域追加也解析掉，
+// 真实查询不可靠（probe 包 fakeHealthChecker 同款问题）；生产行为不变
+// （恒调 net.LookupIP）。
+var domainLookupIP = net.LookupIP
+
 // Info domain information
 type Info struct {
 	Domain      string    `json:"domain"`
@@ -314,7 +320,7 @@ func (m *Monitor) BatchCheck(domains []string) *BatchCheckResult {
 
 // ResolveDNS resolves DNS for domain
 func (m *Monitor) ResolveDNS(domain string) ([]string, error) {
-	ips, err := net.LookupIP(domain)
+	ips, err := domainLookupIP(domain)
 	if err != nil {
 		return nil, fmt.Errorf("dns lookup: %w", err)
 	}
@@ -345,7 +351,7 @@ func (m *Monitor) CheckDNS(domain string) (*DNSInfo, error) {
 	}
 
 	// A records
-	aRecs, err := net.LookupIP(domain)
+	aRecs, err := domainLookupIP(domain)
 	if err == nil {
 		for _, ip := range aRecs {
 			if ipv4 := ip.To4(); ipv4 != nil {
@@ -393,7 +399,7 @@ func (m *Monitor) IsAvailable(domain string) (bool, error) {
 	if err != nil {
 		// If whois fails, domain might be available
 		// Check DNS as fallback
-		ips, err := net.LookupIP(domain)
+		ips, err := domainLookupIP(domain)
 		if err != nil {
 			return true, nil // No DNS = likely available
 		}

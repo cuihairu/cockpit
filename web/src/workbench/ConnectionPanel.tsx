@@ -6,10 +6,15 @@ const ConnectionPanel = ({
   protocol,
   service,
   onConnect,
+  onFallback,
+  fallbackLabel,
 }: {
   protocol: 'ssh' | 'rdp' | 'vnc'
   service?: RemoteService
   onConnect: () => void
+  /** 兜底入口（SSH：guacd 不可用时经 agent 的 xterm.js 终端） */
+  onFallback?: () => void
+  fallbackLabel?: string
 }) => {
   return (
     <Card size="small" title={`${protocol.toUpperCase()} 连接`}>
@@ -24,9 +29,14 @@ const ConnectionPanel = ({
             </Descriptions.Item>
           </Descriptions>
           <PermGuard perm="terminal:write">
-            <Button type="primary" onClick={onConnect}>
-              打开 {protocol.toUpperCase()}
-            </Button>
+            <Space>
+              <Button type="primary" onClick={onConnect}>
+                打开 {protocol.toUpperCase()}
+              </Button>
+              {onFallback && (
+                <Button onClick={onFallback}>{fallbackLabel || '备选入口'}</Button>
+              )}
+            </Space>
           </PermGuard>
         </Space>
       ) : (

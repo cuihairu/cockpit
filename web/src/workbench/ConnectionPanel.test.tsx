@@ -62,6 +62,41 @@ describe('ConnectionPanel', () => {
     await waitForUser()
     expect(screen.queryByText('打开 VNC')).toBeNull()
   })
+
+  it('传 onFallback 渲染兜底按钮并回调；缺省不渲染', async () => {
+    const onFallback = vi.fn()
+    grant(['terminal:write'])
+    const { rerender } = render(
+      <UserProvider>
+        <ConnectionPanel
+          protocol="ssh"
+          service={service}
+          onConnect={vi.fn()}
+          onFallback={onFallback}
+          fallbackLabel="内置终端（经 Agent）"
+        />
+      </UserProvider>,
+    )
+    const btn = await screen.findByText('内置终端（经 Agent）')
+    btn.click()
+    expect(onFallback).toHaveBeenCalledOnce()
+    // 缺省 onFallback：不渲染兜底按钮（RDP/VNC 面板形态不变）
+    rerender(
+      <UserProvider>
+        <ConnectionPanel protocol="ssh" service={service} onConnect={vi.fn()} />
+      </UserProvider>,
+    )
+    expect(screen.queryByText('内置终端（经 Agent）')).toBeNull()
+    expect(screen.queryByText('备选入口')).toBeNull()
+
+    // 有 onFallback 但缺省 fallbackLabel：落兜底文案
+    rerender(
+      <UserProvider>
+        <ConnectionPanel protocol="ssh" service={service} onConnect={vi.fn()} onFallback={onFallback} />
+      </UserProvider>,
+    )
+    expect(screen.getByText('备选入口')).toBeInTheDocument()
+  })
 })
 
 async function waitForUser() {

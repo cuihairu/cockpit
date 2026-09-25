@@ -27,6 +27,66 @@ const nativeGetComputedStyle = window.getComputedStyle.bind(window)
 window.getComputedStyle = ((el: Element, pseudo?: string | null) =>
   pseudo ? { resize: 'none' } as CSSStyleDeclaration : nativeGetComputedStyle(el)) as typeof window.getComputedStyle
 
+// ResizeObserver：jsdom 无实现，GuacamoleModal 的 SSH 尺寸同步（窗口变形 →
+// size 指令 → guacd 换算列/行）依赖它。注册可观测桩：observe 的目标与回调记
+// 入 __resizeObservers，测试用 window.__triggerResize(w, h) 手动触发。
+interface RoStub {
+  callback: ResizeObserverCallback
+  targets: Set<Element>
+  disconnected: boolean
+}
+const resizeObservers: RoStub[] = []
+class ResizeObserverStub {
+  private entry: RoStub
+  constructor(callback: ResizeObserverCallback) {
+    this.entry = { callback, targets: new Set(), disconnected: false }
+    resizeObservers.push(this.entry)
+  }
+  observe(el: Element) {
+    this.entry.targets.add(el)
+  }
+  unobserve(el: Element) {
+    this.entry.targets.delete(el)
+  }
+  disconnect() {
+    this.entry.targets.clear()
+    this.entry.disconnected = true
+  }
+}
+// configurable：TerminalModal 等测试文件自己 vi.stubGlobal('ResizeObserver')，
+// 桩若不可配置会把它们顶掉（Cannot redefine property）
+Object.defineProperty(window, 'ResizeObserver', {
+  writable: true,
+  configurable: true,
+  value: ResizeObserverStub,
+})
+Object.defineProperty(window, '__resizeObservers', {
+  writable: true,
+  configurable: true,
+  value: resizeObservers,
+})
+Object.defineProperty(window, '__triggerResize', {
+  writable: true,
+  configurable: true,
+  value: (width: number, height: number) => {
+    let fired = 0
+    for (const ro of resizeObservers) {
+      if (ro.disconnected) continue
+      for (const target of ro.targets) {
+        ro.callback(
+          [{ target, contentRect: { width, height } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        )
+        fired += 1
+      }
+    }
+    return fired
+  },
+})
+afterEach(() => {
+  resizeObservers.length = 0
+})
+
 // antd message/notification 渲染挂在 body，避免跨用例残留
 afterEach(async () => {
   cleanup()

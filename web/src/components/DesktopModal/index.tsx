@@ -84,9 +84,13 @@ const DesktopModal: React.FC<DesktopModalProps> = ({
     },
   });
 
-  // 超时回调读取最新连接态：直接比较 useState 值会捕获点击时的过期闭包
+  // 超时回调读取最新连接态：直接比较 useState 值会捕获点击时的过期闭包。
+  // ref 在 commit 后同步（render 期写 ref 违反 react-hooks/refs；超时回调
+  // 读取时已提交完毕，时序等价）
   const stateRef = useRef(state);
-  stateRef.current = state;
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const { setCanvas } = useInputCapture({
     sendKeyboard,

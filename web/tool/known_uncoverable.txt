@@ -19,7 +19,15 @@ pages/Cron/index.tsx:210 同上（deleteJob）
 pages/Docker/index.tsx:44 cleanDockerLog 空串早退：调用侧对空日志已短路，防御分支不可达
 components/GuacPlayer/index.tsx:26 displayRef null 早退：弹窗未挂载不触发 effect，防御
 components/MetricsChart/index.tsx:50 containerRef null 早退：echarts init 前置防御，React 保证挂载后 effect 才跑
-components/VNCModal/index.tsx:71 vncContainerRef null 早退：RFB 挂载点在凭据阶段预挂载，ref 恒有值，前置防御不可达（原 67，vncStateRef 插入后漂移）
+components/VNCModal/index.tsx:75 vncContainerRef null 早退：RFB 挂载点在凭据阶段预挂载，ref 恒有值，前置防御不可达（原 67→71→75，vncStateRef 插入 + useEffect 改写后两次漂移）
+components/GuacamoleModal/index.tsx:226 clientRef null 早退（sendClipboardToRemote）：两个入口（终端 paste / 工具栏按钮）都只在 state==='connected' 时存在，cleanup 先于断开移除，client 恒有值
+components/GuacamoleModal/index.tsx:271 displayRef null 早退（SSH 尺寸同步/粘贴 effect）：display 容器与 state==='connected' 同渲染，effect 跑时 ref 必已赋值
+pages/Workbench/index.tsx:103 openAgentTerminal selectedAgent 防御早退：兜底按钮在 SSH Tab 内，Tab 仅在选中 agent 后可切
+pages/Workbench/index.tsx:104 同上（message.warning 文案行）
+pages/Workbench/index.tsx:105 同上（return）
+pages/Workbench/index.tsx:108 未检测到 SSH 服务防御早退：该按钮所在 ConnectionPanel 仅在 remoteServices 有 ssh 时才渲染兜底按钮
+pages/Workbench/index.tsx:109 同上（message.warning 文案行）
+pages/Workbench/index.tsx:110 同上（return）
 pages/Recordings/index.tsx:83 recording null 早退：回放入口由行内按钮发起，recording 必已选中
 pages/Recordings/index.tsx:166 recording/termDivRef null 早退：弹窗内容未挂载时不建终端，防御
 pages/Backups/index.tsx:376 restoreTarget null 早退：恢复按钮仅在选中目标后可点
@@ -27,8 +35,8 @@ pages/AuditLogs/index.tsx:59 parseAuditDetails 空串早退：详情为空的行
 workbench/LogsPanel.tsx:207 frames.pop() ?? '' 兜底：split 结果至少一个元素，pop 永不返回 undefined
 
 # ---- 生命周期/时序在 jsdom 下不可注入或与真实语义互斥 ----
-components/DesktopModal/index.tsx:122 超时回调 if 条件行：回调体（disconnect/错误提示/回表单）已由 30s 超时用例断言，v8 对命中分支条件行漏计
-components/VNCModal/index.tsx:56 超时回调 if 条件行：同 DesktopModal 122，cleanup/置断开/错误提示已由 30s 超时用例断言
+components/DesktopModal/index.tsx:126 超时回调 if 条件行：回调体（disconnect/错误提示/回表单）已由 30s 超时用例断言，v8 对命中分支条件行漏计（原 122，stateRef 改 useEffect 后漂移）
+components/VNCModal/index.tsx:60 超时回调 if 条件行：同 DesktopModal 126，cleanup/置断开/错误提示已由 30s 超时用例断言
 components/TerminalModal/index.tsx:83 连接超时 if 条件行：close 调用 + 超时提示已由 CONNECTING 30s 用例断言，v8 条件行漏计
 components/TerminalModal/index.tsx:104 fitAddonRef 判空：赋值位于同 effect 后文，首次触发时必为 null，赋值先于可达路径
 components/TerminalModal/index.tsx:211 !visible 清理入口：主 effect（[connectWebSocket, visible, authPending]）cleanup 先行 dispose 并置 null，本 effect（[visible]）后跑时 terminalInstanceRef.current 恒 null，判空恒 false
@@ -48,10 +56,10 @@ pages/Proxy/index.tsx:149 同上（return）
 pages/Docker/index.tsx:189 动作 switch default 抛错：action 来自固定按钮集合，未知值不可达
 pages/Stacks/StackDetail.tsx:187 taskActionLabel 未知 action 兜底：后端 action 枚举封闭，四类已知动作已全测；同款兜底语义已由历史 Tab 用例实证
 pages/Cron/index.tsx:41 空表达式早退：表单 required 前置，简写/五段式主路径已实证
-components/GuacamoleModal/index.tsx:103 resolution || 1280 兜底：分辨率经下拉白名单（恒为 WxH 格式），split 后必为数字
-components/GuacamoleModal/index.tsx:104 同上（height || 800）
-components/GuacamoleModal/index.tsx:113 同上（凭据表单侧 width）
-components/GuacamoleModal/index.tsx:114 同上（凭据表单侧 height）
+components/GuacamoleModal/index.tsx:115 resolution || 1280 兜底：分辨率经下拉白名单（恒为 WxH 格式），split 后必为数字
+components/GuacamoleModal/index.tsx:116 同上（height || 800）
+components/GuacamoleModal/index.tsx:125 同上（凭据表单侧 width）
+components/GuacamoleModal/index.tsx:126 同上（凭据表单侧 height）
 pages/Acme/index.tsx:186 下载文件名三元 issuer 分支：download() 仅被 cert/key 两个按钮调用，issuer 无 UI 入口（预留）
 
 # ---- v8 伪缺口：行为已由用例双向实证，lcov 计数为 0（JSX 内联/回调链/三元怪癖）----
@@ -73,8 +81,8 @@ pages/Recordings/index.tsx:91 guac blob 加载失败 catch：错误文案断言�
 pages/Recordings/index.tsx:100 回放 Modal title 内联模板：标题断言已有
 pages/Recordings/index.tsx:188 倍速 effect 条件：2x 切换重拉用例已实证该路径执行
 pages/Recordings/index.tsx:197 effect 依赖数组行：非执行语句，v8 挂计
-components/GuacamoleModal/index.tsx:319 错误横幅 JSX 短路渲染：错误态已由 state 断言覆盖
-components/GuacamoleModal/index.tsx:343 disconnected && !showCredentials 复合条件：各单态渲染断言均有，复合分支 v8 漏计
+components/GuacamoleModal/index.tsx:432 错误横幅 JSX 短路渲染：错误态已由 state 断言覆盖
+components/GuacamoleModal/index.tsx:456 disconnected && !showCredentials 复合条件：各单态渲染断言均有，复合分支 v8 漏计
 components/GuacPlayer/index.tsx:82 Slider tooltip formatter：悬停才触发的内联纯函数，jsdom 不可悬停；格式化逻辑已由等价断言覆盖
 components/MetricsChart/index.tsx:85 tooltip formatter：params 四向（name/seriesName/value 缺省）均已断言，echarts 内联回调漏计
 components/TerminalModal/index.tsx:223 同 211 清理家族（reset 前判空）

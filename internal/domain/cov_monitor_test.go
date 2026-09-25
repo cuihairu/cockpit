@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -283,6 +285,14 @@ func TestCovIsAvailableRegistered(t *testing.T) {
 }
 
 func TestCovIsAvailableNoDNS(t *testing.T) {
+	// 环境确定性：真实 DNS 在 fake-IP 解析器（Clash/MOS 等）下会把 .invalid
+	// TLD 经搜索域追加也解析掉——注入解析失败，与 probe 包同款纪律
+	orig := domainLookupIP
+	t.Cleanup(func() { domainLookupIP = orig })
+	domainLookupIP = func(string) ([]net.IP, error) {
+		return nil, errors.New("no such host")
+	}
+
 	m := NewMonitor(Config{WhoisPath: "/non/existent/whois"})
 
 	available, err := m.IsAvailable("nonexistent-cov-probe.invalid")

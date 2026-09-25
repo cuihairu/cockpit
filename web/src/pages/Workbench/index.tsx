@@ -35,8 +35,9 @@ const Workbench = () => {
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<WorkbenchTab>('overview')
   const [terminalConfig, setTerminalConfig] = useState<SessionConfig | null>(null)
-  // RDP/VNC 走 Guacamole 网关（guacd + guacamole-common-js，见
-  // docs/remote-desktop-guacamole-design.md）；SSH 仍走 TerminalModal（xterm.js）
+  // RDP/VNC/SSH 走 Guacamole 网关（guacd + guacamole-common-js，见
+  // docs/remote-access-integration-design.md D3）；telnet 走 TerminalModal（xterm.js），
+  // SSH 的「内置终端（经 Agent）」兜底入口同走 TerminalModal
   const [guacConfig, setGuacConfig] = useState<SessionConfig | null>(null)
 
   const { data: agents = [], isFetching: loading, refetch: loadAgents } = useQuery({
@@ -80,8 +81,11 @@ const Workbench = () => {
       return
     }
 
-    // RDP/VNC 经 Guacamole 网关由 guacd 终结协议，agent 不参与（无需
-    // rdp-client capability）；出口策略与审计仍在 server 侧（D3/D4）
+    // 三个远控 Tab（ssh/rdp/vnc）全部经 Guacamole 网关由 guacd 终结协议，
+    // agent 不参与（无需 rdp-client capability）；出口策略与审计仍在 server
+    // 侧（D3/D4）。openConnection 的入参类型 WorkbenchTab 就不含 telnet，
+    // 所以这里没有「走 TerminalModal」的第二分支——telnet 只在 Agents 页有
+    // 入口（那里仍经 useRemoteModals 分流到 TerminalModal）
     const config: SessionConfig = {
       agentId: selectedAgent.id,
       host: service.host,
@@ -90,11 +94,28 @@ const Workbench = () => {
       title: `${service.protocol.toUpperCase()} - ${selectedAgent.hostname || selectedAgent.id}`,
     }
 
-    if (service.protocol === 'rdp' || service.protocol === 'vnc') {
-      setGuacConfig(config)
-    } else {
-      setTerminalConfig(config)
+    setGuacConfig(config)
+  }
+
+  // SSH 兜底入口：guacd 不可用或需要字符终端体验时，经 agent 的
+  // x/crypto/ssh + xterm.js 直连（docs/remote-access-integration-design.md D4）
+  const openAgentTerminal = () => {
+    if (!selectedAgent) {
+      message.warning('请先选择一台服务器')
+      return
     }
+    const service = remoteServices.find((item) => item.protocol === 'ssh')
+    if (!service) {
+      message.warning('未检测到可用的 SSH 服务')
+      return
+    }
+    setTerminalConfig({
+      agentId: selectedAgent.id,
+      host: service.host,
+      port: service.port,
+      protocol: service.protocol,
+      title: `SSH (Agent) - ${selectedAgent.hostname || selectedAgent.id}`,
+    })
   }
 
   return (
@@ -164,6 +185,8 @@ const Workbench = () => {
                       protocol="ssh"
                       service={remoteServices.find((item) => item.protocol === 'ssh')}
                       onConnect={() => openConnection('ssh')}
+                      onFallback={openAgentTerminal}
+                      fallbackLabel="内置终端（经 Agent）"
                     />
                   ),
                 },
@@ -207,7 +230,7 @@ const Workbench = () => {
         />
       )}
 
-      {guacConfig && (guacConfig.protocol === 'rdp' || guacConfig.protocol === 'vnc') && (
+      {guacConfig && (guacConfig.protocol === 'rdp' || guacConfig.protocol === 'vnc' || guacConfig.protocol === 'ssh') && (
         <GuacamoleModal
           visible={Boolean(guacConfig)}
           onClose={() => setGuacConfig(null)}

@@ -71,13 +71,22 @@ vi.mock('@/workbench/ConnectionPanel', () => ({
   default: ({
     protocol,
     onConnect,
+    onFallback,
   }: {
     protocol: string
     onConnect: () => void
+    onFallback?: () => void
   }) => (
-    <button onClick={onConnect} data-testid={`panel-${protocol}`}>
-      connect-{protocol}
-    </button>
+    <div>
+      <button onClick={onConnect} data-testid={`panel-${protocol}`}>
+        connect-{protocol}
+      </button>
+      {onFallback && (
+        <button onClick={onFallback} data-testid={`panel-${protocol}-fallback`}>
+          fallback-{protocol}
+        </button>
+      )}
+    </div>
   ),
 }))
 vi.mock('@/workbench/OverviewPanel', () => ({
@@ -175,19 +184,19 @@ describe('Workbench', () => {
     expect(screen.getByTestId('overview')).toHaveTextContent('ag-2')
   })
 
-  it('SSH/VNC 有服务时分流对应 Modal；RDP 无服务告警', async () => {
+  it('SSH/VNC 有服务时分流 Guacamole Modal（三协议统一栈）；RDP 无服务告警', async () => {
     renderPage()
     await screen.findByText('web-01')
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /SSH/ }))
     })
-    await screen.findByTestId('terminal-modal')
+    await screen.findByTestId('guac-modal')
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /VNC/ }))
     })
     await screen.findByTestId('guac-modal')
     expect(opened.titles).toEqual(expect.arrayContaining([
-      'terminal:SSH - web-01',
+      'guac:ssh:SSH - web-01',
       'guac:vnc:VNC - web-01',
     ]))
     await act(async () => {
@@ -290,12 +299,20 @@ describe('Workbench', () => {
     await screen.findByTestId('guac-modal')
     fireEvent.click(screen.getByText('close-guac'))
     await waitFor(() => expect(screen.queryByTestId('guac-modal')).toBeNull())
-    // SSH/VNC 面板连接按钮（切 Tab 后挂载）
+    // SSH/VNC 面板连接按钮（切 Tab 后挂载）：SSH 主入口走 Guacamole，
+    // 兜底入口（经 Agent）走 TerminalModal
     fireEvent.click(screen.getByRole('tab', { name: 'SSH' }))
     await act(async () => {
       fireEvent.click(await screen.findByTestId('panel-ssh'))
     })
+    await screen.findByTestId('guac-modal')
+    fireEvent.click(screen.getByText('close-guac'))
+    await waitFor(() => expect(screen.queryByTestId('guac-modal')).toBeNull())
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('panel-ssh-fallback'))
+    })
     await screen.findByTestId('terminal-modal')
+    expect(opened.titles).toEqual(expect.arrayContaining(['terminal:SSH (Agent) - ag-1']))
     fireEvent.click(screen.getByText('close-terminal'))
     await waitFor(() => expect(screen.queryByTestId('terminal-modal')).toBeNull())
     fireEvent.click(screen.getByRole('tab', { name: 'VNC' }))

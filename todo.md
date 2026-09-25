@@ -757,6 +757,23 @@
 - ✅ CI `test.yml` 新增 `go test -race -short ./...` 兜底步骤（此前只有普通 `go test`，这类竞态 CI 抓不到）。
 - ✅ 全仓 `-race -short` 终验通过。
 
+## 远控三协议统一第三方集成（Guacamole SSH 接入，2026-09-25）
+
+方向对齐另一仓库：VNC / SSH / RDP 三协议远控统一集成第三方方案（guacd + guacamole-common-js 单栈），不再各自维护自研协议链路。设计文档 `docs/remote-access-integration-design.md`（选型总览/备选对比/数据流/衔接既有链路/决策 D1-D7）。RDP/VNC 已在 Guacamole 路线上，本次补齐 **SSH 接入同一栈**：
+
+1. ✅ **Go 网关**（`internal/server/api_guacamole.go`）：协议白名单扩 `ssh`（telnet 维持 agent 通道，D1）；`guacConnectArgs` ssh 分支——username/password 直传、`private_key` PEM 原文 → `private-key` base64（guacd 约定）、width/height/domain 不进 connect（字符终端 + SSH 无域概念，D2）。录制/审计/出口策略/票据链路零新增（guacd ssh 同样支持 recording → `.guac` 收集链路原样生效）。
+2. ✅ **web 入口切换**（D3/D4）：Workbench SSH Tab 与 Agents 页 `useRemoteModals` 默认分流 GuacamoleModal（与 RDP/VNC 一致）；ConnectionPanel 加 `onFallback` 可选兜底按钮——SSH Tab 显「内置终端（经 Agent）」开 TerminalModal（guacd 不可用时的退路，与 grdp 并存期同纪律）；GuacamoleModal protocol 扩 `ssh`（表单：用户名必填 + 可选口令/私钥 PEM TextArea，无私钥域）。
+3. ✅ **测试**：Go 3 新用例（`TestGuacConnectArgsSSH` 参数映射含 base64/无私钥不传、`TestGuacamoleTunnelSSHFullFlow` 全链路 select ssh 握手断言、白名单测试改 telnet/ftp 拒绝）；web 4 处（GuacamoleModal ssh 表单 3 用例——含 saveDesktopConfig 预填绕过必填校验的坑（同键最近配置先清 localStorage）、ConnectionPanel 兜底按钮渲染/回调/缺省不渲染、useRemoteModals ssh 分流改 guac、Workbench SSH 主入口 guac + 兜底入口 terminal 断言）。
+4. ✅ **顺带修三处环境依赖存量失败**（fake-IP DNS 下 `.invalid` 经搜索域追加被解析，真实网络查询不可靠）：`internal/probe` `TestRunAllChecksDomainDNSFailure` 改注入 `fakeHealthChecker`（既有基建）；`internal/domain` `IsAvailable` 的 `net.LookupIP` 三处 var 化 `domainLookupIP`（行为中性）+ `TestCovIsAvailableNoDNS` 注入解析失败；web ESLint 2 存量 error（DesktopModal/VNCModal render 期写 ref 违反 react-hooks/refs）改 `useEffect` commit 后同步（超时回调读取时已提交，时序等价）。
+
+5. ✅ **验收项补齐（D8，2026-09-25 续做）**：上一轮只落了 D1-D4 的骨架，todo「真机验收」里的三条前端可自证项当时**没有对应实现**——SSH 尺寸不跟窗口走（vim/top 全屏程序停在旧列行数）、剪贴板只有正向（远端→浏览器）。本轮补上：
+   - **尺寸同步**（`GuacamoleModal`）：仅 SSH 用 `ResizeObserver` 监听 display 容器，150ms 去抖后发 `sendSize`，guacd 按字体度量换算列/行；建连后先按当前窗口补发一次。RDP/VNC **不接**（那里的 `size` 语义是「切远端分辨率」，由工具栏下拉驱动；自动跟窗口变会变成「窗口多大桌面多大」），并对 SSH 隐藏分辨率下拉与尺寸文本（固定档位会与自动尺寸打架）。
+   - **剪贴板双向**：反向用 `Client.createClipboardStream('text/plain')` + `Guacamole.StringWriter`（common-js 官方写法，Go 网关字节管道原样透传，**后端零改动**）；两条入口 = 终端区域 Ctrl+V（`paste` 事件自带数据，不受 Clipboard 授权限制）+ 工具栏「粘贴到远程」按钮（`navigator.clipboard.readText()`，读失败提示走 Ctrl+V 不静默）。反向只对 SSH 接，RDP/VNC 维持既有仅正向行为（桌面路径零变更）。纯文本单层（富格式维持「不做」）。
+   - **踩坑修复（真 bug，非风格）**：`GuacamoleModal` 里 `useConnectionTimeout` 的 `clear` 解构成 `clearTimeout`，**遮蔽了全局 `clearTimeout`**——去抖第一版因此失效（连续两次 resize 发了两条 `size`，测试直接抓到）。改名 `clearConnTimeout` 并在代码里留注释。组件内还有真实定时器，这是复发高发点。
+   - **可访问性**：`RemoteToolbar` 的「粘贴到远程」按钮补 `aria-label`（此前 icon-only 无可访问名，测试也只能靠按钮序号定位）。
+6. ✅ **补测试（含发现并修掉的存量回归）**：`web/src/test/setup.ts` 加 ResizeObserver 可观测桩（jsdom 无实现）+ `window.__triggerResize(w,h)` 触发器。GuacamoleModal 新增 5 用例（尺寸同步去抖取末次/0 尺寸跳过、RDP 不挂 RO、终端 paste 反向含空与无 clipboardData 两条静默分支、工具栏按钮正向与读失败兜底、SSH 隐藏分辨率下拉 vs RDP 保留、卸载 cleanup 断 RO）。**发现上一轮漏改 `web/src/pages/Agents/index.test.tsx`**：两处仍断言 ssh 分流到 `terminal-modal`（D3 改成 guac 后必挂），本轮一并修正。
+   - 验收边界：`go build/vet/test ./...` 全绿（32 包）；web tsc 0 错、ESLint 0 error（2 存量 warning 非本次引入）、`pnpm build` 过、全量 vitest（909 用例）过 + `tool/coverage_check.sh` 通过（有效覆盖 100%）。真机验收项挂起（真 guacd + 真 sshd：口令/私钥认证、终端渲染、`.guac` 录制回放、剪贴板；已入 acceptance-checklist「远控三协议」节）。移动端不动（D6：xterm.dart 走 agent 通道独立链路）。
+
 ## 真机验收清单（2026-09-22）
 
 各功能散落的「剩余：真实环境验收」已汇总为 `docs/guide/acceptance-checklist.md`（12 功能域、可勾选、含通用前置与回填约定，sidebar 规划分组可导航）。后续拿到测试机/凭据按清单推进，验收一项回填一处；本文件各条目的「剩余」字样以清单为准逐项消化。

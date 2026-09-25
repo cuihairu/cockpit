@@ -7,7 +7,8 @@ import type { ReactElement, ReactNode } from 'react'
 import type { Agent } from '@/types'
 
 // Agents：搜索/三维筛选（地域/状态/类型）+ 详情链路 + 远程连接分流
-// （Terminal/Guacamole Modal 有独立测试，mock 成轻量桩；RDP/VNC 走 Guacamole）
+// （RDP/VNC/SSH 走 Guacamole Modal、telnet 走 TerminalModal；两者有独立测试，
+// 这里 mock 成轻量桩）
 
 const apiMock = vi.hoisted(() => ({ getAgents: vi.fn() }))
 vi.mock('@/services/api', () => ({ api: apiMock }))
@@ -181,14 +182,15 @@ describe('Agents', () => {
     expect(document.querySelectorAll('tr.ant-table-row').length).toBe(1)
   })
 
-  it('详情链路：打开详情并从远程服务发起 ssh 连接分流 Terminal', async () => {
+  it('详情链路：打开详情并从远程服务发起 ssh 连接分流 Guacamole（三协议统一栈）', async () => {
     renderPage()
     await screen.findByText('web-01')
     fireEvent.click(within(rowOf('ag-1')).getByRole('button', { name: '详情' }))
     expect(await screen.findByText('Agent 详情')).toBeInTheDocument()
     fireEvent.click(screen.getByText('conn-ssh'))
-    await screen.findByTestId('terminal-modal')
-    expect(modalStubs.opened).toContain('terminal:SSH - 10.0.0.1:22')
+    await screen.findByTestId('guac-modal')
+    expect(modalStubs.opened).toContain('guac:ssh:SSH - 10.0.0.1:22')
+    expect(screen.queryByTestId('terminal-modal')).toBeNull()
   })
 
   it('刷新按钮触发 refetch', async () => {
@@ -249,19 +251,53 @@ describe('Agents', () => {
     fireEvent.click(screen.getByText('conn-ssh'))
     fireEvent.click(screen.getByText('conn-rdp'))
     fireEvent.click(screen.getByText('conn-vnc'))
-    await screen.findByTestId('terminal-modal')
+    await screen.findByTestId('guac-modal')
     expect(modalStubs.opened).toEqual([
-      'terminal:SSH - 7.7.7.7:22',
+      'guac:ssh:SSH - 7.7.7.7:22',
       'guac:rdp:RDP - 7.7.7.7:3389',
       'guac:vnc:VNC - 7.7.7.7:5900',
     ])
     // 三个 Modal 的 onClose 各自触发（visible 置 false 的 setter）
-    fireEvent.click(screen.getByTestId('terminal-modal'))
-    fireEvent.click(screen.getByTestId('guac-modal'))
-    fireEvent.click(screen.getByTestId('guac-modal'))
-    expect(modalStubs.closed).toEqual(['terminal', 'guac', 'guac'])
+    fireEvent.click(screen.getAllByTestId('guac-modal')[0])
+    fireEvent.click(screen.getAllByTestId('guac-modal')[0])
+    fireEvent.click(screen.getAllByTestId('guac-modal')[0])
+    expect(modalStubs.closed).toEqual(['guac', 'guac', 'guac'])
     // 详情 Modal 的 X → onClose
     fireEvent.click(document.querySelector('.ant-modal-close')!)
+  })
+
+  it('telnet 仍走 TerminalModal（D1：telnet 不进 guacd 栈）', async () => {
+    apiMock.getAgents.mockResolvedValue([
+      {
+        id: 'ag-telnet',
+        hostname: 'legacy',
+        ip: '7.7.7.8',
+        region: 'cn',
+        status: 'online',
+        lastSeen: '0',
+        virtType: 'kvm',
+        virtRole: 'guest',
+        capabilities: [
+          {
+            type: 'remote-services',
+            metadata: {
+              telnet: { host: '7.7.7.8', port: 23, name: 'TELNET', running: true },
+            },
+          },
+        ],
+      } as unknown as Agent,
+    ])
+    renderPage()
+    await screen.findByText('legacy')
+    fireEvent.click(within(rowOf('legacy')).getByRole('button', { name: '详情' }))
+    expect(await screen.findByText('Agent 详情')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('conn-telnet'))
+    await screen.findByTestId('terminal-modal')
+    expect(modalStubs.opened).toContain('terminal:TELNET - 7.7.7.8:23')
+    expect(screen.queryByTestId('guac-modal')).toBeNull()
+    // onClose 回落（关掉 TerminalModal）
+    fireEvent.click(screen.getByTestId('terminal-modal'))
+    expect(modalStubs.closed).toContain('terminal')
   })
 
   it('列定义：三个 sorter 三态（含空值兜底）与能力 +N tooltip 分支', () => {
