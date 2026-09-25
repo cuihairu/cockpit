@@ -107,6 +107,12 @@ describe('App', () => {
     expect(await screen.findByTestId('page-login')).toBeInTheDocument()
   })
 
+  it('token 在而 user 未加载（null）：顶栏用户名兜底 Admin', async () => {
+    userMock.user = null
+    await renderAt('/')
+    expect(await screen.findByText('Admin')).toBeInTheDocument()
+  })
+
   it('已登录进主框架：总览页渲染、搜索框、文档外链、通知铃铛', async () => {
     await renderAt('/')
     expect(await screen.findByTestId('page-Dashboard')).toBeInTheDocument()

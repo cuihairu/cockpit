@@ -134,6 +134,27 @@ describe('useDesktopWS', () => {
     expect(handlers.onError).not.toHaveBeenCalled()
   })
 
+  it('type/desktopType 均缺的消息静默忽略', async () => {
+    const { handlers, get } = setup()
+    await connect(get())
+    await push({ foo: 'bar' })
+    expect(handlers.onConnected).not.toHaveBeenCalled()
+    expect(handlers.onDisconnected).not.toHaveBeenCalled()
+    expect(handlers.onError).not.toHaveBeenCalled()
+    expect(handlers.onClipboard).not.toHaveBeenCalled()
+  })
+
+  it('https 页面下 connect 用 wss', async () => {
+    vi.stubGlobal('location', { protocol: 'https:', host: 'localhost:3000' })
+    try {
+      const { get } = setup()
+      await connect(get())
+      expect(FakeWebSocket.instances[0].url).toBe('wss://localhost:3000/api/remote/desktop')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('ws.onopen 置 connecting；ws.onclose 置 disconnected', async () => {
     const { get } = setup()
     await connect(get())

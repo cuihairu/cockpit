@@ -71,6 +71,22 @@ describe('SetupTOTP', () => {
     expect(screen.getByText('打开认证器应用，输入显示的 6 位验证码')).toBeInTheDocument()
   })
 
+  it('扫码步「取消」返回设置页', async () => {
+    renderPage()
+    await screen.findByTestId('qr-stub')
+    fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }))
+    expect(screen.getByTestId('settings-page')).toBeInTheDocument()
+  })
+
+  it('验证步「上一步」回到扫码步', async () => {
+    renderPage()
+    await screen.findByTestId('qr-stub')
+    fireEvent.click(nextBtn())
+    await screen.findByPlaceholderText('123456')
+    fireEvent.click(screen.getByRole('button', { name: /上一步/ }))
+    expect(await screen.findByTestId('qr-stub')).toBeInTheDocument()
+  })
+
   it('验证码剔除非数字；不足 6 位时按钮禁用、Enter 提交告警', async () => {
     renderPage()
     await screen.findByTestId('qr-stub')

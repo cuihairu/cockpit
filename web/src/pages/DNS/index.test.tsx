@@ -117,6 +117,31 @@ describe('DNS', () => {
     expect(screen.queryByRole('tab', { name: '记录管理' })).not.toBeInTheDocument()
   })
 
+  it('未配置引导：未知 provider 兜底 cloudflare 文案', async () => {
+    apiMock.getDNSStatus.mockResolvedValue({ configured: false, provider: 'hetzner' })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><DNS /></QueryClientProvider>)
+    expect(await screen.findByText('DNS 服务商未配置')).toBeInTheDocument()
+    expect(screen.getByText('dns.cloudflare.api_token')).toBeInTheDocument()
+    expect(screen.getByText('CLOUDFLARE_API_TOKEN')).toBeInTheDocument()
+  })
+
+  it('非 CF provider：记录表无代理列', async () => {
+    renderPage('alidns')
+    await chooseZone('example.com')
+    expect(await screen.findByText('www')).toBeInTheDocument()
+    expect(document.querySelector('.ant-table-thead')?.textContent).not.toContain('代理')
+  })
+
+  it('编辑记录：TTL 非 1 回填原值', async () => {
+    apiMock.updateDNSRecord.mockResolvedValue({})
+    renderPage()
+    await chooseZone('example.com')
+    fireEvent.click(within(recRow('www')).getByRole('button', { name: /编\s*辑/ }))
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('编辑记录 www'))
+    expect((screen.getByLabelText('TTL（秒，留空 = auto）') as HTMLInputElement).value).toBe('300')
+  })
+
   it('记录管理：zone 选择、未登记警告、CF 代理列与 TTL auto', async () => {
     renderPage()
     await chooseZone('example.com')
@@ -297,5 +322,37 @@ describe('DNS', () => {
     expect(screen.getAllByText('只读').length).toBeGreaterThanOrEqual(1)
     expect(screen.queryByRole('button', { name: /新建 DDNS/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^保\s*存$/ })).not.toBeInTheDocument()
+  })
+
+  it('保存失败错误透出；记录 Modal 取消关闭', async () => {
+    apiMock.createDNSRecord.mockRejectedValue(new Error('dns save fail'))
+    renderPage()
+    await chooseZone('example.com')
+    fireEvent.click(screen.getByRole('button', { name: /新建记录/ }))
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('新建 DNS 记录'))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'home' } })
+    fireEvent.change(screen.getByLabelText('内容'), { target: { value: '5.6.7.8' } })
+    fireEvent.click(document.querySelector('.ant-modal .ant-btn-primary')!)
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('操作失败'))
+    expect(msgSuccess).not.toHaveBeenCalledWith('记录已创建')
+    // 取消（限定 Modal 内按钮）→ Modal 关闭
+    // 默认 locale 下取消按钮文案为 Cancel，按 footer 非 primary 按钮定位
+    fireEvent.click(document.querySelector('.ant-modal-footer .ant-btn:not(.ant-btn-primary)')!)
+    // jsdom 无过渡动画不做 DOM 消失断言；行为验证：重开新建表单已重置（destroyOnClose）
+    fireEvent.click(screen.getByRole('button', { name: /新建记录/ }))
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('新建 DNS 记录'))
+    expect(screen.getByLabelText('名称')).toHaveValue('')
+    expect(screen.getByLabelText('内容')).toHaveValue('')
+  })
+
+  it('删除失败错误透出', async () => {
+    apiMock.deleteDNSRecord.mockRejectedValue(new Error('dns del fail'))
+    renderPage()
+    await chooseZone('example.com')
+    fireEvent.click(within(recRow('www')).getByRole('button', { name: /删\s*除/ }))
+    expect(await screen.findByText('删除立即生效，不可恢复')).toBeInTheDocument()
+    fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    await waitFor(() => expect(apiMock.deleteDNSRecord).toHaveBeenCalledWith('z1', 'r1'))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('操作失败'))
   })
 })

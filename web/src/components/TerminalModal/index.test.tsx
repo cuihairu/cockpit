@@ -295,4 +295,33 @@ describe('TerminalModal', () => {
     expect(fitMock.fit).toHaveBeenCalled()
     expect(ws.sent).toContain(JSON.stringify({ type: 'resize', rows: 24, cols: 80 }))
   })
+
+  it('https 页面下终端 WS 用 wss', async () => {
+    vi.stubGlobal('location', { protocol: 'https:', host: 'localhost:3000' })
+    try {
+      render(<TerminalModal {...props} />)
+      await flush()
+      expect(FakeWebSocket.instances[0].url.startsWith('wss://')).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('WS 未建立时窗口变化只本地 fit 不上报', async () => {
+    let roCb: ResizeObserverCallback | null = null
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: ResizeObserverCallback) { roCb = cb }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+
+    render(<TerminalModal {...props} />)
+    // ticket 未决窗口：wsRef 尚空，ResizeObserver 已可触发
+    await act(async () => {
+      roCb?.([], {} as ResizeObserver)
+    })
+    expect(fitMock.fit).toHaveBeenCalled()
+    expect(FakeWebSocket.instances[0]?.sent ?? []).toHaveLength(0)
+  })
 })

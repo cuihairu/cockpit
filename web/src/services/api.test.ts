@@ -515,4 +515,15 @@ describe('ApiService 拦截器边界', () => {
     expect(locationStub.href).toBe('')
     expect(localStorage.getItem('token')).toBe('keep')
   })
+
+  it('getRecordingBlob：recordings cast 接口走 blob responseType', async () => {
+    const fakeBlob = new Blob(['guac'])
+    mockInstance.get.mockResolvedValueOnce({ data: fakeBlob })
+    // 模块内 response 拦截器在运行时解包 data；axios mock 不经拦截器，返回整包
+    const out = (await api.getRecordingBlob('s 1')) as unknown as { data: Blob }
+    expect(out.data).toBe(fakeBlob)
+    expect(mockInstance.get).toHaveBeenCalledWith('/recordings/s%201/cast', {
+      responseType: 'blob',
+    })
+  })
 })

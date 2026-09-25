@@ -107,4 +107,43 @@ describe('GuacPlayer', () => {
     render(<GuacPlayer blob={blob} onError={onError} />)
     await waitFor(() => expect(onError).toHaveBeenCalledWith('parse fail'))
   })
+
+  it('构造抛非 Error：兜底「录制解析失败」；rec 未建时播放按钮早退', async () => {
+    const Guacamole = (await import('guacamole-common-js')).default
+    ;(Guacamole.SessionRecording as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      function () {
+        throw 'plain-string'
+      },
+    )
+    const onError = vi.fn()
+    render(<GuacPlayer blob={blob} onError={onError} />)
+    await waitFor(() => expect(onError).toHaveBeenCalledWith('录制解析失败'))
+    // recRef 未建：toggle 的 !rec 防御早退
+    fireEvent.click(screen.getByRole('button', { name: /播\s*放/ }))
+    expect(recMock.play).not.toHaveBeenCalled()
+  })
+
+  it('onerror 无 message 字段：兜底「录制回放失败」', async () => {
+    const onError = vi.fn()
+    render(<GuacPlayer blob={blob} onError={onError} />)
+    await waitFor(() => expect(recMock.getDisplay).toHaveBeenCalled())
+    await act(async () => {
+      ;(recMock.onerror as (s: unknown) => void)?.(undefined)
+    })
+    expect(onError).toHaveBeenCalledWith('录制回放失败')
+  })
+
+  it('Slider 拖动触发 rec.seek 并以回调更新位置', async () => {
+    const { container } = render(<GuacPlayer blob={blob} />)
+    await screen.findByTestId('guac-display')
+    // 先播放让 duration 就绪（5s），再经 onseek 把位置推到 1s
+    fireEvent.click(screen.getByRole('button', { name: /播放/ }))
+    ;(recMock.onseek as (p: number) => void)?.(1234)
+    await screen.findByText((_, el) => el?.tagName === 'SPAN' && el.textContent === '1s / 5s')
+    // mousedown 轨道 → onChange(v) → seek(v, cb) → cb 回填位置（jsdom 计算值为 0）
+    recMock.seek.mockImplementation((_v: number, cb: () => void) => cb())
+    fireEvent.mouseDown(container.querySelector('.ant-slider-rail') as HTMLElement, { clientX: 60, clientY: 10 })
+    await screen.findByText((_, el) => el?.tagName === 'SPAN' && el.textContent === '5s / 5s')
+    expect(recMock.seek).toHaveBeenCalled()
+  })
 })

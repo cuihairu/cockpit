@@ -116,6 +116,25 @@ describe('Dashboard', () => {
     expect(document.querySelector('.ant-progress-status-exception')).toBeInTheDocument()
   })
 
+  it('在线率不低于 80 时健康度成功分档', async () => {
+    apiMock.getStatus.mockResolvedValue({
+      ...status,
+      infrastructure: { total: 4, online: 4 },
+    })
+    renderPage()
+    expect(await screen.findByText('100% 在线')).toBeInTheDocument()
+    expect(document.querySelector('.ant-progress-status-success')).toBeInTheDocument()
+  })
+
+  it('Agent 区域为空：region/zone 回退 -', async () => {
+    apiMock.getAgents.mockResolvedValue([
+      { id: 'ag-9', hostname: 'bare-01', ip: '10.0.0.9', status: 'online', lastSeen: '0', capabilities: [] },
+    ])
+    renderPage()
+    expect(await screen.findByText('bare-01')).toBeInTheDocument()
+    expect(within(rowOf('bare-01')).getByText('-/-')).toBeInTheDocument()
+  })
+
   it('刷新按钮触发 refetch', async () => {
     renderPage()
     await screen.findByText('web-01')

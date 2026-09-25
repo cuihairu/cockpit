@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { message } from 'antd'
 import DesktopModal from './index'
+import * as desktop from '@/services/desktop'
 
 // DesktopModal：RDP 远程桌面集成——凭据/连接状态机/分辨率/断开/配置持久化
 
@@ -89,6 +90,14 @@ describe('DesktopModal', () => {
     expect(screen.getByPlaceholderText('(可选)')).toHaveValue('')
   })
 
+  it('visible=false：不读最近配置、不取票据', () => {
+    const recentSpy = vi.spyOn(desktop, 'getRecentDesktopConfig')
+    render(<DesktopModal {...props} visible={false} />)
+    expect(recentSpy).not.toHaveBeenCalled()
+    expect(createRemoteTicket).not.toHaveBeenCalled()
+    recentSpy.mockRestore()
+  })
+
   it('有存量配置自动预填用户名/域（不含密码）', () => {
     localStorage.setItem('desktop_configs', JSON.stringify([{
       id: 'c1', lastUsed: 1,
@@ -120,6 +129,28 @@ describe('DesktopModal', () => {
     expect(screen.getByText('已连接')).toBeInTheDocument()
     expect(screen.getByText('1920x1080')).toBeInTheDocument()
     expect(document.querySelector('canvas')).not.toBeNull()
+  })
+
+  it('screen_update 渲染到 canvas：initBuffer + putImageData', async () => {
+    render(<DesktopModal {...props} />)
+    clickConnect()
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1))
+    await push({ type: 'connected', width: 4, height: 4 })
+    ctx2d.putImageData.mockClear()
+    // 4x4 像素（RGBA 64 字节）的整屏矩形
+    const raw = new Uint8Array(4 * 4 * 4).fill(9)
+    const b64 = btoa(String.fromCharCode(...raw))
+    await push({
+      type: 'screen_update',
+      width: 4,
+      height: 4,
+      rects: [{ x: 0, y: 0, width: 4, height: 4, data: b64 }],
+    })
+    await waitFor(() => expect(ctx2d.putImageData).toHaveBeenCalled())
+    const [region, x, y] = ctx2d.putImageData.mock.calls[0]
+    expect(region.data.length).toBe(64)
+    expect(x).toBe(0)
+    expect(y).toBe(0)
   })
 
   it('分辨率下拉发 set_resolution 并更新文本', async () => {

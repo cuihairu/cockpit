@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import Resources from './index'
+import Resources, { activeKeyFallback } from './index'
 import type { Certificate, ComputeInstance, Domain, Gateway, Service, Storage } from '@/types'
+import { computeColumns } from './columns'
 
 // Resources：六类资源并发拉取、tab 计数开关、各表列渲染与空值兜底、刷新
 
@@ -40,6 +41,8 @@ const domains = [
 
 const certificates = [
   { id: 'x1', domain: 'a.com', status: 'valid', issuer: "Let's Encrypt", autoRenew: true, expiresAt: '' },
+  // x2 覆盖反向分支：非空过期时间走格式化、autoRenew false 走「否/default」
+  { id: 'x2', domain: 'b.com', status: 'expiring', issuer: 'ZeroSSL', autoRenew: false, expiresAt: '2027-01-15' },
 ] as unknown as Certificate[]
 
 const services = [
@@ -55,15 +58,26 @@ const gateways = [
 const storages = [
   { id: 'st1', name: 'data', type: 'nfs', agentId: 'ag-1', path: '/data', totalGb: 100, usedGb: 40, status: 'online' },
   { id: 'st2', name: 'empty', type: '', agentId: '', path: '', totalGb: 0, usedGb: 0, status: '' },
+  // st3/st4 覆盖 `${used || 0}` 与 `${total || 0}` 的单侧兜底（双 0 走 '-' 提前返回）
+  { id: 'st3', name: 'half', type: 'ssd', agentId: 'ag-1', path: '/mnt', totalGb: 50, usedGb: 0, status: 'online' },
+  { id: 'st4', name: 'odd', type: 'cifs', agentId: '', path: '', totalGb: 0, usedGb: 40, status: '' },
 ] as unknown as Storage[]
 
-const renderPage = () => {
-  apiMock.getComputeInstances.mockResolvedValue({ data: compute })
-  apiMock.getDomains.mockResolvedValue({ data: domains })
-  apiMock.getCertificates.mockResolvedValue({ data: certificates })
-  apiMock.getServices.mockResolvedValue({ data: services })
-  apiMock.getGateways.mockResolvedValue({ data: gateways })
-  apiMock.getStorages.mockResolvedValue({ data: storages })
+type ApiKey = keyof typeof apiMock
+
+// dataOverride 可替换单个 API 的 resolved 值（renderPage 内设置默认值，故经参数传入）
+const renderPage = (dataOverride?: Partial<Record<ApiKey, unknown>>) => {
+  const defaults: Record<ApiKey, unknown> = {
+    getComputeInstances: { data: compute },
+    getDomains: { data: domains },
+    getCertificates: { data: certificates },
+    getServices: { data: services },
+    getGateways: { data: gateways },
+    getStorages: { data: storages },
+  }
+  for (const key of Object.keys(defaults) as ApiKey[]) {
+    apiMock[key].mockResolvedValue(dataOverride?.[key] ?? defaults[key])
+  }
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
@@ -131,12 +145,16 @@ describe('Resources', () => {
     expect(screen.getAllByTestId('probe-cell').some((el) => el.textContent === 'domain:d1')).toBe(true)
   })
 
-  it('证书 tab：签发者与有效状态', async () => {
+  it('证书 tab：签发者、有效状态、过期时间格式化与自动续费否侧', async () => {
     renderPage()
     await switchTab('证书')
     expect(await screen.findByText('a.com')).toBeInTheDocument()
     expect(screen.getByText("Let's Encrypt")).toBeInTheDocument()
     expect(screen.getByText('valid')).toBeInTheDocument()
+    // 非空过期时间 → toLocaleDateString（时区相关，用同一运行时表达式对期望值）
+    expect(within(rowOf('b.com')).getByText(new Date('2027-01-15').toLocaleDateString())).toBeInTheDocument()
+    // autoRenew false → 「否」+ default 色
+    expect(within(rowOf('b.com')).getByText('否')).toBeInTheDocument()
   })
 
   it('服务 tab：URL 链接、响应时间空值兜底', async () => {
@@ -157,12 +175,32 @@ describe('Resources', () => {
     expect(within(rowOf('gw2')).getAllByText('-').length).toBeGreaterThanOrEqual(3)
   })
 
-  it('存储 tab：容量拼接与无容量兜底', async () => {
+  it('存储 tab：容量拼接、单侧缺省兜底与无容量兜底', async () => {
     renderPage()
     await switchTab('存储')
     expect(await screen.findByText('data')).toBeInTheDocument()
     expect(within(rowOf('data')).getByText('40 / 100 GB')).toBeInTheDocument()
+    // usedGb 为 0 → 「0 / 50 GB」；totalGb 为 0 → 「40 / 0 GB」（|| 0 单侧兜底）
+    expect(within(rowOf('half')).getByText('0 / 50 GB')).toBeInTheDocument()
+    expect(within(rowOf('odd')).getByText('40 / 0 GB')).toBeInTheDocument()
+    // 双 0 → '-' 提前返回
     expect(within(rowOf('empty')).getAllByText('-').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('六个 API 返回 data 缺失：全部兜底空数组，页面空态不崩', async () => {
+    renderPage({
+      getComputeInstances: { data: null },
+      getDomains: {}, // data 为 undefined，同走 || [] 兜底
+      getCertificates: { data: null },
+      getServices: {},
+      getGateways: { data: null },
+      getStorages: {},
+    })
+    expect(await screen.findByText('计算实例 (0)')).toBeInTheDocument()
+    for (const label of ['域名 (0)', '证书 (0)', '服务 (0)', '网关 (0)', '存储 (0)']) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
+    expect(document.querySelectorAll('tr.ant-table-row').length).toBe(0)
   })
 
   it('刷新按钮：六查询重新拉取', async () => {
@@ -173,5 +211,20 @@ describe('Resources', () => {
       expect(apiMock.getComputeInstances).toHaveBeenCalledTimes(2)
       expect(apiMock.getStorages).toHaveBeenCalledTimes(2)
     })
+  })
+
+  it('名称列排序器：localeCompare 三态', () => {
+    const sorter = computeColumns.find((c) => c.key === 'name')!
+      .sorter as (a: ComputeInstance, b: ComputeInstance) => number
+    expect(sorter({ name: 'a' } as ComputeInstance, { name: 'b' } as ComputeInstance)).toBeLessThan(0)
+    expect(sorter({ name: 'b' } as ComputeInstance, { name: 'a' } as ComputeInstance)).toBeGreaterThan(0)
+    expect(sorter({ name: 'a' } as ComputeInstance, { name: 'a' } as ComputeInstance)).toBe(0)
+  })
+
+  it('activeKeyFallback：命中、回退首个 tab、空列表兜底', () => {
+    const items = [{ key: 'compute' }, { key: 'domains' }]
+    expect(activeKeyFallback('domains', items)).toBe('domains')
+    expect(activeKeyFallback('gone', items)).toBe('compute')
+    expect(activeKeyFallback('gone', [])).toBe('gone')
   })
 })

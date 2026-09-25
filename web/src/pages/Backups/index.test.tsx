@@ -412,6 +412,25 @@ describe('Backups', () => {
     expect(apiMock.restoreBackup).not.toHaveBeenCalled()
   })
 
+  it('取消后的关闭动画窗口内点「开始恢复」：restoreTarget 已空短路返回', async () => {
+    renderPage()
+    expect(await screen.findByText('etc')).toBeInTheDocument()
+    fireEvent.click(textBtnIn(cfgRow('etc'), '文件')!)
+    await filesRows()
+    fireEvent.click(within(drawerRow('etc-20260914')).getByRole('button', { name: /恢\s*复/ }))
+    await screen.findByText('恢复备份：etc-20260914-030000.tar.gz')
+    // 取消 → restoreTarget 清空；jsdom 无 transitionend，Modal 停在 leave、
+    // footer 按钮仍挂载（真实浏览器里关闭动画的几百 ms 内同样可点）
+    fireEvent.click(screen.getByRole('button', { name: /^取\s*消$/ }))
+    const okBtn = Array.from(document.querySelectorAll<HTMLButtonElement>('.ant-modal-footer button'))
+      .find((b) => (b.textContent || '').includes('开始恢复'))!
+    expect(okBtn).toBeTruthy()
+    fireEvent.click(okBtn)
+    // !restoreTarget 防御短路：不下发任务、无成功提示
+    expect(apiMock.restoreBackup).not.toHaveBeenCalled()
+    expect(msgSuccess).not.toHaveBeenCalledWith('恢复任务已下发')
+  })
+
   it('恢复任务运行中：后台关闭与关窗告警', async () => {
     apiMock.restoreBackup.mockResolvedValue({ taskId: 't-run' })
     apiMock.getBackupTask.mockResolvedValue({ status: 'running', log: 'unpacking…', error: '' })

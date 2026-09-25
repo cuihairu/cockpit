@@ -24,11 +24,17 @@ const apiMock = vi.hoisted(() => ({
   getRecordingsConfig: vi.fn(),
   putRecordingsConfig: vi.fn(),
   getRecordingCast: vi.fn(),
+  getRecordingBlob: vi.fn(),
   syncRecordingRemote: vi.fn(),
   deleteRecording: vi.fn(),
   downloadRecording: vi.fn(),
 }))
 vi.mock('@/services/api', () => ({ api: apiMock }))
+vi.mock('@/components/GuacPlayer', () => ({
+  default: ({ blob }: { blob: Blob }) => (
+    <div data-testid="guac-player-stub">blob:{(blob as Blob).size}</div>
+  ),
+}))
 vi.mock('@/hooks/usePerm', () => ({ usePerm: () => true }))
 
 const msgSuccess = vi.spyOn(message, 'success')
@@ -345,6 +351,76 @@ describe('Recordings', () => {
     expect(screen.getByText('rdp')).toBeInTheDocument()
     expect(screen.getByText('rdp').closest('.ant-tag')).toHaveClass('ant-tag-default')
     expect(within(rowOf('45s')).getByText('-')).toBeInTheDocument()
+  })
+
+  it('guac 格式回放：取二进制内容挂 GuacPlayer', async () => {
+    apiMock.getRecordingBlob.mockResolvedValue(new Blob(['guac-stream'], { type: 'text/plain' }))
+    renderPage(undefined, [mkRec({ sessionId: 'g-1', format: 'guac', durationMs: 5000, bytes: 11 })])
+    // 表格无 sessionId 列，按时长单元格定位（与既有用例同构）
+    expect(await screen.findByText('5s')).toBeInTheDocument()
+    // 先关再开建立弹窗（与 cast 回放用例同构）
+    await act(async () => {
+      fireEvent.click(rowOf('5s').querySelectorAll('button')[0] as HTMLButtonElement)
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('.ant-modal-close')!)
+    })
+    await act(async () => {
+      fireEvent.click(rowOf('5s').querySelectorAll('button')[0] as HTMLButtonElement)
+    })
+    expect(apiMock.getRecordingBlob).toHaveBeenCalledWith('g-1')
+    expect(await screen.findByTestId('guac-player-stub')).toHaveTextContent('blob:11')
+    expect(screen.getByText(/会话录制回放（Guacamole）/)).toBeInTheDocument()
+    // 关闭：effect cleanup（cancelled 置位）+ GuacPlaybackModal 退出
+    await closePlayer()
+    expect(screen.queryByTestId('guac-player-stub')).not.toBeInTheDocument()
+  })
+
+  it('guac 回放加载失败：错误透出', async () => {
+    apiMock.getRecordingBlob.mockRejectedValue(new Error('blob 404'))
+    renderPage(undefined, [mkRec({ sessionId: 'g-2', format: 'guac', durationMs: 5000, bytes: 11 })])
+    expect(await screen.findByText('5s')).toBeInTheDocument()
+    await openPlayer('5s')
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('加载录制内容失败'))
+  })
+
+  it('guac 回放关闭后 blob 迟到：cancelled 防护不再 setState', async () => {
+    let resolveBlob!: (b: Blob) => void
+    apiMock.getRecordingBlob.mockImplementation(
+      () => new Promise<Blob>((r) => { resolveBlob = r }),
+    )
+    renderPage(undefined, [mkRec({ sessionId: 'g-x', format: 'guac', durationMs: 5000, bytes: 11 })])
+    expect(await screen.findByText('5s')).toBeInTheDocument()
+    await openPlayer('5s')
+    await act(async () => {
+      fireEvent.click(document.querySelector('.ant-modal-close')!)
+    })
+    // 关闭后 promise 才 resolve：cancelled 已置位，不触发关闭后的 setState
+    await act(async () => {
+      resolveBlob(new Blob(['late']))
+    })
+    expect(screen.queryByTestId('guac-player-stub')).not.toBeInTheDocument()
+  })
+
+  it('下载：guac 格式文件名 .guac 后缀', async () => {
+    apiMock.downloadRecording.mockResolvedValue(new Blob(['g']))
+    let downloadName = ''
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloadName = this.download
+      })
+    try {
+      renderPage(undefined, [mkRec({ sessionId: 'g-9', format: 'guac', durationMs: 5000, bytes: 11 })])
+      expect(await screen.findByText('5s')).toBeInTheDocument()
+      await act(async () => {
+        fireEvent.click(rowOf('5s').querySelector('.anticon-download')!.closest('button')!)
+      })
+      await waitFor(() => expect(apiMock.downloadRecording).toHaveBeenCalledWith('g-9'))
+      expect(downloadName).toBe('g-9.guac')
+    } finally {
+      clickSpy.mockRestore()
+    }
   })
 })
 

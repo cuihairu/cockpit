@@ -278,4 +278,163 @@ describe('Domains', () => {
     await waitFor(() => expect(apiMock.deleteDomainBinding).toHaveBeenCalledWith('blog.example.com'))
     expect(msgSuccess).toHaveBeenCalledWith('已删除登记（已下发的 DNS/站点/监控项保留，需手动清理）')
   })
+
+  it('漂移检查失败与保存失败：错误透出', async () => {
+    apiMock.getDomainDrift.mockRejectedValue(new Error('drift fail'))
+    renderPage()
+    await screen.findByText('blog.example.com')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /漂移检查/ }))
+    })
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('漂移检查失败'))
+    // 保存失败：合法表单提交但接口拒绝
+    apiMock.saveDomainBinding.mockRejectedValue(new Error('save fail'))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /登记绑定/ }))
+    })
+    fireEvent.change(screen.getByPlaceholderText('blog.example.com'), { target: { value: 'new.example.com' } })
+    fireEvent.mouseDown(document.querySelector('.ant-modal .ant-select-selector')!)
+    const opt = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll('.ant-select-item-option')).find(
+        (o) => o.textContent === 'web-01')
+      if (!el) throw new Error('option not found')
+      return el as HTMLElement
+    })
+    fireEvent.click(opt)
+    fireEvent.change(screen.getByPlaceholderText('127.0.0.1:8080 或 docker://web'), { target: { value: 'docker://web' } })
+    await modalOk()
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('保存失败'))
+  })
+
+  it('删除失败错误透出；登记 Modal 取消与刷新按钮', async () => {
+    apiMock.deleteDomainBinding.mockRejectedValue(new Error('del fail'))
+    renderPage()
+    await screen.findByText('blog.example.com')
+    await act(async () => {
+      fireEvent.click(within(rowOf('blog.example.com')).getByRole('button', { name: /删\s*除/ }))
+    })
+    expect(await screen.findByText('只删登记，已下发的 DNS/站点/监控项保留')).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    })
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('删除失败'))
+    // 登记 Modal 取消 → 关闭
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /登记绑定/ }))
+    })
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toContain('登记绑定'))
+    fireEvent.click(document.querySelector('.ant-modal-footer .ant-btn:not(.ant-btn-primary)')!)
+    // jsdom 无过渡动画不做 DOM 消失断言；行为验证：重开登记表单已重置（destroyOnClose）
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /登记绑定/ }))
+    })
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toContain('登记绑定'))
+    expect(screen.getByPlaceholderText('blog.example.com')).toHaveValue('')
+    // 刷新按钮 → 绑定查询重新拉取
+    const before = apiMock.getDomainBindings.mock.calls.length
+    const reloadBtn = document.querySelector('.ant-card-head button .anticon-reload')!.closest('button')!
+    await act(async () => {
+      fireEvent.click(reloadBtn)
+    })
+    await waitFor(() => expect(apiMock.getDomainBindings.mock.calls.length).toBeGreaterThan(before))
+  })
+
+  it('漂移：未知与缺失 status 均走「漂移」兜底', async () => {
+    apiMock.getDomainDrift.mockResolvedValue({
+      checkedAt: 1,
+      items: [
+        {
+          domain: 'blog.example.com',
+          enabled: true,
+          dns: { checked: true, ok: false, status: 'weird' }, // 未知名 → 兜底
+          proxy: { checked: true, ok: false }, // 无 status → ?? '' 再兜底
+          cert: { checked: true, ok: true },
+        },
+      ],
+    })
+    renderPage()
+    await screen.findByText('blog.example.com')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /漂移检查/ }))
+    })
+    expect(msgSuccess).toHaveBeenCalledWith('漂移检查完成（1 条绑定）')
+    const r1 = rowOf('blog.example.com')
+    expect(within(r1).getByText('DNS·漂移')).toBeInTheDocument()
+    expect(within(r1).getByText('反代·漂移')).toBeInTheDocument()
+    expect(within(r1).getByText((_, el) => el?.classList.contains('ant-tag-success') === true && el.textContent === '证书')).toBeInTheDocument()
+  })
+
+  it('防御分支：hostname 空 agent 显示 id、未知 agentId 原值、失败行空 lastError 兜底', async () => {
+    apiMock.getDomainBindings.mockResolvedValue([
+      mkBinding({ id: 1, domain: 'empty.example.com', agentId: 'ag-2' }),
+      mkBinding({
+        id: 2,
+        domain: 'ghost.example.com',
+        agentId: 'ag-ghost',
+        lastApplyStatus: 'failed',
+        lastError: '',
+        appliedAt: 1758000200,
+      }),
+    ])
+    apiMock.getAgents.mockResolvedValue([
+      ...agents,
+      { id: 'ag-2', hostname: '', ip: '1.2.3.5', status: 'online', lastSeen: '0', capabilities: [] },
+    ] as unknown as Agent[])
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <DomainsPage />
+      </QueryClientProvider>,
+    )
+    await screen.findByText('empty.example.com')
+    // hostname 空 → Agent 列回退显示 id
+    expect(within(rowOf('empty.example.com')).getByText('ag-2')).toBeInTheDocument()
+    // agentId 不在 agent 列表 → 原样显示 id
+    expect(within(rowOf('ghost.example.com')).getByText('ag-ghost')).toBeInTheDocument()
+    // 失败行 lastError 为空串 → tooltip 兜底「失败」
+    fireEvent.mouseEnter(within(rowOf('ghost.example.com')).getByText(/失败·/))
+    fireEvent.mouseMove(within(rowOf('ghost.example.com')).getByText(/失败·/))
+    expect(await screen.findByText('失败')).toBeInTheDocument()
+    fireEvent.mouseLeave(document.body)
+    // 登记 Modal 内 Agent 下拉 option：hostname 空回退 id（下拉 portal 在 body，须非作用域查询）
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /登记绑定/ }))
+    })
+    fireEvent.mouseDown(document.querySelector('.ant-modal .ant-select-selector')!)
+    await waitFor(() =>
+      expect(Array.from(document.querySelectorAll('.ant-select-item-option')).map((o) => o.textContent)).toEqual(['web-01', 'ag-2']))
+    // 卡片 extra 片段下拉 option：同样回退 id
+    fireEvent.mouseDown(screen.getAllByText('选择 agent 生成配置片段')[0].closest('.ant-select')!.querySelector('.ant-select-selector')!)
+    await waitFor(() =>
+      expect(Array.from(document.querySelectorAll('.ant-select-item-option')).map((o) => o.textContent)).toContain('ag-2'))
+  })
+
+  it('防御分支：apply 无 steps 字段兜底空数组；片段为 null 复制空串', async () => {
+    apiMock.applyDomainBinding.mockResolvedValue({ status: 'ok' }) // 无 steps 字段
+    apiMock.getAgentDomainsSnippet.mockResolvedValue(null)
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.assign(navigator, { clipboard: { writeText } })
+    renderPage()
+    await screen.findByText('blog.example.com')
+    await act(async () => {
+      fireEvent.click(within(rowOf('blog.example.com')).getByRole('button', { name: /Apply/ }))
+    })
+    // steps ?? [] → 空数组 → 「未启用任何 auto 联动开关」
+    expect(await screen.findByText('未启用任何 auto 联动开关')).toBeInTheDocument()
+    // 片段弹窗：snippet 为 null → 复制空串兜底
+    fireEvent.mouseDown(screen.getAllByText('选择 agent 生成配置片段')[0].closest('.ant-select')!.querySelector('.ant-select-selector')!)
+    const opt = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll('.ant-select-item-option')).find(
+        (o) => o.textContent === 'web-01')
+      if (!el) throw new Error('option not found')
+      return el as HTMLElement
+    })
+    fireEvent.click(opt)
+    expect(await screen.findByText('域名配置片段 · web-01')).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /复\s*制/ }))
+    })
+    expect(writeText).toHaveBeenCalledWith('')
+    expect(msgSuccess).toHaveBeenCalledWith('已复制')
+  })
 })

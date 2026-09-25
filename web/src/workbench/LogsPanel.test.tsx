@@ -335,6 +335,30 @@ describe('LogsPanel', () => {
     expect(await screen.findByText('已停止')).toBeInTheDocument()
   })
 
+  it('半帧跨 chunk：无尾换行的残帧留 buf，待下一块补全后再解析', async () => {
+    // 既有用例的 chunk 都以 "\n" 结尾（整帧，split 尾部空串被 pop 回 buf）；
+    // 本例 chunk1 无尾换行 → 半帧留在 buf，chunk2 补全后才解析出一行。
+    // 拼接结果等价 JSON.stringify({ data: 'half-line\n' }) + '\n'
+    const enc = new TextEncoder()
+    const chunks = [enc.encode('{"data":"half-line'), enc.encode('\\n"}\n')]
+    let i = 0
+    apiMock.followLogs.mockResolvedValue({
+      ok: true, status: 200,
+      body: new ReadableStream({
+        pull(controller) {
+          if (i < chunks.length) controller.enqueue(chunks[i++])
+          else controller.close()
+        },
+      }),
+    } as unknown as Response)
+    render(wrap(<LogsPanel agentId="ag1" />))
+    await screen.findByText('nginx.service')
+    fireEvent.click(followButton())
+    // 半帧补全后正确渲染为一行；流无 eof 结束 → disconnected
+    expect(await screen.findByText('half-line')).toBeInTheDocument()
+    expect(await screen.findByText('连接中断')).toBeInTheDocument()
+  })
+
   it('eof 未知 reason 原样展示', async () => {
     apiMock.followLogs.mockResolvedValue(followResp([
       { data: 'y\n' }, { eof: true, reason: 'mystery' },

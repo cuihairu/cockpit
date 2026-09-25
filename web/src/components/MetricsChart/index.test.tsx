@@ -72,5 +72,20 @@ describe('MetricsChart', () => {
     ).toBe('10:00<br/>M: 42ms')
     expect(fmt(null)).toBe('')
     expect(fmt([])).toBe('')
+    expect(fmt([42])).toBe('')
+  })
+
+  it('x 轴 formatter 格式化 HH:mm；window resize 触发 chart.resize', () => {
+    const { unmount } = render(<MetricsChart title="T" unit="ms" data={data} />)
+    const option = chartInstance.setOption.mock.calls[0][0] as {
+      xAxis: { axisLabel: { formatter: (v: string) => string } }
+    }
+    const fmt = option.xAxis.axisLabel.formatter
+    expect(fmt('2026-09-20T10:05:00Z')).toBe('10:05')
+    expect(fmt('2026-09-20T23:59:00Z')).toBe('23:59')
+
+    window.dispatchEvent(new Event('resize'))
+    expect(chartInstance.resize).toHaveBeenCalled()
+    unmount()
   })
 })

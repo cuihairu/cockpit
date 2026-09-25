@@ -94,4 +94,32 @@ describe('AgentDetailModal', () => {
     // 标签 Descriptions 行内的占位「-」（LabelsDisplay 空态）
     expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(1)
   })
+
+  it('字段缺省侧：空 hostname/ip/region/lastSeen、宿主机角色、离线态、能力缺省', () => {
+    renderModal({
+      agent: {
+        id: 'ag-min',
+        status: 'offline',
+        virtRole: 'host',
+        lastSeen: '',
+        capabilities: undefined,
+        labels: undefined,
+      } as unknown as Agent,
+    })
+    // hostname/ip/region/zone/lastSeen/labels 六处占位 '-'
+    expect(screen.getAllByText('-')).toHaveLength(6)
+    expect(screen.getByText('物理机 (宿主机)')).toBeInTheDocument()
+    expect(screen.getByText('离线')).toBeInTheDocument()
+    expect(screen.queryByText('remote-services')).not.toBeInTheDocument()
+  })
+
+  it('布尔标签两侧：true 显「是」success 色，false 显「否」default 色', () => {
+    renderModal({ agent: { ...agent, labels: { backup: false, gpu: true } } as Agent })
+    const tagText = (name: string) =>
+      screen.getByText((_, el) => !!el?.closest('.ant-tag') && el.textContent === name)
+    expect(tagText('backup: 否')).toBeInTheDocument()
+    expect(tagText('backup: 否')).toHaveClass('ant-tag-default')
+    expect(tagText('gpu: 是')).toBeInTheDocument()
+    expect(tagText('gpu: 是')).toHaveClass('ant-tag-success')
+  })
 })

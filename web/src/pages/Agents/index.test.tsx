@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Agents from './index'
+import { buildAgentColumns } from './columns'
+import type { ReactElement, ReactNode } from 'react'
 import type { Agent } from '@/types'
 
 // Agents：搜索/三维筛选（地域/状态/类型）+ 详情链路 + 远程连接分流
@@ -260,5 +262,97 @@ describe('Agents', () => {
     expect(modalStubs.closed).toEqual(['terminal', 'guac', 'guac'])
     // 详情 Modal 的 X → onClose
     fireEvent.click(document.querySelector('.ant-modal-close')!)
+  })
+
+  it('列定义：三个 sorter 三态（含空值兜底）与能力 +N tooltip 分支', () => {
+    const cols = buildAgentColumns({ onShowDetail: vi.fn() })
+    const byTitle = (title: string) => cols.find((c) => (c as { title: string }).title === title)!
+    const sorterOf = (title: string) => byTitle(title).sorter as (a: Agent, b: Agent) => number
+    const host = sorterOf('主机名')
+    expect(host({ hostname: 'a' } as Agent, { hostname: 'b' } as Agent)).toBeLessThan(0)
+    expect(host({ hostname: '' } as Agent, { hostname: 'b' } as Agent)).toBeLessThan(0)
+    const virt = sorterOf('类型')
+    expect(virt({ virtType: 'kvm' } as Agent, { virtType: 'none' } as Agent)).toBeLessThan(0)
+    expect(virt({ virtType: '' } as Agent, { virtType: 'kvm' } as Agent)).toBeLessThan(0)
+    const status = sorterOf('状态')
+    expect(status({ status: 'offline' } as Agent, { status: 'online' } as Agent)).toBeLessThan(0)
+    expect(status({ status: 'online' } as Agent, { status: 'offline' } as Agent)).toBeGreaterThan(0)
+    expect(status({ status: 'online' } as Agent, { status: 'online' } as Agent)).toBe(0)
+
+    // 能力列：>3 渲染 +N 溢出 Tag（Tooltip 文案为余下能力逗号拼接）
+    const capRender = byTitle('能力').render as (caps: Agent['capabilities']) => ReactNode
+    const four = render(capRender([
+      { type: 'file' }, { type: 'exec' }, { type: 'docker' }, { type: 'nas' },
+    ] as Agent['capabilities']) as ReactElement)
+    expect(four.container.textContent).toContain('+1')
+    const three = render(capRender([
+      { type: 'file' }, { type: 'exec' }, { type: 'docker' },
+    ] as Agent['capabilities']) as ReactElement)
+    expect(three.container.textContent).not.toContain('+')
+  })
+
+  it('列定义 sorter 空值另一侧：b 侧缺省与 a.status 缺省短路', () => {
+    const cols = buildAgentColumns({ onShowDetail: vi.fn() })
+    const sorterOf = (title: string) =>
+      cols.find((c) => (c as { title: string }).title === title)!.sorter as (a: Agent, b: Agent) => number
+    expect(sorterOf('主机名')({ hostname: 'b' } as Agent, { hostname: undefined } as unknown as Agent)).toBeGreaterThan(0)
+    expect(sorterOf('类型')({ virtType: 'kvm' } as Agent, { virtType: undefined } as unknown as Agent)).toBeGreaterThan(0)
+    // a.status 缺省走可选链短路，返回 undefined
+    expect(sorterOf('状态')({ status: undefined } as unknown as Agent, { status: 'online' } as Agent)).toBeUndefined()
+    expect(sorterOf('状态')({ status: 'online' } as Agent, { status: undefined } as unknown as Agent)).toBeGreaterThan(0)
+  })
+
+  it('渲染缺口侧：空字段占位、未知状态回退、相对时间分支与能力 +N', async () => {
+    const now = Math.floor(Date.now() / 1000)
+    apiMock.getAgents.mockResolvedValue([
+      {
+        id: 'ag-e', hostname: '', ip: '', region: '', zone: '',
+        status: 'weird', lastSeen: '', capabilities: undefined,
+      },
+      {
+        id: 'ag-t', hostname: 'just-now', ip: '1.1.1.4', region: 'r', zone: 'z',
+        status: 'online', lastSeen: String(now),
+        virtType: 'kvm', virtRole: 'guest', capabilities: [],
+      },
+      {
+        id: 'ag-m', hostname: 'half-hour', ip: '1.1.1.5', region: 'r', zone: 'z',
+        status: 'offline', lastSeen: String(now - 1800),
+        virtType: 'kvm', virtRole: 'guest', capabilities: [],
+      },
+      {
+        id: 'ag-h', hostname: 'five-hours', ip: '1.1.1.6', region: 'r', zone: 'z',
+        status: 'offline', lastSeen: String(now - 18000),
+        virtType: 'kvm', virtRole: 'guest', capabilities: [],
+      },
+      {
+        id: 'ag-c', hostname: 'cap-five', ip: '1.1.1.7', region: 'r', zone: 'z',
+        status: 'online', lastSeen: String(now),
+        virtRole: 'host',
+        capabilities: [
+          { type: 'remote-services' }, { type: 'files' }, { type: 'exec' },
+          { type: 'docker' }, { type: 'nas' },
+        ],
+      },
+    ] as unknown as Agent[])
+    renderPage()
+    await screen.findByText('just-now')
+
+    // 空 hostname/ip/zone/lastSeen 各渲染占位 '-'
+    const emptyRow = rowOf('ag-e')
+    expect(within(emptyRow).getAllByText('-')).toHaveLength(4)
+    // 未知 status 回退 offline 配置文案
+    expect(within(emptyRow).getByText('离线')).toBeInTheDocument()
+    // capabilities 为 undefined：能力列无 Tag；virtType/virtRole 缺省类型列走「未知」
+    expect(within(emptyRow).queryByText('remote-services')).not.toBeInTheDocument()
+    expect(within(emptyRow).getByText('未知')).toBeInTheDocument()
+
+    expect(within(rowOf('ag-t')).getByText('刚刚')).toBeInTheDocument()
+    expect(within(rowOf('ag-m')).getByText('30 分钟前')).toBeInTheDocument()
+    expect(within(rowOf('ag-h')).getByText('5 小时前')).toBeInTheDocument()
+
+    // >3 capabilities 渲染 +N 溢出 Tag；virtRole host 显示物理机
+    const capRow = rowOf('ag-c')
+    expect(within(capRow).getByText('+2')).toBeInTheDocument()
+    expect(within(capRow).getByText('物理机')).toBeInTheDocument()
   })
 })

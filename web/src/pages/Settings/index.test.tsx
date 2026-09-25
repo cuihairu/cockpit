@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { message } from 'antd'
@@ -265,6 +265,30 @@ describe('Settings', () => {
     await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('通知未启用：请在服务端 config.yaml 的 notification 段配置渠道'))
   })
 
+  it('未知渠道与空错误文案：channelMeta 未命中回退原文名、error 空串兜底', async () => {
+    apiMock.testNotification.mockResolvedValue({
+      results: [
+        { channel: 'pagerduty', target: 'https://hook.example/x', ok: true },
+        { channel: 'herald', target: 'https://h.example.com/x', ok: false, error: '' },
+      ],
+    })
+    // 渠道表只含未知渠道：Tag 颜色 default、文案回退原 channel 值
+    renderPage(mkUser(), {
+      enabled: true,
+      channels: [{ channel: 'pagerduty', target: 'https://hook.example/x' }],
+      events: [],
+    })
+    fireEvent.click(screen.getByRole('tab', { name: '告警设置' }))
+    expect(await screen.findByText('pagerduty')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /发送测试通知/ }))
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('部分渠道发送失败，详见下方结果'))
+    // 结果 label 同样回退原 channel 名（表 + 结果两处）
+    await waitFor(() => expect(screen.getAllByText('pagerduty').length).toBe(2))
+    // ok true → 发送成功；ok false 且 error 空串 → 兜底「发送失败」
+    expect(screen.getByText('发送成功')).toBeInTheDocument()
+    expect(screen.getByText('发送失败')).toBeInTheDocument()
+  })
+
   it('通知渠道为空：引导 Alert 与测试按钮禁用', async () => {
     renderPage(mkUser(), { enabled: false, channels: [], events: [] })
     fireEvent.click(screen.getByRole('tab', { name: '告警设置' }))
@@ -290,5 +314,42 @@ describe('Settings', () => {
     expect(screen.queryByRole('tab', { name: '告警设置' })).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '安全设置' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '系统信息' })).toBeInTheDocument()
+  })
+
+  it('禁用 TOTP Modal 取消：关闭且重开时验证码已清空', async () => {
+    renderPage(mkUser({ totp_enabled: true }))
+    await openSecurity()
+    expect(await screen.findByText('TOTP 已启用')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /禁用 TOTP/ }))
+    fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    const codeInput = await screen.findByPlaceholderText('123456')
+    fireEvent.change(codeInput, { target: { value: '654321' } })
+    // 取消（不走动效断言，行为验证：重开输入框为空）；限定 Modal 内按钮（Popconfirm 也有取消）
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: /取\s*消/ }))
+    await waitFor(() => expect(apiMock.disableTOTP).not.toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: /禁用 TOTP/ }))
+    fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    const again = await screen.findByPlaceholderText('123456')
+    expect(again).toHaveValue('')
+  })
+
+  it('拨测保存失败：错误透出且不误报成功', async () => {
+    apiMock.saveProbeConfig.mockRejectedValue(new Error('probe save boom'))
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: '告警设置' }))
+    await waitFor(() => expect(probeField('证书提醒').value).toBe('30'))
+    fireEvent.click(screen.getByRole('button', { name: /保\s*存$/ }))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('保存拨测配置失败'))
+    expect(msgSuccess).not.toHaveBeenCalledWith(expect.stringContaining('拨测配置已保存'))
+  })
+
+  it('测试通知普通失败（非 503）：错误透出', async () => {
+    apiMock.testNotification.mockRejectedValue(new Error('network down'))
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: '告警设置' }))
+    await screen.findByText('https://h.example.com/x')
+    fireEvent.click(screen.getByRole('button', { name: /发送测试通知/ }))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('发送测试通知失败'))
   })
 })

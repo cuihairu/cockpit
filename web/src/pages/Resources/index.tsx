@@ -95,7 +95,8 @@ const Resources = () => {
   )
 }
 
-const activeKeyFallback = (activeKey: string, items: Array<{ key: string }>) => {
+// tab key 失效兜底（items 变化时防御）；导出仅为可单测
+export const activeKeyFallback = (activeKey: string, items: Array<{ key: string }>) => {
   if (items.some((item) => item.key === activeKey)) {
     return activeKey
   }

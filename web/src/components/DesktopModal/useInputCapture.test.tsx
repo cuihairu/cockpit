@@ -13,9 +13,10 @@ const setup = (enabled: boolean) => {
   const sendKeyboard = vi.fn()
   const sendMouse = vi.fn()
   let canvasEl!: HTMLCanvasElement
+  let cap!: ReturnType<typeof useInputCapture>
   // setCanvas 须在 useEffect 挂监听前执行——用 ref callback（commit 期先于 effect）
   const Probe = () => {
-    const cap = useInputCapture({ sendKeyboard, sendMouse, enabled })
+    cap = useInputCapture({ sendKeyboard, sendMouse, enabled })
     return (
       <canvas
         ref={(c) => {
@@ -33,7 +34,7 @@ const setup = (enabled: boolean) => {
     )
   }
   render(<Probe />)
-  return { canvas: canvasEl, sendKeyboard, sendMouse }
+  return { canvas: canvasEl, sendKeyboard, sendMouse, setCanvas: cap.setCanvas }
 }
 
 describe('useInputCapture', () => {
@@ -71,19 +72,40 @@ describe('useInputCapture', () => {
     expect(sendKeyboard).toHaveBeenLastCalledWith(getBaseScanCode(scan), false, isExtendedKey(scan))
   })
 
-  it('未知 code 扫描码为 0 不发送', () => {
+  it('未知 code 扫描码为 0 不发送（keydown 与 keyup 同）', () => {
     const { sendKeyboard } = setup(true)
     fireEvent.keyDown(window, { code: 'NotAKey' })
     expect(sendKeyboard).not.toHaveBeenCalled()
+    fireEvent.keyUp(window, { code: 'NotAKey' })
+    expect(sendKeyboard).not.toHaveBeenCalled()
+  })
+
+  it('canvas 置空后 mousemove 坐标兜底 0,0', () => {
+    const { canvas, sendMouse, setCanvas } = setup(true)
+    setCanvas(null)
+    fireEvent.mouseMove(canvas, { clientX: 5, clientY: 5 })
+    expect(sendMouse).toHaveBeenLastCalledWith(0, 0, 0, 0, 'move')
   })
 
   it('enabled=false 时全部静默', () => {
     const { canvas, sendKeyboard, sendMouse } = setup(false)
     fireEvent.mouseDown(canvas, { button: 0 })
+    fireEvent.mouseUp(canvas, { button: 0 })
     fireEvent.mouseMove(canvas, { clientX: 1, clientY: 1 })
     fireEvent.wheel(canvas, { deltaY: 10 })
     fireEvent.keyDown(window, { code: 'KeyA' })
+    fireEvent.keyUp(window, { code: 'KeyA' })
     expect(sendMouse).not.toHaveBeenCalled()
     expect(sendKeyboard).not.toHaveBeenCalled()
+  })
+
+  it('拦截键（F5）走 preventDefault 且扫描码照常发送', () => {
+    const { sendKeyboard } = setup(true)
+    const evt = new KeyboardEvent('keydown', { code: 'F5', bubbles: true, cancelable: true })
+    const spy = vi.spyOn(evt, 'preventDefault')
+    window.dispatchEvent(evt)
+    expect(spy).toHaveBeenCalled()
+    const scan = codeToScanCode('F5')
+    expect(sendKeyboard).toHaveBeenCalledWith(getBaseScanCode(scan), true, isExtendedKey(scan))
   })
 })

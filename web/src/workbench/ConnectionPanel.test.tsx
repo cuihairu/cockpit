@@ -97,4 +97,16 @@ describe('OverviewPanel', () => {
     expect(screen.getByText('离线')).toBeInTheDocument()
     expect(document.querySelectorAll('.ant-tag').length).toBe(1) // 仅状态 tag
   })
+
+  it('capabilities 字段缺失（undefined）走 || [] 兜底：不崩且无能力 tag', () => {
+    const agent = {
+      id: 'ag3', hostname: 'bare', ip: '10.0.0.3', status: 'online', lastSeen: '',
+      region: 'cn', zone: 'z',
+    } as Agent
+    render(<OverviewPanel agent={agent} />)
+    expect(screen.getByText('bare')).toBeInTheDocument()
+    expect(screen.getByText('在线')).toBeInTheDocument()
+    // 仅状态一枚 tag，能力区空
+    expect(document.querySelectorAll('.ant-tag').length).toBe(1)
+  })
 })

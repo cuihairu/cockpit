@@ -198,6 +198,26 @@ describe('Proxy', () => {
     expect(msgSuccess).toHaveBeenCalledWith('站点 blog 已应用')
   })
 
+  it('编辑 http 站点：tlsCert/tlsKey 不入参（scheme 条件分支）', async () => {
+    apiMock.applyProxySite.mockResolvedValue({})
+    renderPage()
+    await screen.findByText('选择一台安装了 Nginx 或 Traefik 的主机开始管理')
+    await act(async () => {
+      await pickAgent('gw-nginx')
+    })
+    expect(await screen.findByText('api')).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(within(rowOf('api')).getByRole('button', { name: /编辑/ }))
+    })
+    expect(await screen.findByText('编辑站点 api')).toBeInTheDocument()
+    await modalOk()
+    await waitFor(() => expect(apiMock.applyProxySite).toHaveBeenCalled())
+    const site = apiMock.applyProxySite.mock.calls[0][1] as Record<string, unknown>
+    expect(site.scheme).toBe('http')
+    expect(site.tlsCert).toBeUndefined()
+    expect(site.tlsKey).toBeUndefined()
+  })
+
   it('新建：名称与上游格式校验；https 切换出证书必填', async () => {
     renderPage()
     await screen.findByText('选择一台安装了 Nginx 或 Traefik 的主机开始管理')

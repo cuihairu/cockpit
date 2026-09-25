@@ -155,4 +155,79 @@ describe('LogSearch', () => {
     })
     expect(await screen.findByText('没有可检索的主机（全部离线或无日志能力）')).toBeInTheDocument()
   })
+
+  it('类型 Segmented 切换与 tail 数值调整', async () => {
+    renderPage()
+    expect(await screen.findByText('日志检索')).toBeInTheDocument()
+    // Segmented onChange：systemd → docker → systemd
+    fireEvent.click(screen.getByText('docker'))
+    expect(document.querySelector('.ant-segmented-item-selected')?.textContent).toBe('docker')
+    fireEvent.click(screen.getByText('systemd'))
+    expect(document.querySelector('.ant-segmented-item-selected')?.textContent).toBe('systemd')
+    // InputNumber onChange：调整 tail 行数
+    const tail = screen.getByRole('spinbutton')
+    fireEvent.change(tail, { target: { value: '50' } })
+    expect((tail as HTMLInputElement).value).toBe('50')
+  })
+
+  it('tail 清空（onChange null）回落 200 并入参', async () => {
+    renderPage()
+    await screen.findByText('日志检索')
+    const tail = screen.getByRole('spinbutton')
+    // jsdom 下 InputNumber 须 focus → change → blur 序列 onChange 才触发
+    await act(async () => {
+      fireEvent.focus(tail)
+      fireEvent.change(tail, { target: { value: '50' } })
+      fireEvent.blur(tail)
+    })
+    fireEvent.change(screen.getByPlaceholderText('日志源，如 nginx.service'), { target: { value: 'nginx.service' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /检索/ }))
+    })
+    await waitFor(() =>
+      expect(apiMock.searchLogs).toHaveBeenCalledWith(expect.objectContaining({ tail: 50 })))
+    // 清空输入 → onChange(null) → ?? 200 兜底
+    await act(async () => {
+      fireEvent.focus(tail)
+      fireEvent.change(tail, { target: { value: '' } })
+      fireEvent.blur(tail)
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /检索/ }))
+    })
+    await waitFor(() =>
+      expect(apiMock.searchLogs).toHaveBeenLastCalledWith(expect.objectContaining({ tail: 200 })))
+  })
+
+  it('防御分支：capabilities 缺失过滤、hostname 空、ok 行无 lines、失败行无 error', async () => {
+    apiMock.getAgents.mockResolvedValue([
+      mkAgent('ag-1', 'web-01', true),
+      // capabilities 缺失 → || [] 兜底后无 logs 能力，被过滤
+      { id: 'ag-7', hostname: 'db-07', ip: '1.2.3.6', capabilities: undefined, status: 'online', lastSeen: '0' } as unknown as Agent,
+      // hostname 空 → 下拉 label 回退 id
+      { id: 'ag-9', hostname: '', ip: '1.2.3.7', capabilities: [{ type: 'logs' }], status: 'online', lastSeen: '0' } as unknown as Agent,
+    ])
+    apiMock.searchLogs.mockResolvedValue({
+      results: [
+        { agentId: 'ag-9', hostname: '', ok: true }, // 无 lines → ?? '' 兜底
+        { agentId: 'ag-8', hostname: 'app-01', ok: false }, // 无 error → '未知错误'
+      ],
+      skipped: [],
+    })
+    renderPage()
+    await screen.findByText('日志检索')
+    // 主机下拉：无 logs 能力被过滤（capabilities || [] 不炸）；hostname 空显示 id
+    fireEvent.mouseDown(screen.getByText('全部主机').closest('.ant-select')!.querySelector('.ant-select-selector')!)
+    await waitFor(() =>
+      expect(Array.from(document.querySelectorAll('.ant-select-item-option')).map((o) => o.textContent)).toEqual(['web-01', 'ag-9']))
+    fireEvent.change(screen.getByPlaceholderText('日志源，如 nginx.service'), { target: { value: 'nginx.service' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /检索/ }))
+    })
+    // ok 行无 lines → ?? '' → '0 行'（非截断分支）；汇总行共 0 行
+    expect(await screen.findByText('0 行')).toBeInTheDocument()
+    expect(screen.getByText('1/2 台返回，共 0 行')).toBeInTheDocument()
+    // 失败行无 error → '未知错误'
+    expect(screen.getByText('未知错误')).toBeInTheDocument()
+  })
 })

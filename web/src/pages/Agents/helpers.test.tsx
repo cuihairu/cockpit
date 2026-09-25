@@ -81,6 +81,25 @@ describe('getRemoteServices', () => {
       { protocol: 'vnc', host: '127.0.0.1', port: 5900, name: 'VNC Server', running: true },
     ])
   })
+
+  it('metadata 值非对象/null/缺 running 字段均跳过', () => {
+    const agent = baseAgent({
+      capabilities: [
+        {
+          type: 'remote-services',
+          metadata: {
+            ssh: 'plain-string',
+            rdp: null,
+            vnc: { host: 'h', port: 5900 },
+            telnet: { host: '10.0.0.1', port: 23, name: 'Tel', running: true },
+          },
+        },
+      ],
+    })
+    expect(getRemoteServices(agent)).toEqual([
+      { protocol: 'telnet', host: '10.0.0.1', port: 23, name: 'Tel', running: true },
+    ])
+  })
 })
 
 describe('配置表完整性', () => {
