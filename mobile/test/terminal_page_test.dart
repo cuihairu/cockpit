@@ -380,4 +380,73 @@ void main() {
     await tester.runAsync(() => server.close());
   });
 
+  testWidgets('终端页：WS 协议帧非法 → stream onError 显示连接错误文案',
+      (tester) async {
+    // 升级前持有 raw socket，升级响应后紧跟保留 opcode（0x3）帧字节：
+    // RFC 6455 §5.2 要求客户端收到保留 opcode 即 fail connection，
+    // dart:io 协议解析抛 WebSocketException → channel.stream onError
+    // （此前登记 KNOWN_UNCOVERABLE 的 onError 分支由此路径真实触发）。
+    final upgraded = Completer<void>();
+    final server = (await tester.runAsync(() async {
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      try {
+        final s = await HttpServer.bind('127.0.0.1', 0);
+        s.listen((req) async {
+          final raw = req.socket;
+          final ws = await WebSocketTransformer.upgrade(req,
+              protocolSelector: (protocols) => protocols.first);
+          raw.add([0x83, 0x01, 0x78]); // FIN + 保留 opcode 3，负载 'x'
+          upgraded.complete();
+          ws.listen((_) {});
+        });
+        return s;
+      } finally {
+        HttpOverrides.global = saved;
+      }
+    }))!;
+
+    final adapter = MockAdapter()
+      ..on('POST', '/api/remote/tickets', 200,
+          {'ticket': 'tk-err', 'expires_at': '2030-01-01T00:00:00Z'});
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(
+            () => _UrlSettings('http://127.0.0.1:${server.port}')),
+        apiProvider.overrideWith(
+            (ref) async => CockpitApi(ApiClient.forTest(dio))),
+      ],
+      child: MaterialApp(
+        home: TerminalPage(
+          agent: _agentWithSsh(),
+          ssh: SshService(host: '10.0.0.1', port: 22),
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    // 真 async 区等握手完成 + 客户端解析非法帧 → onError → _fail
+    await tester.runAsync(() async {
+      for (var i = 0; i < 50 && !upgraded.isCompleted; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 200));
+    // onError（写文案 + 置 error 态）先于 onDone（connected 态下不写文案）；
+    // 若只有 onDone，L123 条件不满足、横幅为空——文案出现即 onError 已执行
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+    expect(find.textContaining('连接已关闭'), findsOneWidget);
+
+    // 卸载 → dispose → sink.close() 挂 5s close 超时 Timer，推进 fake time
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 5));
+    await tester.runAsync(() => server.close(force: true));
+  });
+
 }
