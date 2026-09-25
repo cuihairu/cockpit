@@ -20,8 +20,8 @@ export default defineConfig({
     // 限半数 worker 换稳定性（总时长接近，flaky 归零）
     maxWorkers: 8,
     // coverage 插桩后 antd 组件首渲染显著变慢（默认 5s 会超时）；
-    // 16 核 68 worker 并发下重表单/千行 diff 用例需 20s+，放宽到 60s
-    testTimeout: 60000,
+    // 插桩 + 8 worker 下 Backups 重表单用例实测 63s+，放宽到 120s
+    testTimeout: 120000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
