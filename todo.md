@@ -42,7 +42,7 @@
 
 ### P0：前后端协议和主路径不一致
 
-#### 1. 远程终端 / 桌面 / VNC 前端仍走旧的 query-token WebSocket，未切到 ticket + `Sec-WebSocket-Protocol` ✅ 已完成（2026-06-26）
+#### 1. 远程终端 / 桌面 / VNC 前端仍走旧的 query-token WebSocket，未切到 ticket + `Sec-WebSocket-Protocol` [已完成（2026-06-26]
 
 代码证据：
 
@@ -57,7 +57,7 @@
 - Terminal/Desktop/VNC 三个连接器都已改为先取 ticket，再通过 `Sec-WebSocket-Protocol` 建立连接。
 - WebSocket URL 已不再携带 JWT、password、host/port 等敏感参数。
 
-#### 2. 前端残留一套不存在的 `/api/remote/connections` / `/api/remote/terminal/start` API ✅ 已完成（2026-06-26）
+#### 2. 前端残留一套不存在的 `/api/remote/connections` / `/api/remote/terminal/start` API [已完成（2026-06-26]
 
 代码证据：
 
@@ -72,7 +72,7 @@
 
 ### P1：表面可用，但实际未闭环
 
-#### 3. 个人资料里的 `phone` / `department` 目前不会持久化 ✅ 已完成（2026-06-26）
+#### 3. 个人资料里的 `phone` / `department` 目前不会持久化 [已完成（2026-06-26]
 
 代码证据：
 
@@ -85,7 +85,7 @@
 - `storage/user_test.go`、`internal/server/api_test.go` 已补覆盖。
 - Profile 页已从 `/api/me` 回填并在保存后同步上下文。
 
-#### 4. `/api/settings` 只是兼容空实现，设置页并没有真正持久化或影响全局 UI ✅ 已完成（2026-06-26，方案 A）
+#### 4. `/api/settings` 只是兼容空实现，设置页并没有真正持久化或影响全局 UI [已完成（2026-06-26，方案 A]
 
 代码证据：
 
@@ -99,7 +99,7 @@
 - Settings 页已加载真实当前值，不再使用硬编码初始值。
 - `siteName`、`theme`、`refreshInterval`、`compactMode`、`showResourceCount` 已实际影响 UI/轮询行为。
 
-#### 5. RDP 功能默认构建产物并不真正可用 ✅ 已完成（2026-06-28，方案 B）
+#### 5. RDP 功能默认构建产物并不真正可用 [已完成（2026-06-28，方案 B]
 
 代码证据：
 
@@ -117,7 +117,7 @@
 
 ### P2：产品边界和文档仍不一致
 
-#### 6. `remote_control.allowed_targets` 文档声称支持 inventory endpoint，但当前实现只读取配置白名单 ✅ 已完成（2026-06-28）
+#### 6. `remote_control.allowed_targets` 文档声称支持 inventory endpoint，但当前实现只读取配置白名单 [已完成（2026-06-28]
 
 代码证据：
 
@@ -131,7 +131,7 @@
 - `docs/guide/{concepts,protocol,architecture}.md` 已同步当前 allow-list 语义。
 - `internal/server/remote_audit_test.go` 已覆盖默认拒绝、白名单放行和任意目标开关。
 
-#### 7. `inventory.watch` 文档仍有历史表述，需要按代码事实改写 ✅ 已完成（2026-06-28）
+#### 7. `inventory.watch` 文档仍有历史表述，需要按代码事实改写 [已完成（2026-06-28]
 
 代码证据：
 
@@ -142,7 +142,7 @@
 
 - `docs/guide/concepts.md` 已改为说明 `inventory.watch` 复用同一套 Syncer，可同步 Agent、Domain、Certificate、ComputeInstance、Service、Gateway、Storage 等资源。
 
-#### 8. 登录页仍展示 `admin / admin` 默认账号，和当前强制 `ADMIN_PASSWORD` 的启动逻辑矛盾 ✅ 已完成（2026-06-28）
+#### 8. 登录页仍展示 `admin / admin` 默认账号，和当前强制 `ADMIN_PASSWORD` 的启动逻辑矛盾 [已完成（2026-06-28]
 
 代码证据：
 
@@ -154,7 +154,7 @@
 - `web/src/pages/Login/index.tsx` 已删除 `admin/admin` 默认填充值。
 - 登录页页脚已改为提示管理员账号由 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 初始化。
 
-#### 9. 前端仍把 `ftp` 暴露为可选远控协议，但主远控后端并未支持 ✅ 已完成（2026-06-26）
+#### 9. 前端仍把 `ftp` 暴露为可选远控协议，但主远控后端并未支持 [已完成（2026-06-26]
 
 代码证据：
 
@@ -183,7 +183,7 @@
 
 > 以上"当前判断"为初始状态描述，**作为历史快照保留**；实际进度以"进度状态"表为准。
 
-## Phase 0: 建立可验证基线 ✅
+## Phase 0: 建立可验证基线
 
 ### 0.1 记录并修复依赖下载问题
 
@@ -748,33 +748,33 @@
 
 覆盖率推至 98.6% 后主线转向 `go test -race` 收口，本轮修复三处数据竞态：
 
-1. ✅ `internal/proxy`：测试 mock 的 `messages` 切片被后台协程持锁追加、测试裸读（dbe1e8b0）。
-2. ✅ `internal/auth`：密码重置令牌全局 map **生产代码无锁**——HTTP handler 并发读写 + `GenerateResetToken` 起后台清理协程遍历删除；加 `resetTokenMu`，顺带删除名字像锁实为冗余映射的 `resetTokenStoreMutex`（a849ada8）。
-3. ✅ `internal/agent`：`connect()` 直接写全局单例 `websocket.DefaultDialer.HandshakeTimeout`，与并发 Dial 构成竞态；改为值拷贝（d9f28dcc）。
+1. [`internal/proxy`：测试 mock 的 `messages` 切片被后台协程持锁追加、测试裸读（dbe1e8b0）。]
+2. [`internal/auth`：密码重置令牌全局 map **生产代码无锁**——HTTP handler 并发读写 + `GenerateResetToken` 起后台清理协程遍历删除；加 `resetTokenMu`，顺带删除名字像锁实为冗余映射的 `resetTokenStoreMutex`（a849ada8）。]
+3. [`internal/agent`：`connect()` 直接写全局单例 `websocket.DefaultDialer.HandshakeTimeout`，与并发 Dial 构成竞态；改为值拷贝（d9f28dcc）。]
 
 配套：
 
-- ✅ CI `test.yml` 新增 `go test -race -short ./...` 兜底步骤（此前只有普通 `go test`，这类竞态 CI 抓不到）。
-- ✅ 全仓 `-race -short` 终验通过。
+- [CI `test.yml` 新增 `go test -race -short ./...` 兜底步骤（此前只有普通 `go test`，这类竞态 CI 抓不到）。]
+- [全仓 `-race -short` 终验通过。]
 
 ## 远控三协议统一第三方集成（Guacamole SSH 接入，2026-09-25）
 
 方向对齐另一仓库：VNC / SSH / RDP 三协议远控统一集成第三方方案（guacd + guacamole-common-js 单栈），不再各自维护自研协议链路。设计文档 `docs/remote-access-integration-design.md`（选型总览/备选对比/数据流/衔接既有链路/决策 D1-D7）。RDP/VNC 已在 Guacamole 路线上，本次补齐 **SSH 接入同一栈**：
 
-1. ✅ **Go 网关**（`internal/server/api_guacamole.go`）：协议白名单扩 `ssh`（telnet 维持 agent 通道，D1）；`guacConnectArgs` ssh 分支——username/password 直传、`private_key` PEM 原文 → `private-key` base64（guacd 约定）、width/height/domain 不进 connect（字符终端 + SSH 无域概念，D2）。录制/审计/出口策略/票据链路零新增（guacd ssh 同样支持 recording → `.guac` 收集链路原样生效）。
-2. ✅ **web 入口切换**（D3/D4）：Workbench SSH Tab 与 Agents 页 `useRemoteModals` 默认分流 GuacamoleModal（与 RDP/VNC 一致）；ConnectionPanel 加 `onFallback` 可选兜底按钮——SSH Tab 显「内置终端（经 Agent）」开 TerminalModal（guacd 不可用时的退路，与 grdp 并存期同纪律）；GuacamoleModal protocol 扩 `ssh`（表单：用户名必填 + 可选口令/私钥 PEM TextArea，无私钥域）。
-3. ✅ **测试**：Go 3 新用例（`TestGuacConnectArgsSSH` 参数映射含 base64/无私钥不传、`TestGuacamoleTunnelSSHFullFlow` 全链路 select ssh 握手断言、白名单测试改 telnet/ftp 拒绝）；web 4 处（GuacamoleModal ssh 表单 3 用例——含 saveDesktopConfig 预填绕过必填校验的坑（同键最近配置先清 localStorage）、ConnectionPanel 兜底按钮渲染/回调/缺省不渲染、useRemoteModals ssh 分流改 guac、Workbench SSH 主入口 guac + 兜底入口 terminal 断言）。
-4. ✅ **顺带修三处环境依赖存量失败**（fake-IP DNS 下 `.invalid` 经搜索域追加被解析，真实网络查询不可靠）：`internal/probe` `TestRunAllChecksDomainDNSFailure` 改注入 `fakeHealthChecker`（既有基建）；`internal/domain` `IsAvailable` 的 `net.LookupIP` 三处 var 化 `domainLookupIP`（行为中性）+ `TestCovIsAvailableNoDNS` 注入解析失败；web ESLint 2 存量 error（DesktopModal/VNCModal render 期写 ref 违反 react-hooks/refs）改 `useEffect` commit 后同步（超时回调读取时已提交，时序等价）。
+1. [**Go 网关**（`internal/server/api_guacamole.go`）：协议白名单扩 `ssh`（telnet 维持 agent 通道，D1）；`guacConnectArgs` ssh 分支——username/password 直传、`private_key` PEM 原文 → `private-key` base64（guacd 约定）、width/height/domain 不进 connect（字符终端 + SSH 无域概念，D2）。录制/审计/出口策略/票据链路零新增（guacd ssh 同样支持 recording → `.guac` 收集链路原样生效）。]
+2. [**web 入口切换**（D3/D4）：Workbench SSH Tab 与 Agents 页 `useRemoteModals` 默认分流 GuacamoleModal（与 RDP/VNC 一致）；ConnectionPanel 加 `onFallback` 可选兜底按钮——SSH Tab 显「内置终端（经 Agent）」开 TerminalModal（guacd 不可用时的退路，与 grdp 并存期同纪律）；GuacamoleModal protocol 扩 `ssh`（表单：用户名必填 + 可选口令/私钥 PEM TextArea，无私钥域）。]
+3. [**测试**：Go 3 新用例（`TestGuacConnectArgsSSH` 参数映射含 base64/无私钥不传、`TestGuacamoleTunnelSSHFullFlow` 全链路 select ssh 握手断言、白名单测试改 telnet/ftp 拒绝）；web 4 处（GuacamoleModal ssh 表单 3 用例——含 saveDesktopConfig 预填绕过必填校验的坑（同键最近配置先清 localStorage）、ConnectionPanel 兜底按钮渲染/回调/缺省不渲染、useRemoteModals ssh 分流改 guac、Workbench SSH 主入口 guac + 兜底入口 terminal 断言）。]
+4. [**顺带修三处环境依赖存量失败**（fake-IP DNS 下 `.invalid` 经搜索域追加被解析，真实网络查询不可靠）：`internal/probe` `TestRunAllChecksDomainDNSFailure` 改注入 `fakeHealthChecker`（既有基建）；`internal/domain` `IsAvailable` 的 `net.LookupIP` 三处 var 化 `domainLookupIP`（行为中性）+ `TestCovIsAvailableNoDNS` 注入解析失败；web ESLint 2 存量 error（DesktopModal/VNCModal render 期写 ref 违反 react-hooks/refs）改 `useEffect` commit 后同步（超时回调读取时已提交，时序等价）。]
 
-5. ✅ **验收项补齐（D8，2026-09-25 续做）**：上一轮只落了 D1-D4 的骨架，todo「真机验收」里的三条前端可自证项当时**没有对应实现**——SSH 尺寸不跟窗口走（vim/top 全屏程序停在旧列行数）、剪贴板只有正向（远端→浏览器）。本轮补上：
+5. [**验收项补齐（D8，2026-09-25 续做）**：上一轮只落了 D1-D4 的骨架，todo「真机验收」里的三条前端可自证项当时**没有对应实现**——SSH 尺寸不跟窗口走（vim/top 全屏程序停在旧列行数）、剪贴板只有正向（远端→浏览器）。本轮补上：]
    - **尺寸同步**（`GuacamoleModal`）：仅 SSH 用 `ResizeObserver` 监听 display 容器，150ms 去抖后发 `sendSize`，guacd 按字体度量换算列/行；建连后先按当前窗口补发一次。RDP/VNC **不接**（那里的 `size` 语义是「切远端分辨率」，由工具栏下拉驱动；自动跟窗口变会变成「窗口多大桌面多大」），并对 SSH 隐藏分辨率下拉与尺寸文本（固定档位会与自动尺寸打架）。
    - **剪贴板双向**：反向用 `Client.createClipboardStream('text/plain')` + `Guacamole.StringWriter`（common-js 官方写法，Go 网关字节管道原样透传，**后端零改动**）；两条入口 = 终端区域 Ctrl+V（`paste` 事件自带数据，不受 Clipboard 授权限制）+ 工具栏「粘贴到远程」按钮（`navigator.clipboard.readText()`，读失败提示走 Ctrl+V 不静默）。反向只对 SSH 接，RDP/VNC 维持既有仅正向行为（桌面路径零变更）。纯文本单层（富格式维持「不做」）。
    - **踩坑修复（真 bug，非风格）**：`GuacamoleModal` 里 `useConnectionTimeout` 的 `clear` 解构成 `clearTimeout`，**遮蔽了全局 `clearTimeout`**——去抖第一版因此失效（连续两次 resize 发了两条 `size`，测试直接抓到）。改名 `clearConnTimeout` 并在代码里留注释。组件内还有真实定时器，这是复发高发点。
    - **可访问性**：`RemoteToolbar` 的「粘贴到远程」按钮补 `aria-label`（此前 icon-only 无可访问名，测试也只能靠按钮序号定位）。
-6. ✅ **补测试（含发现并修掉的存量回归）**：`web/src/test/setup.ts` 加 ResizeObserver 可观测桩（jsdom 无实现）+ `window.__triggerResize(w,h)` 触发器。GuacamoleModal 新增 5 用例（尺寸同步去抖取末次/0 尺寸跳过、RDP 不挂 RO、终端 paste 反向含空与无 clipboardData 两条静默分支、工具栏按钮正向与读失败兜底、SSH 隐藏分辨率下拉 vs RDP 保留、卸载 cleanup 断 RO）。**发现上一轮漏改 `web/src/pages/Agents/index.test.tsx`**：两处仍断言 ssh 分流到 `terminal-modal`（D3 改成 guac 后必挂），本轮一并修正。
+6. [**补测试（含发现并修掉的存量回归）**：`web/src/test/setup.ts` 加 ResizeObserver 可观测桩（jsdom 无实现）+ `window.__triggerResize(w,h)` 触发器。GuacamoleModal 新增 5 用例（尺寸同步去抖取末次/0 尺寸跳过、RDP 不挂 RO、终端 paste 反向含空与无 clipboardData 两条静默分支、工具栏按钮正向与读失败兜底、SSH 隐藏分辨率下拉 vs RDP 保留、卸载 cleanup 断 RO）。**发现上一轮漏改 `web/src/pages/Agents/index.test.tsx`**：两处仍断言 ssh 分流到 `terminal-modal`（D3 改成 guac 后必挂），本轮一并修正。]
    - 验收边界：`go build/vet/test ./...` 全绿（32 包）；web tsc 0 错、ESLint 0 error（2 存量 warning 非本次引入）、`pnpm build` 过、全量 vitest（909 用例）过 + `tool/coverage_check.sh` 通过（有效覆盖 100%）。真机验收项挂起（真 guacd + 真 sshd：口令/私钥认证、终端渲染、`.guac` 录制回放、剪贴板；已入 acceptance-checklist「远控三协议」节）。移动端不动（D6：xterm.dart 走 agent 通道独立链路）。
 
-7. ✅ **审核修复（2026-09-26，复查 31d1c16 发现两处真缺陷）**：
+7. [**审核修复（2026-09-26，复查 31d1c16 发现两处真缺陷）**：]
    - **`StringWriter` 用了虚构 API**：`writer.send(text)` 在库源码里不存在（guacamole-common-js 1.5.0 只有 `sendText`/`sendEnd`，dist/esm 14188/14197 行），运行时必抛 `TypeError`。假绿根因：`global.d.ts` 的手写类型声明把虚构方法名定了型，测试 mock 又照着虚构声明实现——类型、组件、mock 三方一致地错。改为官方写法 `sendText` + `sendEnd`（漏 `sendEnd` 远端流会一直开着）；类型声明与 mock 同步纠正，mock 处留注释「对照库真实 API」防复发。这正是设计文档「照抄官方，不自由发挥」禁区撞车的实例：**手写第三方类型声明时，方法名必须回库源码核实，不能凭印象写**。
    - **paste 监听绑 display 容器收不到事件**：浏览器 paste 落在「当前聚焦元素」上再冒泡，而连接态的桌面分支里没有任何可聚焦元素（canvas 无 tabindex），焦点实际停在 body/Modal 容器——绑 `el` 的监听器在真实浏览器**永远不触发**（jsdom 测试直接往 display 元素 dispatch 才假绿）。改绑 `document`：该 effect 只在 `state === 'connected'` 时挂载，凭据表单（用户名/私钥 TextArea）此刻不在 DOM，无误粘面；另加输入框守卫（`closest('input, textarea, [contenteditable]')`）防御未来连接态 UI 加输入控件，守卫分支有专门测试（往 body 挂 input 后 dispatch paste 断言不开流）。
    - **`TestNormalizeDomain` 依赖真实 whois 网络**（同病不同处：2026-09-26 全量跑复现 whois exit 1）：用例本意是输入归一化与非法输入分流，却 `NewMonitor(Config{})` 走系统 whois 连真服务器。改经既有 `Config.WhoisPath` 注入假脚本（`t.TempDir` 下 `exit 0` 的 sh，`parseWhois` 对任意输出恒不报错、出参不参与断言故等价）——顺带 CI 无 whois 二进制时也不用 skip 了。
@@ -783,15 +783,15 @@
 
 仓库此前已有 Dockerfile 与 compose（本地构建向），但**没有一条把镜像发出去的链路**——部署机想用只能自己 build。本次补齐「推镜像 → 拉镜像部署」的闭环。
 
-1. ✅ **`.github/workflows/docker.yml`**（新建）：GitHub-hosted runner + buildx，推 `ghcr.io/cuihairu/cockpit`。结构对齐同组织 croupier 仓库的同名 workflow：checkout@v7 / setup-buildx@v4 / login@v4 / metadata@v6 / build-push@v7 + 一段「把 GHCR 包可见性改 public」best-effort 步骤（`continue-on-error`，优先 `GHCR_TOKEN` secret、缺省回退 `GITHUB_TOKEN`），否则 `docker pull` 得先登录。
+1. [**`.github/workflows/docker.yml`**（新建）：GitHub-hosted runner + buildx，推 `ghcr.io/cuihairu/cockpit`。结构对齐同组织 croupier 仓库的同名 workflow：checkout@v7 / setup-buildx@v4 / login@v4 / metadata@v6 / build-push@v7 + 一段「把 GHCR 包可见性改 public」best-effort 步骤（`continue-on-error`，优先 `GHCR_TOKEN` secret、缺省回退 `GITHUB_TOKEN`），否则 `docker pull` 得先登录。]
    - **多 tag**：`latest`（main 分支）/ `main` / `v1.2.3`·`1.2.3`·`1.2`·`1`（semver 系列）/ 短 sha / `pr-N`。锁 sha 或 semver 即得不可变部署点。
    - **只出 linux/amd64**：Server 走 CGO（SQLite 绑死在 cgo），多架构要交叉工具链，不在本轮范围（文档里写明）。
    - **PR 只构建不推送**（`load` 与 `push` 互斥），并跑一次真容器冒烟：`cockpit version` 校验 VERSION build-arg 真的进了二进制 → 起容器 → 轮询 `/health`。这是「Dockerfile 可直接跑」的 CI 证据。
    - GHA 缓存（`cache-from/to: type=gha,scope=cockpit,mode=max`）。
-2. ✅ **Dockerfile 可直接跑**：`--build-arg VERSION` 注入 `main.version`（`cockpit version` 可见，此前镜像里版本号恒为源码默认值）；**pnpm 版本钉死 `pnpm@11.19.0`**——仓库无 `packageManager` 字段，原来的 `corepack enable` 会挑「corepack 已知最新版」pnpm，哪天上游发新版就可能把 `--frozen-lockfile` 掀了；改走 `npm install -g`（corepack `prepare` 在新版 corepack 已废弃，且与本仓 `deploy-dev.yml` 的做法一致）。
-3. ✅ **docker compose**（`deployments/docker/docker-compose.yml` 新建）：**拉镜像**的部署向编排（`COCKPIT_IMAGE_TAG` 可锁 tag，缺省 latest），与仓库根那份**本地构建**向 compose 职责分工，两份服务定义同源。顺带修一个真缺陷：原根 compose 只把 `guacd-recordings` 卷挂给 guacd、**没挂给 server**——guacd 按 `recording-path` 写 `<sid>.guac`，Go 网关会话结束时从**同一路径**收走归档（`collectGuacRecording`），不共挂则远控/终端录制的 `.guac` 永远收不进 `/recordings`。两份 compose 现都同卷同路径挂载并显式设 `GUACD_RECORDING_PATH`。
-4. ✅ **`docs/operations/deploy-docker.md`**（新建）+ 文档网接入：VitePress sidebar 新增「运维」分组（`/operations/` 前缀），快速开始页加「不想编译？用 Docker」入口与下一步链接；`deployments/docker/README.md` 改成两套姿势分工 + 指向新指南；README 的 Docker 章节补镜像地址、tag 策略、拉镜像命令与 guacd 共卷说明；`.env.example` 补 `COCKPIT_IMAGE_TAG` / `GUACD_ADDR` / `GUACD_RECORDING_PATH` / `GUACD_LOG_LEVEL`。
-5. ✅ **顺带修一处反代缺口**：`deployments/nginx/cockpit.cuihairu.site.conf` 的远控 WS location 正则 `^/api/remote/(terminal|desktop|vnc)` **漏了 `guacamole`**——走该配置部署时 Guacamole 隧道（RDP/VNC/SSH）建不起来。已补，并加注释说明漏它的后果。
+2. [**Dockerfile 可直接跑**：`--build-arg VERSION` 注入 `main.version`（`cockpit version` 可见，此前镜像里版本号恒为源码默认值）；**pnpm 版本钉死 `pnpm@11.19.0`**——仓库无 `packageManager` 字段，原来的 `corepack enable` 会挑「corepack 已知最新版」pnpm，哪天上游发新版就可能把 `--frozen-lockfile` 掀了；改走 `npm install -g`（corepack `prepare` 在新版 corepack 已废弃，且与本仓 `deploy-dev.yml` 的做法一致）。]
+3. [**docker compose**（`deployments/docker/docker-compose.yml` 新建）：**拉镜像**的部署向编排（`COCKPIT_IMAGE_TAG` 可锁 tag，缺省 latest），与仓库根那份**本地构建**向 compose 职责分工，两份服务定义同源。顺带修一个真缺陷：原根 compose 只把 `guacd-recordings` 卷挂给 guacd、**没挂给 server**——guacd 按 `recording-path` 写 `<sid>.guac`，Go 网关会话结束时从**同一路径**收走归档（`collectGuacRecording`），不共挂则远控/终端录制的 `.guac` 永远收不进 `/recordings`。两份 compose 现都同卷同路径挂载并显式设 `GUACD_RECORDING_PATH`。]
+4. [**`docs/operations/deploy-docker.md`**（新建）+ 文档网接入：VitePress sidebar 新增「运维」分组（`/operations/` 前缀），快速开始页加「不想编译？用 Docker」入口与下一步链接；`deployments/docker/README.md` 改成两套姿势分工 + 指向新指南；README 的 Docker 章节补镜像地址、tag 策略、拉镜像命令与 guacd 共卷说明；`.env.example` 补 `COCKPIT_IMAGE_TAG` / `GUACD_ADDR` / `GUACD_RECORDING_PATH` / `GUACD_LOG_LEVEL`。]
+5. [**顺带修一处反代缺口**：`deployments/nginx/cockpit.cuihairu.site.conf` 的远控 WS location 正则 `^/api/remote/(terminal|desktop|vnc)` **漏了 `guacamole`**——走该配置部署时 Guacamole 隧道（RDP/VNC/SSH）建不起来。已补，并加注释说明漏它的后果。]
 
 文档纪律：VitePress 只校验 docs 目录内的相对链接，`.yml` 之外的越界链接（`../../deployments/**`）会被判死链导致 `docs.yml` 构建失败——按同组织 croupier 文档的既有做法，仓内文件一律用行内 code 路径引用而非链接。
 
@@ -803,8 +803,8 @@
 
 全页面测试系列收官（33/33 页面有测试，Drift 页收尾）后，两笔清掉 web 侧全部存量：
 
-1. ✅ **Agent/资源地域字段对齐后端 API**（8f928baf）：后端 `storage.Agent`/`ComputeInstance` 顶层序列化 `region`/`zone`，从无 `location` 对象；前端类型错位导致 Agents 地域列与筛选、Dashboard 地域列、Docker 面包屑、Workbench 搜索与概览、Network 面板标签在真实环境**恒空**（页面测试 mock 沿用错位 shape 所以从未暴露——mock 数据应以后端真实序列化为准，不能互相抄）。`Agent`/`ComputeInstance` 类型改顶层可选 `region`/`zone`；`Gateway`/`Storage` 后端无地域字段，删除 `location`；`Location` interface 删除；10 处 reader（含 `src/workbench/`）、19 个测试文件 mock 同步迁移；Network 面板标签断言更新为「主机名 · 地域」（修复后地域首次真实显示）。
-2. ✅ **tsc 存量错误清零**（72adcbf8）：`tsc --noEmit` 全仓 0 错误（此前 7 个存量）。navTheme 映射 realDark、ErrorBoundary 未用 React 导入、ServerBackupCard enabled 收敛 Boolean、useSettings 剔除 null refreshInterval、新增 `vite-env.d.ts`（vite/client）。
+1. [**Agent/资源地域字段对齐后端 API**（8f928baf）：后端 `storage.Agent`/`ComputeInstance` 顶层序列化 `region`/`zone`，从无 `location` 对象；前端类型错位导致 Agents 地域列与筛选、Dashboard 地域列、Docker 面包屑、Workbench 搜索与概览、Network 面板标签在真实环境**恒空**（页面测试 mock 沿用错位 shape 所以从未暴露——mock 数据应以后端真实序列化为准，不能互相抄）。`Agent`/`ComputeInstance` 类型改顶层可选 `region`/`zone`；`Gateway`/`Storage` 后端无地域字段，删除 `location`；`Location` interface 删除；10 处 reader（含 `src/workbench/`）、19 个测试文件 mock 同步迁移；Network 面板标签断言更新为「主机名 · 地域」（修复后地域首次真实显示）。]
+2. [**tsc 存量错误清零**（72adcbf8）：`tsc --noEmit` 全仓 0 错误（此前 7 个存量）。navTheme 映射 realDark、ErrorBoundary 未用 React 导入、ServerBackupCard enabled 收敛 Boolean、useSettings 剔除 null refreshInterval、新增 `vite-env.d.ts`（vite/client）。]
 
 验收：`pnpm build` 通过；全量 vitest 68 文件 / 473 用例全绿、退出码 0 无 Errors。
 
@@ -814,27 +814,27 @@
 
 功能路线图自可选任务收尾后，把滞后于实现的对外文档对齐：
 
-1. ✅ **README「当前能力」对齐 2026-09 功能面**：原 5 条停在 6 月版本（资源/工作台/监控/设置/审计/远程连接），补齐控制面基础（TOTP/RBAC）、资源视图（心跳条/到期告警）、远程操作（录制/文件/日志联邦检索）、容器与 Stacks、备份恢复（agent+server 双侧）、反代双后端、ACME 三 provider、DNS/DDNS/台账、主机运维（服务三后端/Cron/SMART/NAS/组网观测）、漂移与多渠道通知；「关键配置」补新配置键指引与环境变量清单。
-2. ✅ **config/cockpit.yaml 示例补齐**：`notification` 补 ntfy/webhook/telegram 渠道示例（对照 `internal/config/config.go` 实际 yaml tag）；`dns` 补 `provider`/`dnspod`/`alidns` 键与三家环境变量注入提示；新增注释形态 `overlay` 段（zerotier/tailscale token + tailnet）。密钥一律以注释示例 + env 优先呈现，不引入真实凭据。YAML 解析校验通过。
+1. [**README「当前能力」对齐 2026-09 功能面**：原 5 条停在 6 月版本（资源/工作台/监控/设置/审计/远程连接），补齐控制面基础（TOTP/RBAC）、资源视图（心跳条/到期告警）、远程操作（录制/文件/日志联邦检索）、容器与 Stacks、备份恢复（agent+server 双侧）、反代双后端、ACME 三 provider、DNS/DDNS/台账、主机运维（服务三后端/Cron/SMART/NAS/组网观测）、漂移与多渠道通知；「关键配置」补新配置键指引与环境变量清单。]
+2. [**config/cockpit.yaml 示例补齐**：`notification` 补 ntfy/webhook/telegram 渠道示例（对照 `internal/config/config.go` 实际 yaml tag）；`dns` 补 `provider`/`dnspod`/`alidns` 键与三家环境变量注入提示；新增注释形态 `overlay` 段（zerotier/tailscale token + tailnet）。密钥一律以注释示例 + env 优先呈现，不引入真实凭据。YAML 解析校验通过。]
 
 ## 移动端 Flutter（2026-09-22）
 
 用户指定 Flutter 出手机版（iOS + Android）。设计 [mobile-design](docs/guide/mobile-design.md)（D1-D8），M1 分三笔落地：
 
-1. ✅ **docs(design)**（071a964e）：选型对比、直连既有 `/api/*` 不建 BFF（web api.ts 173 端点复用）、告警推送复用 ntfy 渠道不接 FCM/APNs、JWT+TOTP 双步复用、自签显式开关、Riverpod+dio、终端 M2、独立 mobile.yml（iOS 不进 CI）。诚实边界：本机 Linux 无法构建 iOS，需 macOS。
-2. ✅ **feat(mobile) M1 主体**（eeb7cecd）：Flutter 3.47.5 双端工程；models 逐一对照 Go json tag（region/zone 顶层、ContainerInfo 大写缩写词）；dio 客户端 401 刷新重放一次+失败登出；四态认证机（token 入 secure storage，启动恢复+401 兜底）；引导/登录（TOTP 双步）/仪表盘/主机+容器 start-stop-restart/告警+全部已读/设置 八页；13 测试（MockAdapter 序列响应验 401 链路）。CI mobile.yml：analyze/test + debug APK 构建通过。
-3. ✅ **feat(mobile) 审计页**（99a440b0）：AuditLog 对齐 + 分页加载更多（占位 item post-frame 自动预取，build 期间 setState 是真坑）+ 失败行红标；16 测试全绿。
+1. [**docs(design)**（071a964e）：选型对比、直连既有 `/api/*` 不建 BFF（web api.ts 173 端点复用）、告警推送复用 ntfy 渠道不接 FCM/APNs、JWT+TOTP 双步复用、自签显式开关、Riverpod+dio、终端 M2、独立 mobile.yml（iOS 不进 CI）。诚实边界：本机 Linux 无法构建 iOS，需 macOS。]
+2. [**feat(mobile) M1 主体**（eeb7cecd）：Flutter 3.47.5 双端工程；models 逐一对照 Go json tag（region/zone 顶层、ContainerInfo 大写缩写词）；dio 客户端 401 刷新重放一次+失败登出；四态认证机（token 入 secure storage，启动恢复+401 兜底）；引导/登录（TOTP 双步）/仪表盘/主机+容器 start-stop-restart/告警+全部已读/设置 八页；13 测试（MockAdapter 序列响应验 401 链路）。CI mobile.yml：analyze/test + debug APK 构建通过。]
+3. [**feat(mobile) 审计页**（99a440b0）：AuditLog 对齐 + 分页加载更多（占位 item post-frame 自动预取，build 期间 setState 是真坑）+ 失败行红标；16 测试全绿。]
 
 验收边界：`flutter analyze` 0 issue、`flutter test` 16/16、CI Mobile workflow 绿（Android APK 出包验证）。真机验收项已入 [acceptance-checklist](docs/guide/acceptance-checklist.md) 移动端节（12 项）；iOS 装机与 ntfy 推送送达需真机+凭据，挂起待验。
 
 **M2**（2026-09-22 完成六个功能批，逐笔 CI 绿）：
 
-4. ✅ **feat(mobile) 资源到期视图**（4d84df55）：域名/证书两 tab，后端 status/daysRemaining 直用不自算；`_AsyncList<T>` 泛型列表复用。
-5. ✅ **feat(mobile) 备份任务视图**（3ab28988）：资源页第三 tab；BackupConfig snake_case 与 BackupRun camelCase 混命名的模型分治；最近运行 + 手动触发（play → run → SnackBar → 刷新）。
-6. ✅ **feat(mobile) Cron 只读视图**（82d057c5）：主机行 cron 能力入口；cockpit 任务 + 外部条目（crontab 原生行）等宽只读展示，写操作留桌面端。
-7. ✅ **feat(mobile) 文件只读浏览**（a3f6810d）：POST files/list 目录导航（目录优先排序、symlink 标记）、点文件弹详情；主机行点开能力动作单（容器/定时任务/文件）。
-8. ✅ **feat(mobile) SSH 终端**（bd0bc2f1）：POST /api/remote/tickets 换票据、ticket 作 WS 子协议连 /api/remote/terminal、xterm 4.0 双向转发；自签开关作用于 wss；remote-services 上报 ssh host:port 入动作单首位。
-9. ✅ **feat(mobile) 生物识别锁**（a5c30d92）：local_auth 3.x 接口抽象；LockGate 盖已登录视图（失败/通道异常停留可重试）；设置开关设备不支持即禁用。
+4. [**feat(mobile) 资源到期视图**（4d84df55）：域名/证书两 tab，后端 status/daysRemaining 直用不自算；`_AsyncList<T>` 泛型列表复用。]
+5. [**feat(mobile) 备份任务视图**（3ab28988）：资源页第三 tab；BackupConfig snake_case 与 BackupRun camelCase 混命名的模型分治；最近运行 + 手动触发（play → run → SnackBar → 刷新）。]
+6. [**feat(mobile) Cron 只读视图**（82d057c5）：主机行 cron 能力入口；cockpit 任务 + 外部条目（crontab 原生行）等宽只读展示，写操作留桌面端。]
+7. [**feat(mobile) 文件只读浏览**（a3f6810d）：POST files/list 目录导航（目录优先排序、symlink 标记）、点文件弹详情；主机行点开能力动作单（容器/定时任务/文件）。]
+8. [**feat(mobile) SSH 终端**（bd0bc2f1）：POST /api/remote/tickets 换票据、ticket 作 WS 子协议连 /api/remote/terminal、xterm 4.0 双向转发；自签开关作用于 wss；remote-services 上报 ssh host:port 入动作单首位。]
+9. [**feat(mobile) 生物识别锁**（a5c30d92）：local_auth 3.x 接口抽象；LockGate 盖已登录视图（失败/通道异常停留可重试）；设置开关设备不支持即禁用。]
 
 验收边界同 M1：`flutter analyze` 0 issue、`flutter test` 34/34、CI 五 workflow 全绿逐笔验证。M2 验收项 7 条已补进 checklist 移动端节；真机项（终端连接、生物识别、ntfy 送达等）挂起待验。反代视图未做，顺延 M3 评估。
 
@@ -862,11 +862,11 @@
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
 
-### P0 — 近期（核心场景补全）✅ 全部完成
+### P0 — 近期（核心场景补全） [全部完成]
 
-- ✅ **Docker 容器生命周期管理**：已实现。后端 `docker_provider.go` 支持 start/stop/restart/remove/pause/unpause，前端 `/docker` 页面操作列含全部按钮（停止/重启/暂停/启动/恢复/删除，带二次确认 Modal）。路由设计：`POST /api/docker/agents/{id}/containers/{cid}/{action}`。前端通过 `useMutation` 操作后自动刷新容器列表。
-- ✅ **Docker 容器日志实时查看**：已实现。后端 `containers.logs` 支持 tail/timestamps，前端「日志」按钮打开 Modal（深色终端风格背景，支持 50/100/200/500/2000 行选择，可手动刷新，自动剥离 Docker 流多路复用头控制字符）。路由设计：`GET /api/docker/agents/{id}/containers/{cid}/logs?tail=N&timestamps=true`。
-- ✅ **自动健康探测**：已实现。新增 `internal/probe/runner.go`，每 5 分钟一轮完整探测。域名走 DNS + HTTP HEAD；服务按 type 自动选探测方式；证书走 TLS 握手。通过 `UpdateServiceStatus/UpdateDomainStatus/UpdateCertificateStatus` 回写数据库。Storage 层新增 3 个状态更新方法。（遗留增强项已列入 P1「拨测增强」。）
+- [**Docker 容器生命周期管理**：已实现。后端 `docker_provider.go` 支持 start/stop/restart/remove/pause/unpause，前端 `/docker` 页面操作列含全部按钮（停止/重启/暂停/启动/恢复/删除，带二次确认 Modal）。路由设计：`POST /api/docker/agents/{id}/containers/{cid}/{action}`。前端通过 `useMutation` 操作后自动刷新容器列表。]
+- [**Docker 容器日志实时查看**：已实现。后端 `containers.logs` 支持 tail/timestamps，前端「日志」按钮打开 Modal（深色终端风格背景，支持 50/100/200/500/2000 行选择，可手动刷新，自动剥离 Docker 流多路复用头控制字符）。路由设计：`GET /api/docker/agents/{id}/containers/{cid}/logs?tail=N&timestamps=true`。]
+- [**自动健康探测**：已实现。新增 `internal/probe/runner.go`，每 5 分钟一轮完整探测。域名走 DNS + HTTP HEAD；服务按 type 自动选探测方式；证书走 TLS 握手。通过 `UpdateServiceStatus/UpdateDomainStatus/UpdateCertificateStatus` 回写数据库。Storage 层新增 3 个状态更新方法。（遗留增强项已列入 P1「拨测增强」。）]
 
 ### P1 — 中期（运维自动化）
 
