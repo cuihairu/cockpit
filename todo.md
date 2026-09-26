@@ -774,6 +774,11 @@
 6. ✅ **补测试（含发现并修掉的存量回归）**：`web/src/test/setup.ts` 加 ResizeObserver 可观测桩（jsdom 无实现）+ `window.__triggerResize(w,h)` 触发器。GuacamoleModal 新增 5 用例（尺寸同步去抖取末次/0 尺寸跳过、RDP 不挂 RO、终端 paste 反向含空与无 clipboardData 两条静默分支、工具栏按钮正向与读失败兜底、SSH 隐藏分辨率下拉 vs RDP 保留、卸载 cleanup 断 RO）。**发现上一轮漏改 `web/src/pages/Agents/index.test.tsx`**：两处仍断言 ssh 分流到 `terminal-modal`（D3 改成 guac 后必挂），本轮一并修正。
    - 验收边界：`go build/vet/test ./...` 全绿（32 包）；web tsc 0 错、ESLint 0 error（2 存量 warning 非本次引入）、`pnpm build` 过、全量 vitest（909 用例）过 + `tool/coverage_check.sh` 通过（有效覆盖 100%）。真机验收项挂起（真 guacd + 真 sshd：口令/私钥认证、终端渲染、`.guac` 录制回放、剪贴板；已入 acceptance-checklist「远控三协议」节）。移动端不动（D6：xterm.dart 走 agent 通道独立链路）。
 
+7. ✅ **审核修复（2026-09-26，复查 31d1c16 发现两处真缺陷）**：
+   - **`StringWriter` 用了虚构 API**：`writer.send(text)` 在库源码里不存在（guacamole-common-js 1.5.0 只有 `sendText`/`sendEnd`，dist/esm 14188/14197 行），运行时必抛 `TypeError`。假绿根因：`global.d.ts` 的手写类型声明把虚构方法名定了型，测试 mock 又照着虚构声明实现——类型、组件、mock 三方一致地错。改为官方写法 `sendText` + `sendEnd`（漏 `sendEnd` 远端流会一直开着）；类型声明与 mock 同步纠正，mock 处留注释「对照库真实 API」防复发。这正是设计文档「照抄官方，不自由发挥」禁区撞车的实例：**手写第三方类型声明时，方法名必须回库源码核实，不能凭印象写**。
+   - **paste 监听绑 display 容器收不到事件**：浏览器 paste 落在「当前聚焦元素」上再冒泡，而连接态的桌面分支里没有任何可聚焦元素（canvas 无 tabindex），焦点实际停在 body/Modal 容器——绑 `el` 的监听器在真实浏览器**永远不触发**（jsdom 测试直接往 display 元素 dispatch 才假绿）。改绑 `document`：该 effect 只在 `state === 'connected'` 时挂载，凭据表单（用户名/私钥 TextArea）此刻不在 DOM，无误粘面；另加输入框守卫（`closest('input, textarea, [contenteditable]')`）防御未来连接态 UI 加输入控件，守卫分支有专门测试（往 body 挂 input 后 dispatch paste 断言不开流）。
+   - **`TestNormalizeDomain` 依赖真实 whois 网络**（同病不同处：2026-09-26 全量跑复现 whois exit 1）：用例本意是输入归一化与非法输入分流，却 `NewMonitor(Config{})` 走系统 whois 连真服务器。改经既有 `Config.WhoisPath` 注入假脚本（`t.TempDir` 下 `exit 0` 的 sh，`parseWhois` 对任意输出恒不报错、出参不参与断言故等价）——顺带 CI 无 whois 二进制时也不用 skip 了。
+
 ## Docker 镜像与 docker 部署（2026-09-25）
 
 仓库此前已有 Dockerfile 与 compose（本地构建向），但**没有一条把镜像发出去的链路**——部署机想用只能自己 build。本次补齐「推镜像 → 拉镜像部署」的闭环。

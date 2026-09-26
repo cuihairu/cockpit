@@ -10,7 +10,7 @@ import { message as messageError } from 'antd'
 
 const created: Array<{ url?: string; connectData?: string }> = []
 const readers: Array<{ ondata?: (c: string) => void; onend?: () => void }> = []
-const writers: Array<{ send: (c: string) => void }> = []
+const writers: Array<{ sendText: (c: string) => void; sendEnd: () => void }> = []
 const mice: Array<Record<string, unknown>> = []
 const keyboards: Array<Record<string, unknown>> = []
 // 超时回调手动触发（start 只登记不启动，避免污染其他用例）
@@ -58,7 +58,9 @@ vi.mock('guacamole-common-js', () => ({
       return inst
     }),
     StringWriter: vi.fn(function () {
-      const inst: { send: (c: string) => void } = { send: vi.fn() }
+      // 对照库真实 API（sendText/sendEnd，无 send）——mock 若虚构方法名，
+      // 组件照抄着写错测试也抓不到（此前 writer.send 假绿就是这么来的）
+      const inst = { sendText: vi.fn(), sendEnd: vi.fn() }
       writers.push(inst)
       return inst
     }),
@@ -512,7 +514,7 @@ describe('GuacamoleModal', () => {
     expect(clientMock.sendSize).not.toHaveBeenCalled()
   })
 
-  it('SSH 剪贴板反向：终端区域 paste 推 text/plain 流到远端（空/无数据不发）', async () => {
+  it('SSH 剪贴板反向：document 级 paste 推 text/plain 流到远端（空/无数据/输入框目标不发）', async () => {
     const canvas = document.createElement('canvas')
     clientMock.getDisplay.mockReturnValue({ getElement: () => canvas })
     // 手动放行票据：等桌面分支（display 容器挂载）提交后再 resolve，
@@ -527,17 +529,26 @@ describe('GuacamoleModal', () => {
     expect(await screen.findByText(/正在连接到 10\.0\.0\.9:22/)).toBeInTheDocument()
     resolveTicket({ ticket: 'tk-1' })
     await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
-    const displayEl = canvas.parentElement!
 
-    // 无 clipboardData / 空文本：静默不发流
-    displayEl.dispatchEvent(pasteEvent(undefined))
-    displayEl.dispatchEvent(pasteEvent({ getData: () => '' }))
+    // 真实浏览器里 paste 落在聚焦元素（连接态焦点在 body/Modal 容器）后
+    // 冒泡到 document——监听挂 document 层，这里也照真实路径派发
+    document.dispatchEvent(pasteEvent(undefined))
+    document.dispatchEvent(pasteEvent({ getData: () => '' }))
     expect(clientMock.createClipboardStream).not.toHaveBeenCalled()
 
-    displayEl.dispatchEvent(pasteEvent({ getData: () => 'ls -al\n' }))
+    document.dispatchEvent(pasteEvent({ getData: () => 'ls -al\n' }))
     expect(clientMock.createClipboardStream).toHaveBeenCalledWith('text/plain')
     expect(writers.length).toBe(1)
-    expect(writers[0].send).toHaveBeenCalledWith('ls -al\n')
+    expect(writers[0].sendText).toHaveBeenCalledWith('ls -al\n')
+    // 官方写法收流（漏了远端流一直开着）
+    expect(writers[0].sendEnd).toHaveBeenCalledTimes(1)
+
+    // 目标是输入框（防御分支）：不劫持，不开新流
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    input.dispatchEvent(pasteEvent({ getData: () => 'should-not-send' }))
+    expect(clientMock.createClipboardStream).toHaveBeenCalledTimes(1)
+    input.remove()
   })
 
   it('SSH 工具栏「粘贴到远程」：读浏览器剪贴板推远端；读失败兜底提示', async () => {
@@ -554,7 +565,7 @@ describe('GuacamoleModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '粘贴到远程' }))
     await waitFor(() => expect(writers.length).toBe(1))
-    expect(writers[0].send).toHaveBeenCalledWith('pasted-from-browser')
+    expect(writers[0].sendText).toHaveBeenCalledWith('pasted-from-browser')
 
     // 空剪贴板：不开流、不写远端
     readText.mockResolvedValue('')
@@ -617,9 +628,10 @@ function resizeObserverDisconnected(): boolean {
   return all.length > 0 && all.every((ro) => ro.disconnected)
 }
 
-// 构造带（或刻意不带）clipboardData 的 paste 事件
+// 构造带（或刻意不带）clipboardData 的 paste 事件。必须 bubbles——监听在
+// document 层，往 input 派发时只有冒泡才到得了（真实浏览器 paste 恒冒泡）
 function pasteEvent(data?: { getData: (t: string) => string }): ClipboardEvent {
-  const ev = new Event('paste') as ClipboardEvent
+  const ev = new Event('paste', { bubbles: true }) as ClipboardEvent
   if (data) {
     Object.defineProperty(ev, 'clipboardData', { value: data })
   }

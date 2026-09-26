@@ -226,7 +226,10 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
     if (!client) return
     if (!text) return
     const writer = new Guacamole.StringWriter(client.createClipboardStream('text/plain'))
-    writer.send(text)
+    // API 名以库源码为准（dist/esm 14188/14197 行）：sendText + sendEnd，
+    // 没有 send——sendEnd 收流，否则远端流一直挂开着
+    writer.sendText(text)
+    writer.sendEnd()
   }, [])
 
   // 工具栏「粘贴到远程」按钮（仅 SSH 渲染）：读浏览器剪贴板推给远端。
@@ -291,18 +294,29 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
     })
     ro.observe(el)
 
-    // 剪贴板反向：终端区域 Ctrl+V（paste 事件自带数据，不受 Clipboard API
-    // 授权限制）。绑在 display 容器上而非 document，免得在凭据表单里误粘。
+    // 剪贴板反向：终端 Ctrl+V（paste 事件自带数据，不受 Clipboard API
+    // 授权限制）。必须绑 document——paste 落在「当前聚焦元素」上冒泡，
+    // 而桌面分支里没有任何可聚焦元素（canvas 无 tabindex），焦点实际停在
+    // body/Modal 容器，绑 display 容器永远收不到。此 effect 只在
+    // state === 'connected' 时挂载，凭据表单（用户名/私钥 TextArea）此刻
+    // 不在 DOM，不会误粘；输入框守卫是防御未来 UI 在连接态加输入控件。
     const onPaste = (ev: ClipboardEvent) => {
+      const target = ev.target
+      if (
+        target instanceof HTMLElement &&
+        target.closest('input, textarea, [contenteditable="true"]')
+      ) {
+        return
+      }
       const text = ev.clipboardData?.getData('text/plain')
       if (text) sendClipboardToRemote(text)
     }
-    el.addEventListener('paste', onPaste)
+    document.addEventListener('paste', onPaste)
 
     return () => {
       if (timer) clearTimeout(timer)
       ro.disconnect()
-      el.removeEventListener('paste', onPaste)
+      document.removeEventListener('paste', onPaste)
     }
   }, [protocol, state, sendClipboardToRemote])
 

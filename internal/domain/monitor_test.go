@@ -1,7 +1,8 @@
 package domain
 
 import (
-	"os/exec"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -116,11 +117,18 @@ func TestQueryWhoisInvalidPath(t *testing.T) {
 }
 
 func TestNormalizeDomain(t *testing.T) {
-	if _, err := exec.LookPath("whois"); err != nil {
-		t.Skip("skipping: whois command not found")
+	// 环境确定性：不走系统 whois（真 whois 连真实 whois 服务器，网络路径
+	// 变化/CI 无 whois 二进制都会让用例忽好忽坏——2026-09-26 全量跑挂过
+	// 一次：whois exit 1）。本用例只断言「输入归一化（大小写/空白）与
+	// 非法输入错误分流」，whois 输出内容不参与断言，假脚本退出 0 即等价
+	// （parseWhois 对任意输出恒不报错）。注入缝是 Config.WhoisPath。
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-whois")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake whois: %v", err)
 	}
 
-	m := NewMonitor(Config{})
+	m := NewMonitor(Config{WhoisPath: script})
 
 	tests := []struct {
 		input       string

@@ -21,7 +21,7 @@ components/GuacPlayer/index.tsx:26 displayRef null 早退：弹窗未挂载不�
 components/MetricsChart/index.tsx:50 containerRef null 早退：echarts init 前置防御，React 保证挂载后 effect 才跑
 components/VNCModal/index.tsx:75 vncContainerRef null 早退：RFB 挂载点在凭据阶段预挂载，ref 恒有值，前置防御不可达（原 67→71→75，vncStateRef 插入 + useEffect 改写后两次漂移）
 components/GuacamoleModal/index.tsx:226 clientRef null 早退（sendClipboardToRemote）：两个入口（终端 paste / 工具栏按钮）都只在 state==='connected' 时存在，cleanup 先于断开移除，client 恒有值
-components/GuacamoleModal/index.tsx:271 displayRef null 早退（SSH 尺寸同步/粘贴 effect）：display 容器与 state==='connected' 同渲染，effect 跑时 ref 必已赋值
+components/GuacamoleModal/index.tsx:274 displayRef null 早退（SSH 尺寸同步/粘贴 effect）：display 容器与 state==='connected' 同渲染，effect 跑时 ref 必已赋值
 pages/Workbench/index.tsx:103 openAgentTerminal selectedAgent 防御早退：兜底按钮在 SSH Tab 内，Tab 仅在选中 agent 后可切
 pages/Workbench/index.tsx:104 同上（message.warning 文案行）
 pages/Workbench/index.tsx:105 同上（return）
@@ -81,8 +81,8 @@ pages/Recordings/index.tsx:91 guac blob 加载失败 catch：错误文案断言�
 pages/Recordings/index.tsx:100 回放 Modal title 内联模板：标题断言已有
 pages/Recordings/index.tsx:188 倍速 effect 条件：2x 切换重拉用例已实证该路径执行
 pages/Recordings/index.tsx:197 effect 依赖数组行：非执行语句，v8 挂计
-components/GuacamoleModal/index.tsx:432 错误横幅 JSX 短路渲染：错误态已由 state 断言覆盖
-components/GuacamoleModal/index.tsx:456 disconnected && !showCredentials 复合条件：各单态渲染断言均有，复合分支 v8 漏计
+components/GuacamoleModal/index.tsx:446 错误横幅 JSX 短路渲染：错误态已由 state 断言覆盖
+components/GuacamoleModal/index.tsx:470 disconnected && !showCredentials 复合条件：各单态渲染断言均有，复合分支 v8 漏计
 components/GuacPlayer/index.tsx:82 Slider tooltip formatter：悬停才触发的内联纯函数，jsdom 不可悬停；格式化逻辑已由等价断言覆盖
 components/MetricsChart/index.tsx:85 tooltip formatter：params 四向（name/seriesName/value 缺省）均已断言，echarts 内联回调漏计
 components/TerminalModal/index.tsx:223 同 211 清理家族（reset 前判空）

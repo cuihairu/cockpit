@@ -95,9 +95,12 @@ declare module 'guacamole-common-js' {
       ondata?: (chunk: string) => void
       onend?: () => void
     }
-    /** 往输出流写文本（配 Client.createClipboardStream 的返回值） */
+    /** 往输出流写文本（配 Client.createClipboardStream 的返回值）。
+     *  API 名对照库源码（dist/esm 14188/14197 行）：sendText/sendEnd，
+     *  官方剪贴板写法是 sendText 后 sendEnd 收流 */
     StringWriter: new (stream: unknown) => {
-      send(data: string): void
+      sendText(text: string): void
+      sendEnd(): void
       onack?: (status: { code: number; message: string }) => void
     }
     /** Web Audio API AudioContext 单例工厂（RawAudioPlayer 内部播放用） */
