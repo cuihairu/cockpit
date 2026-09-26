@@ -42,7 +42,7 @@
 
 ### P0：前后端协议和主路径不一致
 
-#### 1. 远程终端 / 桌面 / VNC 前端仍走旧的 query-token WebSocket，未切到 ticket + `Sec-WebSocket-Protocol` [已完成（2026-06-26]
+#### 1. 远程终端 / 桌面 / VNC 前端仍走旧的 query-token WebSocket，未切到 ticket + `Sec-WebSocket-Protocol` 已完成（2026-06-26）
 
 代码证据：
 
@@ -57,7 +57,7 @@
 - Terminal/Desktop/VNC 三个连接器都已改为先取 ticket，再通过 `Sec-WebSocket-Protocol` 建立连接。
 - WebSocket URL 已不再携带 JWT、password、host/port 等敏感参数。
 
-#### 2. 前端残留一套不存在的 `/api/remote/connections` / `/api/remote/terminal/start` API [已完成（2026-06-26]
+#### 2. 前端残留一套不存在的 `/api/remote/connections` / `/api/remote/terminal/start` API 已完成（2026-06-26）
 
 代码证据：
 
@@ -72,7 +72,7 @@
 
 ### P1：表面可用，但实际未闭环
 
-#### 3. 个人资料里的 `phone` / `department` 目前不会持久化 [已完成（2026-06-26]
+#### 3. 个人资料里的 `phone` / `department` 目前不会持久化 已完成（2026-06-26）
 
 代码证据：
 
@@ -85,7 +85,7 @@
 - `storage/user_test.go`、`internal/server/api_test.go` 已补覆盖。
 - Profile 页已从 `/api/me` 回填并在保存后同步上下文。
 
-#### 4. `/api/settings` 只是兼容空实现，设置页并没有真正持久化或影响全局 UI [已完成（2026-06-26，方案 A]
+#### 4. `/api/settings` 只是兼容空实现，设置页并没有真正持久化或影响全局 UI 已完成（2026-06-26，方案 A）
 
 代码证据：
 
@@ -99,7 +99,7 @@
 - Settings 页已加载真实当前值，不再使用硬编码初始值。
 - `siteName`、`theme`、`refreshInterval`、`compactMode`、`showResourceCount` 已实际影响 UI/轮询行为。
 
-#### 5. RDP 功能默认构建产物并不真正可用 [已完成（2026-06-28，方案 B]
+#### 5. RDP 功能默认构建产物并不真正可用 已完成（2026-06-28，方案 B）
 
 代码证据：
 
@@ -117,7 +117,7 @@
 
 ### P2：产品边界和文档仍不一致
 
-#### 6. `remote_control.allowed_targets` 文档声称支持 inventory endpoint，但当前实现只读取配置白名单 [已完成（2026-06-28]
+#### 6. `remote_control.allowed_targets` 文档声称支持 inventory endpoint，但当前实现只读取配置白名单 已完成（2026-06-28）
 
 代码证据：
 
@@ -131,7 +131,7 @@
 - `docs/guide/{concepts,protocol,architecture}.md` 已同步当前 allow-list 语义。
 - `internal/server/remote_audit_test.go` 已覆盖默认拒绝、白名单放行和任意目标开关。
 
-#### 7. `inventory.watch` 文档仍有历史表述，需要按代码事实改写 [已完成（2026-06-28]
+#### 7. `inventory.watch` 文档仍有历史表述，需要按代码事实改写 已完成（2026-06-28）
 
 代码证据：
 
@@ -142,7 +142,7 @@
 
 - `docs/guide/concepts.md` 已改为说明 `inventory.watch` 复用同一套 Syncer，可同步 Agent、Domain、Certificate、ComputeInstance、Service、Gateway、Storage 等资源。
 
-#### 8. 登录页仍展示 `admin / admin` 默认账号，和当前强制 `ADMIN_PASSWORD` 的启动逻辑矛盾 [已完成（2026-06-28]
+#### 8. 登录页仍展示 `admin / admin` 默认账号，和当前强制 `ADMIN_PASSWORD` 的启动逻辑矛盾 已完成（2026-06-28）
 
 代码证据：
 
@@ -154,7 +154,7 @@
 - `web/src/pages/Login/index.tsx` 已删除 `admin/admin` 默认填充值。
 - 登录页页脚已改为提示管理员账号由 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 初始化。
 
-#### 9. 前端仍把 `ftp` 暴露为可选远控协议，但主远控后端并未支持 [已完成（2026-06-26]
+#### 9. 前端仍把 `ftp` 暴露为可选远控协议，但主远控后端并未支持 已完成（2026-06-26）
 
 代码证据：
 
@@ -778,6 +778,8 @@
    - **`StringWriter` 用了虚构 API**：`writer.send(text)` 在库源码里不存在（guacamole-common-js 1.5.0 只有 `sendText`/`sendEnd`，dist/esm 14188/14197 行），运行时必抛 `TypeError`。假绿根因：`global.d.ts` 的手写类型声明把虚构方法名定了型，测试 mock 又照着虚构声明实现——类型、组件、mock 三方一致地错。改为官方写法 `sendText` + `sendEnd`（漏 `sendEnd` 远端流会一直开着）；类型声明与 mock 同步纠正，mock 处留注释「对照库真实 API」防复发。这正是设计文档「照抄官方，不自由发挥」禁区撞车的实例：**手写第三方类型声明时，方法名必须回库源码核实，不能凭印象写**。
    - **paste 监听绑 display 容器收不到事件**：浏览器 paste 落在「当前聚焦元素」上再冒泡，而连接态的桌面分支里没有任何可聚焦元素（canvas 无 tabindex），焦点实际停在 body/Modal 容器——绑 `el` 的监听器在真实浏览器**永远不触发**（jsdom 测试直接往 display 元素 dispatch 才假绿）。改绑 `document`：该 effect 只在 `state === 'connected'` 时挂载，凭据表单（用户名/私钥 TextArea）此刻不在 DOM，无误粘面；另加输入框守卫（`closest('input, textarea, [contenteditable]')`）防御未来连接态 UI 加输入控件，守卫分支有专门测试（往 body 挂 input 后 dispatch paste 断言不开流）。
    - **`TestNormalizeDomain` 依赖真实 whois 网络**（同病不同处：2026-09-26 全量跑复现 whois exit 1）：用例本意是输入归一化与非法输入分流，却 `NewMonitor(Config{})` 走系统 whois 连真服务器。改经既有 `Config.WhoisPath` 注入假脚本（`t.TempDir` 下 `exit 0` 的 sh，`parseWhois` 对任意输出恒不报错、出参不参与断言故等价）——顺带 CI 无 whois 二进制时也不用 skip 了。
+
+8. ✅ **「去 AI 味」文档清理的替换破损修复（2026-09-26，2b99f1d 复查）**：2b99f1d 把 markdown 里的 ✅ 机械替换成方括号标记，三处翻车——todo.md 9 处 `✅ 已完成（X）` 变 `[已完成（X]`（圆括号没闭、`]` 顶替 `）`，纯语法破损）；`docs/guide/overlay-design.md` M2 清单 6 项整条被 `[…]` 包住（行尾悬挂 `]` 会原样渲染进正式文档）；notification 归档计划 4 处 `- [X]` 是自造 checkbox（非 markdown 语法，渲染为字面方括号）。修复：todo.md 恢复自然形式 `已完成（X）`、overlay 清单去包裹（完成态由后文「M2 落地差异补记」承载）、notification 改标准 `- [x]`。`pnpm run build`（docs）过，无死链。教训顺手记：**批量去 emoji 别用「括号包裹」当替代标记**——markdown 里 `[text]` 不是 checkbox，要么用标准 `- [x]`，要么直接删（上下文自明时）。
 
 ## Docker 镜像与 docker 部署（2026-09-25）
 

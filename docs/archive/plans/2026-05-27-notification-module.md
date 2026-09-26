@@ -1345,9 +1345,9 @@ git commit -m "test: add notification integration tests"
 | 集成测试 | Task 7 | ✅ |
 
 ### 占位符扫描
-- [无 TBD/TODO]
-- [所有代码步骤包含完整实现]
+- [x] 无 TBD/TODO
+- [x] 所有代码步骤包含完整实现
 
 ### 类型一致性检查
-- [配置结构在各 Task 中一致]
-- [函数签名匹配]
+- [x] 配置结构在各 Task 中一致
+- [x] 函数签名匹配

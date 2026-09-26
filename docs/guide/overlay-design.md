@@ -302,12 +302,12 @@ CMDB 对照是**只读推导**：云端成员列表 × agent 上报身份，前�
 
 ## M2 清单
 
-1. [`internal/agent/detector/overlay_identity.go` + 提取测试（注入假命令、失败静默、字段白名单）；]
-2. [删除 `detector/network.go` + 相关测试同步清理（M2-C，独立小提交可并入 feat(agent)）；]
-3. [`internal/overlay`（两 client + WithBase）+ httptest 全流程/降级/白名单测试；]
-4. [`internal/server/api_overlay_cloud.go` + 端点测试（校验 D19/审计/未配置 503/降级/managed 对照）；]
-5. [`web/src/pages/Network/` 云端管理视图 + 观测视图身份 chip；]
-6. [`go test ./...`、`pnpm run build` 不回归；设计文档清单勾选 + todo.md 条目更新。]
+1. `internal/agent/detector/overlay_identity.go` + 提取测试（注入假命令、失败静默、字段白名单）；
+2. 删除 `detector/network.go` + 相关测试同步清理（M2-C，独立小提交可并入 feat(agent)）；
+3. `internal/overlay`（两 client + WithBase）+ httptest 全流程/降级/白名单测试；
+4. `internal/server/api_overlay_cloud.go` + 端点测试（校验 D19/审计/未配置 503/降级/managed 对照）；
+5. `web/src/pages/Network/` 云端管理视图 + 观测视图身份 chip；
+6. `go test ./...`、`pnpm run build` 不回归；设计文档清单勾选 + todo.md 条目更新。
 
 ## M2 落地差异补记
 
