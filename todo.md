@@ -805,7 +805,7 @@
 4. [**`docs/operations/deploy-docker.md`**（新建）+ 文档网接入：VitePress sidebar 新增「运维」分组（`/operations/` 前缀），快速开始页加「不想编译？用 Docker」入口与下一步链接；`deployments/docker/README.md` 改成两套姿势分工 + 指向新指南；README 的 Docker 章节补镜像地址、tag 策略、拉镜像命令与 guacd 共卷说明；`.env.example` 补 `COCKPIT_IMAGE_TAG` / `GUACD_ADDR` / `GUACD_RECORDING_PATH` / `GUACD_LOG_LEVEL`。]
 5. [**顺带修一处反代缺口**：`deployments/nginx/cockpit.cuihairu.site.conf` 的远控 WS location 正则 `^/api/remote/(terminal|desktop|vnc)` **漏了 `guacamole`**——走该配置部署时 Guacamole 隧道（RDP/VNC/SSH）建不起来。已补，并加注释说明漏它的后果。]
 
-文档纪律：VitePress 只校验 docs 目录内的相对链接，`.yml` 之外的越界链接（`../../deployments/**`）会被判死链导致 `docs.yml` 构建失败——按同组织 croupier 文档的既有做法，仓内文件一律用行内 code 路径引用而非链接。
+文档纪律：VitePress 只校验 docs 目录内的相对链接，`.yml` 之外的越界链接（`../../deployments/**`）会被判死链导致 `docs.yml` 构建失败——按同组织 croupier 文档的既有做法，仓内文件一律用行内 code 路径引用而非链接。又一坑（2026-09-27）：**表格行内 code 里的竖线必须写成 `\|`**——GFM 按未转义 `|` 切单元格（先切列后解析行内标记，backtick 挡不住），轻则列错位，重则把 `` `<networkId>` `` 里的尖括号暴露成裸 HTML 标签，vite:vue 报「Element is missing end tag」且报错行号是转换后模板的（overlay-design.md 源码 461 行报 620:11），不可按行号找；`overlay-design.md` 三处（`frpc\|frps`、`join\|leave <networkId>`、`start\|stop\|enable\|disable`）已修，`pnpm build` 恢复绿。
 
 ## 真机验收清单（2026-09-22）
 
