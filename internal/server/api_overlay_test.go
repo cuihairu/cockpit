@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/protocol"
 )
 
@@ -352,6 +353,62 @@ func TestOverlayServiceValidation(t *testing.T) {
 	}
 	if dispatched != 0 {
 		t.Errorf("校验失败不得转发到 agent, dispatched = %d", dispatched)
+	}
+}
+
+// ============ 转发失败与审计退路（覆盖率巡检补齐） ============
+
+func TestOverlayDaemonAgentErrorNoWrite(t *testing.T) {
+	s, _ := newOverlayServer(t, func(method string, params map[string]interface{}) (interface{}, string) {
+		return nil, "agent daemon probe failed"
+	})
+	rec := httptest.NewRecorder()
+	s.handleAgentOverlayAPI(rec, httptest.NewRequest(http.MethodGet, "/api/agents/a1/overlay/daemon", nil), "a1/overlay/daemon")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("daemon 转发失败: code = %d, want 502", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "agent daemon probe failed") {
+		t.Errorf("应透出 agent 错误, body = %s", rec.Body.String())
+	}
+}
+
+func TestOverlayServiceAgentErrorNoAudit(t *testing.T) {
+	s, _ := newOverlayServer(t, func(method string, params map[string]interface{}) (interface{}, string) {
+		return nil, "systemctl failed"
+	})
+	rec := httptest.NewRecorder()
+	s.handleAgentOverlayAPI(rec, httptest.NewRequest(http.MethodPost, "/api/agents/a1/overlay/service", strings.NewReader(`{"tool":"tailscale","action":"stop"}`)), "a1/overlay/service")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("service 转发失败: code = %d, want 502", rec.Code)
+	}
+	// 未到成功不得记审计（写动作审计口径）
+	logs, _, err := s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": "service_toggle"})
+	if err != nil || len(logs) != 0 {
+		t.Errorf("转发失败不得记审计, logs = %d, %v", len(logs), err)
+	}
+}
+
+func TestOverlayServiceUnitFallbackAndAuditUser(t *testing.T) {
+	s, _ := newOverlayServer(t, func(method string, params map[string]interface{}) (interface{}, string) {
+		// 响应不带 unit——审计 resourceID 退化用工具名（单一事实源缺席的退路）
+		return map[string]interface{}{"tool": "zerotier", "action": "start"}, ""
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/a1/overlay/service", strings.NewReader(`{"tool":"zerotier","action":"start"}`))
+	req = req.WithContext(auth.ContextWithUser(req.Context(), "u1", "admin", "admin"))
+	rec := httptest.NewRecorder()
+	s.handleAgentOverlayAPI(rec, req, "a1/overlay/service")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	logs, _, err := s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": "service_toggle"})
+	if err != nil || len(logs) != 1 {
+		t.Fatalf("audit = %d, %v", len(logs), err)
+	}
+	if logs[0].ResourceID != "a1/zerotier" {
+		t.Errorf("unit 缺席时 resourceID 应退化为工具名: %q", logs[0].ResourceID)
+	}
+	if logs[0].Username != "admin" {
+		t.Errorf("带身份请求应记审计用户: %q", logs[0].Username)
 	}
 }
 
