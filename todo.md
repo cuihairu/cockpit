@@ -781,6 +781,8 @@
 
 8. ✅ **「去 AI 味」文档清理的替换破损修复（2026-09-26，2b99f1d 复查）**：2b99f1d 把 markdown 里的 ✅ 机械替换成方括号标记，三处翻车——todo.md 9 处 `✅ 已完成（X）` 变 `[已完成（X]`（圆括号没闭、`]` 顶替 `）`，纯语法破损）；`docs/guide/overlay-design.md` M2 清单 6 项整条被 `[…]` 包住（行尾悬挂 `]` 会原样渲染进正式文档）；notification 归档计划 4 处 `- [X]` 是自造 checkbox（非 markdown 语法，渲染为字面方括号）。修复：todo.md 恢复自然形式 `已完成（X）`、overlay 清单去包裹（完成态由后文「M2 落地差异补记」承载）、notification 改标准 `- [x]`。`pnpm run build`（docs）过，无死链。教训顺手记：**批量去 emoji 别用「括号包裹」当替代标记**——markdown 里 `[text]` 不是 checkbox，要么用标准 `- [x]`，要么直接删（上下文自明时）。
 
+9. ✅ **e2e 冒烟本机跑绿 + 验收清单回填（2026-09-26）**：`scripts/e2e-smoke.sh` 本机两次连跑全绿（退出码 0，可重复）——health ok → agent 经 `/ws` 注册在线（agents=1）→ admin 登录拿 JWT → `cockpit sync` 七类各 +1 → 六类 `/api/resources/*` 全 200 各 1 项。零代码改动（无需修复）。`docs/guide/acceptance-checklist.md` 通用前置的 e2e 条目已勾并注明日期。**边界**：同节「`/agents` 页绿标」条目未勾——冒烟验证的是 API 层在线，WebUI 页面绿标属浏览器验收，未开浏览器不冒认。顺带观察（无害噪音，不修）：`cockpit sync` CLI 启动时打 `WARNING: JWT_SECRET not set`——`internal/auth/jwt.go:25` 的包级 var 初始化，任何 import 该包的二进制（含不发 token 的 sync CLI）未设 `JWT_SECRET` 都会打；对 CLI 用户略有误导，真要治理应改惰性初始化（动 internal/auth 核心 + 补测试，另行立项）。
+
 ## Docker 镜像与 docker 部署（2026-09-25）
 
 仓库此前已有 Dockerfile 与 compose（本地构建向），但**没有一条把镜像发出去的链路**——部署机想用只能自己 build。本次补齐「推镜像 → 拉镜像部署」的闭环。
