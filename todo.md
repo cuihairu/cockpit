@@ -817,6 +817,7 @@
 
 1. [**Agent/资源地域字段对齐后端 API**（8f928baf）：后端 `storage.Agent`/`ComputeInstance` 顶层序列化 `region`/`zone`，从无 `location` 对象；前端类型错位导致 Agents 地域列与筛选、Dashboard 地域列、Docker 面包屑、Workbench 搜索与概览、Network 面板标签在真实环境**恒空**（页面测试 mock 沿用错位 shape 所以从未暴露——mock 数据应以后端真实序列化为准，不能互相抄）。`Agent`/`ComputeInstance` 类型改顶层可选 `region`/`zone`；`Gateway`/`Storage` 后端无地域字段，删除 `location`；`Location` interface 删除；10 处 reader（含 `src/workbench/`）、19 个测试文件 mock 同步迁移；Network 面板标签断言更新为「主机名 · 地域」（修复后地域首次真实显示）。]
 2. [**tsc 存量错误清零**（72adcbf8）：`tsc --noEmit` 全仓 0 错误（此前 7 个存量）。navTheme 映射 realDark、ErrorBoundary 未用 React 导入、ServerBackupCard enabled 收敛 Boolean、useSettings 剔除 null refreshInterval、新增 `vite-env.d.ts`（vite/client）。]
+3. [**「9 存量」台账复核归零（2026-09-27 巡检）**：09-18/19 轮次（备份 M2、文件 M2-M5）多处记载「web tsc 零新增（9 存量）」，随 55a329f 批量提交入册；而 09-27 的 compose/DNS 两轮验收已记录「web tsc 0 错」。本轮全量复核：`cd web && tsc --noEmit`（strict + noUnusedLocals/noUnusedParameters，include src）与 `tsc -b --force`（含 vite.config.ts 子项目）均 **0 错误**；仓内其余 TS 面（根 package.json 为 web 镜像、docs 为 vitepress、mobile 为 Dart）无独立 tsconfig。结论：9 存量已在此前某轮清零，多处「零新增（9 存量）」字样为过期台账，非待修项。]
 
 验收：`pnpm build` 通过；全量 vitest 68 文件 / 473 用例全绿、退出码 0 无 Errors。
 
