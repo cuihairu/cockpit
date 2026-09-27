@@ -140,6 +140,41 @@ describe('Stacks', () => {
     await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('Stack「my-blog」创建成功，可在详情中启动部署'))
   })
 
+  it('新建：上传 compose.yml 文件填充编辑区', async () => {
+    renderPage()
+    expect(await screen.findByText('blog')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建 Stack/ }))
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('新建 Stack'))
+    const file = new File([], 'blog.yml')
+    Object.defineProperty(file, 'text', {
+      value: () => Promise.resolve('services:\n  web:\n    image: nginx:alpine\n'),
+    })
+    const input = document.querySelector('.ant-modal input[type=file]') as HTMLInputElement
+    Object.defineProperty(input, 'files', { value: [file], configurable: true })
+    await act(async () => {
+      fireEvent.change(input)
+    })
+    const composeArea = document.querySelector('.ant-modal textarea') as HTMLTextAreaElement
+    await waitFor(() => expect(composeArea.value).toContain('nginx:alpine'))
+    expect(msgSuccess).toHaveBeenCalledWith('已载入 blog.yml')
+  })
+
+  it('新建：上传非 yml 文件被拒绝，编辑区保持默认模板', async () => {
+    renderPage()
+    expect(await screen.findByText('blog')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建 Stack/ }))
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('新建 Stack'))
+    const file = new File([], 'Dockerfile')
+    const input = document.querySelector('.ant-modal input[type=file]') as HTMLInputElement
+    Object.defineProperty(input, 'files', { value: [file], configurable: true })
+    await act(async () => {
+      fireEvent.change(input)
+    })
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('读取失败: 仅支持 .yml / .yaml 文件'))
+    const composeArea = document.querySelector('.ant-modal textarea') as HTMLTextAreaElement
+    expect(composeArea.value).toContain('nginx:latest')
+  })
+
   it('新建 502：YAML 校验失败出终端弹窗', async () => {
     apiMock.saveStackCompose.mockRejectedValue(axios502('yaml: line 3: did not find expected key'))
     renderPage()

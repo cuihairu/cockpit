@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  COMPOSE_MAX_BYTES,
   DEFAULT_COMPOSE_TEMPLATE,
   STACK_NAME_PATTERN,
   STACK_TEMPLATES,
   extractApiError,
+  readComposeFile,
+  type ComposeFileLike,
   formatTimestamp,
   lastStatusColor,
   serviceStateColor,
@@ -12,7 +15,7 @@ import {
   taskActionLabel,
 } from './shared'
 
-// Stacks/shared：extractApiError 全分支、时间戳/配色/模板常量
+// Stacks/shared：extractApiError 全分支、时间戳/配色/模板常量、compose 上传读取守卫
 
 // 模拟 axios 错误（axios.isAxiosError 依据 isAxiosError 标志）
 const axiosErr = (data?: unknown, message = 'Request failed') =>
@@ -115,6 +118,36 @@ describe('Stacks/shared', () => {
       expect(lastStatusColor('error')).toBe('error')
       expect(lastStatusColor('running')).toBe('processing')
       expect(lastStatusColor('weird')).toBe('default')
+    })
+  })
+
+  describe('readComposeFile', () => {
+    // 只实现 ComposeFileLike 结构，避免依赖 jsdom File.text() 的支持度
+    const mkFile = (name: string, content: string, size = content.length): ComposeFileLike => ({
+      name,
+      size,
+      text: async () => content,
+    })
+
+    it('合法 .yml/.yaml（扩展名大小写不敏感）返回原文', async () => {
+      expect(await readComposeFile(mkFile('c.yml', 'services: {}\n'))).toBe('services: {}\n')
+      expect(await readComposeFile(mkFile('C.YAML', 'a: 1'))).toBe('a: 1')
+    })
+
+    it('非 yml 扩展名拒绝', async () => {
+      await expect(readComposeFile(mkFile('compose.txt', 'x'))).rejects.toThrow('仅支持 .yml / .yaml 文件')
+      await expect(readComposeFile(mkFile('Dockerfile', 'x'))).rejects.toThrow('仅支持 .yml / .yaml 文件')
+    })
+
+    it('超过大小上限拒绝', async () => {
+      await expect(
+        readComposeFile(mkFile('big.yml', 'x', COMPOSE_MAX_BYTES + 1)),
+      ).rejects.toThrow('256KB')
+    })
+
+    it('空/纯空白内容拒绝', async () => {
+      await expect(readComposeFile(mkFile('e.yml', ''))).rejects.toThrow('文件内容为空')
+      await expect(readComposeFile(mkFile('e.yml', '   \n\t'))).rejects.toThrow('文件内容为空')
     })
   })
 })

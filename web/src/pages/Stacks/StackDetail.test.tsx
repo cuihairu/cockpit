@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { message } from 'antd'
@@ -218,6 +218,51 @@ describe('StackDetail', () => {
     apiMock.saveStackCompose.mockRejectedValueOnce(new Error('disk full'))
     fireEvent.click(screen.getByRole('button', { name: /保存$/ }))
     await waitFor(() => expect(msgError).toHaveBeenCalledWith('保存失败: disk full'))
+  })
+
+  it('compose Tab：上传文件替换草稿并随保存提交', async () => {
+    apiMock.getStackCompose.mockResolvedValue({
+      name: 'blog', compose: 'services:\n  web:\n', env: '', composeFile: '/x/compose.yml', modifiedAt: 0,
+    })
+    apiMock.saveStackCompose.mockResolvedValueOnce({ created: false })
+    renderDetail()
+    await openDetail()
+    fireEvent.click(screen.getByText('compose.yml'))
+    await screen.findByDisplayValue(/services:/)
+    const file = new File([], 'new.yml')
+    Object.defineProperty(file, 'text', {
+      value: () => Promise.resolve('services:\n  app:\n    image: redis\n'),
+    })
+    const input = drawer().querySelector('input[type=file]') as HTMLInputElement
+    Object.defineProperty(input, 'files', { value: [file], configurable: true })
+    await act(async () => {
+      fireEvent.change(input)
+    })
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已载入 new.yml，保存后生效'))
+    const ta = screen.getByDisplayValue(/redis/) as HTMLTextAreaElement
+    expect(ta.value).toContain('image: redis')
+    fireEvent.click(screen.getByRole('button', { name: /保存$/ }))
+    await waitFor(() => expect(apiMock.saveStackCompose).toHaveBeenCalledWith(
+      'ag-1', 'blog', { compose: 'services:\n  app:\n    image: redis\n', env: '' }))
+  })
+
+  it('compose Tab：上传读取失败提示', async () => {
+    apiMock.getStackCompose.mockResolvedValue({
+      name: 'blog', compose: 'services:\n  web:\n', env: '', composeFile: '/x/compose.yml', modifiedAt: 0,
+    })
+    renderDetail()
+    await openDetail()
+    fireEvent.click(screen.getByText('compose.yml'))
+    await screen.findByDisplayValue(/services:/)
+    const file = new File([], 'notes.md')
+    const input = drawer().querySelector('input[type=file]') as HTMLInputElement
+    Object.defineProperty(input, 'files', { value: [file], configurable: true })
+    await act(async () => {
+      fireEvent.change(input)
+    })
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('读取失败: 仅支持 .yml / .yaml 文件'))
+    // 草稿未被替换：编辑区仍是服务器内容
+    expect((screen.getByDisplayValue(/services:/) as HTMLTextAreaElement).value).toBe('services:\n  web:\n')
   })
 
   it('compose 保存 502：YAML 校验失败终端弹窗可关闭', async () => {

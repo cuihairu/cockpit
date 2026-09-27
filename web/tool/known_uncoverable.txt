@@ -54,7 +54,7 @@ pages/Proxy/index.tsx:147 空域名运行时校验：表单 required + validator
 pages/Proxy/index.tsx:148 同上（错误文案）
 pages/Proxy/index.tsx:149 同上（return）
 pages/Docker/index.tsx:189 动作 switch default 抛错：action 来自固定按钮集合，未知值不可达
-pages/Stacks/StackDetail.tsx:187 taskActionLabel 未知 action 兜底：后端 action 枚举封闭，四类已知动作已全测；同款兜底语义已由历史 Tab 用例实证
+pages/Stacks/StackDetail.tsx:191 taskActionLabel 未知 action 兜底：后端 action 枚举封闭，四类已知动作已全测；同款兜底语义已由历史 Tab 用例实证
 pages/Cron/index.tsx:41 空表达式早退：表单 required 前置，简写/五段式主路径已实证
 components/GuacamoleModal/index.tsx:115 resolution || 1280 兜底：分辨率经下拉白名单（恒为 WxH 格式），split 后必为数字
 components/GuacamoleModal/index.tsx:116 同上（height || 800）
@@ -67,7 +67,7 @@ pages/Proxy/index.tsx:142 tlsCert 三元 undefined 分支：http 站点不入参
 pages/Proxy/index.tsx:143 tlsKey 同上
 pages/Backups/index.tsx:193 remoteDest ?? '' 兜底：留空提交 payload 断言 remote_dest:'' 已实证
 pages/Backups/index.tsx:194 preHook ?? '' 同上
-pages/Stacks/StackDetail.tsx:204 taskMeta 空值侧兜底：任务终态提示与 failed 日志弹窗均已断言（含弹窗标题）
+pages/Stacks/StackDetail.tsx:208 taskMeta 空值侧兜底：任务终态提示与 failed 日志弹窗均已断言（含弹窗标题）
 pages/DNS/index.tsx:267 Modal title 编辑/新建三元：JSX 内联，两态渲染断言均有
 pages/DNS/DDNSPanel.tsx:195 agent 列 render 三元/||：hostname 缺省用 id、未知 id 原样显示均已断言
 pages/Agents/columns.tsx:82 能力 +N 溢出 Tag 分支：4 能力渲染 +1、3 能力不渲染均已断言，Tooltip 包装致 v8 漏计

@@ -24,6 +24,32 @@ services:
       - "8080:80"
 `
 
+// compose.yml 本地上传（M1「上传」路径）：浏览器读文件文本灌入编辑器，
+// 不经 server 传输通道——校验守卫集中在此，页面层只负责 catch 提示。
+export const COMPOSE_MAX_BYTES = 256 * 1024
+
+// 只声明用到的字段（File 的结构子集），测试可用普通对象 mock。
+export interface ComposeFileLike {
+  name: string
+  size: number
+  text(): Promise<string>
+}
+
+// 校验并读取 compose 文件内容；不合法时 throw（中文 message 直接给用户看）。
+export const readComposeFile = async (file: ComposeFileLike): Promise<string> => {
+  if (!/\.ya?ml$/i.test(file.name)) {
+    throw new Error('仅支持 .yml / .yaml 文件')
+  }
+  if (file.size > COMPOSE_MAX_BYTES) {
+    throw new Error(`文件超过 ${Math.round(COMPOSE_MAX_BYTES / 1024)}KB 上限`)
+  }
+  const text = await file.text()
+  if (!text.trim()) {
+    throw new Error('文件内容为空')
+  }
+  return text
+}
+
 // 从 axios 错误中提取后端返回的错误信息（支持多行文本，如 docker compose config 输出）
 export const extractApiError = (err: unknown, fallback = '请求失败'): string => {
   if (axios.isAxiosError(err)) {

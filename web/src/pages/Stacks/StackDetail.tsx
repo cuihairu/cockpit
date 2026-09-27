@@ -16,8 +16,10 @@ import {
   Tag,
   Timeline,
   Typography,
+  Upload,
   message,
 } from 'antd'
+import type { RcFile } from 'antd/es/upload'
 import {
   CloudDownloadOutlined,
   DeleteOutlined,
@@ -27,6 +29,7 @@ import {
   ReloadOutlined,
   SaveOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
@@ -36,6 +39,7 @@ import TerminalBlock from './TerminalBlock'
 import {
   extractApiError,
   formatTimestamp,
+  readComposeFile,
   serviceStateColor,
   serviceStatusColor,
   tailOptions,
@@ -272,6 +276,18 @@ const StackDetail = ({
     saveMutation.mutate({ compose: composeValue, env: envValue })
   }
 
+  // 本地上传 compose.yml：读文件文本替换编辑草稿（返回 false 阻止 antd
+  // Upload 上传流程——内容仍走「保存」按钮的 saveStackCompose API）
+  const handleComposeUpload = (file: RcFile) => {
+    readComposeFile(file)
+      .then((text) => {
+        setComposeDraft(text)
+        message.success(`已载入 ${file.name}，保存后生效`)
+      })
+      .catch((err) => message.error(`读取失败: ${(err as Error).message}`))
+    return false
+  }
+
   // 从服务表跳转到部署日志并按该服务过滤
   const openServiceLog = (service: string) => {
     setLogService(service)
@@ -399,14 +415,19 @@ const StackDetail = ({
               {composeData?.modifiedAt ? ` · 修改于 ${formatTimestamp(composeData.modifiedAt)}` : ''}
             </Typography.Text>
             <PermGuard perm="stack:write">
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                loading={saveMutation.isPending}
-                onClick={handleSaveCompose}
-              >
-                保存
-              </Button>
+              <Space>
+                <Upload accept=".yml,.yaml" showUploadList={false} beforeUpload={handleComposeUpload}>
+                  <Button icon={<UploadOutlined />}>上传文件</Button>
+                </Upload>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  loading={saveMutation.isPending}
+                  onClick={handleSaveCompose}
+                >
+                  保存
+                </Button>
+              </Space>
             </PermGuard>
           </Space>
           <Input.TextArea

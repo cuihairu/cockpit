@@ -16,9 +16,11 @@ import {
   Tag,
   Tooltip,
   Typography,
+  Upload,
   message,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons'
+import type { RcFile } from 'antd/es/upload'
+import { PlusOutlined, ReloadOutlined, RocketOutlined, UploadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { StackView } from '@/types'
@@ -30,6 +32,7 @@ import {
   STACK_NAME_PATTERN,
   STACK_TEMPLATES,
   extractApiError,
+  readComposeFile,
   formatTimestamp,
   lastStatusColor,
   serviceStatusColor,
@@ -109,6 +112,19 @@ const Stacks = () => {
       message.error(`创建失败: ${extractApiError(err)}`)
     },
   })
+
+  // 本地上传 compose.yml：读文件文本灌入 compose 字段（返回 false 阻止
+  // antd Upload 的上传流程——内容走既有 saveStackCompose API，不走 multipart）
+  const handleComposeUpload = (file: RcFile) => {
+    readComposeFile(file)
+      .then((text) => {
+        form.setFieldValue('compose', text)
+        message.success(`已载入 ${file.name}`)
+      })
+      // readComposeFile 契约只 throw Error，直接取 message 不留无分支
+      .catch((err) => message.error(`读取失败: ${(err as Error).message}`))
+    return false
+  }
 
   const openDetail = (record: StackView) => {
     setDetailStack(record)
@@ -310,7 +326,16 @@ const Stacks = () => {
           </Form.Item>
           <Form.Item
             name="compose"
-            label="compose.yml 初始内容"
+            label={
+              <Space size={12}>
+                <span>compose.yml 初始内容</span>
+                <Upload accept=".yml,.yaml" showUploadList={false} beforeUpload={handleComposeUpload}>
+                  <Button size="small" icon={<UploadOutlined />}>
+                    上传文件
+                  </Button>
+                </Upload>
+              </Space>
+            }
             rules={[{ required: true, message: '请输入 compose.yml 内容' }]}
           >
             <Input.TextArea
