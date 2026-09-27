@@ -100,6 +100,9 @@ const ResourceDriftBaseline = "drift_baseline"
 // ResourceDNSRecord DNS 记录资源类型（见 dns-design.md）
 const ResourceDNSRecord = "dns_record"
 
+// ResourceDomain Domain 台账资源类型（DNS 写联动的登记/移除，dns-design M3）
+const ResourceDomain = "domain"
+
 // ResourceAcmeCert ACME 签发证书资源类型（见 acme-design.md）
 const ResourceAcmeCert = "acme_cert"
 

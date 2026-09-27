@@ -46,6 +46,7 @@ import type {
   ServerBackupConfig,
   DNSStatus,
   DNSZone,
+  DNSOrphan,
   DNSRecord,
   DNSRecordInput,
   DNSRecordsPage,
@@ -738,9 +739,25 @@ class ApiService {
     return this.client.get<unknown, DNSStatus>('/dns/status')
   }
 
-  async getDNSZones(): Promise<DNSZone[]> {
-    const resp = await this.client.get<unknown, { data: DNSZone[] }>('/dns/zones')
-    return resp.data ?? []
+  async getDNSZones(): Promise<{ zones: DNSZone[]; orphans: DNSOrphan[] }> {
+    const resp = await this.client.get<unknown, { data: DNSZone[]; orphans?: DNSOrphan[] }>('/dns/zones')
+    return { zones: resp.data ?? [], orphans: resp.orphans ?? [] }
+  }
+
+  // zone 级登记「资源 → 域名」台账（同名行已存在时 server 409，dns-design M3 D18）
+  async registerDNSZoneCMDB(zoneID: string): Promise<{ registered: boolean; id: string }> {
+    return this.client.post<unknown, { registered: boolean; id: string }>(
+      `/dns/zones/${encodeURIComponent(zoneID)}/cmdb`,
+    )
+  }
+
+  // 移除登记：清掉该 zone 的全部 DNS 来源台账行（含孤儿清理出口，D20）
+  async unregisterDNSZoneCMDB(
+    zoneID: string,
+  ): Promise<{ unregistered: boolean; records_removed: number }> {
+    return this.client.delete<unknown, { unregistered: boolean; records_removed: number }>(
+      `/dns/zones/${encodeURIComponent(zoneID)}/cmdb`,
+    )
   }
 
   async getDNSRecords(zoneID: string, type?: string, page?: number): Promise<DNSRecordsPage> {

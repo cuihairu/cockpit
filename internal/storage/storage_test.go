@@ -448,6 +448,43 @@ func TestUpsertDomain(t *testing.T) {
 	}
 }
 
+// TestUpsertDomainUniqueConflict DNS 写联动的 storage 层依据（dns-design M3
+// D20）：不同 ID 写同名 Domain 触发唯一索引冲突；据此 server 层同名预检
+// （GetDomainByName）+ 唯一索引构成双保险，声明态/手工行绝不被覆盖。
+func TestUpsertDomainUniqueConflict(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	if err := db.UpsertDomain(&Domain{ID: "manual-1", Domain: "app.example.com", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	err := db.UpsertDomain(&Domain{ID: "dns-z1-ra1", Domain: "app.example.com", Status: "active"})
+	if err == nil {
+		t.Fatal("unique index must reject different ID with same domain")
+	}
+	if _, e := db.GetDomain("dns-z1-ra1"); e == nil {
+		t.Error("conflicting row must not exist")
+	}
+}
+
+// TestGetDomainByNameExact GetDomainByName 的精确匹配语义（大小写敏感）是
+// 联动预检的前提；zones/inventory 比对用 ToLower 归一属 server 层职责。
+func TestGetDomainByNameExact(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	if err := db.UpsertDomain(&Domain{ID: "d1", Domain: "Example.com", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.GetDomainByName("Example.com"); err != nil {
+		t.Errorf("exact name lookup = %v", err)
+	}
+	if _, err := db.GetDomainByName("example.com"); err != ErrNotFound {
+		t.Errorf("case-mismatched lookup = %v, want ErrNotFound", err)
+	}
+	if _, err := db.GetDomainByName("nope.com"); err != ErrNotFound {
+		t.Errorf("missing lookup = %v, want ErrNotFound", err)
+	}
+}
+
 func TestGetDomain(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()

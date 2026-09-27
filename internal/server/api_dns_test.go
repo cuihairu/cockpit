@@ -84,7 +84,11 @@ func TestDNSZonesInCMDB(t *testing.T) {
 func TestDNSRecordsCRUDAndAudit(t *testing.T) {
 	var gotMethod, gotPath string
 	s := newDNSTestServer(t, func(r *http.Request) (int, string) {
-		gotMethod, gotPath = r.Method, r.URL.Path
+		// M3 联动会额外探测 GET /zones（找 zone 名），不覆盖上游断言
+		// 捕获的变量；记录动作本身的 method/path 才是本测试的断言对象
+		if !(r.Method == http.MethodGet && r.URL.Path == "/zones") {
+			gotMethod, gotPath = r.Method, r.URL.Path
+		}
 		switch r.Method {
 		case http.MethodGet:
 			return 200, `{"success":true,"errors":[],"result":[

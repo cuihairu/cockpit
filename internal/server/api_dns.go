@@ -16,11 +16,13 @@ import (
 // API v4，Agent 不参与；zone 与 record 都是 Cloudflare 侧事实源，不落库。
 //
 //	GET    /api/dns/status                       配置探测（只返回布尔，不含 token）
-//	GET    /api/dns/zones                        zone 列表（含 in_cmdb 标注）
+//	GET    /api/dns/zones                        zone 列表（in_cmdb 标注 + 反向对账 orphans）
 //	GET    /api/dns/zones/{zid}/records?type=&page=   记录分页
-//	POST   /api/dns/zones/{zid}/records          创建记录（审计 dns_create）
-//	PUT    /api/dns/zones/{zid}/records/{rid}    更新记录（审计 dns_update）
-//	DELETE /api/dns/zones/{zid}/records/{rid}    删除记录（审计 dns_delete）
+//	POST   /api/dns/zones/{zid}/records          创建记录（审计 dns_create + 台账联动）
+//	PUT    /api/dns/zones/{zid}/records/{rid}    更新记录（审计 dns_update + 台账联动）
+//	DELETE /api/dns/zones/{zid}/records/{rid}    删除记录（审计 dns_delete + 台账联动）
+//	POST   /api/dns/zones/{zid}/cmdb             zone 登记 Domain 台账（审计 dns_cmdb_register）
+//	DELETE /api/dns/zones/{zid}/cmdb             台账移除（仅 DNS 来源行；审计 dns_cmdb_unregister）
 
 // dnsZoneOut zone 列表响应行（in_cmdb = 该域名是否在 Domain 表，只读联动）
 type dnsZoneOut struct {
@@ -104,19 +106,36 @@ func (s *Server) handleDNSZones(w http.ResponseWriter, r *http.Request) {
 	for _, z := range zones {
 		out = append(out, dnsZoneOut{Zone: z, InCMDB: cmdb[strings.ToLower(z.Name)]})
 	}
-	// {data} 包装对齐 web getDNSZones 的 resp.data 解构（P0 响应结构一致性）
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{"data": out})
+	// {data} 包装对齐 web getDNSZones 的 resp.data 解构（P0 响应结构一致性）；
+	// M3 反向对账：orphans = 台账中 DNS 来源但已不在 zone 列表的行（D20）
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"data":    out,
+		"orphans": s.listDNSOrphans(zones),
+	})
 }
 
-// handleDNSZoneRecords /api/dns/zones/{zid}/records[/{rid}]
+// handleDNSZoneRecords /api/dns/zones/{zid}/records[/{rid}] 与
+// /api/dns/zones/{zid}/cmdb（M3 写联动，api_dns_cmdb.go）
 func (s *Server) handleDNSZoneRecords(w http.ResponseWriter, r *http.Request, sub string) {
-	// sub 形态：{zid}/records 或 {zid}/records/{rid}
+	// sub 形态：{zid}/records[/{rid}] 或 {zid}/cmdb
 	parts := strings.Split(strings.Trim(sub, "/"), "/")
-	if len(parts) < 2 || parts[0] == "" || parts[1] != "records" {
+	if len(parts) < 2 || parts[0] == "" {
 		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 		return
 	}
 	zoneID := parts[0]
+	if parts[1] == "cmdb" {
+		if len(parts) != 2 {
+			s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
+			return
+		}
+		s.handleDNSZoneCMDB(w, r, zoneID)
+		return
+	}
+	if parts[1] != "records" {
+		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
+		return
+	}
 	if len(parts) == 2 {
 		switch r.Method {
 		case http.MethodGet:
@@ -178,6 +197,8 @@ func (s *Server) handleDNSRecordCreate(w http.ResponseWriter, r *http.Request, z
 		s.handleDNSUpstreamError(w, r, err)
 		return
 	}
+	// M3 写联动：解析记录创建成功后跟随登记台账（失败只记日志不回滚，D20）
+	s.linkDNSRecordDomain("create", zoneID, rec)
 	s.auditDNS(r, "dns_create", zoneID, input.Name, input)
 	s.writeJSON(w, http.StatusOK, rec)
 }
@@ -198,6 +219,8 @@ func (s *Server) handleDNSRecordUpdate(w http.ResponseWriter, r *http.Request, z
 		s.handleDNSUpstreamError(w, r, err)
 		return
 	}
+	// M3 写联动：更新后台账行跟随最新 name/type（确定性 ID 原地 upsert，D19）
+	s.linkDNSRecordDomain("update", zoneID, rec)
 	s.auditDNS(r, "dns_update", zoneID, input.Name, input)
 	s.writeJSON(w, http.StatusOK, rec)
 }
@@ -212,6 +235,8 @@ func (s *Server) handleDNSRecordDelete(w http.ResponseWriter, r *http.Request, z
 		s.handleDNSUpstreamError(w, r, err)
 		return
 	}
+	// M3 写联动：记录删除后台账行随之移除（幂等；按类型过滤在联动函数内）
+	s.unlinkDNSRecordDomain(zoneID, recordID)
 	s.auditDNS(r, "dns_delete", zoneID, recordID, nil)
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": true})
 }

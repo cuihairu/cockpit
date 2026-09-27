@@ -1,7 +1,9 @@
-# DNS 管理设计（M1：Cloudflare 集成；M2：DNSPod / 阿里云）
+# DNS 管理设计（M1：Cloudflare 集成；M2：DNSPod / 阿里云；M3：Domain 台账写联动）
 
 > 2026-09-15 立项。对应 todo「DNS 管理：Cloudflare API 集成，域名资源
 > 联动记录增删改」。M2 立项 2026-09-19：DNSPod / 阿里云 provider。
+> M3 立项 2026-09-27：Domain 台账写联动（D5 明写「留 M2」的写联动，
+> 实际排到 M3）。
 
 ## 痛点
 
@@ -115,6 +117,75 @@ zones 与 M1 Cloudflare 同款单页策略）；② 阿里云 `DescribeDomainRec
 
 **真机验收（剩余）**：DNSPod 免费版 TTL 下限与 CAA 支持、阿里云 enterprise
 版差异、两家 SRV 编辑实测。
+
+## M3：Domain 台账写联动（2026-09-27 设计）
+
+### 痛点与范围
+
+M1/M2 与 Domain 表的关系只有只读标注（D5：`in_cmdb`）：在面板里加了
+`app.example.com` 的 A 记录，「资源 → 域名」里并不会多出这一行，探测与
+证书管理依旧覆盖不到；zone 也要先去 inventory 手工登记。M3 把 D5 明写
+「留 M2」的写联动落地：DNS 侧的域名资产变更同步进 Domain 表，并给出
+provider 自动识别与反向对账语义。
+
+### 决策
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D18 | 联动范围与字段映射 | **zone 级显式登记/移除**（`POST`/`DELETE /api/dns/zones/{zid}/cmdb`）+ **解析记录 CRUD 成功后自动跟随**（仅 A/AAAA/CNAME 三类「解析出一个域名」的记录，MX/TXT/NS/SRV/CAA 是附属数据不是域名资产，不联动）；台账行字段就近取值：`Domain`=全名（provider 侧已归一，client 层 @↔zone 名，D14）、`Provider`=当前 `dns.provider`、`Status`="active"、`Labels`={source:"dns", zone_id, zone, record_id, type} | 三家 provider 都没有 zone 的创建/删除 API（DNS 管理只覆盖记录），所以「域名变更」在面板里就是登记/移除这个动作本身；A/AAAA/CNAME 口径对齐既有约定（DDNS 只写 A/AAAA、web proxied 仅这三类）；labels 让台账行可溯源到具体 zone/记录 |
+| D19 | 确定性 ID 与 provider 识别 | 台账行 ID：zone 级 `dns-{zid}`、记录级 `dns-{zid}-{rid}`（对齐 acme-{id} 先例）——记录删除/改名时无需反查即可定位行；`Provider` 字段写当前配置名，三态（cloudflare/dnspod/alidns）识别联动对象由 zone 查找（ListZones 命中 zid）统一承担，provider 差异在 client 层已被吸收 | 确定性 ID 让 unlink 幂等（行不存在不报错）且记录更新时原地 upsert（改 name/type 不产生新行）；zid 在 dnspod/alidns 即域名本身（D14），ID 可读性反而更好 |
+| D20 | 尽力而为 + 声明态保护 + 反向对账 | **provider 是事实源**：DNS 操作必须先成功，联动失败只记日志，不回滚、不改 API 应答（含审计：跟随动作不单独记，同一动作已有 dns_create/update/delete 留痕；登记/移除两个显式动作用新审计动作 `dns_cmdb_register`/`dns_cmdb_unregister`，resource=domain）；**声明态保护**：登记时同名行已存在（inventory/手工/历史 DNS 来源）一律 409，绝不静默改写别人的行；记录跟随遇到同名但 ID 不同的行 → 跳过联动只留日志；唯一索引是最终防线；移除登记只删 `labels.source=="dns"` 的行，且**一次清掉该 zone 的全部 DNS 来源行（zone 行 + 记录跟随行）**——这也是孤儿行的清理出口；**反向对账**：`GET /api/dns/zones` 响应新增 `orphans`（DNS 来源、所属 zone 已不在 provider 列表的行；归属口径：记录级行看 `labels.zone`，zone 级行看自身域名），只列出**永不自动删除**——inventory 声明或手工登记可能仍有效，由用户在面板逐条清理 | 面板外删 zone / 切换 provider 后的残留行不能悄悄消失（可能仍被探测/证书引用），但也不能假装它们有效——列出来让用户处置；zone 已从 provider 消失时移除端点不查 provider，照常可清；孤儿摘要带 `zone_id` 供前端定向清理 |
+
+### API 面与 Web
+
+- `POST /api/dns/zones/{zid}/cmdb` → 200 `{registered,id}` / 404（zone 不在
+  provider）/ 409（同名行已存在）/ 502·503（凭据与上游同既有语义）；
+- `DELETE /api/dns/zones/{zid}/cmdb` → 200 `{unregistered,records_removed}`
+  / 404（该 zone 无任何 DNS 来源行）/ 409（zone 行存在但来源不是 dns）；
+- `GET /api/dns/zones` 响应扩为 `{data:[...], orphans:[{id,domain,zone_id}]}`；
+- 记录 CRUD 的联动对 web 透明（成功后台账行已跟随，无需新交互）；
+- web `/dns` 记录管理 Tab：zone 选中后按 `in_cmdb` 显示「登记台账」或
+  「移除登记」（Popconfirm 说明会连带清记录跟随行），两者受 `dns:write`
+  管辖，失败文案（含 409）直接透出；`orphans` 非空时表格上方 Alert 逐条
+  列出并给定向「清理」按钮（无 `zone_id` 的历史行提示去「资源 → 域名」
+  手工处理）。
+
+### 不做（M3 确认）
+
+- 台账行 content/ttl 等 DNS 细节的镜像（Domain 表只表达「这个域名存在、
+  归谁管」，值以 provider 为准）；
+- 自动删除孤儿行（见 D20）；inventory 侧声明与 DNS 来源行的合并策略
+  （保持「同名 409/跳过」的先到先得，不做字段级 merge）；
+- 记录级联（zone 下全量记录的一次性登记）。
+
+### M3 清单
+
+- [x] server：`api_dns_cmdb.go`（登记/移除 + 记录跟随 + 孤儿对账）+
+      api_dns 路由挂载与三处联动钩子
+- [x] audit：`ResourceDomain` 资源类型 + `dns_cmdb_register`/
+      `dns_cmdb_unregister` 动作
+- [x] storage：无新增方法（复用 UpsertDomain/GetDomainByName/GetDomain/
+      DeleteDomain/ListDomains），补唯一索引冲突与 GetDomainByName 大小写
+      精确匹配的单测
+- [x] dns 包：零改动（联动全部在 server 层，client 归一已够用）
+- [x] web：api.ts 登记/移除方法 + getDNSZones 返回 `{zones,orphans}` +
+      DNS 页按钮/Alert + DDNSPanel 适配
+- [x] 测试：server 层登记/移除/三 provider 识别/跟随/失败不写库/同名不
+      覆盖/孤儿对账与清理 + 错误分支注入（closed db、trigger 阻断
+      INSERT·DELETE）；web 层 DNS 页 6 个联动用例
+- [x] 文档收尾（本清单勾选）+ todo.md 同步
+
+✅ M3 完成（2026-09-27）：api_dns_cmdb.go 全函数 100% 语句覆盖（经
+TestDNS 口径 profile 核对）。与设计的两处实现差异：① 登记前用
+`ListZones` 验 zone 存在（provider 是唯一事实源，面板不凭空登记），故
+未知 zid 是 404 而不是直接落库；② 台账跟随读路径用
+`GetDomainByName`（唯一索引精确匹配，大小写敏感——`Example.com` 与
+`example.com` 是两行），孤儿对账用 `ListDomains` 单趟扫描（与 zones
+的 in_cmdb 标注共用 provider 列表，不额外查询）。
+
+**真机验收（剩余）**：真实 Cloudflare/DNSPod/阿里云账号下登记→台账出现
+→改记录→台账跟随→删记录→台账消失→移除登记→整 zone 清干净的全链路；
+以及面板外删 zone 后 orphans 提示与清理。
 
 ## 参考
 

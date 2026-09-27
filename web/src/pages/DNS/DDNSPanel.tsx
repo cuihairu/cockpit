@@ -59,7 +59,10 @@ const DDNSPanel: React.FC = () => {
   const [savingScan, setSavingScan] = useState(false)
 
   const { data: configs = [], isLoading } = useQuery({ queryKey: ['ddns-configs'], queryFn: () => api.getDDNSConfigs() })
-  const { data: zones = [] } = useQuery({ queryKey: ['dns-zones'], queryFn: () => api.getDNSZones() })
+  // getDNSZones 返回 { zones, orphans }（与记录管理 Tab 共用 dns-zones 缓存，
+  // M3 台账联动后 server 在 zones 响应里附带反向对账结果）
+  const { data: zonesResult } = useQuery({ queryKey: ['dns-zones'], queryFn: () => api.getDNSZones() })
+  const zones = zonesResult?.zones ?? []
   const { data: agents = [] } = useQuery({ queryKey: ['ddns-agents'], queryFn: () => api.getAgents() })
   const { data: scanCfg } = useQuery({ queryKey: ['ddns-scan-config'], queryFn: () => api.getDDNSScanConfig() })
 

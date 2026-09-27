@@ -27,7 +27,8 @@ const msgSuccess = vi.spyOn(message, 'success')
 const msgError = vi.spyOn(message, 'error')
 const msgWarning = vi.spyOn(message, 'warning')
 
-const zones = [{ id: 'z1', name: 'example.com' }]
+// getDNSZones 已改为 { zones, orphans } 包装（M3 台账联动）
+const zones = { zones: [{ id: 'z1', name: 'example.com' }], orphans: [] }
 
 const mkAgent = (id: string, hostname: string, status = 'online'): Agent =>
   ({ id, hostname, ip: '10.0.0.1', region: 'cn', zone: 'z1', status, lastSeen: '0', capabilities: [] }) as unknown as Agent

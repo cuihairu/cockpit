@@ -1040,6 +1040,20 @@ export interface DNSZone {
   in_cmdb: boolean
 }
 
+// 孤儿台账行摘要（dns-design M3 D20）：DNS 来源、但所属 zone 已不在
+// provider 列表的 Domain 台账行，由用户经「移除登记」处置
+export interface DNSOrphan {
+  id: string
+  domain: string
+  zone_id: string
+}
+
+// zones 端点返回（data + 反向对账 orphans）
+export interface DNSZonesResult {
+  zones: DNSZone[]
+  orphans: DNSOrphan[]
+}
+
 // DNS 记录
 export interface DNSRecord {
   id: string

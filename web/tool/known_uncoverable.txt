@@ -68,8 +68,8 @@ pages/Proxy/index.tsx:143 tlsKey 同上
 pages/Backups/index.tsx:193 remoteDest ?? '' 兜底：留空提交 payload 断言 remote_dest:'' 已实证
 pages/Backups/index.tsx:194 preHook ?? '' 同上
 pages/Stacks/StackDetail.tsx:208 taskMeta 空值侧兜底：任务终态提示与 failed 日志弹窗均已断言（含弹窗标题）
-pages/DNS/index.tsx:267 Modal title 编辑/新建三元：JSX 内联，两态渲染断言均有
-pages/DNS/DDNSPanel.tsx:195 agent 列 render 三元/||：hostname 缺省用 id、未知 id 原样显示均已断言
+pages/DNS/index.tsx:347 Modal onCancel 内联回调：取消关闭并重开重置两断言均实证，v8 对 JSX 属性内联函数记 0
+pages/DNS/DDNSPanel.tsx:198 agent 列 render 三元/||：hostname 缺省用 id、未知 id 原样显示均已断言
 pages/Agents/columns.tsx:82 能力 +N 溢出 Tag 分支：4 能力渲染 +1、3 能力不渲染均已断言，Tooltip 包装致 v8 漏计
 pages/Drift/ConsistencyTab.tsx:139 mismatch 字段映射 hostname 分支：fixture 含 hostname 明细且「主机名」渲染断言通过，v8 对 Table columns 内联 render 三元漏计
 contexts/UserContext.tsx:90 login 后拉权限 setUser updater：login 成功用例断言 user 合并结果，async 回调内联漏计

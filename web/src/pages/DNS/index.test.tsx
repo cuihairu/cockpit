@@ -6,12 +6,14 @@ import DNS from './index'
 import type { Agent } from '@/types'
 
 // DNS：未配置引导按 provider 分流、记录管理（zone/类型过滤/CF 代理列/新建
-// 编辑 proxied 联动/删除）、DDNS（状态三态/巡检开关/新建编辑 pattern/检查
-// 三分支/RBAC 只读降级）
+// 编辑 proxied 联动/删除）、台账写联动（登记/移除/孤儿清理/RBAC）、
+// DDNS（状态三态/巡检开关/新建编辑 pattern/检查三分支/RBAC 只读降级）
 
 const apiMock = vi.hoisted(() => ({
   getDNSStatus: vi.fn(),
   getDNSZones: vi.fn(),
+  registerDNSZoneCMDB: vi.fn(),
+  unregisterDNSZoneCMDB: vi.fn(),
   getDNSRecords: vi.fn(),
   createDNSRecord: vi.fn(),
   updateDNSRecord: vi.fn(),
@@ -62,11 +64,11 @@ const ddnsConfigs = [
     type: 'A', enabled: false, lastStatus: 'never', lastIP: '', lastError: '', checkedAt: 0 },
 ]
 
-const renderPage = (provider = 'cloudflare') => {
+const renderPage = (provider = 'cloudflare', orphans: { id: string; domain: string; zone_id: string }[] = []) => {
   apiMock.getDNSStatus.mockResolvedValue({ configured: true, provider })
   // mock 整个 API 方法：mock 值 = 方法返回值（内部已解构 resp.data），
   // 非 {data} 包装——拦截器 unwrap 后 API 方法再解构一层（P0 响应结构一致性）
-  apiMock.getDNSZones.mockResolvedValue(zones)
+  apiMock.getDNSZones.mockResolvedValue({ zones, orphans })
   apiMock.getDNSRecords.mockResolvedValue(records)
   apiMock.getDDNSConfigs.mockResolvedValue(ddnsConfigs)
   apiMock.getAgents.mockResolvedValue(ddnsAgents)
@@ -154,6 +156,66 @@ describe('DNS', () => {
     await chooseZone('unmanaged.io')
     expect(await screen.findByText('该域名未登记在「资源 → 域名」，探测与证书管理不会覆盖它')).toBeInTheDocument()
     expect(screen.getByText('unmanaged.io（未登记 CMDB）', { selector: '.ant-select-selection-item' })).toBeInTheDocument()
+  })
+
+  it('台账联动：未登记 zone 显登记按钮，登记成功刷新台账标注', async () => {
+    apiMock.registerDNSZoneCMDB.mockResolvedValue({ registered: true, id: 'dns-z2' })
+    renderPage()
+    await chooseZone('unmanaged.io')
+    fireEvent.click(screen.getByRole('button', { name: /登记台账/ }))
+    await waitFor(() => expect(apiMock.registerDNSZoneCMDB).toHaveBeenCalledWith('z2'))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已登记到「资源 → 域名」'))
+  })
+
+  it('台账联动：同名行 409 等失败透出兜底文案', async () => {
+    apiMock.registerDNSZoneCMDB.mockRejectedValue(new Error('registered elsewhere'))
+    renderPage()
+    await chooseZone('unmanaged.io')
+    fireEvent.click(screen.getByRole('button', { name: /登记台账/ }))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('登记失败'))
+    expect(msgSuccess).not.toHaveBeenCalledWith('已登记到「资源 → 域名」')
+  })
+
+  it('台账联动：已登记 zone 显移除按钮，Popconfirm 确认后整 zone 清除', async () => {
+    apiMock.unregisterDNSZoneCMDB.mockResolvedValue({ unregistered: true, records_removed: 1 })
+    renderPage()
+    await chooseZone('example.com')
+    fireEvent.click(screen.getByRole('button', { name: /移除登记/ }))
+    expect(
+      await screen.findByText('将同时清除该域名在台账里的记录级跟随行（仅 DNS 来源行，inventory 声明不受影响）'),
+    ).toBeInTheDocument()
+    fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    await waitFor(() => expect(apiMock.unregisterDNSZoneCMDB).toHaveBeenCalledWith('z1'))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已移除登记'))
+  })
+
+  it('台账联动：移除失败透出兜底文案', async () => {
+    apiMock.unregisterDNSZoneCMDB.mockRejectedValue(new Error('sweep fail'))
+    renderPage()
+    await chooseZone('example.com')
+    fireEvent.click(screen.getByRole('button', { name: /移除登记/ }))
+    fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('移除失败'))
+  })
+
+  it('台账联动：孤儿行 Alert 逐条定向清理；无 zone_id 者提示手工处理', async () => {
+    apiMock.unregisterDNSZoneCMDB.mockResolvedValue({ unregistered: false, records_removed: 1 })
+    renderPage('cloudflare', [
+      { id: 'dns-zg', domain: 'gone.com', zone_id: 'zg' },
+      { id: 'dns-legacy', domain: 'legacy.com', zone_id: '' },
+    ])
+    expect(await screen.findByText('发现孤儿台账行')).toBeInTheDocument()
+    expect(screen.getByText('gone.com')).toBeInTheDocument()
+    expect(screen.getByText('无 zone 信息，请在「资源 → 域名」手工处理')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /清\s*理/ }))
+    expect(
+      await screen.findByText('仅删除 DNS 来源行（该 zone 的登记与记录跟随行），inventory 声明不受影响'),
+    ).toBeInTheDocument()
+    fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    await waitFor(() => expect(apiMock.unregisterDNSZoneCMDB).toHaveBeenCalledWith('zg'))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已移除登记'))
+    // 不带 zone 信息的孤儿不出现清理按钮（两条孤儿只有一条可清）
+    expect(document.querySelectorAll('.ant-alert button').length).toBe(1)
   })
 
   it('记录管理：类型过滤与刷新接线', async () => {
@@ -316,6 +378,9 @@ describe('DNS', () => {
     renderPage()
     await chooseZone('example.com')
     expect(screen.queryByRole('button', { name: /新建记录/ })).not.toBeInTheDocument()
+    // 台账登记/移除同样受 dns:write 管辖
+    expect(screen.queryByRole('button', { name: /登记台账/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /移除登记/ })).not.toBeInTheDocument()
     expect(recRow('www').querySelectorAll('button').length).toBe(0)
     fireEvent.click(screen.getByRole('tab', { name: 'DDNS' }))
     expect(await screen.findByText('home.example.com')).toBeInTheDocument()

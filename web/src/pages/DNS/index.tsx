@@ -77,10 +77,13 @@ const RecordsPanel = ({ provider }: { provider: string }) => {
   const [form] = Form.useForm<RecordFormValues>()
   const queryClient = useQueryClient()
 
-  const { data: zones = [], isLoading: zonesLoading } = useQuery({
+  const { data: zonesResult, isLoading: zonesLoading } = useQuery({
     queryKey: ['dns-zones'],
     queryFn: () => api.getDNSZones(),
   })
+  const zones = zonesResult?.zones ?? []
+  // 反向对账：DNS 来源台账行但所属 zone 已不在 provider 列表（M3 D20）
+  const orphans = zonesResult?.orphans ?? []
 
   const zone: DNSZone | undefined = useMemo(
     () => zones.find((z) => z.id === zoneId),
@@ -124,6 +127,27 @@ const RecordsPanel = ({ provider }: { provider: string }) => {
       invalidateRecords()
     },
     onError: (err) => message.error(getApiErrorMessage(err, '操作失败')),
+  })
+
+  // 台账写联动（dns-design M3 D18/D20）：zone 显式登记 / 整 zone 移除
+  // （移除同时清该 zone 的记录级跟随行，也是孤儿清理出口）；同名行已被
+  // inventory/手工占用时 server 409，错误文案直接透出
+  const registerMutation = useMutation({
+    mutationFn: (z: DNSZone) => api.registerDNSZoneCMDB(z.id),
+    onSuccess: () => {
+      message.success('已登记到「资源 → 域名」')
+      queryClient.invalidateQueries({ queryKey: ['dns-zones'] })
+    },
+    onError: (err) => message.error(getApiErrorMessage(err, '登记失败')),
+  })
+
+  const unregisterMutation = useMutation({
+    mutationFn: (zoneID: string) => api.unregisterDNSZoneCMDB(zoneID),
+    onSuccess: () => {
+      message.success('已移除登记')
+      queryClient.invalidateQueries({ queryKey: ['dns-zones'] })
+    },
+    onError: (err) => message.error(getApiErrorMessage(err, '移除失败')),
   })
 
   const openCreate = () => {
@@ -218,6 +242,28 @@ const RecordsPanel = ({ provider }: { provider: string }) => {
               该域名未登记在「资源 → 域名」，探测与证书管理不会覆盖它
             </Typography.Text>
           )}
+          {zone && (
+            <PermGuard perm="dns:write">
+              {zone.in_cmdb ? (
+                <Popconfirm
+                  title={`移除登记 ${zone.name}？`}
+                  description="将同时清除该域名在台账里的记录级跟随行（仅 DNS 来源行，inventory 声明不受影响）"
+                  onConfirm={() => unregisterMutation.mutate(zone.id)}
+                >
+                  <Button danger loading={unregisterMutation.isPending}>
+                    移除登记
+                  </Button>
+                </Popconfirm>
+              ) : (
+                <Button
+                  loading={registerMutation.isPending}
+                  onClick={() => registerMutation.mutate(zone)}
+                >
+                  登记台账
+                </Button>
+              )}
+            </PermGuard>
+          )}
           <Select
             style={{ width: 120 }}
             allowClear
@@ -242,6 +288,40 @@ const RecordsPanel = ({ provider }: { provider: string }) => {
           </PermGuard>
         </Space>
       </Card>
+
+      {orphans.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message="发现孤儿台账行"
+          description={
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              {orphans.map((o) => (
+                <Space key={o.id} wrap>
+                  <Typography.Text code>{o.domain}</Typography.Text>
+                  {o.zone_id ? (
+                    <Popconfirm
+                      title={`清理 ${o.domain} 的残留台账行？`}
+                      description="仅删除 DNS 来源行（该 zone 的登记与记录跟随行），inventory 声明不受影响"
+                      onConfirm={() => unregisterMutation.mutate(o.zone_id)}
+                    >
+                      <Button size="small">清理</Button>
+                    </Popconfirm>
+                  ) : (
+                    <Typography.Text type="secondary">
+                      无 zone 信息，请在「资源 → 域名」手工处理
+                    </Typography.Text>
+                  )}
+                </Space>
+              ))}
+              <Typography.Text type="secondary">
+                这些 DNS 来源台账行的域名已不在当前 provider 的 zone 列表（可能在面板外删除或切换过
+                provider）
+              </Typography.Text>
+            </Space>
+          }
+        />
+      )}
 
       <Card title={zone ? `${zone.name} 的 DNS 记录` : 'DNS 记录'}>
         <Table<DNSRecord>

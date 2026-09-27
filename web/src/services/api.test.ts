@@ -139,6 +139,8 @@ describe('ApiService 全方法驱动（URL/method/参数序列化不抛错）', 
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).deleteServerBackup('x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getDNSStatus()
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getDNSZones()
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).registerDNSZoneCMDB('x')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).unregisterDNSZoneCMDB('x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getDNSRecords('x', 'x', 1)
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).createDNSRecord('x', {})
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).updateDNSRecord('x', 'x', {})
@@ -444,6 +446,28 @@ describe('ApiService 默认参数与可选分支', () => {
       '/dns/zones/zone%201/records', { params: { page: '2' } })
   })
 
+  it('getDNSZones 返回 zones+orphans 包装，orphans 缺省兜底空数组', async () => {
+    mockInstance.get.mockResolvedValueOnce({
+      data: [{ id: 'z1', name: 'example.com', in_cmdb: true }],
+      orphans: [{ id: 'dns-zg', domain: 'gone.com', zone_id: 'zg' }],
+    })
+    expect(await api.getDNSZones()).toEqual({
+      zones: [{ id: 'z1', name: 'example.com', in_cmdb: true }],
+      orphans: [{ id: 'dns-zg', domain: 'gone.com', zone_id: 'zg' }],
+    })
+    mockInstance.get.mockResolvedValueOnce({ data: undefined })
+    expect(await api.getDNSZones()).toEqual({ zones: [], orphans: [] })
+  })
+
+  it('台账登记/移除走 /dns/zones/{zid}/cmdb，zoneID 编码', async () => {
+    mockInstance.post.mockResolvedValueOnce({ registered: true, id: 'dns-z 1' })
+    expect(await api.registerDNSZoneCMDB('z 1')).toEqual({ registered: true, id: 'dns-z 1' })
+    expect(mockInstance.post).toHaveBeenCalledWith('/dns/zones/z%201/cmdb')
+    mockInstance.delete.mockResolvedValueOnce({ unregistered: true, records_removed: 2 })
+    expect(await api.unregisterDNSZoneCMDB('z 1')).toEqual({ unregistered: true, records_removed: 2 })
+    expect(mockInstance.delete).toHaveBeenCalledWith('/dns/zones/z%201/cmdb')
+  })
+
   it('data 包装端点有 data 原样返回，缺 data 兜底空数组', async () => {
     mockInstance.get.mockResolvedValueOnce({ data: [{ id: 'r1' }] })
     expect(await api.getRecordings()).toEqual([{ id: 'r1' }])
@@ -453,10 +477,6 @@ describe('ApiService 默认参数与可选分支', () => {
     expect(await api.getServerBackups()).toEqual([{ name: 'b1.sql' }])
     mockInstance.get.mockResolvedValueOnce({})
     expect(await api.getServerBackups()).toEqual([])
-    mockInstance.get.mockResolvedValueOnce({ data: [{ id: 'z1' }] })
-    expect(await api.getDNSZones()).toEqual([{ id: 'z1' }])
-    mockInstance.get.mockResolvedValueOnce({})
-    expect(await api.getDNSZones()).toEqual([])
     mockInstance.get.mockResolvedValueOnce({ data: [{ domain: 'd1' }] })
     expect(await api.getAgentDomains('ag')).toEqual([{ domain: 'd1' }])
     mockInstance.get.mockResolvedValueOnce({})
