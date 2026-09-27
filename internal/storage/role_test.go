@@ -45,12 +45,16 @@ func TestSeedRolesBuiltin(t *testing.T) {
 	}
 	operator, _ := db.GetRole("operator")
 	for _, p := range operator.Permissions {
-		if p == "users:admin" || p == "roles:admin" || p == "settings:admin" {
+		if p == "users:admin" || p == "roles:admin" || p == "settings:admin" || p == "overlay:admin" {
 			t.Errorf("operator must not carry %s", p)
 		}
 	}
 	if !contains(operator.Permissions, "terminal:write") || !contains(operator.Permissions, "acme:admin") {
 		t.Errorf("operator should carry terminal:write and acme:admin, got %v", operator.Permissions)
+	}
+	// overlay:admin 属踢出网络级破坏动作，operator 应保留 read+write 但无 admin（M3 D28）
+	if !contains(operator.Permissions, "overlay:write") || contains(operator.Permissions, "overlay:admin") {
+		t.Errorf("operator should carry overlay:write but not overlay:admin, got %v", operator.Permissions)
 	}
 	viewer, _ := db.GetRole("viewer")
 	for _, p := range viewer.Permissions {

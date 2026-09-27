@@ -69,12 +69,24 @@ func TestRBACMatrix(t *testing.T) {
 		{"operator settings", "operator", "PUT", "/api/settings", 403},
 		{"operator create user", "operator", "POST", "/api/users", 403},
 		{"operator terminal", "operator", "GET", "/api/remote/terminal", 200},
+		// overlay 本机侧（M3 D28）：读观测全角色放行；join/leave/service
+		// 归 overlay:admin——operator 只有 read+write，被 D28 档位排除
+		{"viewer overlay status", "viewer", "GET", "/api/agents/a1/overlay/status", 200},
+		{"operator overlay daemon", "operator", "GET", "/api/agents/a1/overlay/daemon", 200},
+		{"operator overlay cloud write", "operator", "POST", "/api/overlay/cloud/networks/n/members", 200},
+		{"viewer overlay join", "viewer", "POST", "/api/agents/a1/overlay/networks/8056c2e21c000001/join", 403},
+		{"operator overlay join", "operator", "POST", "/api/agents/a1/overlay/networks/8056c2e21c000001/join", 403},
+		{"operator overlay leave", "operator", "POST", "/api/agents/a1/overlay/networks/-/leave", 403},
+		{"operator overlay service", "operator", "POST", "/api/agents/a1/overlay/service", 403},
+		{"operator overlay status post falls to write", "operator", "POST", "/api/agents/a1/overlay/status", 200},
 		// admin：全量
 		{"admin users", "admin", "GET", "/api/users", 200},
 		{"admin roles list", "admin", "GET", "/api/roles", 200},
 		{"admin settings", "admin", "PUT", "/api/settings", 200},
 		{"admin domains write", "admin", "POST", "/api/domains", 200},
 		{"admin drift config", "admin", "PUT", "/api/drift/config", 200},
+		{"admin overlay join", "admin", "POST", "/api/agents/a1/overlay/networks/8056c2e21c000001/join", 200},
+		{"admin overlay service", "admin", "POST", "/api/agents/a1/overlay/service", 200},
 		// 认证优先于鉴权：无/坏 token 放行给内层 auth（出 401 而非 403）
 		{"no token", "", "GET", "/api/dns", 200},
 		{"bad token", "bad", "GET", "/api/dns", 200},
@@ -108,6 +120,33 @@ func TestRBACDomainWriteRequiresBoth(t *testing.T) {
 	// 只读清单不需要 proxy:write
 	if got := rbacPair(t, s, "dns-only", "GET", "/api/domains"); got != http.StatusOK {
 		t.Errorf("dns-only read domains = %d, want 200", got)
+	}
+}
+
+// TestRBACOverlayJoinTierD28 overlay:admin 档位独立于 write：自定义角色
+// 有 overlay:write 也进不了本机 join/leave/service，显式补 admin 才放行
+func TestRBACOverlayJoinTierD28(t *testing.T) {
+	s := newTestServerWithDB(t)
+	if err := s.db.CreateRole(&storage.Role{
+		Name: "net-ops", Permissions: []string{"overlay:read", "overlay:write"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	join := "/api/agents/a1/overlay/networks/8056c2e21c000001/join"
+	if got := rbacPair(t, s, "net-ops", "GET", "/api/agents/a1/overlay/status"); got != http.StatusOK {
+		t.Errorf("net-ops overlay status = %d, want 200", got)
+	}
+	if got := rbacPair(t, s, "net-ops", "POST", join); got != http.StatusForbidden {
+		t.Errorf("net-ops overlay join = %d, want 403 (overlay:write 不含 admin 档)", got)
+	}
+	// 升级角色补 overlay:admin → 放行
+	if err := s.db.UpdateRole(&storage.Role{
+		Name: "net-ops", Permissions: []string{"overlay:read", "overlay:write", "overlay:admin"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rbacPair(t, s, "net-ops", "POST", join); got != http.StatusOK {
+		t.Errorf("net-ops + overlay:admin join = %d, want 200", got)
 	}
 }
 

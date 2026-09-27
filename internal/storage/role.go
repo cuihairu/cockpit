@@ -39,7 +39,7 @@ var resourceActions = map[string][]string{
 	"dns":       {"read", "write"},
 	"ddns":      {"read", "write"},
 	"proxy":     {"read", "write"},
-	"overlay":   {"read", "write"},
+	"overlay":   {"read", "write", "admin"},
 	"drift":     {"read", "write"},
 	"nas":       {"read", "write"},
 	"alerts":    {"read", "write"},
@@ -48,9 +48,9 @@ var resourceActions = map[string][]string{
 	"roles":     {"admin"},
 	"settings":  {"admin"},
 	// 笔 2 补齐：systemd 服务/SMART 磁盘/会话录制（D3 清单实现时对账补全）
-	"services":    {"read", "write"},
-	"smart":       {"read", "write"},
-	"recordings":  {"read", "write"},
+	"services":   {"read", "write"},
+	"smart":      {"read", "write"},
+	"recordings": {"read", "write"},
 }
 
 // PermissionValid 权限点是否落在 D3 清单内
@@ -85,12 +85,13 @@ func allPermissions() []string {
 }
 
 // operatorPermissions 全部模块 read+write（含 terminal:write、acme:admin），
-// 无 users/roles/settings（D8）
+// 无 users/roles/settings（D8）；无 overlay:admin（M3 D28：本机 join/leave
+// 能把主机踢出网络，破坏半径高于 operator 日常运维，需显式授予）
 func operatorPermissions() []string {
 	out := make([]string, 0, len(allPermissions()))
 	for _, p := range allPermissions() {
 		switch p {
-		case "users:admin", "roles:admin", "settings:admin":
+		case "users:admin", "roles:admin", "settings:admin", "overlay:admin":
 		default:
 			out = append(out, p)
 		}

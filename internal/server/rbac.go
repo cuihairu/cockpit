@@ -107,6 +107,14 @@ func requiredPerms(path, method string) (perms []string, governed bool) {
 		if strings.HasSuffix(rest, "/secret") {
 			return []string{"inventory:write"}, true
 		}
+		// overlay 本机侧写操作（join/leave/service）归 overlay:admin
+		// （M3 D28：能把主机踢出网络，破坏半径高于云管理面 write，
+		// 需显式授予，operator 不含此档）；读（status/daemon）仍 overlay:read
+		if method == http.MethodPost && strings.Contains(rest, "/overlay/") &&
+			(strings.HasSuffix(rest, "/join") || strings.HasSuffix(rest, "/leave") ||
+				strings.Contains(rest, "/overlay/service")) {
+			return []string{"overlay:admin"}, true
+		}
 		for sub, res := range agentSubResources {
 			if strings.Contains(rest, "/"+sub) {
 				return actionPerm(res, method, ""), true

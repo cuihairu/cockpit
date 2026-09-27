@@ -100,6 +100,34 @@ func (a *Agent) Heartbeat() {
 	a.LastSeen = time.Now()
 }
 
+// UpdateOverlayIdentity 就地刷新 overlay capability 上报的身份（M3 D26）。
+// join/leave 成功后 agent 经响应载荷回带新身份，server 据此更新 registry
+// 内存态——不动 WebSocket 协议面（register 仍只在连接首帧）。
+//
+// 并发：与 Update 同款「换新切片」策略——copy-on-write 出新 slice + 新
+// metadata map 再整体赋值，绝不原地改写旧 backing array，保证 GetCapabilities
+// 交出的旧 slice header 无 data race。无 overlay capability 时忽略（该 agent
+// 本就不具备组网身份，属异常载荷，静默丢弃而非新建 capability 项）。
+func (a *Agent) UpdateOverlayIdentity(identity map[string]interface{}) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for i := range a.Capabilities {
+		if a.Capabilities[i].Type != "overlay" {
+			continue
+		}
+		newCaps := make([]protocol.Capability, len(a.Capabilities))
+		copy(newCaps, a.Capabilities)
+		newMeta := make(map[string]interface{}, len(a.Capabilities[i].Metadata)+1)
+		for k, v := range a.Capabilities[i].Metadata {
+			newMeta[k] = v
+		}
+		newMeta["identity"] = identity
+		newCaps[i].Metadata = newMeta
+		a.Capabilities = newCaps
+		return
+	}
+}
+
 // IsOnline 检查是否在线（根据心跳）
 func (a *Agent) IsOnline(timeout time.Duration) bool {
 	a.mu.RLock()
