@@ -19,13 +19,17 @@ bash scripts/local-acceptance/run-acceptance.sh
 | `fake-docker-daemon` | 监听 `$FAKE_DOCKER_SOCK`，实现 `/_ping`、`/version`、`/info`、`/containers/json`（汇总状态目录里的 `<project>.json`） |
 | `fake-docker` | 拦截 `docker compose version/config -q/up -d/down/logs`；`up` 先睡 `FAKE_COMPOSE_UP_DELAY`（默认 2s，制造并发 409 窗口）再解析 compose 顶层 services 写状态文件，`down` 删除状态文件——`stack.status` 与 compose 动作真实联动 |
 
-## 断言范围（32 项）
+## 断言范围（42 项）
 
 登录 → agent 注册（`docker-api` capability）→ 创建 stack（`created=true`、
 compose/.env 回读一致）→ 非法 compose 校验失败不落盘 → 列表 → `up` 返回
 taskId → 同名并发 `up` 409 → 任务轮询 success → status 联动（running/total）
 → logs → `down` 归零 → `remove` 删目录 → agent 断连后缓存灰态
 （`online=false`）→ 审计事件齐全且 `.env` 内容不泄漏。
+
+M1.5 起追加：`restart` / `pull` 动作各返回 200 且任务终态 success →
+部署历史带终态且含 up/restart/pull → 目录自检（`stack.info`）聚合
+agentInfo 并带 stacks 目录路径。
 
 ## 与真实 Docker 验收的边界
 
