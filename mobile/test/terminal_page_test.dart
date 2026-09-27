@@ -380,35 +380,52 @@ void main() {
     await tester.runAsync(() => server.close());
   });
 
-  testWidgets('终端页：WS 协议帧非法 → stream onError 显示连接错误文案',
+  testWidgets('终端页：WS 握手被拒 → stream onError 显示连接错误文案',
       (tester) async {
-    // 升级前持有 raw socket，升级响应后紧跟保留 opcode（0x3）帧字节：
-    // RFC 6455 §5.2 要求客户端收到保留 opcode 即 fail connection，
-    // dart:io 协议解析抛 WebSocketException → channel.stream onError
-    // （此前登记 KNOWN_UNCOVERABLE 的 onError 分支由此路径真实触发）。
-    final upgraded = Completer<void>();
+    // 服务端完成 TCP + HTTP 请求读取后回 400（非 101）：
+    // dart:io WebSocket.connect 以 WebSocketException（not upgraded）
+    // 拒绝 → web_socket_channel adapter 把连接期异常包装成
+    // WebSocketChannelException 经 channel.stream addError 投递
+    // （adapter_web_socket_channel.dart onError 分支：addError+close），
+    // 页面 onError 分支（此前登记 KNOWN_UNCOVERABLE）由此真实触发，
+    // 横幅显示「连接错误：<异常>」。
+    //
+    // 注：SDK 相关约束（Dart 3.13 / Flutter 3.47 实测）——升级后的协议
+    // 帧非法走的是 stream onDone 静默关闭（websocket_impl.dart 对协议
+    // 错误只 _controller.close()、不 addError），无法触发 onError 分支；
+    // 连接期拒绝才是 stream onError 的可靠注入点。
+    //
+    // 另一约束：dart:io connect 内部调度在 FakeAsync 下不推进，initState
+    // 触发的首轮连接永远出不了网（IOWebSocketChannel 包装 Future 的
+    // 惰性握手使页面照常进 connected 态）——与本地 WS 全链路用例同款
+    // 解法：先不 mock ticket 以 404 快速失败（fake-async 安全），再在
+    // runAsync 真 zone 内还原 HttpOverrides 并按重连发起真实连接。
+    final rejected = Completer<void>();
     final server = (await tester.runAsync(() async {
-      final saved = HttpOverrides.current;
-      HttpOverrides.global = null;
-      try {
-        final s = await HttpServer.bind('127.0.0.1', 0);
-        s.listen((req) async {
-          final raw = req.socket;
-          final ws = await WebSocketTransformer.upgrade(req,
-              protocolSelector: (protocols) => protocols.first);
-          raw.add([0x83, 0x01, 0x78]); // FIN + 保留 opcode 3，负载 'x'
-          upgraded.complete();
-          ws.listen((_) {});
-        });
-        return s;
-      } finally {
-        HttpOverrides.global = saved;
-      }
+      final s = await ServerSocket.bind('127.0.0.1', 0);
+      s.listen((sock) async {
+        try {
+          final it = StreamIterator(sock);
+          final buf = <int>[];
+          // 读完完整 HTTP 请求头再应答，避免半途断连触发客户端重试歧义
+          while (!utf8.decode(buf, allowMalformed: true).contains('\r\n\r\n')) {
+            if (!await it.moveNext()) return;
+            buf.addAll(it.current as List<int>);
+          }
+          sock.add(utf8.encode(
+              'HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n'));
+          await sock.flush();
+          rejected.complete();
+          await sock.close();
+        } catch (_) {
+          sock.destroy();
+        }
+      });
+      return s;
     }))!;
 
-    final adapter = MockAdapter()
-      ..on('POST', '/api/remote/tickets', 200,
-          {'ticket': 'tk-err', 'expires_at': '2030-01-01T00:00:00Z'});
+    // 首轮不 mock ticket：404 快速失败（fake-async 安全）→ 错误态出重连按钮
+    final adapter = MockAdapter();
     final dio = Dio(BaseOptions(baseUrl: 'http://test'))
       ..httpClientAdapter = adapter;
     await tester.pumpWidget(ProviderScope(
@@ -427,26 +444,43 @@ void main() {
     ));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
+    expect(find.byIcon(Icons.refresh), findsOneWidget);
 
-    // 真 async 区等握手完成 + 客户端解析非法帧 → onError → _fail
+    // 真 async 区发起真实连接：还原 HttpOverrides（否则握手被劫持），
+    // 按重连按钮 → 等 400 应答落定 + 客户端 connect future 拒绝投递
+    adapter.on('POST', '/api/remote/tickets', 200,
+        {'ticket': 'tk-err', 'expires_at': '2030-01-01T00:00:00Z'});
     await tester.runAsync(() async {
-      for (var i = 0; i < 50 && !upgraded.isCompleted; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      try {
+        final btn = tester.widget<IconButton>(find.ancestor(
+            of: find.byIcon(Icons.refresh),
+            matching: find.byType(IconButton)));
+        btn.onPressed!();
+        for (var i = 0; i < 50 && !rejected.isCompleted; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+      } finally {
+        HttpOverrides.global = saved;
       }
-      await Future<void>.delayed(const Duration(milliseconds: 800));
     });
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pump(const Duration(milliseconds: 200));
-    // onError（写文案 + 置 error 态）先于 onDone（connected 态下不写文案）；
-    // 若只有 onDone，L123 条件不满足、横幅为空——文案出现即 onError 已执行
+    expect(rejected.isCompleted, isTrue);
+    // onError：横幅写「连接错误：<异常>」并置 error 态
+    //（onDone 的「连接已关闭」不覆盖已写的 onError 文案）
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
-    expect(find.textContaining('连接已关闭'), findsOneWidget);
+    final errText = tester.widget<Text>(find.descendant(
+        of: find.byType(Expanded), matching: find.byType(Text)));
+    expect(errText.data, startsWith('连接错误：'));
 
     // 卸载 → dispose → sink.close() 挂 5s close 超时 Timer，推进 fake time
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 5));
-    await tester.runAsync(() => server.close(force: true));
+    await tester.runAsync(() => server.close());
   });
 
 }

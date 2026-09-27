@@ -86,17 +86,23 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
       scheme: wsScheme,
       path: '/api/remote/terminal',
     );
+    WebSocketChannel channel;
     if (server.scheme != 'https') {
-      return IOWebSocketChannel.connect(uri, protocols: [ticket]);
+      channel = IOWebSocketChannel.connect(uri, protocols: [ticket]);
+    } else {
+      final allowSelfSigned = ref.read(settingsProvider).allowSelfSigned;
+      final client = HttpClient()
+        ..badCertificateCallback = allowSelfSigned ? (_, _, _) => true : null;
+      channel = IOWebSocketChannel.connect(
+        uri,
+        protocols: [ticket],
+        customClient: client,
+      );
     }
-    final allowSelfSigned = ref.read(settingsProvider).allowSelfSigned;
-    final client = HttpClient()
-      ..badCertificateCallback = allowSelfSigned ? (_, _, _) => true : null;
-    return IOWebSocketChannel.connect(
-      uri,
-      protocols: [ticket],
-      customClient: client,
-    );
+    // 连接期异常由 stream onError 统一呈现；ready 携带同源错误但无
+    // 消费者，显式忽略避免每次握手失败都产生 unhandled async error
+    channel.ready.ignore();
+    return channel;
   }
 
   void _onServerMessage(String raw) {
@@ -120,7 +126,13 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
   void _fail(String msg) {
     if (!mounted) return;
     setState(() {
-      if (_state != _ConnState.connected || msg != '连接已关闭') _error = msg;
+      // 兜底的「连接已关闭」在两种情况下抑制：connected 态的正常关闭
+      // （保持空横幅）、onError 已写入具体错误（连接错误：…）——避免
+      // 紧随其后的 onDone 把可诊断文案冲成无信息量的通用提示
+      final suppressClose =
+          msg == '连接已关闭' &&
+              (_state == _ConnState.connected || _error.isNotEmpty);
+      if (!suppressClose) _error = msg;
       _state = _ConnState.error;
     });
   }

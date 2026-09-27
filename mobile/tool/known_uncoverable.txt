@@ -21,10 +21,8 @@ pages/dashboard_page.dart:19 const 构造行，loading 分支运行时已被用�
 # （用例通过即证明命中）。await 在未就绪 channel 上挂起，行计数不被记录。
 pages/terminal_page.dart:56 await 挂起行，!mounted 分支已被用例验证，lcov 漏计
 
-# [环境不可达] channel.stream.listen 的 onError 回调。
-# 可实验证实：IOWebSocketChannel.connect 的握手失败落在 ready future 上，
-# 不会进入 stream onError（flutter_test 的 HttpOverrides 400 亦然）；
-# 二进制帧等畸形消息经 dart:io WebSocket 正常 yield 不产生 error 事件。
-# 触发 onError 需真实 TCP 异常（RST/协议违例），testWidgets 的
-# fake-async 事件循环无法注入。
-pages/terminal_page.dart:73 真实 WS stream error 无法在 fake-async 测试环境注入
+# 注：channel.stream.listen 的 onError 回调（terminal_page.dart:73）曾登记
+# 为环境不可达；web_socket_channel 3.x 的 adapter 把连接期异常（如握手
+# 非 101 → WebSocketException not upgraded）经 channel.stream addError
+# 投递，「WS 握手被拒」用例在 runAsync 真 zone 内以本地 ServerSocket 回
+# 400 真实触发该分支，已移出登记表。
