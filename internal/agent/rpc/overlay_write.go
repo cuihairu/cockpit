@@ -49,6 +49,11 @@ var overlayServiceActions = map[string]bool{
 // 分支必须能脱离真机环境断言）
 var overlayDetectSystemd = DetectSystemd
 
+// overlayStatusSnapshot join/leave 成功后回带快照的取数点（var 仅为测试
+// 可注入，同 overlayDetectSystemd 先例——Status 是全降级设计、从不返回
+// 错误，下方 refresh-failure 分支是防御性兜底，只有注入桩才能覆盖）
+var overlayStatusSnapshot = func(p *OverlayProvider) (interface{}, error) { return p.Status() }
+
 // SetOverlayIdentityFn 注入 join/leave 成功后刷新身份用的提取函数
 // （D26；detector.OverlayIdentity 在 providers.go 注入）。未注入时
 // 响应不带 identity 键——server 跳过 registry 更新，其余语义不变。
@@ -118,7 +123,7 @@ func (p *OverlayProvider) changeNetwork(verb, tool, netID string) (interface{}, 
 		return nil, fmt.Errorf("tool %s does not support join/leave (supported: zerotier, tailscale)", tool)
 	}
 
-	result, err := p.Status()
+	result, err := overlayStatusSnapshot(p)
 	if err != nil {
 		return nil, fmt.Errorf("command succeeded but status refresh failed: %w", err)
 	}

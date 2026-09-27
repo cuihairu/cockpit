@@ -757,6 +757,8 @@
 - [CI `test.yml` 新增 `go test -race -short ./...` 兜底步骤（此前只有普通 `go test`，这类竞态 CI 抓不到）。]
 - [全仓 `-race -short` 终验通过。]
 
+**覆盖率巡检复跑（2026-09-27）**：全量 `go test ./... -coverprofile` 复跑，30/32 包 100.0%，两处真实缺口当轮归零：① `internal/domain` 99.4%——`cov_monitor.go` `queryWhois` 的 `whoisPath == ""` 早退分支（空 Monitor 构造即可测），补 `TestQueryWhoisMissingCommand` 同时覆盖 `queryWhois`/`Check` 两入口 → 100.0%；② `internal/agent/rpc` 99.953%（4250/4252，语句级 awk 核算——`-func` total 一位小数四舍五入照样显示 100.0%，即 2026-09-23 教训的复发形态，而 agent-test.yml 的 bc 门禁恰好抓住它，CI 红=真缺口）——`overlay_write.go` 两分支：`tailscale down` 失败分支补 `TestOverlayLeaveTailscaleDownFails`（断言不回退 logout）；`Status` 全降级设计从不返回错误、其 refresh-failure 兜底分支按 `stdinPipeFn`/`rdpClientAvailable` 先例 var 化 `overlayStatusSnapshot`（行为中性）+ 注入桩覆盖 → 4253/4253。顺带硬化一处测试 flake：`TestStackProviderRestartAndPull` 在 `-coverprofile` 高负载下偶发「stack busy」——`launchTask` 终态写在锁内、锁释放与轮询看到终态之间有窗口（持久化不变量要求终态与锁序不可倒换），测试侧 `runStackAction` 对 busy 重试（5s 上限）而非改 provider 顺序。终验：rpc/domain 包 profile 精确 100%，agent 家族 CI 门禁口径（`-short` + bc 判定）本地复验 `Agent coverage: 100.0%`，`-tags rdp` 步骤通过。
+
 ## 远控三协议统一第三方集成（Guacamole SSH 接入，2026-09-25）
 
 方向对齐另一仓库：VNC / SSH / RDP 三协议远控统一集成第三方方案（guacd + guacamole-common-js 单栈），不再各自维护自研协议链路。设计文档 `docs/remote-access-integration-design.md`（选型总览/备选对比/数据流/衔接既有链路/决策 D1-D7）。RDP/VNC 已在 Guacamole 路线上，本次补齐 **SSH 接入同一栈**：

@@ -131,6 +131,26 @@ func waitForTask(t *testing.T, p *StackProvider, taskID string) map[string]inter
 	return nil
 }
 
+// runStackAction 发起异步动作并等终态。launchTask 的栈锁在终态写盘之后、
+// goroutine 返回时才释放（保证轮询观察到终态时 last-task.json 已写完——
+// 见 launchTask 注释的不变量），「观察到成功 → 立刻再发动作」存在极小的
+// busy 窗口（高负载/插桩下可复现），对 busy 语义重试至死线。
+func runStackAction(t *testing.T, p *StackProvider, action, name string) map[string]interface{} {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := p.Call(action, map[string]interface{}{"name": name})
+		if err == nil {
+			return waitForTask(t, p, resp.(map[string]interface{})["taskId"].(string))
+		}
+		if strings.Contains(err.Error(), "busy") && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		t.Fatalf("%s error = %v", action, err)
+	}
+}
+
 // ============ 名称校验 ============
 
 func TestStackProviderInvalidName(t *testing.T) {
@@ -475,20 +495,12 @@ func TestStackProviderRestartAndPull(t *testing.T) {
 	p := newTestStackProvider(t, `exit 0`, &mockStackDocker{})
 	writeStack(t, p.dir, "web", "compose.yml", "services: {}\n")
 
-	resp, err := p.Call("restart", map[string]interface{}{"name": "web"})
-	if err != nil {
-		t.Fatalf("restart error = %v", err)
-	}
-	task := waitForTask(t, p, resp.(map[string]interface{})["taskId"].(string))
+	task := runStackAction(t, p, "restart", "web")
 	if task["status"] != stackTaskSuccess || task["action"] != "restart" {
 		t.Errorf("restart task = %v/%v", task["action"], task["status"])
 	}
 
-	resp, err = p.Call("pull", map[string]interface{}{"name": "web"})
-	if err != nil {
-		t.Fatalf("pull error = %v", err)
-	}
-	task = waitForTask(t, p, resp.(map[string]interface{})["taskId"].(string))
+	task = runStackAction(t, p, "pull", "web")
 	if task["status"] != stackTaskSuccess || task["action"] != "pull" {
 		t.Errorf("pull task = %v/%v", task["action"], task["status"])
 	}

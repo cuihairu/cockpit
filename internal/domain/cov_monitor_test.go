@@ -348,3 +348,16 @@ func TestCovParseWhoisEdgeLines(t *testing.T) {
 		t.Error("DNSSec should be false when value lacks 'signed'")
 	}
 }
+
+// TestQueryWhoisMissingCommand 覆盖 whoisPath 为空的早退分支：
+// NewMonitor 配置层已拒绝空 whoisPath，公开构造路径下该分支不可达，
+// 故直接构造零值 Monitor 验证错误文案（queryWhois 与 Check 包装两层）。
+func TestQueryWhoisMissingCommand(t *testing.T) {
+	m := &Monitor{timeout: time.Second}
+	if _, err := m.queryWhois("example.com"); err == nil || !strings.Contains(err.Error(), "whois command not found") {
+		t.Fatalf("queryWhois() with empty whoisPath err = %v, want 'whois command not found'", err)
+	}
+	if _, err := m.Check("example.com"); err == nil || !strings.Contains(err.Error(), "whois command not found") {
+		t.Fatalf("Check() with empty whoisPath err = %v, want wrapped 'whois command not found'", err)
+	}
+}

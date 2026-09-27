@@ -173,6 +173,27 @@ func TestOverlayJoinTailscaleRequiresLogin(t *testing.T) {
 	}
 }
 
+func TestOverlayJoinTailscaleInvalidStatusJSON(t *testing.T) {
+	rec := &wrRecorder{routes: map[string]wrRoute{
+		"tailscale status --json": {out: []byte(`{"BackendState":`)}, // 截断 JSON
+	}}
+	p := NewOverlayProvider(rec.run)
+	_, err := p.Join("tailscale", "tailnet-name.ts.net")
+	if err == nil || !strings.Contains(err.Error(), "invalid tailscale status json") {
+		t.Errorf("err = %v, want invalid-status-json rejection", err)
+	}
+	if len(rec.calls) != 1 {
+		t.Errorf("calls = %d, want only status probe (no up)", len(rec.calls))
+	}
+}
+
+func TestOverlayInstallGuideUnknownTool(t *testing.T) {
+	// 未知工具：无引导文案（面板侧兜底），不 panic 不误指安装源
+	if got := overlayInstallGuide("frp"); got != "" {
+		t.Errorf("overlayInstallGuide(frp) = %q, want empty", got)
+	}
+}
+
 func TestOverlayJoinTailscaleOK(t *testing.T) {
 	rec := &wrRecorder{routes: map[string]wrRoute{
 		"tailscale status --json": tsStatusRoute("Running", "nas.tailnet-name.ts.net."),
@@ -583,5 +604,43 @@ func TestOverlayFirstLineAndClipLine(t *testing.T) {
 	}
 	if got := clipLine(strings.Repeat("x", 30), 10); got != strings.Repeat("x", 10)+"…" {
 		t.Errorf("clipLine(long) = %q", got)
+	}
+}
+
+// ============ 防御分支：down 失败与快照刷新失败 ============
+
+func TestOverlayLeaveTailscaleDownFails(t *testing.T) {
+	rec := &wrRecorder{routes: map[string]wrRoute{
+		"tailscale down": {stderr: []byte("state operation in progress"), err: exec.ErrNotFound},
+	}}
+	p := NewOverlayProvider(rec.run)
+	_, err := p.Leave("tailscale", "-")
+	if err == nil || !strings.Contains(err.Error(), "tailscale down") {
+		t.Fatalf("err = %v, want down failure summary", err)
+	}
+	if !strings.Contains(err.Error(), "state operation in progress") {
+		t.Errorf("err 应携带 stderr 摘要, got %q", err)
+	}
+	if rec.hasCall("tailscale logout") {
+		t.Error("down 失败也不得回退到 logout（清凭据不可逆，D24）")
+	}
+	if rec.hasCall("tailscale up") {
+		t.Error("leave 失败路径不得执行 up")
+	}
+}
+
+func TestOverlayJoinStatusRefreshFailure(t *testing.T) {
+	old := overlayStatusSnapshot
+	t.Cleanup(func() { overlayStatusSnapshot = old })
+	rec := &wrRecorder{routes: map[string]wrRoute{
+		"zerotier-cli join " + wrZTNet: {out: []byte("200 join OK")},
+	}}
+	p := NewOverlayProvider(rec.run)
+	overlayStatusSnapshot = func(*OverlayProvider) (interface{}, error) {
+		return nil, exec.ErrNotFound
+	}
+	_, err := p.Join("zerotier", wrZTNet)
+	if err == nil || !strings.Contains(err.Error(), "command succeeded but status refresh failed") {
+		t.Fatalf("err = %v, want status refresh failure wrap", err)
 	}
 }
