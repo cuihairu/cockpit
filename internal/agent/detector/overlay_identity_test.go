@@ -177,3 +177,32 @@ func TestOverlayDetectorDetectWithIdentity(t *testing.T) {
 		t.Errorf("unexpected feature flags: %v", cap.Metadata)
 	}
 }
+
+func TestOverlayIdentityWrapper(t *testing.T) {
+	// M3 D26 入口：join/leave 响应载荷刷新身份用，两工具全量自检
+	fakeBinDir(t, map[string]string{
+		"zerotier-cli": `if [ "$2" = "info" ]; then echo '` + ztInfoJSON + `'; else echo '[]'; fi`,
+		"tailscale":    `echo '` + tsStatusJSON + `'`,
+	})
+	id := OverlayIdentity()
+	if id == nil {
+		t.Fatal("OverlayIdentity() = nil, want both identities")
+	}
+	if _, ok := id["zerotier"]; !ok {
+		t.Error("identity missing zerotier")
+	}
+	if _, ok := id["tailscale"]; !ok {
+		t.Error("identity missing tailscale")
+	}
+}
+
+func TestOverlayIdentityWrapperAllAbsent(t *testing.T) {
+	// 两工具 CLI 都缺席/失败 → nil，server 据此跳过 registry 更新（D26）
+	fakeBinDir(t, map[string]string{
+		"zerotier-cli": "exit 1",
+		"tailscale":    "exit 1",
+	})
+	if id := OverlayIdentity(); id != nil {
+		t.Errorf("OverlayIdentity() = %v, want nil when both tools absent", id)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/agent/detector"
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
 	"github.com/cuihairu/cockpit/internal/docker"
 	"github.com/cuihairu/cockpit/internal/protocol"
@@ -99,8 +100,11 @@ func (a *Agent) setupProviders() {
 			}
 			a.rpc.RegisterProvider(dp)
 		case "overlay":
-			// 组网工具观测（见 docs/guide/overlay-design.md）
-			a.rpc.RegisterProvider(rpc.NewOverlayProvider(nil))
+			// 组网工具观测 + M3 写管理（见 docs/guide/overlay-design.md）；
+			// join/leave 成功后经响应载荷刷新身份（M3 D26）
+			op := rpc.NewOverlayProvider(nil)
+			op.SetOverlayIdentityFn(detector.OverlayIdentity)
+			a.rpc.RegisterProvider(op)
 		case "hardware-monitor":
 			// SMART 磁盘健康观测（见 docs/guide/disk-health-design.md）；
 			// 无 smartctl 的主机 provider 返回 available=false，不报错

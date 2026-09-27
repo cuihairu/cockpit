@@ -44,6 +44,8 @@ var (
 // OverlayProvider 组网工具观测
 type OverlayProvider struct {
 	run Commander
+	// identityFn join/leave 成功后刷新身份（M3 D26），见 SetOverlayIdentityFn
+	identityFn func() map[string]interface{}
 }
 
 // NewOverlayProvider 创建 provider；run 为 nil 时使用真实命令执行
@@ -62,6 +64,14 @@ func (p *OverlayProvider) Call(action string, params map[string]interface{}) (in
 	switch action {
 	case "status":
 		return p.Status()
+	case "join":
+		return p.Join(paramString(params, "tool"), paramString(params, "networkId"))
+	case "leave":
+		return p.Leave(paramString(params, "tool"), paramString(params, "networkId"))
+	case "daemon":
+		return p.Daemon()
+	case "service":
+		return p.Service(paramString(params, "tool"), paramString(params, "action"))
 	default:
 		return nil, fmt.Errorf("unknown overlay action: %s", action)
 	}

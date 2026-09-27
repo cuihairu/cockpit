@@ -103,6 +103,13 @@ func stripCIDRSuffixes(addrs []string) []string {
 	return out
 }
 
+// OverlayIdentity 供 overlay.join/leave 响应载荷刷新身份用（M3 D26）：
+// 不依赖探测结果，两工具各自跑命令自检（命令缺席该段自然静默缺席，
+// 与注册路径同一纪律）；全空返回 nil，server 据此跳过 registry 更新。
+func OverlayIdentity() map[string]any {
+	return extractIdentity(map[string]any{"zerotier": true, "tailscale": true})
+}
+
 // extractIdentity 按已探测到的工具提取身份；两工具都缺席时返回 nil
 // （metadata 不带 identity 键）。
 func extractIdentity(features map[string]any) map[string]any {
