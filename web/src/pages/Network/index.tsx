@@ -562,7 +562,292 @@ const CloudPanel: React.FC = () => {
   )
 }
 
-// 单 agent 详情面板：身份 chip + 工具卡 + 网络与 peers
+// ============ 本机侧管理（M3，D21-D30） ============
+
+// 加入表单占位/提示按工具区分（D30）
+const JOIN_HINTS: Record<string, { placeholder: string; hint: string }> = {
+  zerotier: {
+    placeholder: '16 位十六进制网络 ID',
+    hint: '形如 8056c2e21c000001，在 ZeroTier Central 网络页可查。',
+  },
+  tailscale: {
+    placeholder: 'tailnet 名或 -（不校验归属）',
+    hint: 'Tailscale 无按网络加入的 CLI 动作：此处执行 tailscale up，需该机已完成登录（未登录会被拒绝并给引导）。',
+  },
+}
+
+// ToolCard 单工具卡：观测内容 + M3 加入/离开动作。wireguard/frp 无加入
+// 语义不出口（D25）；离开就近放在各自的网络行（ZT 逐网、TS 卡级 down）
+const ToolCard: React.FC<{ agentId: string; tool: OverlayTool }> = ({ agentId, tool }) => {
+  const queryClient = useQueryClient()
+  const [joinOpen, setJoinOpen] = useState(false)
+  const [netId, setNetId] = useState('')
+  const manageable = tool.tool === 'zerotier' || tool.tool === 'tailscale'
+
+  const change = useMutation({
+    mutationFn: (v: { verb: 'join' | 'leave'; netId: string }) =>
+      v.verb === 'join'
+        ? api.joinAgentOverlayNetwork(agentId, v.netId, tool.tool)
+        : api.leaveAgentOverlayNetwork(agentId, v.netId, tool.tool),
+    onSuccess: (resp, vars) => {
+      // D26：响应携带最新快照与身份——快照直接入缓存免二次请求，
+      // agents 列表失效以刷新身份 chip
+      if (resp?.status) queryClient.setQueryData(['overlay-status', agentId], resp.status)
+      message.success(vars.verb === 'join' ? '已发起加入' : '已离开网络')
+      queryClient.invalidateQueries({ queryKey: ['overlay-status', agentId] })
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+    },
+    onError: (e) => message.error(`操作失败：${String(e)}`),
+  })
+
+  const submitJoin = () => {
+    const id = netId.trim()
+    if (!id) return
+    change.mutate({ verb: 'join', netId: id })
+    setJoinOpen(false)
+    setNetId('')
+  }
+
+  const leaveButton = (netIdValue: string, name: string, description: string) => (
+    <Popconfirm
+      title={`离开 ${name}？`}
+      description={description}
+      okText="离开"
+      onConfirm={() => change.mutate({ verb: 'leave', netId: netIdValue })}
+    >
+      <Button
+        size="small"
+        danger
+        loading={change.isPending && change.variables?.verb === 'leave' && change.variables?.netId === netIdValue}
+      >
+        离开
+      </Button>
+    </Popconfirm>
+  )
+
+  const extra = manageable ? (
+    <PermGuard perm="overlay:admin">
+      <Space size={8}>
+        <Button
+          size="small"
+          type="primary"
+          ghost
+          onClick={() => {
+            setNetId('')
+            setJoinOpen(true)
+          }}
+        >
+          加入网络
+        </Button>
+        {tool.tool === 'tailscale' &&
+          leaveButton('-', 'tailnet', '执行 tailscale down：断开连接但保留登录态，再次 up 即可回来。')}
+      </Space>
+    </PermGuard>
+  ) : undefined
+
+  return (
+    <Card
+      size="small"
+      title={
+        <Space>
+          <span>{TOOL_LABELS[tool.tool] ?? tool.tool}</span>
+          <Tag color={STATUS_COLORS[tool.status]}>{STATUS_LABELS[tool.status] ?? tool.status}</Tag>
+          {tool.version && <Typography.Text type="secondary" style={{ fontSize: 12 }}>v{tool.version}</Typography.Text>}
+        </Space>
+      }
+      extra={tool.error ? <Tooltip title={tool.error}><Typography.Text type="warning" style={{ fontSize: 12 }}>详情</Typography.Text></Tooltip> : extra}
+    >
+      {(tool.networks?.length ?? 0) > 0 && (
+        <Descriptions
+          size="small"
+          column={1}
+          style={{ marginBottom: tool.peers?.length || tool.interfaces?.length ? 8 : 0 }}
+          items={tool.networks!.map((n) => ({
+            key: n.id,
+            label: n.name || n.id,
+            children: (
+              <Space wrap size={8}>
+                <Tag color={n.status === 'OK' || n.online ? 'success' : 'warning'}>{n.status ?? '—'}</Tag>
+                {(n.ips ?? []).map((ip) => (
+                  <Typography.Text key={ip} code style={{ fontSize: 12 }}>{ip}</Typography.Text>
+                ))}
+                {/* ZeroTier 逐网络离开（D30）：网络 id 已知，Popconfirm 二次确认 */}
+                {tool.tool === 'zerotier' && (
+                  <PermGuard perm="overlay:admin">
+                    {leaveButton(n.id, n.name || n.id, '离开后该主机将失去此网络的虚拟 IP。')}
+                  </PermGuard>
+                )}
+              </Space>
+            ),
+          }))}
+        />
+      )}
+      {(tool.interfaces?.length ?? 0) > 0 && (
+        <Descriptions
+          size="small"
+          column={1}
+          items={tool.interfaces!.map((i) => ({
+            key: i.name,
+            label: i.name,
+            children: `${i.peerCount} 个 peer${i.listenPort ? ` · 监听 ${i.listenPort}` : ''}`,
+          }))}
+        />
+      )}
+      {toolPeers(tool).length > 0 && (
+        <Table
+          size="small"
+          rowKey={(p) => `${tool.tool}:${p.peer.id}:${p.from ?? ''}`}
+          dataSource={toolPeers(tool)}
+          pagination={{ pageSize: 8, hideOnSinglePage: true }}
+          columns={[
+            { title: '对端', render: (_: unknown, r) => r.peer.name || r.peer.id, width: 180 },
+            {
+              title: '地址',
+              render: (_: unknown, r) => (
+                <Typography.Text code style={{ fontSize: 12 }}>
+                  {r.peer.virtualIps?.join(', ') || r.peer.endpoint || '—'}
+                </Typography.Text>
+              ),
+            },
+            {
+              title: '在线',
+              dataIndex: ['peer', 'online'],
+              width: 80,
+              render: (v: boolean) => <Badge status={v ? 'success' : 'error'} />,
+            },
+            { title: '延迟', render: (_: unknown, r) => (r.peer.latencyMs ? `${r.peer.latencyMs}ms` : '—'), width: 80 },
+            {
+              title: '最近握手',
+              dataIndex: ['peer', 'lastHandshake'],
+              width: 160,
+              render: (v?: string) => <span style={{ fontSize: 12 }}>{formatTime(v)}</span>,
+            },
+          ]}
+        />
+      )}
+      {manageable && (
+        <Modal
+          title={`加入网络（${TOOL_LABELS[tool.tool]}）`}
+          open={joinOpen}
+          onOk={submitJoin}
+          okText="加入"
+          cancelText="取消"
+          okButtonProps={{ disabled: !netId.trim() }}
+          onCancel={() => setJoinOpen(false)}
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size={8}>
+            <Input
+              value={netId}
+              onChange={(e) => setNetId(e.target.value)}
+              onPressEnter={submitJoin}
+              placeholder={JOIN_HINTS[tool.tool]?.placeholder}
+              allowClear
+            />
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+              {JOIN_HINTS[tool.tool]?.hint}
+            </Typography.Paragraph>
+          </Space>
+        </Modal>
+      )}
+    </Card>
+  )
+}
+
+// DaemonCard daemon/systemd 单元状态卡（D27/D30）：安装态 + 运行/自启徽标 +
+// 缺装引导 + 启停/自启按钮。daemon 归 systemd，agent 只管理不宿主（D22）。
+const DAEMON_ACTIONS: { action: string; label: string; danger?: boolean }[] = [
+  { action: 'start', label: '启动' },
+  { action: 'stop', label: '停止', danger: true },
+  { action: 'enable', label: '开机自启' },
+  { action: 'disable', label: '取消自启' },
+]
+
+const DaemonCard: React.FC<{ agentId: string }> = ({ agentId }) => {
+  const queryClient = useQueryClient()
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['overlay-daemon', agentId],
+    queryFn: () => api.getOverlayDaemon(agentId),
+    staleTime: 30_000,
+  })
+  const service = useMutation({
+    mutationFn: (v: { tool: string; action: string }) => api.agentOverlayService(agentId, v.tool, v.action),
+    onSuccess: (r) => {
+      message.success(`${r.unit} ${r.action} 完成`)
+      queryClient.invalidateQueries({ queryKey: ['overlay-daemon', agentId] })
+    },
+    onError: (e) => message.error(`服务操作失败：${String(e)}`),
+  })
+
+  if (isLoading) {
+    return (
+      <Card size="small" title="Daemon 服务">
+        <Spin />
+      </Card>
+    )
+  }
+  if (isError || !data) {
+    return <Alert type="warning" showIcon message="Daemon 状态获取失败" />
+  }
+  const tools = data.tools ?? []
+  if (tools.length === 0) return null
+
+  return (
+    <Card size="small" title="Daemon 服务">
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        {tools.map((t) => (
+          <div key={t.tool}>
+            <Space wrap size={8}>
+              <Typography.Text strong>{TOOL_LABELS[t.tool] ?? t.tool}</Typography.Text>
+              {t.installed ? (
+                <>
+                  {t.version && <Tag>v{t.version}</Tag>}
+                  {t.unitExists === undefined ? (
+                    <Tag>非 systemd 平台</Tag>
+                  ) : t.unitExists ? (
+                    <>
+                      <Badge status={t.active ? 'success' : 'error'} text={t.active ? '运行中' : '已停止'} />
+                      <Badge status={t.enabled ? 'processing' : 'default'} text={t.enabled ? '开机自启' : '未自启'} />
+                    </>
+                  ) : (
+                    <Tag color="warning">systemd 单元缺失</Tag>
+                  )}
+                </>
+              ) : (
+                <Tag color="default">未安装</Tag>
+              )}
+              {t.installed && t.unitExists && (
+                <PermGuard perm="overlay:admin">
+                  <Space size={4}>
+                    {DAEMON_ACTIONS.map((a) => (
+                      <Button
+                        key={a.action}
+                        size="small"
+                        danger={a.danger}
+                        loading={
+                          service.isPending &&
+                          service.variables?.tool === t.tool &&
+                          service.variables?.action === a.action
+                        }
+                        onClick={() => service.mutate({ tool: t.tool, action: a.action })}
+                      >
+                        {a.label}
+                      </Button>
+                    ))}
+                  </Space>
+                </PermGuard>
+              )}
+            </Space>
+            {!t.installed && t.missingGuide && (
+              <Alert type="warning" showIcon style={{ marginTop: 8 }} message={t.missingGuide} />
+            )}
+          </div>
+        ))}
+      </Space>
+    </Card>
+  )
+}
+
+// 单 agent 详情面板：身份 chip + daemon 卡 + 工具卡（观测 + M3 动作）
 const AgentOverlayPanel: React.FC<{ agentId: string; identity?: OverlayAgentIdentity }> = ({
   agentId,
   identity,
@@ -585,90 +870,17 @@ const AgentOverlayPanel: React.FC<{ agentId: string; identity?: OverlayAgentIden
   }
 
   const active = (data.tools ?? []).filter((t) => t.status !== 'unavailable')
-  if (active.length === 0) {
-    return <Empty description="未检测到组网工具" />
-  }
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
       <IdentityChips identity={identity} />
-      {active.map((tool) => (
-        <Card
-          key={tool.tool}
-          size="small"
-          title={
-            <Space>
-              <span>{TOOL_LABELS[tool.tool] ?? tool.tool}</span>
-              <Tag color={STATUS_COLORS[tool.status]}>{STATUS_LABELS[tool.status] ?? tool.status}</Tag>
-              {tool.version && <Typography.Text type="secondary" style={{ fontSize: 12 }}>v{tool.version}</Typography.Text>}
-            </Space>
-          }
-          extra={tool.error ? <Tooltip title={tool.error}><Typography.Text type="warning" style={{ fontSize: 12 }}>详情</Typography.Text></Tooltip> : undefined}
-        >
-          {(tool.networks?.length ?? 0) > 0 && (
-            <Descriptions
-              size="small"
-              column={1}
-              style={{ marginBottom: tool.peers?.length || tool.interfaces?.length ? 8 : 0 }}
-              items={tool.networks!.map((n) => ({
-                key: n.id,
-                label: n.name || n.id,
-                children: (
-                  <Space wrap size={8}>
-                    <Tag color={n.status === 'OK' || n.online ? 'success' : 'warning'}>{n.status ?? '—'}</Tag>
-                    {(n.ips ?? []).map((ip) => (
-                      <Typography.Text key={ip} code style={{ fontSize: 12 }}>{ip}</Typography.Text>
-                    ))}
-                  </Space>
-                ),
-              }))}
-            />
-          )}
-          {(tool.interfaces?.length ?? 0) > 0 && (
-            <Descriptions
-              size="small"
-              column={1}
-              items={tool.interfaces!.map((i) => ({
-                key: i.name,
-                label: i.name,
-                children: `${i.peerCount} 个 peer${i.listenPort ? ` · 监听 ${i.listenPort}` : ''}`,
-              }))}
-            />
-          )}
-          {toolPeers(tool).length > 0 && (
-            <Table
-              size="small"
-              rowKey={(p) => `${tool.tool}:${p.peer.id}:${p.from ?? ''}`}
-              dataSource={toolPeers(tool)}
-              pagination={{ pageSize: 8, hideOnSinglePage: true }}
-              columns={[
-                { title: '对端', render: (_: unknown, r) => r.peer.name || r.peer.id, width: 180 },
-                {
-                  title: '地址',
-                  render: (_: unknown, r) => (
-                    <Typography.Text code style={{ fontSize: 12 }}>
-                      {r.peer.virtualIps?.join(', ') || r.peer.endpoint || '—'}
-                    </Typography.Text>
-                  ),
-                },
-                {
-                  title: '在线',
-                  dataIndex: ['peer', 'online'],
-                  width: 80,
-                  render: (v: boolean) => <Badge status={v ? 'success' : 'error'} />,
-                },
-                { title: '延迟', render: (_: unknown, r) => (r.peer.latencyMs ? `${r.peer.latencyMs}ms` : '—'), width: 80 },
-                {
-                  title: '最近握手',
-                  dataIndex: ['peer', 'lastHandshake'],
-                  width: 160,
-                  render: (v?: string) => <span style={{ fontSize: 12 }}>{formatTime(v)}</span>,
-                },
-              ]}
-            />
-          )}
-        </Card>
-      ))}
+      {/* daemon 卡不受 status 快照影响——未安装工具的引导也在这里（D30） */}
+      <DaemonCard agentId={agentId} />
+      {active.length === 0 ? (
+        <Empty description="未检测到组网工具" />
+      ) : (
+        active.map((tool) => <ToolCard key={tool.tool} agentId={agentId} tool={tool} />)
+      )}
     </Space>
   )
 }

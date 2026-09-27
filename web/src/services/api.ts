@@ -72,6 +72,9 @@ import type {
   ServiceListResult,
   ServiceStatus,
   OverlayStatus,
+  OverlayDaemonStatus,
+  OverlayChangeResult,
+  OverlayServiceResult,
   OverlayCloudStatus,
   CronStatus,
   CronUserEntry,
@@ -1070,6 +1073,35 @@ class ApiService {
   // 组网工具快照（ZeroTier/Tailscale/WireGuard/frp，只读纯转发）
   async getOverlayStatus(agentId: string): Promise<OverlayStatus> {
     return this.client.get<unknown, OverlayStatus>(`/agents/${encodeURIComponent(agentId)}/overlay/status`)
+  }
+
+  // daemon/服务状态（M3 D27，浏览不审计）
+  async getOverlayDaemon(agentId: string): Promise<OverlayDaemonStatus> {
+    return this.client.get<unknown, OverlayDaemonStatus>(`/agents/${encodeURIComponent(agentId)}/overlay/daemon`)
+  }
+
+  // 加入网络（overlay:admin，审计 overlay_join；响应携带最新快照与身份 D26）
+  async joinAgentOverlayNetwork(agentId: string, netId: string, tool: string): Promise<OverlayChangeResult> {
+    return this.client.post<unknown, OverlayChangeResult>(
+      `/agents/${encodeURIComponent(agentId)}/overlay/networks/${encodeURIComponent(netId)}/join`,
+      { tool },
+    )
+  }
+
+  // 离开网络（overlay:admin，审计 overlay_leave；Tailscale 侧传 `-` 即 down）
+  async leaveAgentOverlayNetwork(agentId: string, netId: string, tool: string): Promise<OverlayChangeResult> {
+    return this.client.post<unknown, OverlayChangeResult>(
+      `/agents/${encodeURIComponent(agentId)}/overlay/networks/${encodeURIComponent(netId)}/leave`,
+      { tool },
+    )
+  }
+
+  // 服务启停/自启（overlay:admin，审计 service_toggle）
+  async agentOverlayService(agentId: string, tool: string, action: string): Promise<OverlayServiceResult> {
+    return this.client.post<unknown, OverlayServiceResult>(`/agents/${encodeURIComponent(agentId)}/overlay/service`, {
+      tool,
+      action,
+    })
   }
 
   // ============ Overlay 云管理面（M2，server 直连云控制面） ============

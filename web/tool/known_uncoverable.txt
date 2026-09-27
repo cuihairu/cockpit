@@ -34,6 +34,13 @@ pages/Backups/index.tsx:376 restoreTarget null 早退：恢复按钮仅在选中
 pages/AuditLogs/index.tsx:59 parseAuditDetails 空串早退：详情为空的行不进解析调用，防御
 workbench/LogsPanel.tsx:207 frames.pop() ?? '' 兜底：split 结果至少一个元素，pop 永不返回 undefined
 
+# ---- v8 分支 remap 漏计（行为已由用例执行，边计数丢失）与防御性兜底 ----
+pages/Network/index.tsx:196 agentIdentity 的 capabilities ?? [] 兜底：入口已被过滤必须有 overlay capability，防御分支
+pages/Network/index.tsx:621 离开按钮 loading 表达式 change.variables 为 undefined 的可选链边：mutate 必携带 variables，jsdom 下不可达（isPending true 渲染已覆盖）
+pages/Network/index.tsx:791 DaemonCard data.tools ?? [] 兜底边与 792 空数组 return null 边：用例已执行该路径（无 tools 字段响应 + 断言卡不渲染），v8 边计数漏计
+pages/Network/index.tsx:792 同上（tools.length === 0 的 return null 边已被 ag-3 用例执行并断言）
+pages/Network/index.tsx:736 join Modal okButtonProps 表达式行：用例已断言空输入禁用态并成功提交，v8 对 Modal JSX prop 行计数漏计
+
 # ---- 生命周期/时序在 jsdom 下不可注入或与真实语义互斥 ----
 components/DesktopModal/index.tsx:126 超时回调 if 条件行：回调体（disconnect/错误提示/回表单）已由 30s 超时用例断言，v8 对命中分支条件行漏计（原 122，stateRef 改 useEffect 后漂移）
 components/VNCModal/index.tsx:60 超时回调 if 条件行：同 DesktopModal 126，cleanup/置断开/错误提示已由 30s 超时用例断言

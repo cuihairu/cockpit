@@ -17,6 +17,10 @@ const apiMock = vi.hoisted(() => ({
   removeOverlayZTMember: vi.fn(),
   authorizeOverlayTSDevice: vi.fn(),
   removeOverlayTSDevice: vi.fn(),
+  getOverlayDaemon: vi.fn(),
+  joinAgentOverlayNetwork: vi.fn(),
+  leaveAgentOverlayNetwork: vi.fn(),
+  agentOverlayService: vi.fn(),
 }))
 vi.mock('@/services/api', () => ({ api: apiMock }))
 
@@ -90,10 +94,22 @@ const cloud = {
   },
 }
 
-const renderPage = (cloudOverride?: unknown) => {
+const daemon = {
+  tools: [
+    { tool: 'zerotier', installed: true, unitExists: true, active: true, enabled: false, version: '1.12.2' },
+    { tool: 'tailscale', installed: false, missingGuide: '未检测到 tailscale CLI。安装：curl -fsSL https://tailscale.com/install.sh | sh' },
+  ],
+}
+
+const renderPage = (
+  cloudOverride?: unknown,
+  statusImpl?: (id: string) => unknown,
+  daemonImpl?: (id: string) => unknown,
+) => {
   apiMock.getAgents.mockResolvedValue(agents)
-  apiMock.getOverlayStatus.mockImplementation(statusOf)
+  apiMock.getOverlayStatus.mockImplementation((statusImpl ?? statusOf) as never)
   apiMock.getOverlayCloud.mockResolvedValue(cloudOverride ?? cloud)
+  apiMock.getOverlayDaemon.mockImplementation(daemonImpl ?? (async () => daemon))
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
@@ -277,6 +293,7 @@ describe('Network', () => {
     apiMock.getAgents.mockResolvedValue(customAgents)
     apiMock.getOverlayStatus.mockImplementation(statusImpl as never)
     apiMock.getOverlayCloud.mockResolvedValue(cloudOverride ?? cloud)
+    apiMock.getOverlayDaemon.mockResolvedValue(daemon)
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     return render(
       <QueryClientProvider client={qc}>
@@ -511,5 +528,164 @@ describe('Network', () => {
     renderCustom([mkOverlayAgent('ag-1', 'node-01')], () => ({ tools: [] }), Promise.reject(new Error('down')))
     fireEvent.click(screen.getByText('云端管理'))
     expect(await screen.findByText('云端成员获取失败')).toBeInTheDocument()
+  })
+
+  // ---- M3 本机侧：join/leave + daemon 管理（D21-D30） ----
+
+  const expand = async (host: string, statusImpl?: (id: string) => unknown, daemonImpl?: (id: string) => unknown) => {
+    renderPage(undefined, statusImpl, daemonImpl)
+    expect(await screen.findByText('peer-a')).toBeInTheDocument()
+    fireEvent.click(screen.getByText(host, { selector: '.ant-collapse-header-text' }))
+    await screen.findByText('Daemon 服务')
+  }
+
+  it('daemon 卡：安装/运行/自启徽标、缺装引导、非安装工具不出操作按钮', async () => {
+    await expand('node-01 · cn')
+    // zerotier：运行中 + 未自启（expand 只等到卡标题，徽标需等 daemon 查询落定）
+    expect(await screen.findByText('运行中')).toBeInTheDocument()
+    expect(screen.getByText('未自启')).toBeInTheDocument()
+    expect(screen.getAllByText('v1.12.2').length).toBeGreaterThanOrEqual(1)
+    // tailscale 未安装 → 引导 Alert；无操作按钮（PermGuard 出口只在 installed+unitExists）
+    expect(await screen.findByText(/未检测到 tailscale CLI/)).toBeInTheDocument()
+  })
+
+  it('daemon 卡：非 systemd 平台、单元缺失、已停止与开机自启徽标、空工具不渲染', async () => {
+    await expand('node-01 · cn', undefined, (id) =>
+      id === 'ag-1'
+        ? Promise.resolve({
+            tools: [
+              { tool: 'tailscale', installed: true, version: '1.80' }, // unitExists 缺省 → 非 systemd
+              { tool: 'zerotier', installed: true, unitExists: false }, // 无 version → 不出 Tag；单元缺失
+              { tool: 'headscale', installed: true }, // 未知工具 key → 标签兜底显示原始名
+            ],
+          })
+        : id === 'ag-2'
+          ? Promise.resolve({
+              tools: [{ tool: 'zerotier', installed: true, unitExists: true, active: false, enabled: true, version: '1.12.2' }],
+            })
+          : Promise.resolve({})) // ag-3：无 tools 字段 → 兜底空数组 → DaemonCard 返回 null
+    // tailscale 与 headscale（未知工具兜底）都无 unitExists → 两个非 systemd 标签
+    expect((await screen.findAllByText('非 systemd 平台')).length).toBe(2)
+    expect(screen.getByText('systemd 单元缺失')).toBeInTheDocument()
+    expect(screen.getByText('headscale')).toBeInTheDocument()
+    // 展开第二台：active/enabled 反向徽标
+    fireEvent.click(screen.getByText('node-02 · cn', { selector: '.ant-collapse-header-text' }))
+    expect(await screen.findByText('已停止')).toBeInTheDocument()
+    // 徽标与操作按钮（开机自启）并存
+    expect(screen.getAllByText('开机自启').length).toBeGreaterThanOrEqual(2)
+    // 第三台 tools 为空 → 无第三张 Daemon 卡
+    fireEvent.click(screen.getByText('empty-01 · cn', { selector: '.ant-collapse-header-text' }))
+    await waitFor(() => expect(screen.getAllByText('Daemon 服务')).toHaveLength(2))
+  })
+
+  it('daemon 查询失败：Alert 提示', async () => {
+    await expand('node-01 · cn', undefined, () => Promise.reject(new Error('down')))
+    expect(await screen.findByText('Daemon 状态获取失败')).toBeInTheDocument()
+  })
+
+  it('daemon 服务操作：点击按钮调 service 接口并提示', async () => {
+    apiMock.agentOverlayService.mockResolvedValue({ tool: 'zerotier', unit: 'zerotier-one.service', action: 'stop' })
+    await expand('node-01 · cn')
+    fireEvent.click(await screen.findByRole('button', { name: /停\s*止/ }))
+    await waitFor(() => expect(apiMock.agentOverlayService).toHaveBeenCalledWith('ag-1', 'zerotier', 'stop'))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('zerotier-one.service stop 完成'))
+    // 失败路径
+    apiMock.agentOverlayService.mockRejectedValueOnce(new Error('systemd down'))
+    const msgError = vi.spyOn(message, 'error')
+    fireEvent.click(await screen.findByRole('button', { name: /启\s*动/ }))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith(expect.stringContaining('服务操作失败')))
+  })
+
+  it('ZT 加入网络：Modal 输入 netId → join 接口携带 tool 与 id；空输入禁用确认', async () => {
+    const labOf = (id: string) =>
+      id === 'ag-2'
+        ? Promise.resolve({ tools: [{ tool: 'zerotier', status: 'ok', networks: [{ id: '8056c2e21c000001', name: 'lab', status: 'OK' }] }] })
+        : Promise.resolve(statusOf(id))
+    apiMock.joinAgentOverlayNetwork.mockResolvedValue({
+      status: { tools: [{ tool: 'zerotier', status: 'ok', networks: [{ id: '8056c2e21c000001', name: 'lab', status: 'OK' }] }] },
+    })
+    // statusImpl：join onSuccess 的 setQueryData 快照会被 invalidate-refetch 覆盖，refetch 结果需同样含 lab
+    await expand('node-02 · cn', labOf)
+    const ztCard = Array.from(document.querySelectorAll('.ant-card')).find((c) =>
+      c.textContent?.includes('加入网络') && c.textContent?.includes('ZeroTier'))!
+    fireEvent.click(within(ztCard as HTMLElement).getByRole('button', { name: /加入网络/ }))
+    const modalInput = document.querySelector('.ant-modal input')! as HTMLInputElement
+    expect((document.querySelector('.ant-modal-footer .ant-btn-primary')! as HTMLButtonElement).disabled).toBe(true)
+    // 空输入回车：submitJoin 早退，不发请求
+    fireEvent.keyDown(modalInput, { key: 'Enter' })
+    expect(apiMock.joinAgentOverlayNetwork).not.toHaveBeenCalled()
+    fireEvent.change(modalInput, { target: { value: '8056c2e21c000001' } })
+    fireEvent.click(document.querySelector('.ant-modal-footer .ant-btn-primary')!)
+    await waitFor(() => expect(apiMock.joinAgentOverlayNetwork).toHaveBeenCalledWith('ag-2', '8056c2e21c000001', 'zerotier'))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已发起加入'))
+    // D26：响应快照入缓存——网络行就地出现（node-02 面板内 net 标签）
+    expect(await screen.findByText('lab')).toBeInTheDocument()
+    expect(within(document.body).getByRole('button', { name: /离\s*开/ })).toBeInTheDocument()
+  })
+
+  it('ZT 逐网络离开：Popconfirm 确认后调 leave（网络 id 入参）', async () => {
+    apiMock.leaveAgentOverlayNetwork.mockResolvedValue({ status: { tools: [] } })
+    await expand('node-01 · cn', (id) =>
+      id === 'ag-1'
+        ? Promise.resolve({ tools: [{ tool: 'zerotier', status: 'ok', networks: [
+            { id: '8056c2e21c000001', name: 'lab', status: 'OK', ips: ['10.0.0.5'] },
+            { id: '0000000000000099', name: 'net2', status: 'OK' },
+          ] }] })
+        : Promise.resolve(statusOf(id)))
+    expect(await screen.findByText('lab')).toBeInTheDocument()
+    // 两张网各有一个离开按钮：点击首行（lab）——渲染期另一行按钮的 loading 变量比较为 false
+    const leaveBtns = within(document.body).getAllByRole('button', { name: /离\s*开/ })
+    fireEvent.click(leaveBtns[0])
+    expect(await screen.findByText(/离开后该主机将失去此网络的虚拟 IP/)).toBeInTheDocument()
+    fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    await waitFor(() =>
+      expect(apiMock.leaveAgentOverlayNetwork).toHaveBeenCalledWith('ag-1', '8056c2e21c000001', 'zerotier'))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已离开网络'))
+  })
+
+  it('Tailscale 卡：加入提示 up 语义、离开执行 down（netId `-`）', async () => {
+    // 响应不带 status：onSuccess 跳过快照入缓存分支
+    apiMock.joinAgentOverlayNetwork.mockResolvedValue({})
+    apiMock.leaveAgentOverlayNetwork.mockResolvedValue({ status: { tools: [] } })
+    await expand('node-01 · cn', (id) =>
+      id === 'ag-1'
+        ? Promise.resolve({ tools: [{ tool: 'tailscale', status: 'ok', version: '1.80', networks: [{ id: 'n5', name: 'ts-net', status: 'OK' }] }] })
+        : Promise.resolve(statusOf(id)))
+    const tsCard = Array.from(document.querySelectorAll('.ant-card')).filter((c) => c.textContent?.includes('Tailscale'))
+      .find((c) => c.textContent?.includes('加入网络')) as HTMLElement
+    expect(tsCard).toBeTruthy()
+    // 加入 Modal 提示 up 语义
+    fireEvent.click(within(tsCard).getByRole('button', { name: /加入网络/ }))
+    expect(await screen.findByText(/执行 tailscale up，需该机已完成登录/)).toBeInTheDocument()
+    fireEvent.change(document.querySelector('.ant-modal input')!, { target: { value: '-' } })
+    fireEvent.click(document.querySelector('.ant-modal-footer .ant-btn-primary')!)
+    await waitFor(() => expect(apiMock.joinAgentOverlayNetwork).toHaveBeenCalledWith('ag-1', '-', 'tailscale'))
+    // 卡级离开（down）
+    fireEvent.click(within(tsCard).getByRole('button', { name: /离\s*开/ }))
+    expect(await screen.findByText(/断开连接但保留登录态/)).toBeInTheDocument()
+    fireEvent.click(document.querySelector('.ant-popover .ant-btn-primary')!)
+    await waitFor(() => expect(apiMock.leaveAgentOverlayNetwork).toHaveBeenCalledWith('ag-1', '-', 'tailscale'))
+  })
+
+  it('M3 操作失败：错误文案透出', async () => {
+    apiMock.joinAgentOverlayNetwork.mockRejectedValue(new Error('tailscale not logged in'))
+    const msgError = vi.spyOn(message, 'error')
+    await expand('node-02 · cn')
+    const ztCard = Array.from(document.querySelectorAll('.ant-card')).find((c) =>
+      c.textContent?.includes('加入网络') && c.textContent?.includes('ZeroTier'))!
+    fireEvent.click(within(ztCard as HTMLElement).getByRole('button', { name: /加入网络/ }))
+    fireEvent.change(document.querySelector('.ant-modal input')!, { target: { value: '8056c2e21c000001' } })
+    await act(async () => {
+      fireEvent.click(document.querySelector('.ant-modal-footer .ant-btn-primary')!)
+    })
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith(expect.stringContaining('操作失败')))
+  })
+
+  it('RBAC 无 overlay:admin：加入/离开/服务按钮全部隐藏', async () => {
+    canWrite = false
+    await expand('node-01 · cn')
+    expect(screen.queryByRole('button', { name: /加入网络/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /停\s*止/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /启\s*动/ })).not.toBeInTheDocument()
   })
 })

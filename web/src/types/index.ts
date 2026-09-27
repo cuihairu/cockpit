@@ -938,6 +938,38 @@ export interface OverlayStatus {
   tools: OverlayTool[]
 }
 
+// ========== Overlay 本机侧管理（M3，见 overlay-design.md D21-D30） ==========
+
+// 单工具 daemon/systemd 单元状态（D27）；非 systemd 平台 unit 字段缺席
+export interface OverlayDaemonTool {
+  tool: 'zerotier' | 'tailscale'
+  installed: boolean
+  missingGuide?: string
+  unitExists?: boolean
+  active?: boolean
+  enabled?: boolean
+  version?: string
+}
+
+// overlay.daemon 返回
+export interface OverlayDaemonStatus {
+  tools: OverlayDaemonTool[]
+}
+
+// overlay.join/leave 响应（D26：携带刷新后的 status 快照与身份，
+// 前端免二次请求）
+export interface OverlayChangeResult {
+  status: OverlayStatus
+  identity?: OverlayAgentIdentity
+}
+
+// overlay.service 响应
+export interface OverlayServiceResult {
+  tool: string
+  unit: string
+  action: string
+}
+
 // ========== Overlay 云管理面（M2，见 overlay-design.md D13/D17） ==========
 
 // agent 上报的虚拟网身份（overlay capability metadata.identity，D15/D16）
