@@ -462,6 +462,17 @@
 - `terminalKeepaliveLoop` 的 lastActive 没有被输入更新，可能固定按 CreatedAt 超时。
 - `JWT` 配置文件里的 secret/expiration 没有接入 `auth.SetSecret` 和 token 过期策略，当前主要依赖环境变量或随机 secret。
 
+> **复核归零（2026-09-27，以代码为准逐条核对）**：六项均已在代码兑现，本清单字样过期——
+> ① `server.go` `Start()` 里 `s.proxyMgr.Start()` 已调；② `handleTicketCreate` 的
+> port/width/height 已全用 `strconv.Itoa`（`api_remote.go` 470/486/489）；③ `/agents/{id}/secret`
+> 已挂主路由（`api.go` `handleAgentSecret` 分发）；④ duplicate 判定已改为 registry 活跃
+> 连接存在性检查（`websocket.go` `duplicate_connection`）；⑤ `terminalSendLoop` 每条消息
+> 在 `session.mu` 下更新 `LastActive`，keepalive 同锁读取；⑥ `cfg.JWT.Secret/Expiration`
+> 经 `auth.NewService(Options{...})` 接入（`server.go` 87-90），token TTL 用 `s.expiration`，
+> `resolveSecret` 顺序为配置文件 secret → 随机密钥+WARNING → 兜底——比包级 `auth.SetSecret`
+> 形态更好（服务实例独立于全局态）。todo 下一个未完成项：无（Phase 表全 ✅、
+> 「当前未完成功能」1-9 全部已完成，剩余为 `docs/guide/acceptance-checklist.md` 真实环境验收）。
+
 验收标准：
 
 - 新增或修复对应单元测试。
