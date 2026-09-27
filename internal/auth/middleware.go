@@ -8,6 +8,7 @@ import (
 
 // Middleware 认证中间件
 func Middleware(next http.HandlerFunc) http.HandlerFunc {
+	ensureDefaults()
 	return defaultService.Middleware(next)
 }
 
@@ -47,6 +48,7 @@ func (s *Service) Middleware(next http.HandlerFunc) http.HandlerFunc {
 
 // OptionalMiddleware 可选认证中间件（不强制要求登录）
 func OptionalMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	ensureDefaults()
 	return defaultService.OptionalMiddleware(next)
 }
 

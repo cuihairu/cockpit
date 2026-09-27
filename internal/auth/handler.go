@@ -35,6 +35,7 @@ var DB *storage.DB
 // InitDB 初始化数据库连接
 func InitDB(db *storage.DB) {
 	DB = db
+	ensureDefaults()
 	defaultService.SetDB(db)
 }
 
@@ -45,6 +46,7 @@ func InitAdmin(db *storage.DB, username, password string) error {
 
 // HandleLogin 处理登录
 func HandleLogin(w http.ResponseWriter, r *http.Request) {
+	ensureDefaults()
 	defaultService.HandleLogin(w, r)
 }
 
@@ -110,6 +112,7 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 // HandleRefresh 处理 token 刷新
 func HandleRefresh(w http.ResponseWriter, r *http.Request) {
+	ensureDefaults()
 	defaultService.HandleRefresh(w, r)
 }
 

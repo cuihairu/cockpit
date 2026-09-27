@@ -16,17 +16,30 @@ import (
 var randRead = rand.Read
 
 var (
+	// defaultsOnce 保护包级默认密钥/服务的惰性初始化。
+	// 旧实现用 init()：任何 import 本包的二进制（含根本不发 token 的
+	// `cockpit sync` CLI）启动即跑 resolveSecret，缺 JWT_SECRET 就打在
+	// 场景下纯噪音的 WARNING。现在 import 期零副作用，密钥解析与警告
+	// 推迟到首次真正用到默认服务时发生。
+	defaultsOnce sync.Once
 	jwtSecret      []byte
 	jwtExpiration  time.Duration = 24 * time.Hour // 默认 24 小时
 	defaultService *Service
 )
 
-func init() {
-	jwtSecret = resolveSecret(os.Getenv("JWT_SECRET"))
-	defaultService = &Service{
-		secret:     cloneBytes(jwtSecret),
-		expiration: jwtExpiration,
-	}
+// ensureDefaults 首次使用时解析 JWT_SECRET 并构建默认服务。
+// 语义与改前 init() 逐条一致：env 优先；缺失则随机密钥 + WARNING；
+// randRead 失败回退 "change-me"。sync.Once 保证进程内密钥恒定且并发
+// 首触发无竞态。注意本函数只影响包级默认服务；服务端实际用的
+// NewService 实例一直是独立构造的，行为不变。
+func ensureDefaults() {
+	defaultsOnce.Do(func() {
+		jwtSecret = resolveSecret(os.Getenv("JWT_SECRET"))
+		defaultService = &Service{
+			secret:     cloneBytes(jwtSecret),
+			expiration: jwtExpiration,
+		}
+	})
 }
 
 // Options Auth 服务配置。
@@ -86,6 +99,7 @@ func (s *Service) SetExpiration(expiration time.Duration) {
 // SetSecret 设置 JWT 密钥
 func SetSecret(secret string) {
 	if secret != "" {
+		ensureDefaults()
 		jwtSecret = []byte(secret)
 		defaultService.SetSecret(secret)
 	}
@@ -94,6 +108,7 @@ func SetSecret(secret string) {
 // SetExpiration 设置 JWT token 过期时间
 func SetExpiration(expiration time.Duration) {
 	if expiration > 0 {
+		ensureDefaults()
 		jwtExpiration = expiration
 		defaultService.SetExpiration(expiration)
 	}
@@ -101,6 +116,7 @@ func SetExpiration(expiration time.Duration) {
 
 // SecretFingerprint 返回当前 secret 的指纹（用于诊断）
 func SecretFingerprint() string {
+	ensureDefaults()
 	if len(jwtSecret) < 4 {
 		return hex.EncodeToString(jwtSecret)
 	}
@@ -117,6 +133,7 @@ type Claims struct {
 
 // GenerateToken 生成 JWT token
 func GenerateToken(userID, username, role string) (string, error) {
+	ensureDefaults()
 	return defaultService.GenerateToken(userID, username, role)
 }
 
@@ -140,6 +157,7 @@ func (s *Service) GenerateToken(userID, username, role string) (string, error) {
 
 // ValidateToken 验证 JWT token
 func ValidateToken(tokenString string) (*Claims, error) {
+	ensureDefaults()
 	return defaultService.ValidateToken(tokenString)
 }
 
@@ -161,6 +179,7 @@ func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 
 // RefreshToken 刷新 token
 func RefreshToken(tokenString string) (string, error) {
+	ensureDefaults()
 	return defaultService.RefreshToken(tokenString)
 }
 
@@ -181,6 +200,9 @@ func (s *Service) RefreshToken(tokenString string) (string, error) {
 
 func (s *Service) jwtConfig() ([]byte, time.Duration) {
 	if s == nil {
+		// 双保险：即便未来新增入口忘了显式 ensure，nil 服务取密钥前
+		// 也保证默认值已解析（空密钥签发是绝不可发生的安全底线）。
+		ensureDefaults()
 		return cloneBytes(jwtSecret), jwtExpiration
 	}
 
