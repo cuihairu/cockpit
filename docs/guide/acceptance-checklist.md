@@ -9,7 +9,7 @@
 ## 通用前置
 
 - [ ] server 启动，至少一台 Linux agent 注册在线（`/agents` 页绿标）
-- [x] `scripts/e2e-smoke.sh` 冒烟通过（server→agent→inventory 同步→`/api/resources` 闭环）（2026-09-26，本机连跑两次全绿）
+- [x] `scripts/e2e-smoke.sh` 冒烟通过（server→agent→inventory 同步→`/api/resources` 闭环）（2026-09-27，本机连跑两次全绿）
 - [ ] 至少配置一个通知渠道（webhook/ntfy 等），验收告警类功能时用「测试通知」按钮核对送达
 - [ ] 习惯性核对：变更类操作在「审计日志」页有留痕、敏感字段（证书内容、密钥）不出现在审计 detail
 
