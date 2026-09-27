@@ -165,8 +165,10 @@ func TestLogsFollowByteLimit(t *testing.T) {
 	c := &followCollector{}
 	p.SetSender(c.sender)
 	p.SetCloser(c.closer)
-	// 5MB 分行输出，越过 4MB 会话上限
-	p.followCmdFn = fakeFollowCmd(`yes xxxxxxxxxx | head -c 5242880`)
+	// 20 行 × 256KB ≈ 5MB，越过 4MB 会话上限。刻意用大行而非大量小行
+	// （yes|head -c 5M 需 ~49 万次 sender 回调）：-race 插桩下回调体量
+	// 会超出 waitClose 的 3s 窗口，属测试自身慢而非被测逻辑问题
+	p.followCmdFn = fakeFollowCmd(`awk 'BEGIN{s="x";while(length(s)<262144)s=s s;for(i=0;i<20;i++)print s}'`)
 
 	if _, err := p.FollowStart(followParams("f1", "")); err != nil {
 		t.Fatalf("FollowStart: %v", err)
