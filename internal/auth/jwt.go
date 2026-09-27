@@ -21,7 +21,7 @@ var (
 	// `cockpit sync` CLI）启动即跑 resolveSecret，缺 JWT_SECRET 就打在
 	// 场景下纯噪音的 WARNING。现在 import 期零副作用，密钥解析与警告
 	// 推迟到首次真正用到默认服务时发生。
-	defaultsOnce sync.Once
+	defaultsOnce   sync.Once
 	jwtSecret      []byte
 	jwtExpiration  time.Duration = 24 * time.Hour // 默认 24 小时
 	defaultService *Service
