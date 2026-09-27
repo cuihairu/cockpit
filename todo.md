@@ -842,10 +842,8 @@
 
 功能路线图自可选任务收尾后，把滞后于实现的对外文档对齐：
 
-功能路线图自可选任务收尾后，把滞后于实现的对外文档对齐：
-
-1. [**README「当前能力」对齐 2026-09 功能面**：原 5 条停在 6 月版本（资源/工作台/监控/设置/审计/远程连接），补齐控制面基础（TOTP/RBAC）、资源视图（心跳条/到期告警）、远程操作（录制/文件/日志联邦检索）、容器与 Stacks、备份恢复（agent+server 双侧）、反代双后端、ACME 三 provider、DNS/DDNS/台账、主机运维（服务三后端/Cron/SMART/NAS/组网观测）、漂移与多渠道通知；「关键配置」补新配置键指引与环境变量清单。]
-2. [**config/cockpit.yaml 示例补齐**：`notification` 补 ntfy/webhook/telegram 渠道示例（对照 `internal/config/config.go` 实际 yaml tag）；`dns` 补 `provider`/`dnspod`/`alidns` 键与三家环境变量注入提示；新增注释形态 `overlay` 段（zerotier/tailscale token + tailnet）。密钥一律以注释示例 + env 优先呈现，不引入真实凭据。YAML 解析校验通过。]
+1. ✅ **README「当前能力」对齐 2026-09 功能面**（已完成）：README 当前能力已含控制面基础、资源视图心跳条/到期告警、远程操作录制/文件/日志联邦检索、容器与 Stacks、备份恢复双侧、反代双后端、ACME 三 provider、DNS/DDNS/台账、主机运维三后端/Cron/SMART/NAS/组网观测、漂移与多渠道通知；“关键配置”已补新配置键指引与环境变量清单。
+2. ✅ **config/cockpit.yaml 示例补齐**（已完成）：`notification` 已含 ntfy/webhook/telegram 注释示例；`dns` 已含 `provider`/`dnspod`/`alidns` 与环境变量注入提示；新增注释形态 `overlay` 段（zerotier/tailscale token + tailnet）。密钥均以注释示例 + env 优先呈现。YAML 解析校验通过。
 
 ## 移动端 Flutter（2026-09-22）
 
