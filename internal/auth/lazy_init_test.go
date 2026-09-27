@@ -120,8 +120,13 @@ func TestLazyInitHelper(t *testing.T) {
 		}
 		fmt.Printf("HELPER_OK concurrent tokens=%d\n", len(tokens))
 	case "service":
-		// 服务端实例路径语义核对：NewService 仍是构造期 eager 解析
-		// （缺 config secret → 构造时警告 + 随机密钥），签发/校验往返可用。
+		// auth 包直接收空 Options.Secret 时的构造期 eager 语义（警告 +
+		// 随机密钥，改前后一致）+ 签发/校验往返可用。注意真实 server
+		// 走不到这条：config.Normalize 把空 jwt.secret 预填 "change-me"
+		// （internal/config/config.go），所以改前 server 启动日志里那行
+		// WARNING 也是 init() 噪音而非实例行为——惰性化后随噪音一起消失，
+		// 实例校验路径前后零差异（PRODUCTION 强制校验只查 TOTP/storage
+		// key 不改 JWT 缺省值，同样是改前既有边界）。
 		svc := NewService(nil, Options{})
 		tok, err := svc.GenerateToken("u1", "alice", "admin")
 		if err != nil {
