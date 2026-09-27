@@ -329,3 +329,118 @@ CMDB 对照是**只读推导**：云端成员列表 × agent 上报身份，前�
 - Tailscale API v2：`https://api.tailscale.com/api/v2`（`GET /tailnet/{tailnet}/devices`、
   `POST /device/{id}/authorize`、`DELETE /device/{id}`，Bearer token；`tailnet=-`
   为 API 生成文档支持的默认 tailnet 简写，实现以真机 token 实测为准）
+
+---
+
+# M3 方案设计：独立部署路线——网络加入/离开 + daemon 服务管理
+
+> 2026-09-27。M1 观测、M2 云管理面把「看」和「云端授权」都收口了，但**本机
+> 侧的两类高频动作仍要 SSH**：①「这台机器加入/退出某个网络」②「tailscaled /
+> zerotier-one 挂了/没装/想禁止开机自启」。M3 把这两类动作收进面板。用户
+> 拍板走**独立部署路线**：组网 daemon 仍由用户装在主机上、归 systemd 管，
+> cockpit agent 只做调用者与状态管理者，绝不宿主 daemon 进程（详见 D21）。
+
+## 架构总览
+
+与 M1 同一通道模型：**同步 RPC + server 纯转发 + 审计**。差别只在写操作
+的防护等级：
+
+```
+┌─ server ────────────────────────────────┐        ┌─ agent ──────────────────────┐
+│ POST /api/agents/{id}/overlay/          │  ─RPC─▶ │ overlay.join / overlay.leave │
+│   networks/{netId}/join|leave           │  ◀RPC── │   → zerotier-cli join|leave  │
+│ GET  /api/agents/{id}/overlay/daemon    │  ─RPC─▶ │   → tailscale up|down        │
+│ POST /api/agents/{id}/overlay/service   │  ◀RPC─▶ │ overlay.daemon / overlay.service│
+│ RBAC overlay:admin + 审计三动作          │         │   → systemctl（单元名硬白名单）│
+└─────────────────────────────────────────┘         │ daemon 归 systemd，agent 只  │
+                                                    │ 管理不宿主；argv 直传不过 shell │
+                                                    └──────────────────────────────┘
+```
+
+## 关键决策
+
+| # | 决策 | 选择 | 理由 |
+|---|------|------|------|
+| D21 | **部署形态：独立部署，不做 tsnet 内嵌** | cockpit agent **不引入 tsnet/内置 tailscaled**，组网 daemon 由用户装在主机、归 systemd 管理；agent 只执行 CLI 与 systemctl 动作。原则入档：**daemon 归 systemd，agent 只管理不宿主** | tsnet 内嵌意味着 tailscaled 生命周期挂进 cockpit agent 进程——agent 重启/升级即断网，cockpit 崩溃即失联（远程排障场景正需要它活着）；个人设施 daemon 本就常年自启，重复宿主徒增双 daemon 冲突面；独立部署同时保持 ZeroTier 可行（tsnet 只解决 Tailscale） |
+| D22 | RPC 方法面 | 新增 `overlay.join` / `overlay.leave`（参数 `{tool, networkId}`）与 `overlay.daemon`（读）/ `overlay.service`（写，参数 `{tool, action}`）；join/leave 成功返回**最新 status 快照 + identity** | 写操作与只读 `overlay.status` 分方法——server 端 RBAC/审计分流干净；成功回带快照省前端一次拉取（见 D26） |
+| D23 | ZeroTier join/leave | `zerotier-cli join|leave <networkId>`，argv 直传不过 shell（D10 纪律）、5s 超时；networkId **16 位 hex** 白名单 **server + agent 双端校验**；CLI `200` 前缀应答视为成功（`101 already joined` 亦回快照） | ZeroTier 网络 ID 形态唯一（16-hex），双端各挡一道是写操作的最低注入纪律；200/101 应答语义按 `zerotier-cli(1)` 实测 |
+| D24 | Tailscale join/leave 语义（按 CLI 实际行为核实后定） | cockpit 场景里 Tailscale 的「网络」= tailnet，**没有按网络 ID 加入的 CLI 动作**；join = 先查 `tailscale status --json` 的 `BackendState`，`Running`（已登录）才执行 `tailscale up`——未登录时 `up` 是交互式认证流（打印 auth URL 等浏览器），非交互执行必挂，**故拒绝并回引导文案**；leave = `tailscale down`（断连但保留登录态，再 up 可回），**绝不用 `logout`**（清凭据 → 再 join 需交互重认证，破坏性翻倍）；networkId 传 `-` 或 tailnet 名，与 identity `Self.DNSName` 推出的 tailnet 不一致 → 400 | `up/down/logout` 三态的「可再入」差异是决策核心：down 可逆、logout 不可逆（对用户而言）；authkey 自动注册不纳入——凭据下发属于装机流程，面板只服务已装机设备 |
+| D25 | WireGuard / frp | join/leave 与 service 一律返回 `unavailable` 并给出语义说明 | WireGuard 没有运行时 join 概念（配置即 `/etc/wireguard/*.conf` + `wg-quick`，接口增删属文件管理域，面板不做配置文件编辑）；frp 是端口穿透不是 overlay 网络（无成员/加入语义）。诚实报错好过强行映射 |
+| D26 | 成功后状态同步 | join/leave 响应携带**最新 `overlay.status` 快照**（agent 端本地重新拉取）与刷新后的 `identity`；server registry 内的 `metadata.identity` **保持「重连重注册」刷新时机不变** | WebSocket 协议只接受连接后**首条**消息为 register（`websocket.go handleWebSocket`），会话中途重注册不支持；identity 是 CMDB 对照的提示性数据，运行态权威本就在每次 `overlay.status` 实时拉取，join/leave 响应已回带新快照，前端即时更新即可 |
+| D27 | daemon/服务管理（M3.5） | `overlay.daemon` 读：按工具返回 `{installed, unitExists, active, enabled, version, missingGuide}`——CLI/daemon `LookPath` + 版本，systemd 单元经 `systemctl cat <unit>` 存在性、`is-active` / `is-enabled` 取态；`overlay.service` 写：action ∈ `start|stop|enable|disable`，**单元名硬编码白名单** `{tailscale→tailscaled.service, zerotier→zerotier-one.service}`，不复用通用 service provider 面；非 systemd 平台读降级（unit 字段缺席）、写 unavailable；未装 → `missing` + 安装引导文案（apt/brew/官网脚本各一句） | 白名单只有这两个单元：overlay 页绝不能成为动任意 systemd 单元的口子（通用 service provider 存在是给 /services 页的，权限资源不同）；`daemon 归 systemd` 原则下 agent 只发 systemctl 指令，进程托管（`tailscale up` 拉 netsd 之类）不碰 |
+| D28 | RBAC | `overlay` 资源新增 **`admin`** 档（`resourceActions["overlay"] = [read, write, admin]`）；join/leave/service 四个写端点全要求 `overlay:admin`；**内置 operator 角色排除 `overlay:admin`**（与 `users`/`roles`/`settings:admin` 同纪律）——overlay 写操作能把主机踢出网络，必须显式授予；`role_test.go` 的 admin=全量 / operator=排除集断言同步更新 | 观测（read）与云端管理（write）的爆炸半径逐级升高，三档边界恰好匹配；admin 级授予只影响 join/leave/service，M2 云授权留在 write 不动 |
+| D29 | REST API + 审计 | `POST /api/agents/{id}/overlay/networks/{netId}/join`、`.../leave`（body `{tool}`）、`GET /api/agents/{id}/overlay/daemon`、`POST /api/agents/{id}/overlay/service`（body `{tool, action}`）；审计动作 `overlay_join` / `overlay_leave` / `service_toggle`，resourceID = `{agentID}/{tool}/{netId}` 与 `{agentID}/{unit}`；server 端 netId 正则白名单（ZT 16-hex / Tailscale tailnet 名 `-`或 `[-a-z0-9.]+`）非法 400；agent 离线 503 | 路径组织延续 M1 `/agents/{id}/overlay/` 前缀；`GET daemon` 浏览类不记审计（M1 D8 口径）；三个写动作全留审计痕迹（与 cloud 段 `overlay_authz`/`overlay_remove` 命名同风格） |
+| D30 | Web UI | 运行态观测视图（M1）每个工具卡片上：**ZeroTier/Tailscale** 增「加入网络」按钮（netId 输入 Modal，ZT 侧提示 16-hex、Tailscale 侧提示 tailnet 名 + 需已登录）与「离开」按钮（Popconfirm，文案明示后果：down 可逆）；每工具增 **daemon 状态卡**（installed/active/enabled/version 徽标 + `missing` 时出安装引导 Alert + start/stop/enable/disable 按钮组）；全部操作 `PermGuard perm="overlay:admin"` | 动作就近放观测卡——决策依据（当前 peers/网络）与按钮同屏；`tailscale down` 类「离开」文案强调保留登录态可回，降低误操作心理预期差 |
+
+## Agent 侧设计（rpc/overlay_provider.go 扩展）
+
+### RPC 方法面
+
+| 方法 | 参数 | 返回 | 门禁 |
+|------|------|------|------|
+| `overlay.join` | `{tool, networkId}` | `{status: <同 overlay.status>, identity: {…}}` | tool 白名单 + 双端校验；5s |
+| `overlay.leave` | `{tool, networkId}` | 同上 | 同上 |
+| `overlay.daemon` | `{}` | `{tools: [{tool, installed, unitExists, active, enabled, version, missingGuide}]}` | 只读 |
+| `overlay.service` | `{tool, action}` | `{tool, unit, action, result}`（systemctl 退出码非 0 → 错误） | 单元名白名单（D27）；5s |
+
+### 各工具命令语义（argv 直传）
+
+| 工具 | join | leave | 说明 |
+|------|------|-------|------|
+| ZeroTier | `zerotier-cli join <16hex>` | `zerotier-cli leave <16hex>` | 应答 `200`/`101` 前缀为成功 |
+| Tailscale | 需 `BackendState==Running` → `tailscale up`；否则错误 + 引导「先在该机 `tailscale up` 登录」 | `tailscale down` | networkId 仅作审计与一致性校验（D24） |
+| WireGuard / frp | `unavailable` | `unavailable` | D25 |
+
+### daemon 检测细则
+
+| 项 | 方法 | 备注 |
+|------|------|------|
+| installed | CLI `LookPath`（zerotier-cli / tailscale）+ daemon 存在（zerotier-one / tailscaled 同项） | 任一缺 → installed=false |
+| version | `<cli> version` 输出取版本串 | 失败留空 |
+| unitExists | `systemctl cat <unit>` 退出码 | 非 systemd 平台跳过（字段缺席） |
+| active / enabled | `systemctl is-active / is-enabled <unit>` | 同上 |
+| missingGuide | installed=false 时给安装命令摘要文案 | apt/brew/官方脚本各一句，静态字符串 |
+
+## Server 侧设计
+
+### REST API（`api_overlay.go` 扩展，JWT + RBAC）
+
+| 方法 | 路径 | 权限 | 审计 |
+|------|------|------|------|
+| GET | `/api/agents/{id}/overlay/daemon` | `overlay:read` | 否（浏览类） |
+| POST | `/api/agents/{id}/overlay/networks/{netId}/join` | `overlay:admin` | `overlay_join` |
+| POST | `/api/agents/{id}/overlay/networks/{netId}/leave` | `overlay:admin` | `overlay_leave` |
+| POST | `/api/agents/{id}/overlay/service` | `overlay:admin` | `service_toggle` |
+
+- join/leave 成功：server 把响应内新快照原样返回（web 无需二次拉取）；
+- `requiredPerms` 挂载：`/overlay/networks/`、`/overlay/service` 前缀要求
+  `overlay:admin`，`/overlay/daemon` 前缀 `overlay:read`——沿用
+  `acme issue/deploy → acme:admin` 的 special-case 模式（agentSubResources
+  现有 `overlay/` 条目保持 write 级，admin 前缀先判）；
+- agent 端错误（未登录 Tailscale 引导、CLI 报错）原样透出 502 + 摘要
+  （M2 差异补记的上游错误口径）。
+
+## 不做（后续项）
+
+- authkey 交互式注册 / 邀请零Tier网络 token 下发（装机域，D24）；
+- WireGuard 接口文件管理（属文件管理器域，D25）；
+- daemon 日志查看（logs provider 已可覆盖 journald 单元）；
+- 中途重注册刷新 registry identity（协议限制，D26）。
+
+## M3 清单
+
+1. agent `overlay.join/leave/daemon/service` RPC + 假 Commander 注入测试（argv 断言、双端校验、Tailscale 前置态、200/101 应答、白名单单元拒绝）；
+2. server `api_overlay.go` 四端点 + RBAC `overlay:admin` + 审计三动作 + 端点测试（转发/校验/离线 503/审计/权限矩阵）；
+3. `internal/storage/role.go` `resourceActions["overlay"] += admin`、operator 排除 + `role_test.go` 断言更新；
+4. `web/src/pages/Network/` 加入/离开 Modal + 二次确认 + daemon 状态卡（含 missing 引导）；
+5. 本文档（已落）+ todo.md 与能力矩阵回填；
+6. 门禁：`go vet`、`go test -race -short ./...`、web vitest + build 全绿。
+
+## 参考
+
+- `zerotier-cli(1)`：join/leave 应答码（200/101）；`tailscale up|down|logout`
+  语义：KB《The tailscale CLI》(kb/1080)——`up` 未登录走交互式认证流，`down`
+  断连保留登录态，`logout` 清凭据；
+- systemd 单元名：tailscale 官方安装脚本落盘 `tailscaled.service`，ZeroTier
+  包 `zerotier-one.service`（`systemctl cat` 存在性检测依据）；
+- 生命周期归属原则：D21；服务面隔离理由：D27。
