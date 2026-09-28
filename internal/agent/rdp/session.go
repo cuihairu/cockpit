@@ -15,10 +15,39 @@ import (
 	grdp "github.com/nakagami/grdp"
 )
 
+// rdpClient Session 对 grdp 客户端的依赖面（On* 系 grdp 原样链式签名）。
+// 收敛成接口 + newRdpClient 工厂变量，是为让「登录成功/改分辨率成功」等
+// 需真实 RDP 握手的路径可注入假件做单测；生产行为不变。
+type rdpClient interface {
+	Login(domain string, user string, password string) error
+	Reconnect(width, height int) error
+	KeyDown(sc int)
+	KeyUp(sc int)
+	MouseMove(x, y int)
+	MouseDown(button int, x, y int)
+	MouseUp(button int, x, y int)
+	MouseWheel(delta float64)
+	NotifyClipboardChanged()
+	Close()
+	OnBitmap(paint func([]grdp.Bitmap)) *grdp.RdpClient
+	OnReady(f func()) *grdp.RdpClient
+	OnError(f func(e error)) *grdp.RdpClient
+	OnClose(f func()) *grdp.RdpClient
+	OnClipboard(onRemote func(text string), getLocal func() string) *grdp.RdpClient
+}
+
+// newRdpClient 构造 grdp 客户端（显式 dialer：grdp v0.9.11+ nil 会 panic；
+// 10s 连接超时对齐 proxy 侧）。变量形式供测试覆写注入。
+var newRdpClient = func(target string, width, height int) rdpClient {
+	return grdp.NewRdpClient(target, width, height, func(addr string) (net.Conn, error) {
+		return net.DialTimeout("tcp", addr, 10*time.Second)
+	})
+}
+
 // Session RDP 桌面会话，封装 grdp 客户端
 type Session struct {
 	ID        string
-	client    *grdp.RdpClient
+	client    rdpClient
 	sendQueue chan *protocol.Message
 	width     int
 	height    int
@@ -39,10 +68,7 @@ func NewSession(sessionID, target, domain, username, password string, width, hei
 		screen:    image.NewRGBA(image.Rect(0, 0, width, height)),
 	}
 
-	// grdp v0.9.11+ 需显式 dialer（nil 会 panic）；10s 连接超时对齐 proxy 侧
-	client := grdp.NewRdpClient(target, width, height, func(addr string) (net.Conn, error) {
-		return net.DialTimeout("tcp", addr, 10*time.Second)
-	})
+	client := newRdpClient(target, width, height)
 	s.client = client
 
 	// 登录（grdp v0.6.7 的 On* 方法内部访问 g.pdu，Login 前为 nil）
