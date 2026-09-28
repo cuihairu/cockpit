@@ -61,13 +61,19 @@ func validateServiceUnit(name, action string) error {
 // ServiceProvider systemd 服务管理 Provider
 type ServiceProvider struct {
 	run Commander
+	// health 健康探针与自愈引擎（策略层，见 service_health.go 与
+	// service-health-design.md）；与执行层同一实例——自愈 restart 直接
+	// 复用 DoAction，不出现第二条 systemctl 通道（D1）
+	health *serviceHealthEngine
 }
 
 func NewServiceProvider(run Commander) *ServiceProvider {
 	if run == nil {
 		run = defaultCommander
 	}
-	return &ServiceProvider{run: run}
+	sp := &ServiceProvider{run: run}
+	sp.health = newServiceHealthEngine(sp)
+	return sp
 }
 
 func (p *ServiceProvider) Type() string { return "service" }
@@ -86,6 +92,13 @@ func (p *ServiceProvider) Call(action string, params map[string]interface{}) (in
 		return p.UnitFile(paramString(params, "name"))
 	case "unitsave":
 		return p.SaveUnitFile(paramString(params, "name"), paramString(params, "content"))
+	// 健康探针与自愈（策略层，见 service-health-design.md）
+	case "health.config":
+		return p.HealthConfigAction(params)
+	case "health.status":
+		return p.HealthStatusAction()
+	case "health.now":
+		return p.HealthNowAction(paramString(params, "id"))
 	default:
 		return nil, fmt.Errorf("unknown service action: %s", action)
 	}
