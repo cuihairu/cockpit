@@ -1,0 +1,20 @@
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "18080:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+  worker:
+    image: busybox:latest
+    command: ["sleep", "3600"]
+    environment:
+      GREETING: ${STACK_ACC_SECRET}
+  debug:
+    image: busybox:latest
+    command: ["sleep", "3600"]
+    profiles: ["debug"]

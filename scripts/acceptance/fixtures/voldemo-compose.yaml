@@ -1,0 +1,18 @@
+# 真机验收夹具（2026-09-28 实测通过，见 docs/guide/stack-deploy-design.md 验收记录）：
+# 命名卷跨容器共享 + depends_on 启动顺序——db 先写 /data/seed.txt，
+# app 启动后 cat 应读到 db-ready（依赖顺序 + 卷共享双验证）。
+services:
+  db:
+    image: busybox:latest
+    command: ["sh", "-c", "echo db-ready > /data/seed.txt && sleep 3600"]
+    volumes:
+      - demo-data:/data
+  app:
+    image: busybox:latest
+    command: ["sh", "-c", "cat /data/seed.txt && sleep 3600"]
+    volumes:
+      - demo-data:/data
+    depends_on:
+      - db
+volumes:
+  demo-data:

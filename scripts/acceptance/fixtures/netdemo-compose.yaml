@@ -1,0 +1,15 @@
+# 真机验收夹具（2026-09-28 实测通过，见 docs/guide/stack-deploy-design.md 验收记录）：
+# 自定义 bridge 网络 + 服务间 DNS——b 对 a 按服务名 ping，成功后落 /tmp/dns
+# （验收时 docker exec netdemo-b-1 cat /tmp/dns 应输出 DNS_OK，b 保持 running）。
+services:
+  a:
+    image: busybox:latest
+    command: ["sh", "-c", "sleep 3600"]
+    networks: [backnet]
+  b:
+    image: busybox:latest
+    command: ["sh", "-c", "ping -c 1 a && echo DNS_OK > /tmp/dns && sleep 3600"]
+    networks: [backnet]
+networks:
+  backnet:
+    driver: bridge
