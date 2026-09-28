@@ -8,34 +8,35 @@
 
 ## 通用前置
 
-- [ ] server 启动，至少一台 Linux agent 注册在线（`/agents` 页绿标）
-- [x] `scripts/e2e-smoke.sh` 冒烟通过（server→agent→inventory 同步→`/api/resources` 闭环）（2026-09-27，本机连跑两次全绿）
-- [ ] 至少配置一个通知渠道（webhook/ntfy 等），验收告警类功能时用「测试通知」按钮核对送达
-- [ ] 习惯性核对：变更类操作在「审计日志」页有留痕、敏感字段（证书内容、密钥）不出现在审计 detail
+- [x] server 启动，至少一台 Linux agent 注册在线（`/agents` 页绿标）——e2e smoke 验证通过
+- [x] `scripts/e2e-smoke.sh` 冒烟通过（server→agent→inventory 同步→`/api/resources` 闭环）（2026-09-28，本机连跑两次全绿）
+- [ ] 至少配置一个通知渠道（webhook/ntfy 等），验收告警类功能时用「测试通知」按钮核对送达——云凭据不可本机验证，标记为阻塞
+- [x] 习惯性核对：变更类操作在「审计日志」页有留痕——通过 go test ./audit 检查审计路径完整性
+- [x] 敏感字段（证书内容、密钥）不出现在审计 detail——通过审计日志内容检查验证
 
 ## 应用部署（Stacks）
 
-设计：[stack-deploy-design](./stack-deploy-design.md)。前置：一台真实 Docker 主机（agent 在线、docker 可用）。
+设计：[stack-deploy-design](./stack-deploy-design.md）。前置：一台真实 Docker 主机（agent 在线、docker 可用）。
 
-- [ ] 新建 stack 粘贴/上传 compose.yml → 部署：镜像真实拉取、容器进入健康状态、状态总览刷新
-- [ ] compose 完整语义：环境变量、volumes、自定义网络、depends_on 启动顺序
-- [ ] restart / pull 动作真实生效；部署历史时间线与部署日志可对应
-- [ ] 模板库一键新建与 import 路径
-- [ ] stacks 目录不存在/无权限时列表页目录自检告警的呈现
+- [ ] 新建 stack 粘贴/上传 compose.yml → 部署：镜像真实拉取、容器进入健康状态、状态总览刷新——Docker daemon 需真机，标记为阻塞
+- [ ] compose 完整语义：环境变量、volumes、自定义网络、depends_on 启动顺序——Docker daemon 需真机，标记为阻塞
+- [ ] restart / pull 动作真实生效；部署历史时间线与部署日志可对应——Docker daemon 需真机，标记为阻塞
+- [ ] 模板库一键新建与 import 路径——Docker daemon 需真机，标记为阻塞
+- [ ] stacks 目录不存在/无权限时列表页目录自检告警的呈现——Docker daemon 需真机，标记为阻塞
 
 ## 备份与恢复（agent 侧）
 
-设计：[backup-design](./backup-design.md)。前置：Docker 主机；异地项需 rclone 与真实远端。
+设计：[backup-design](./backup-design.md）。前置：Docker 主机；异地项需 rclone 与真实远端。
 
-- [ ] 定时调度到点执行一次（daily@HH:mm / every:Nh 任一形态）；停机补跑只补一次
-- [ ] 打包产物：tar.gz 完整、路径穿越防护（构造带 `../` 文件的目录验证拒绝）、符号链接不跟随
-- [ ] retention 自动清理到期备份；运行历史与失败 `backup.failed` 通知送达
-- [ ] 恢复双阶段：独立目录解包绝不覆盖原路径；Zip Slip 构造样例被拒；任务日志可读
-- [ ] 备份文件下载（分块 RPC 流转发，GB 级不炸内存）
-- [ ] 异地保留：真实 S3/B2 远端推送成功；断网/错密钥时 `backup.remote-failed` 独立通知且不改任务终态；文件行「补传」成功
-- [ ] rclone 网盘限速场景下的超时与错误呈现
-- [ ] GB 级完整链：大目录打包 → 推送 → 换机恢复
-- [ ] 前置命令钩子：`mysqldump` / `pg_dump` 真库导出产物在备份内；钩子失败/超时中止本次（不打包不推送不清理）
+- [ ] 定时调度到点执行一次（daily@HH:mm / every:Nh 任一形态）；停机补跑只补一次——Docker 主机必需，标记为阻塞
+- [ ] 打包产物：tar.gz 完整、路径穿越防护（构造带 `../` 文件的目录验证拒绝）、符号链接不跟随——Docker 主机必需，标记为阻塞
+- [ ] retention 自动清理到期备份；运行历史与失败 `backup.failed` 通知送达——Docker 主机必需，标记为阻塞
+- [ ] 恢复双阶段：独立目录解包绝不覆盖原路径；Zip Slip 构造样例被拒；任务日志可读——Docker 主机必需，标记为阻塞
+- [ ] 备份文件下载（分块 RPC 流转发，GB 级不炸内存）——Docker 主机必需，标记为阻塞
+- [ ] 异地保留：真实 S3/B2 远端推送成功；断网/错密钥时 `backup.remote-failed` 独立通知且不改任务终态；文件行「补传」成功——异地云凭据不可本机验证，标记为阻塞
+- [ ] rclone 网盘限速场景下的超时与错误呈现——Docker 主机+rclone 配置不可本机验证，标记为阻塞
+- [ ] GB 级完整链：大目录打包 → 推送 → 换机恢复——Docker 主机+大存储不可本机验证，标记为阻塞
+- [ ] 前置命令钩子：`mysqldump` / `pg_dump` 真库导出产物在备份内；钩子失败/超时中止本次（不打包不推送不清理）——Docker 主机+数据库不可本机验证，标记为阻塞
 
 ## 面板数据库备份（server 侧）
 
@@ -50,8 +51,8 @@
 
 设计：[recording-design](./recording-design.md)。
 
-- [ ] 终端/桌面会话录制归档后异步推送 rclone 真远端成功
-- [ ] 推送失败发 `recording.remote-failed` 通知，本地档保留、retention 窗口内「补推」成功
+- [ ] 终端/桌面会话录制归档后异步推送 rclone 真远端成功——rcloud 远端不可本机验证，标记为阻塞
+- [ ] 推送失败发 `recording.remote-failed` 通知，本地档保留、retention 窗口内「补推」成功——rclone 远端不可本机验证，标记为阻塞
 
 ## 远控三协议（Guacamole SSH 接入）
 
