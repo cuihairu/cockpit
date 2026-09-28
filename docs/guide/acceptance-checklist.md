@@ -18,11 +18,11 @@
 
 设计：[stack-deploy-design](./stack-deploy-design.md）。前置：一台真实 Docker 主机（agent 在线、docker 可用）。
 
-- [ ] 新建 stack 粘贴/上传 compose.yml → 部署：镜像真实拉取、容器进入健康状态、状态总览刷新——Docker daemon 需真机，标记为阻塞
-- [ ] compose 完整语义：环境变量、volumes、自定义网络、depends_on 启动顺序——Docker daemon 需真机，标记为阻塞
-- [ ] restart / pull 动作真实生效；部署历史时间线与部署日志可对应——Docker daemon 需真机，标记为阻塞
-- [ ] 模板库一键新建与 import 路径——Docker daemon 需真机，标记为阻塞
-- [ ] stacks 目录不存在/无权限时列表页目录自检告警的呈现——Docker daemon 需真机，标记为阻塞
+- [x] 新建 stack 粘贴/上传 compose.yml → 部署：镜像真实拉取、容器进入健康状态、状态总览刷新（2026-09-28，docker VM 真实拉取 nginx:alpine，healthcheck healthy，聚合 running=2/total=2）
+- [x] compose 完整语义：环境变量、volumes、自定义网络、depends_on 启动顺序（2026-09-28，.env 注入 printenv 实证；命名卷 db 写 → app 读 + depends_on 顺序；自定义 bridge 网络 + 服务间 DNS）
+- [x] restart / pull 动作真实生效；部署历史时间线与部署日志可对应（2026-09-28，pull/restart 任务 success，历史 finishedAt 回填含诚实 failed）
+- [x] 模板库一键新建与 import 路径（2026-09-28，模板/import 为 UI 填充路径，落库即常规 create+up——真机以原始 compose 等价验证，UI 链路由 vitest 覆盖）
+- [ ] stacks 目录不存在/无权限时列表页目录自检告警的呈现——部分完成（2026-09-28）：目录不存在→自动创建 0700、dirWritable=true 实证；路径非法→agent 报错透传修复已落地；剩余：list 失败时 dirError 仍到不了列表页（见 todo.md stacks 条目后续小项）+ 无权限场景需非 root agent
 
 ## 备份与恢复（agent 侧）
 

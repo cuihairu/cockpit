@@ -155,7 +155,7 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 - [x] Server：`api_stacks.go` + storage stacks 表 + 审计事件
 - [x] Web：Stacks 页面（列表/详情/编辑/部署/日志轮询）
 - [x] 验收（本机端到端，2026-09-14）：真实 server/agent 二进制 + fake Docker Engine（`scripts/local-acceptance/`），32 项断言全部通过且可重复，覆盖「创建 → 校验失败不落盘 → up（并发 409）→ 状态联动 → logs → down → 删除 → 断连灰态 → 审计闭环 + .env 不泄漏」，记录见下文[验收记录](#验收记录)
-- [ ] 验收（真实 Docker 测试机）：镜像真实拉取、容器健康/端口/重启策略、compose build/pull/profiles/healthcheck 语义、`COCKPIT_STACKS_DIR` 权限实践（0700）
+- [x] 验收（真实 Docker 测试机，2026-09-28）：镜像真实拉取、容器健康/端口/重启策略、compose 完整语义（env/volumes/自定义网络/depends_on/pull/profiles/healthcheck）、`COCKPIT_STACKS_DIR` 0700 实践——见[验收记录](#验收记录)
 
 ### M1.5 —— 体验补齐（2026-09-14 完成）
 
@@ -215,6 +215,30 @@ compose build/pull/profiles/healthcheck 语义、`COCKPIT_STACKS_DIR` 权限实�
   终态由后台 goroutine 回填（`finishedAt > 0` 且 status=success）
 - **A17 目录自检**：聚合接口 `agentInfo` 带 `dirWritable=true` 与 stacks 目录路径
 - **A14 审计扩展**：六个事件齐全（create/up/down/remove/restart/pull），`.env` 值仍不泄漏
+
+### 2026-09-28 真实 Docker 测试机验收
+
+**环境**：Docker 29.8.1 + Compose v5.5.1 真机（Linux VM，agent 以 root systemd 服务运行，`COCKPIT_STACKS_DIR=/var/lib/cockpit/stacks`）；server 为本机验收二进制（`.acceptance/` 专用配置，不入库）；镜像经真实 Docker Hub 拉取（nginx:alpine、busybox）。
+
+**通过（R1-R17 + 补充 S1-S3）**：
+
+- **创建/回读/校验**：created=true、compose 回读 md5 一致；非法 compose 经真实 `docker compose config -q` 拦截（502）且原文件不落盘
+- **部署全链**：up 真实拉镜像起容器（running=2/total=2，`profiles: [debug]` 服务正确排除）；端口跨主机可达（18080→HTTP 200）；healthcheck 进入 healthy；`unless-stopped` 与 `.env` 变量替换实证（容器内 printenv）
+- **自愈/日志/动作**：kill 容器进程后 Docker 按重启策略自动拉起（约 7s，重启退避内）；logs 返回真实 nginx 输出；pull/restart 真实生效
+- **历史/审计**：部署历史 finishedAt 由后台回填（含一次诚实 failed 记录）；审计 5 事件齐全且 `.env` 值不泄漏
+- **compose 完整语义（S1/S3）**：命名卷跨容器共享 + depends_on 启动顺序（db 写卷 → app 读到 seed，卷带项目前缀创建）；自定义 bridge 网络创建 + 服务间 DNS 解析（b 容器 `ping a` 成功后落文件实证）
+- **边界行为**：build 缺 Dockerfile 优雅失败（任务 failed 日志可读，不影响 server）；`down` 保留命名卷（compose 默认语义，非 `-v`，符合预期）；remove 删目录；目录自检 dirWritable=true + composeVersion 5.5.1
+- **目录权限**：`/var/lib/cockpit/stacks` 0700 且可写探针通过；「目录不存在」场景自动创建（list 返回空 + info 报 dirWritable=true）
+
+**环境杂音（非缺陷）**：首轮 up 因 Docker Hub auth 瞬断失败（任务日志如实记录原始错误），重试即通过。
+
+**验收中发现并修复**：stacks 目录路径非法（如误配为普通文件）时 `stack.list` 报错，`GET /api/stacks/agents/{id}` 曾把 agent 原始错误（`read stacks dir: ... not a directory`）替换成笼统的 "Invalid agent response"，与 `handleStackRPC` 的透传行为不一致；已改为透传原始原因（含单测断言透传文案）。
+
+**已知边界（记录为后续小项，不在本次修复）**：
+
+- 路径非法场景下 `stack.info`（dirError）到不了列表页——server 仅在 list 成功后拉取自检信息；需要 server 侧「list 失败仍拉 info」+ web 呈现联动
+- 「无权限」场景对 root agent 不可模拟（CAP_DAC_OVERRIDE 绕过 DAC），需非 root 部署真验
+- 镜像 nginx:alpine/busybox 留作 VM 缓存未清理；模板库/import 为 UI 填充路径（落库即常规 create+up，UI 链路由 vitest 覆盖），真机以原始 compose 等价验证
 
 ## 参考
 
