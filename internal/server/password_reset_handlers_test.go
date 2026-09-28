@@ -230,3 +230,10 @@ func TestHandleVerifyResetCodeValid(t *testing.T) {
 		t.Error("valid should be true")
 	}
 }
+
+// TestPrintfCoverage 覆盖 printf 存根（L169-171）：无操作函数，
+// 调用不 panic 即达成覆盖。
+func TestPrintfCoverage(t *testing.T) {
+	printf("test %s %d", "format", 123)
+	// 无断言：printf 为空实现，仅验证不 panic
+}

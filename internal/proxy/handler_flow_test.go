@@ -218,4 +218,3 @@ func TestHandlerProxyDataClosedConn(t *testing.T) {
 		t.Error("HandleProxyData should fail for closed connection")
 	}
 }
-

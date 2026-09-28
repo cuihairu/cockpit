@@ -13,7 +13,7 @@ import (
 // web 测试 mock 整个 API 方法（绕过 HTTP 层），method 断测试抓不到——
 // 静态 path→handler 映射难精确（serveAPI 子分发 + 各 API 文件内再分发），
 // 故运行时验证：构造 web 调用的 (method, path) 调分发层，断言非 405
-//（404/400/503 都算 method 被接受——只验 method 白名单不误报）。
+// （404/400/503 都算 method 被接受——只验 method 白名单不误报）。
 func TestHTTPMethodDispatch(t *testing.T) {
 	s := newTestServerWithDB(t)
 	if err := auth.InitAdmin(s.db, "admin", "admin123"); err != nil {

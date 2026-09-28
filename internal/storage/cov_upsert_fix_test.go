@@ -18,8 +18,8 @@ func TestUpsertAgentUpdatesExisting(t *testing.T) {
 
 	if err := db.UpsertAgent(&Agent{
 		ID: "a1", Hostname: "h1", IP: "203.0.113.10", Status: "online",
-		SecretHash: "hash-v1",
-		Labels: map[string]interface{}{"env": "prod"},
+		SecretHash:   "hash-v1",
+		Labels:       map[string]interface{}{"env": "prod"},
 		Capabilities: []Capability{{Type: "docker", Version: "1.0"}},
 	}); err != nil {
 		t.Fatal(err)

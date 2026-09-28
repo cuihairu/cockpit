@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -701,5 +702,37 @@ func TestCovPctBackupCreateRcloneAgentMissing(t *testing.T) {
 	wg.Wait()
 	if !hit {
 		t.Fatalf("requireAgentRclone missing-agent pass-through not observed within deadline")
+	}
+}
+
+// TestCovPctRequireAgentRcloneDisabled 覆盖 requireAgentRclone 的
+// rclone 未启用分支（api_backups.go L188-191）：agent 存在且有 backup
+// capability，但 metadata["rclone"] 为 false/缺失 → 返回 400 并注入错误消息。
+func TestCovPctRequireAgentRcloneDisabled(t *testing.T) {
+	s := newBackupTestServer(t)
+
+	const agentID = "bak-rclone-disabled"
+	agent := NewAgent(agentID, nil)
+	agent.Capabilities = []protocol.Capability{{
+		Type:     "backup",
+		Metadata: map[string]interface{}{"rclone": false}, // 显式 false
+	}}
+	if err := s.registry.Register(agent); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	rec := covRec()
+	body := fmt.Sprintf(`{"agent_id":%q,"name":"bak","sources":["/etc"],"dest_dir":"/b","schedule":"manual","remote_dest":"r:bak"}`, agentID)
+	s.handleBackupsAPI(rec, covReq(http.MethodPost, "/api/backups/configs", strings.NewReader(body)))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (rclone not enabled)", rec.Code)
+	}
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "remote_dest requires rclone installed on the agent host (rclone not found)" {
+		t.Errorf("error = %q, want rclone not found message", resp["error"])
 	}
 }

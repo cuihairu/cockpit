@@ -157,13 +157,13 @@ func (f *fakeVNC) serve(c net.Conn) {
 	buf[4] = 32
 	buf[5] = 24
 	buf[6] = 1
-	buf[7] = 0 // big-endian
+	buf[7] = 0                                // big-endian
 	binary.BigEndian.PutUint16(buf[8:], 255)  // red-max
 	binary.BigEndian.PutUint16(buf[10:], 255) // green-max
 	binary.BigEndian.PutUint16(buf[12:], 255) // blue-max
-	buf[14] = 16 // red-shift
-	buf[15] = 8  // green-shift
-	buf[16] = 0  // blue-shift
+	buf[14] = 16                              // red-shift
+	buf[15] = 8                               // green-shift
+	buf[16] = 0                               // blue-shift
 	binary.BigEndian.PutUint32(buf[20:], uint32(len(name)))
 	copy(buf[24:], name)
 	if _, err := c.Write(buf); err != nil {

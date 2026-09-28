@@ -238,7 +238,7 @@ func TestStartWithDNSProviderEnabled(t *testing.T) {
 		Server: &config.ServerConfig{Host: "127.0.0.1", Port: port},
 		JWT:    &config.JWTConfig{Secret: "cov-dns-secret", Expiration: time.Hour},
 		DNS: &config.DNSConfig{
-			Provider: "cloudflare",
+			Provider:   "cloudflare",
 			Cloudflare: &config.CloudflareDNSConfig{APIToken: "cov-cf-token"},
 		},
 	}
@@ -262,10 +262,10 @@ func TestStartWithDNSProviderEnabled(t *testing.T) {
 type guacStubMode int
 
 const (
-	guacStubOK             guacStubMode = iota // 回 select 响应并保持连接
-	guacStubFailSelectWrite                    // Accept 后立即 RST：select write 失败
-	guacStubFailReadSelect                     // Accept 后 EOF：read select 响应失败
-	guacStubFailHandshakeWrite                 // 回 select 响应后 RST：handshake write 失败
+	guacStubOK                 guacStubMode = iota // 回 select 响应并保持连接
+	guacStubFailSelectWrite                        // Accept 后立即 RST：select write 失败
+	guacStubFailReadSelect                         // Accept 后 EOF：read select 响应失败
+	guacStubFailHandshakeWrite                     // 回 select 响应后 RST：handshake write 失败
 )
 
 // startGuacStub 确定性假 guacd：按 mode 精确控制握手失败点（不依赖 RST 传播
@@ -332,7 +332,6 @@ func serveGuacStub(c net.Conn, mode guacStubMode) {
 func startClosingGuacd(t *testing.T) string {
 	return startGuacStub(t, guacStubFailHandshakeWrite)
 }
-
 
 // failWriteConn Write 必失败的 net.Conn mock（覆盖 select write 失败分支）。
 type failWriteConn struct{ net.Conn }

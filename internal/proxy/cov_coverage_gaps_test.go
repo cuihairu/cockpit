@@ -215,7 +215,6 @@ func TestHandleProxyNewSSHSessionFail(t *testing.T) {
 	}
 }
 
-
 // TestNewSSHSessionStdinPipeFail 覆盖 StdinPipe 失败分支（防御性错误处理）。
 // x/crypto/ssh 的 StdinPipe 失败条件是 s.started（仅 Shell→start() 设）或
 // s.Stdin 已设，NewSSHSession 调用序列 NewSession→RequestPty→StdinPipe→Shell

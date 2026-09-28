@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	grdp "github.com/nakagami/grdp"
 	"github.com/cuihairu/cockpit/internal/protocol"
+	grdp "github.com/nakagami/grdp"
 )
 
 // 覆盖率缺口补测（只补测试零业务改动）：HandleKeyboard/HandleMouse/
