@@ -34,6 +34,11 @@ const (
 	ActionStackRemove  = "stack_remove"
 	ActionStackRestart = "stack_restart"
 	ActionStackPull    = "stack_pull"
+	// 服务健康探针与自愈（见 docs/guide/service-health-design.md D9）
+	ActionServiceHealthConfig      = "service_health_config"       // 探针/白名单配置保存
+	ActionServiceHealthHeal        = "service_health_heal"         // 自愈重启成功（agent 事件归集，username=cockpit-agent）
+	ActionServiceHealthHealFailed  = "service_health_heal_failed"  // 自愈重启失败
+	ActionServiceHealthHealBlocked = "service_health_heal_blocked" // 非白名单拦截（只告警不动手）
 	// 备份管理（见 docs/guide/backup-design.md）
 	ActionBackupRun        = "backup_run"
 	ActionBackupRestore    = "backup_restore"

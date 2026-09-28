@@ -96,7 +96,7 @@ func (p *ServiceProvider) Call(action string, params map[string]interface{}) (in
 	case "health.config":
 		return p.HealthConfigAction(params)
 	case "health.status":
-		return p.HealthStatusAction()
+		return p.HealthStatusAction(params)
 	case "health.now":
 		return p.HealthNowAction(paramString(params, "id"))
 	default:

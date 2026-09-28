@@ -124,3 +124,40 @@ func TestCleanupOldAlertsDeletesOld(t *testing.T) {
 		t.Errorf("Expected old alerts to be cleaned, got %d", len(alerts))
 	}
 }
+
+// TestCheckServiceHealth 探针告警素材逐条落库（title 含 probeId 独立去重键，
+// D9）；恢复类素材由调用方过滤，本函数只管下沉
+func TestCheckServiceHealth(t *testing.T) {
+	db := testDB(t)
+	g := NewGenerator(db, nil, nil)
+
+	g.CheckServiceHealth("ag-1", []ServiceHealthIssue{
+		{ProbeID: "p1", Title: "服务健康探针：p1 连续失败（host-1）", Message: "fail x3", AlertType: "error"},
+		{ProbeID: "p2", Title: "服务健康探针：p2 自愈退避额度耗尽（host-1）", Message: "backoff", AlertType: "warning"},
+	})
+
+	alerts, err := db.ListUnreadAlerts()
+	if err != nil {
+		t.Fatalf("ListUnreadAlerts: %v", err)
+	}
+	if len(alerts) != 2 {
+		t.Fatalf("alerts = %d, want 2", len(alerts))
+	}
+	byTitle := map[string]string{}
+	for _, a := range alerts {
+		byTitle[a.Title] = a.Type
+	}
+	if byTitle["服务健康探针：p1 连续失败（host-1）"] != "error" ||
+		byTitle["服务健康探针：p2 自愈退避额度耗尽（host-1）"] != "warning" {
+		t.Fatalf("alert types: %v", byTitle)
+	}
+
+	// 同 title 未读期间重复下沉不重建（真去重）
+	g.CheckServiceHealth("ag-1", []ServiceHealthIssue{
+		{ProbeID: "p1", Title: "服务健康探针：p1 连续失败（host-1）", Message: "fail x4", AlertType: "error"},
+	})
+	alerts, _ = db.ListUnreadAlerts()
+	if len(alerts) != 2 {
+		t.Fatalf("after dedup alerts = %d, want 2", len(alerts))
+	}
+}

@@ -28,6 +28,15 @@ const (
 	ServerBackupRemoteFailed = "server_backup.remote-failed" // 面板库本地备份成功但 rclone 推送失败（server-backup M2 D16，白名单显式启用）
 
 	RecordingRemoteFailed = "recording.remote-failed" // 录制文件归档推送失败（本地档在，retention 窗口内可补推；recording M2 D17，白名单显式启用）
+
+	// 服务健康探针与自愈（service-health-design.md D9，白名单显式启用）
+	ServiceHealthDown        = "service_health.down"         // 探针连续失败达阈值
+	ServiceHealthUp          = "service_health.up"           // 探针恢复
+	ServiceHealthHealed      = "service_health.healed"       // 自愈重启成功
+	ServiceHealthHealFailed  = "service_health.heal_failed"  // 自愈重启失败
+	ServiceHealthHealBlocked = "service_health.heal_blocked" // 非白名单拦截，只告警不动手
+	ServiceHealthBackoff     = "service_health.backoff"      // 退避窗口额度耗尽，暂停自愈
+
 )
 
 // getAlertEventType 根据 Alert 获取对应的事件类型

@@ -40,3 +40,14 @@ func (d *DB) DeleteSetting(key string) error {
 	defer d.mu.Unlock()
 	return d.db.Where("`key` = ?", key).Delete(&Setting{}).Error
 }
+
+// ListSettingKeys 按前缀列出设置键（服务健康探针按 agent 扫描配置用，
+// service-health-design.md D3）。前缀里的 `_` 在 LIKE 中是通配符——对本
+// 前缀语义无害（不存在形如 serviceXhealth.config.* 的他用键）。
+func (d *DB) ListSettingKeys(prefix string) ([]string, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	var keys []string
+	err := d.db.Model(&Setting{}).Where("`key` LIKE ?", prefix+"%").Pluck("`key`", &keys).Error
+	return keys, err
+}

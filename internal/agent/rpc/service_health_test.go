@@ -132,7 +132,15 @@ func TestHealthProbeExecutors(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer ln.Close()
-		go func() { for { c, err := ln.Accept(); if err != nil { return }; c.Close() } }()
+		go func() {
+			for {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				c.Close()
+			}
+		}()
 		if err := e.probe(context.Background(), HealthProbe{Type: "tcp", Target: ln.Addr().String()}); err != nil {
 			t.Fatalf("open port should pass: %v", err)
 		}
@@ -203,8 +211,8 @@ func TestHealthConfigActionRejectKeepsOld(t *testing.T) {
 
 // healthTestEnv 组装带计数替身的引擎（不触真 systemctl）
 type healthTestEnv struct {
-	sp *ServiceProvider
-	e  *serviceHealthEngine
+	sp       *ServiceProvider
+	e        *serviceHealthEngine
 	mu       sync.Mutex
 	restarts []string
 	probeErr error
@@ -233,7 +241,7 @@ func (env *healthTestEnv) restartCount() int {
 // drainEvents 取走事件并按 kind 计数
 func drainEvents(t *testing.T, e *serviceHealthEngine) map[string]int {
 	t.Helper()
-	_, events := e.snapshot()
+	_, events := e.snapshot(true)
 	counts := map[string]int{}
 	for _, ev := range events {
 		counts[ev.Kind]++
@@ -272,7 +280,7 @@ func TestHealthThresholdEdgeAndHeal(t *testing.T) {
 	if env.restartCount() != 1 {
 		t.Fatal("restart should be called by caller")
 	}
-	states, _ := env.e.snapshot()
+	states, _ := env.e.snapshot(true)
 	st := states[p.ID]
 	if st.ConsecutiveFails != 3 || st.LastHeal == nil || st.LastHeal.Result != "restarted" {
 		t.Fatalf("state after heal: %+v", st)
@@ -284,7 +292,7 @@ func TestHealthThresholdEdgeAndHeal(t *testing.T) {
 	if got := drainEvents(t, env.e); got[healthEventRecovered] != 1 {
 		t.Fatalf("recovered event missing: %v", got)
 	}
-	states, _ = env.e.snapshot()
+	states, _ = env.e.snapshot(true)
 	if states[p.ID].ConsecutiveFails != 0 || states[p.ID].Status != "ok" {
 		t.Fatalf("state after recover: %+v", states[p.ID])
 	}
@@ -304,7 +312,7 @@ func TestHealthWhitelistAlertOnly(t *testing.T) {
 	if got[healthEventBlocked] != 1 || got[healthEventDown] != 1 {
 		t.Fatalf("events: %v", got)
 	}
-	states, _ := env.e.snapshot()
+	states, _ := env.e.snapshot(true)
 	if st := states[p.ID]; st.LastHeal == nil || st.LastHeal.Result != "blocked_whitelist" {
 		t.Fatalf("lastHeal: %+v", st.LastHeal)
 	}
@@ -352,7 +360,7 @@ func TestHealthBackoffWindow(t *testing.T) {
 	if got := drainEvents(t, env.e); got[healthEventBackoff] != 0 {
 		t.Fatalf("backoff event once per window: %v", got)
 	}
-	states, _ := env.e.snapshot()
+	states, _ := env.e.snapshot(true)
 	if st := states[p.ID]; st.LastHeal == nil || st.LastHeal.Result != "backoff_skipped" {
 		t.Fatalf("lastHeal: %+v", st.LastHeal)
 	}
@@ -393,11 +401,11 @@ func TestHealthEventRing(t *testing.T) {
 	for i := 0; i < healthEventRingCap+50; i++ {
 		env.e.emit(healthEventDown, "p", "", "x")
 	}
-	states, events := env.e.snapshot()
+	states, events := env.e.snapshot(true)
 	if len(states) != 0 || len(events) != healthEventRingCap {
 		t.Fatalf("ring cap: %d events", len(events))
 	}
-	if _, events := env.e.snapshot(); len(events) != 0 {
+	if _, events := env.e.snapshot(true); len(events) != 0 {
 		t.Fatalf("drain should clear, got %d", len(events))
 	}
 }
@@ -456,7 +464,7 @@ func TestHealthLoopIntegration(t *testing.T) {
 	if _, err := env.sp.HealthConfigAction(params); err != nil {
 		t.Fatalf("re-push: %v", err)
 	}
-	states, _ := env.e.snapshot()
+	states, _ := env.e.snapshot(true)
 	if _, ok := states[p.ID]; ok {
 		t.Fatal("state should reset on config change")
 	}
@@ -465,7 +473,7 @@ func TestHealthLoopIntegration(t *testing.T) {
 // TestHealthStatusActionEmptyNoConfig 未配置时 status 返回空结构不报错
 func TestHealthStatusActionEmptyNoConfig(t *testing.T) {
 	sp := NewServiceProvider(nil)
-	out, err := sp.HealthStatusAction()
+	out, err := sp.HealthStatusAction(nil)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -564,7 +572,7 @@ func TestHealthApplyHealOutcomeNoState(t *testing.T) {
 	p := validHealthProbe()
 	env.e.cfg = HealthConfig{Probes: []HealthProbe{p}}
 	env.e.applyHealOutcome(p, time.Millisecond, nil) // states 空：不 panic
-	if _, events := env.e.snapshot(); len(events) != 1 {
+	if _, events := env.e.snapshot(true); len(events) != 1 {
 		t.Fatalf("heal event should still emit, got %d", len(events))
 	}
 }
@@ -704,5 +712,36 @@ func TestHealthCallDispatch(t *testing.T) {
 	}
 	if _, err := sp.Call("health.nope", nil); err == nil {
 		t.Fatal("unknown health action should error")
+	}
+}
+
+// TestHealthStatusPeekVsDrain status 的窥视/取走双语义（D8）：默认窥视
+// 保留事件（仪表盘读不吞事件），drain=true 才取走（归集循环专用）
+func TestHealthStatusPeekVsDrain(t *testing.T) {
+	env := newHealthTestEnv(nil)
+	env.e.emit(healthEventDown, "p", "", "x")
+
+	out, err := env.sp.HealthStatusAction(nil) // 窥视
+	if err != nil {
+		t.Fatalf("peek: %v", err)
+	}
+	if got := len(out.(map[string]interface{})["events"].([]healthEvent)); got != 1 {
+		t.Fatalf("peek should keep events, got %d", got)
+	}
+	out, err = env.sp.HealthStatusAction(map[string]interface{}{"drain": true})
+	if err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if got := len(out.(map[string]interface{})["events"].([]healthEvent)); got != 1 {
+		t.Fatalf("drain should return events, got %d", got)
+	}
+	_, events := env.e.snapshot(false) // 再窥视为空：事件已被取走
+	if len(events) != 0 {
+		t.Fatalf("events should be drained, got %d", len(events))
+	}
+	// 非法 drain 值按窥视处理
+	env.e.emit(healthEventDown, "p", "", "y")
+	if _, err := env.sp.HealthStatusAction(map[string]interface{}{"drain": "yes"}); err != nil {
+		t.Fatalf("non-bool drain should not error: %v", err)
 	}
 }

@@ -363,3 +363,20 @@ func (g *Generator) CheckACME(primaryDomain, reason string) {
 	message := "ACME 自动签发/续期失败，证书可能临期无法续：\n" + reason
 	g.createAlertIfNotExists("warning", title, message, primaryDomain, "acme")
 }
+
+// ServiceHealthIssue 一条服务健康探针类告警素材（service-health D9）
+type ServiceHealthIssue struct {
+	ProbeID   string
+	Title     string // 需含 probeId（同探针未读期间真去重的去重键）
+	Message   string
+	AlertType string // error / warning
+}
+
+// CheckServiceHealth 服务健康探针结果入告警（见 service-health-design.md
+// D9）：每条 issue 独立 title（含 probeId）→ 同探针未读期间只报一次；
+// 恢复不自动 resolve（同漂移/磁盘口径：用户处理后标已读，再次下沉重建）。
+func (g *Generator) CheckServiceHealth(agentID string, issues []ServiceHealthIssue) {
+	for _, iss := range issues {
+		g.createAlertIfNotExists(iss.AlertType, iss.Title, iss.Message, agentID, "agent")
+	}
+}

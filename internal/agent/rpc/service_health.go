@@ -69,17 +69,17 @@ const (
 
 // HealthProbe 单条探针定义（server 存储 = 下发载荷，D12 字段语义见设计文档）
 type HealthProbe struct {
-	ID            string `json:"id"`
-	Type          string `json:"type"` // http / tcp / systemd
-	Target        string `json:"target"`
-	ExpectStatus  int    `json:"expectStatus"` // http 专用，0 视为 200
-	IntervalSec   int    `json:"intervalSec"`
-	TimeoutSec    int    `json:"timeoutSec"`
-	FailThreshold int    `json:"failThreshold"`
-	Heal          bool   `json:"heal"`
-	Unit          string `json:"unit"` // 自愈目标；systemd 型缺省取 target
-	BackoffWindowSec int `json:"backoffWindowSec"`
-	MaxRestartsInWindow int `json:"maxRestartsInWindow"`
+	ID                  string `json:"id"`
+	Type                string `json:"type"` // http / tcp / systemd
+	Target              string `json:"target"`
+	ExpectStatus        int    `json:"expectStatus"` // http 专用，0 视为 200
+	IntervalSec         int    `json:"intervalSec"`
+	TimeoutSec          int    `json:"timeoutSec"`
+	FailThreshold       int    `json:"failThreshold"`
+	Heal                bool   `json:"heal"`
+	Unit                string `json:"unit"` // 自愈目标；systemd 型缺省取 target
+	BackoffWindowSec    int    `json:"backoffWindowSec"`
+	MaxRestartsInWindow int    `json:"maxRestartsInWindow"`
 }
 
 // HealthConfig 单机全量配置（全量替换语义，D3）
@@ -342,9 +342,11 @@ func (e *serviceHealthEngine) SetConfig(cfg HealthConfig) {
 	}
 }
 
-// snapshot 状态全量 + 事件 drain（D8）。深拷贝出锁后序列化，避免与
-// 引擎循环竞争（LastHeal 指针一并复制）。
-func (e *serviceHealthEngine) snapshot() (map[string]healthProbeState, []healthEvent) {
+// snapshot 状态全量 + 事件读取（D8）。drain=false 仅窥视（仪表盘读路径，
+// 事件保留给归集循环）；drain=true 取走即清（server 归集循环专用——事件
+// 被吞掉会让审计/告警失明，所以 drain 语义只授权给扫描器）。深拷贝出锁
+// 后序列化，避免与引擎循环竞争（LastHeal 指针一并复制）。
+func (e *serviceHealthEngine) snapshot(drain bool) (map[string]healthProbeState, []healthEvent) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	states := make(map[string]healthProbeState, len(e.states))
@@ -356,8 +358,14 @@ func (e *serviceHealthEngine) snapshot() (map[string]healthProbeState, []healthE
 		}
 		states[id] = cp
 	}
-	events := e.events
-	e.events = nil
+	var events []healthEvent
+	if drain {
+		events = e.events
+		e.events = nil
+	} else {
+		events = make([]healthEvent, len(e.events))
+		copy(events, e.events)
+	}
 	return states, events
 }
 
@@ -624,9 +632,15 @@ func (p *ServiceProvider) HealthConfigAction(params map[string]interface{}) (int
 	return map[string]interface{}{"applied": len(cfg.Probes)}, nil
 }
 
-// HealthStatusAction service.health.status：运行态快照 + 事件 drain（D8）
-func (p *ServiceProvider) HealthStatusAction() (interface{}, error) {
-	states, events := p.health.snapshot()
+// HealthStatusAction service.health.status：运行态快照 + 事件读取（D8）。
+// params.drain=true 才取走事件（归集循环专用），缺省窥视不消费——仪表盘
+// 与归集循环并发读互不吞事件。
+func (p *ServiceProvider) HealthStatusAction(params map[string]interface{}) (interface{}, error) {
+	drain := false
+	if v, ok := params["drain"].(bool); ok {
+		drain = v
+	}
+	states, events := p.health.snapshot(drain)
 	if events == nil {
 		events = []healthEvent{}
 	}
@@ -663,7 +677,7 @@ func (p *ServiceProvider) HealthNowAction(id string) (interface{}, error) {
 		rerr := e.restart(probe.Unit)
 		e.applyHealOutcome(probe, time.Since(start), rerr)
 	}
-	states, _ := e.snapshot()
+	states, _ := e.snapshot(false)
 	out := map[string]interface{}{"probe": id}
 	if st, ok := states[id]; ok {
 		out["status"] = st.Status

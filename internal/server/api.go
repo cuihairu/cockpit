@@ -90,6 +90,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			s.handleAgentServiceAPI(w, r, agentID)
 			return
 		}
+		// 服务健康探针 /agents/{id}/health[/probes/{id}/check]（见 api_service_health.go）
+		if strings.HasSuffix(agentID, "/health") || strings.Contains(agentID, "/health/") {
+			s.handleAgentHealthAPI(w, r, agentID)
+			return
+		}
 		// NAS 存储观测 /agents/{id}/nas/...（见 api_nas.go）
 		if strings.Contains(agentID, "/nas/") {
 			s.handleAgentNASAPI(w, r, agentID)

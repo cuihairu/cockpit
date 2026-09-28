@@ -115,6 +115,12 @@ func requiredPerms(path, method string) (perms []string, governed bool) {
 				strings.Contains(rest, "/overlay/service")) {
 			return []string{"overlay:admin"}, true
 		}
+		// 服务健康探针 /agents/{id}/health[/...] 归 services 面（策略层
+		// 不另立权限点，service-health-design.md D10；注意裸 /health 无
+		// 尾斜杠，agentSubResources 的 "/health/" 前缀匹配不到）
+		if strings.HasSuffix(rest, "/health") || strings.Contains(rest, "/health/") {
+			return actionPerm("services", method, ""), true
+		}
 		for sub, res := range agentSubResources {
 			if strings.Contains(rest, "/"+sub) {
 				return actionPerm(res, method, ""), true
