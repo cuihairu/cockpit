@@ -407,8 +407,13 @@ func (s *Server) handleAgentStacks(w http.ResponseWriter, r *http.Request, agent
 		return
 	}
 	rpcResp, err := protocol.DecodeRPCResponse(resp)
-	if err != nil || rpcResp.Status != "success" {
+	if err != nil {
 		s.handleError(w, r, http.StatusBadGateway, "Invalid agent response")
+		return
+	}
+	// agent 明确报错（如 stacks 目录不可读）时透传原因，不替换成笼统文案
+	if rpcResp.Status != "success" {
+		s.handleError(w, r, http.StatusBadGateway, rpcResp.Error)
 		return
 	}
 

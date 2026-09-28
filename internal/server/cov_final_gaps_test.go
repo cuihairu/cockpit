@@ -749,7 +749,15 @@ func TestCovRemainingSmallBranches(t *testing.T) {
 	s6.handleStackRPC(rec, covReq(http.MethodPost, "/x", nil), "ghost", "stack.list", nil, "")
 	covWantCode(t, "stack rpc ghost", rec, http.StatusNotFound)
 
-	// handleAgentStacks：rpcResp error → 固定 502 "Invalid agent response"
+	// handleAgentStacks：rpcResp error → 502 并透传 agent 原始错误原因
+	//（真机验收发现：目录不可读时此前被替换成笼统的 "Invalid agent response"）
+	stackErr("stk2-real", "read stacks dir: open /etc/hostname/stacks: not a directory")
+	rec = covRec()
+	s6.handleAgentStacks(rec, covReq(http.MethodGet, "/x", nil), "stk2-real")
+	covWantCode(t, "agent stacks real err", rec, http.StatusBadGateway)
+	if body := rec.Body.String(); !strings.Contains(body, "read stacks dir") {
+		t.Errorf("agent stacks should surface agent error, body = %s", body)
+	}
 	for _, id := range []string{"stk2-timeout", "stk2-boom"} {
 		stackErr(id, "kaput")
 		rec = covRec()
