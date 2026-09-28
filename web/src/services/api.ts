@@ -71,6 +71,10 @@ import type {
   ServiceUnitFileSaveResult,
   ServiceListResult,
   ServiceStatus,
+  HealthProbe,
+  HealthOverview,
+  HealthConfigSaveResult,
+  HealthProbeCheckResult,
   OverlayStatus,
   OverlayDaemonStatus,
   OverlayChangeResult,
@@ -1065,6 +1069,28 @@ class ApiService {
     return this.client.put<unknown, ServiceUnitFileSaveResult>(
       `/agents/${encodeURIComponent(agentId)}/services/${encodeURIComponent(unit)}/file`,
       { content },
+    )
+  }
+
+  // ============ 服务健康探针与自愈（见 docs/guide/service-health-design.md） ============
+
+  // 概览：配置 + 运行态（在线实时拉取，离线回落缓存灰态）
+  async getAgentHealth(agentId: string): Promise<HealthOverview> {
+    return this.client.get<unknown, HealthOverview>(`/agents/${encodeURIComponent(agentId)}/health`)
+  }
+
+  // 保存探针/白名单（server 双端校验 + 白名单门；在线即推送，离线落库待补推）
+  async saveAgentHealth(
+    agentId: string,
+    body: { probes: HealthProbe[]; whitelist: string[] },
+  ): Promise<HealthConfigSaveResult> {
+    return this.client.put<unknown, HealthConfigSaveResult>(`/agents/${encodeURIComponent(agentId)}/health`, body)
+  }
+
+  // 立即探测一次（诊断用，读语义不审计）
+  async checkAgentProbe(agentId: string, probeId: string): Promise<HealthProbeCheckResult> {
+    return this.client.post<unknown, HealthProbeCheckResult>(
+      `/agents/${encodeURIComponent(agentId)}/health/probes/${encodeURIComponent(probeId)}/check`,
     )
   }
 

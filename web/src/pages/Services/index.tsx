@@ -8,6 +8,7 @@ import type { ServiceActionName, ServiceUnit, ServiceUnitFile } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 import { usePerm } from '@/hooks/usePerm'
 import LogsPanel from '@/workbench/LogsPanel'
+import HealthPanel from './HealthPanel'
 
 // 服务管理（见 docs/guide/service-design.md）：systemd 与 Windows SCM 双后端
 // 统一观测 + 动作操作（capability type=service，metadata.backend 区分）。
@@ -457,6 +458,10 @@ const Services = () => {
               pagination={{ pageSize: 20, showSizeChanger: false, showTotal: (n) => `共 ${n} 个服务` }}
               locale={{ emptyText: search ? '无匹配服务' : '未发现服务' }}
             />
+            {/* 服务健康探针与自愈（service-health-design.md 策略层；面板
+                自带 30s 轮询与离线灰态，随所选主机切换。v1 探针/自愈边界
+                为 Linux+systemd（D11），非 systemd 后端不渲染 */}
+            {isSystemd && <HealthPanel agentId={selectedAgent} />}
           </Space>
         )}
       </Card>

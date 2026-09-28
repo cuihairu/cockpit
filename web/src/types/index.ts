@@ -886,6 +886,70 @@ export interface ServiceUnitFileSaveResult {
   reloaded: boolean
 }
 
+// ========== 服务健康探针与自愈（见 docs/guide/service-health-design.md） ==========
+
+// 单条探针定义（server 存储 = 下发载荷；数值字段 0 视为缺省）
+export interface HealthProbe {
+  id: string
+  type: 'http' | 'tcp' | 'systemd'
+  target: string
+  expectStatus?: number // http 专用，0 视为 200
+  intervalSec?: number // 5-3600，默认 30
+  timeoutSec?: number // 1-30，默认 5
+  failThreshold?: number // 1-60，默认 3
+  heal?: boolean // 自愈开关（目标必须在白名单）
+  unit?: string // 自愈目标；systemd 型缺省取 target
+  backoffWindowSec?: number // 60-86400，默认 600
+  maxRestartsInWindow?: number // 1-10，默认 3
+}
+
+// 探针配置记录（含审计元数据）
+export interface HealthConfigRecord {
+  probes: HealthProbe[]
+  whitelist: string[]
+  updatedAt?: number
+  updatedBy?: string
+}
+
+// 最近一次自愈决策
+export interface HealthHealRec {
+  time: number
+  unit: string
+  result: string // restarted / failed / blocked / backoff
+  detail: string
+  durationMs: number
+}
+
+// 单探针运行态
+export interface HealthStateEntry {
+  status: string // ok / fail / unknown
+  lastCheck?: number
+  consecutiveFails?: number
+  lastError?: string
+  lastHeal?: HealthHealRec | null
+}
+
+// GET /agents/{id}/health 概览（在线实时拉取，离线回落缓存灰态）
+export interface HealthOverview {
+  config: HealthConfigRecord | null
+  states: Record<string, HealthStateEntry>
+  online: boolean
+}
+
+// PUT 保存返回（离线保存成功但 pushed=false，注册上线补推）
+export interface HealthConfigSaveResult {
+  applied: number
+  pushed: boolean
+}
+
+// 立即探测返回（service.health.now 透传）
+export interface HealthProbeCheckResult {
+  probe: string
+  status: string
+  consecutiveFails?: number
+  lastError?: string
+}
+
 // ========== Overlay 组网观测（见 overlay-design.md） ==========
 
 // 组网对端节点（工具间字段取可用子集）

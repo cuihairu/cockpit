@@ -16,6 +16,9 @@ const apiMock = vi.hoisted(() => ({
   serviceDaemonReload: vi.fn(),
   getServiceUnitFile: vi.fn(),
   saveServiceUnitFile: vi.fn(),
+  getAgentHealth: vi.fn(),
+  saveAgentHealth: vi.fn(),
+  checkAgentProbe: vi.fn(),
 }))
 vi.mock('@/services/api', () => ({ api: apiMock }))
 
