@@ -483,6 +483,26 @@ func TestHealthStatusActionEmptyNoConfig(t *testing.T) {
 	}
 }
 
+// TestHealthStatusActionDrainEmptyBuffer drain 空缓冲：snapshot 返回 nil
+// events，action 须归一化为空切片（JSON 序列化 [] 而非 null），连续 drain 不报错
+func TestHealthStatusActionDrainEmptyBuffer(t *testing.T) {
+	sp := NewServiceProvider(nil)
+	for i := 0; i < 2; i++ {
+		out, err := sp.HealthStatusAction(map[string]interface{}{"drain": true})
+		if err != nil {
+			t.Fatalf("drain #%d: unexpected err: %v", i, err)
+		}
+		m := out.(map[string]interface{})
+		events := m["events"].([]healthEvent)
+		if events == nil || len(events) != 0 {
+			t.Fatalf("drain #%d: events should be normalized non-nil empty slice, got %#v", i, m["events"])
+		}
+		if len(m["states"].(map[string]healthProbeState)) != 0 {
+			t.Fatalf("drain #%d: unexpected states: %v", i, m["states"])
+		}
+	}
+}
+
 // TestHealthValidateDefaultsHealFields heal 探针缺省 backoff/额度补齐 +
 // heal=false 的 systemd 型 unit 缺省
 func TestHealthValidateDefaultsHealFields(t *testing.T) {
