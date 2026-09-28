@@ -4,6 +4,7 @@ package rdp
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	"sync"
@@ -106,10 +107,13 @@ func TestHandleDesktopNewMissingTarget(t *testing.T) {
 	}
 }
 
+// TestHandleDesktopNewInvalidTarget 连接失败 → 发送 error 消息且不登记会话。
+// 原实现拨 192.168.255.255 黑洞地址等 10s 超时、被 -short 跳过（rdp 文件
+// 不进默认构建，等于从未在 CI 跑过）；工厂注入后以 loginErr 模拟连接
+// 失败，短模式下确定性覆盖同一分支。
 func TestHandleDesktopNewInvalidTarget(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping in short mode")
-	}
+	fake := &fakeRdpClient{loginErr: errors.New("dial timeout")}
+	useFakeClient(t, fake)
 
 	h := NewHandler()
 	errCh := make(chan *protocol.Message, 1)
@@ -133,6 +137,21 @@ func TestHandleDesktopNewInvalidTarget(t *testing.T) {
 		},
 	}
 	h.HandleDesktopNew(msg)
+
+	select {
+	case m := <-errCh:
+		if m.Payload["desktopType"] != string(protocol.DesktopMsgError) {
+			t.Error("Should send error desktopType")
+		}
+	default:
+		t.Fatal("Should have sent error message")
+	}
+	h.mu.RLock()
+	_, registered := h.sessions["test-1"]
+	h.mu.RUnlock()
+	if registered {
+		t.Error("failed session must not be registered")
+	}
 }
 
 func TestHandleDesktopDataNoSession(t *testing.T) {
@@ -1048,10 +1067,26 @@ func TestSessionSendLoopNilSendFunc(t *testing.T) {
 
 // ============ HandleDesktopNew Default Resolution ============
 
-func TestHandleDesktopNewDefaultResolution(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping test that requires network dial")
+// captureFactory 覆写 newRdpClient 并记录工厂收到的分辨率（用后还原）。
+// 闭包按引用捕获 w/h，调用方经返回的指针读到工厂实参。
+func captureFactory(t *testing.T, fake *fakeRdpClient) (gotW, gotH *int) {
+	t.Helper()
+	w, h := -1, -1
+	gotW, gotH = &w, &h
+	orig := newRdpClient
+	newRdpClient = func(target string, width, height int) rdpClient {
+		w, h = width, height
+		return fake
 	}
+	t.Cleanup(func() { newRdpClient = orig })
+	return
+}
+
+// TestHandleDesktopNewDefaultResolution 缺省宽高补 1280x800；连接失败
+// 仍发 error 消息（原实现拨黑洞地址、被 -short 跳过，工厂注入后确定性覆盖）
+func TestHandleDesktopNewDefaultResolution(t *testing.T) {
+	fake := &fakeRdpClient{loginErr: errors.New("dial timeout")}
+	gotW, gotH := captureFactory(t, fake)
 	h := NewHandler()
 	var capturedMsg *protocol.Message
 	h.SetSendFunc(func(msg *protocol.Message) error {
@@ -1076,12 +1111,15 @@ func TestHandleDesktopNewDefaultResolution(t *testing.T) {
 	if capturedMsg.Payload["desktopType"] != string(protocol.DesktopMsgError) {
 		t.Error("Should send error for connection failure")
 	}
+	if gotW == nil || *gotW != 1280 || gotH == nil || *gotH != 800 {
+		t.Errorf("default resolution should be 1280x800, got %v x %v", gotW, gotH)
+	}
 }
 
+// TestHandleDesktopNewZeroResolution width/height=0 同样补 1280x800
 func TestHandleDesktopNewZeroResolution(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping test that requires network dial")
-	}
+	fake := &fakeRdpClient{loginErr: errors.New("dial timeout")}
+	gotW, gotH := captureFactory(t, fake)
 	h := NewHandler()
 	var capturedMsg *protocol.Message
 	h.SetSendFunc(func(msg *protocol.Message) error {
@@ -1104,6 +1142,9 @@ func TestHandleDesktopNewZeroResolution(t *testing.T) {
 
 	if capturedMsg == nil {
 		t.Fatal("Should have sent error message")
+	}
+	if gotW == nil || *gotW != 1280 || gotH == nil || *gotH != 800 {
+		t.Errorf("zero resolution should fall back to 1280x800, got %v x %v", gotW, gotH)
 	}
 }
 

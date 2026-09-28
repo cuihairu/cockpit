@@ -216,5 +216,17 @@ func TestHandleDesktopNewSuccess(t *testing.T) {
 	}
 }
 
+// TestNewRdpClientRealDialer 默认工厂走原生 dialer：对无监听的 127.0.0.1:1
+// 拨号即时 connection refused（无网络等待），覆盖工厂闭包内的 DialTimeout
+// 路径与 Login 拨号失败透传。
+func TestNewRdpClientRealDialer(t *testing.T) {
+	orig := newRdpClient
+	t.Cleanup(func() { newRdpClient = orig }) // 防御：本测不改工厂，还原是兜底
+	c := newRdpClient("127.0.0.1:1", 100, 100)
+	if err := c.Login("", "u", "p"); err == nil {
+		t.Fatal("dial to closed port should fail")
+	}
+}
+
 // 编译期保证假件与真件满足同一接口面
 var _ rdpClient = (*fakeRdpClient)(nil)
