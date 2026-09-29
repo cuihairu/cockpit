@@ -98,6 +98,18 @@ const btnIn = (row: HTMLTableRowElement, label: string) =>
 const iconBtnIn = (row: HTMLTableRowElement, iconClass: string) =>
   Array.from(row.querySelectorAll(`button .${iconClass}`))[0]?.closest('button') as HTMLButtonElement | undefined
 
+// 手动 resolve 的 promise：用于把两个 serviceAction 的返回顺序倒置，确定性地
+// 造出「先发的后返回」的重叠动作窗口
+const defer = () => {
+  let resolve!: (v: unknown) => void
+  const promise = new Promise((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
+const isLoading = (el?: Element | null) => !!el && el.className.includes('ant-btn-loading')
+
 describe('Services', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -189,6 +201,49 @@ describe('Services', () => {
     fireEvent.click(btnIn(rowOf('redis'), '启动')!)
     expect(await screen.findByText('redis.service 操作失败')).toBeInTheDocument()
     expect(screen.getByText('unit not loaded')).toBeInTheDocument()
+  })
+
+  // 覆盖 index.tsx:121（onSettled 的 `if (actingUnit === unit)`）的 false 侧：
+  // 两个 unit 的动作重叠在途、先发的后返回时，actingUnit 已是后发那个，复位必须
+  // 跳过——否则会把仍在途的 unit 的 loading 提前清掉。
+  //
+  // 关键在批处理：两次点击放进同一个 act，中间不重渲染，先发动作的 onSettled 闭包
+  // 才停留在点击前的 actingUnit。分两次 fireEvent.click 时 act 会各自 flush，
+  // 重渲染把闭包刷成该 unit 自身，永远落回 true 侧（lcov BRDA:121,7,1 恒 0）。
+  // 上方「并发动作 settle 时 actingUnit 不匹配不误清」用例即因此未真正走到 false 侧。
+  it('重叠动作：先发的后返回，不误清仍在途 unit 的 loading', async () => {
+    const first = defer()
+    const second = defer()
+    apiMock.serviceAction.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise)
+    renderPage()
+    await selectAgent('linux-01')
+    expect(await screen.findByText('bad')).toBeInTheDocument()
+
+    // 两次点击必须落在同一个 act 批次里：中间不发生重渲染，先发动作的 onSettled
+    // 闭包才停留在点击前的 actingUnit（否则 setOptions 会把闭包刷成它自己）
+    await act(async () => {
+      fireEvent.click(btnIn(rowOf('nginx'), '重启')!)
+      fireEvent.click(btnIn(rowOf('redis'), '启动')!)
+    })
+    await waitFor(() => expect(apiMock.serviceAction).toHaveBeenCalledTimes(2))
+    // 两个请求同时在途；actingUnit 单值，只标记最后点击的 redis
+    expect(isLoading(btnIn(rowOf('redis'), '启动'))).toBe(true)
+
+    // 先发的 nginx 返回：actingUnit 仍是 redis → nginx 清 loading、redis 保持
+    await act(async () => {
+      first.resolve({})
+      await first.promise
+    })
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('nginx.service 重启成功'))
+    expect(isLoading(btnIn(rowOf('redis'), '启动'))).toBe(true)
+
+    // 后发的 redis 返回：这次才轮到清自己的 loading
+    await act(async () => {
+      second.resolve({})
+      await second.promise
+    })
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('redis.service 启动成功'))
+    expect(isLoading(btnIn(rowOf('redis'), '启动'))).toBe(false)
   })
 
   it('daemon-reload：确认后调用并提示', async () => {
