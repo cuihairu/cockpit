@@ -361,3 +361,24 @@ func TestQueryWhoisMissingCommand(t *testing.T) {
 		t.Fatalf("Check() with empty whoisPath err = %v, want wrapped 'whois command not found'", err)
 	}
 }
+
+// TestCovResolveDNSLookupFail 注入解析失败，覆盖 ResolveDNS 错误分支（monitor.go:325）。
+func TestCovResolveDNSLookupFail(t *testing.T) {
+	// 环境确定性：与 TestCovIsAvailableNoDNS 同款纪律——真实 DNS 在
+	// fake-IP 解析器下连 .invalid 也可能解析掉，注入失败才可靠。
+	orig := domainLookupIP
+	t.Cleanup(func() { domainLookupIP = orig })
+	domainLookupIP = func(string) ([]net.IP, error) {
+		return nil, errors.New("no such host")
+	}
+
+	m := NewMonitor(Config{})
+
+	ips, err := m.ResolveDNS("nonexistent.invalid")
+	if err == nil || !strings.Contains(err.Error(), "dns lookup") {
+		t.Fatalf("ResolveDNS() err = %v, want error containing 'dns lookup'", err)
+	}
+	if ips != nil {
+		t.Errorf("ResolveDNS() ips = %v, want nil", ips)
+	}
+}

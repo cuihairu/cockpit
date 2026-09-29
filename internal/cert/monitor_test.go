@@ -2,6 +2,7 @@ package cert
 
 import (
 	"crypto/tls"
+	"net"
 	"testing"
 	"time"
 )
@@ -433,5 +434,67 @@ func TestCovParseAllCertsEmpty(t *testing.T) {
 	m := NewMonitor(Config{Timeout: time.Second})
 	if _, err := m.parseAllCerts(tls.ConnectionState{}, "d", "1.2.3.4:443"); err == nil {
 		t.Error("parseAllCerts with empty chain should fail")
+	}
+}
+
+// TestBatchCheckLocalTLS 本地 TLS 服务确定性覆盖 BatchCheck 成功分支（monitor.go:357），
+// 既有 TestBatchCheck 依赖真实网络 example.com:443，负载下握手超时导致该分支不稳定命中。
+func TestBatchCheckLocalTLS(t *testing.T) {
+	// 复用 monitor_file_test.go 的自签证书 helper：模板 NotAfter 默认为未来 365 天，
+	// SAN 已含 127.0.0.1，满足本地拨号解析证书的需求。
+	certDER, _, key := generateTestCert(t)
+
+	// 起本地 TLS 监听（先例：internal/probe/cov_runner_test.go 的 tls.Listen）
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+		Certificates: []tls.Certificate{{Certificate: [][]byte{certDER}, PrivateKey: key}},
+	})
+	if err != nil {
+		t.Fatalf("tls.Listen: %v", err)
+	}
+	defer ln.Close()
+
+	// 服务端循环 Accept：tls.Conn 握手由首次 Read 触发，读到客户端关闭（EOF）后关连接退出。
+	// 不能 Accept 后立刻裸 Close——那会让客户端握手收到 EOF 而拿不到对端证书。
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return // 监听已关闭，退出接收循环
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+				buf := make([]byte, 16)
+				_, _ = c.Read(buf)
+			}(conn)
+		}
+	}()
+
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	m := NewMonitor(Config{Timeout: 2 * time.Second})
+	result := m.BatchCheck([]string{"127.0.0.1"}, port)
+
+	if result == nil {
+		t.Fatal("BatchCheck() should not return nil")
+	}
+	if len(result.Success) != 1 {
+		t.Fatalf("Success length = %d, want 1, failed=%v", len(result.Success), result.Failed)
+	}
+	info := result.Success[0]
+	if info == nil {
+		t.Fatal("Success[0] should not be nil")
+	}
+	if info.Fingerprint == "" {
+		t.Error("Fingerprint should not be empty")
+	}
+	if info.DaysLeft < 0 {
+		t.Errorf("DaysLeft = %d, want >= 0", info.DaysLeft)
+	}
+	if info.IsExpired {
+		t.Error("IsExpired should be false")
+	}
+	if len(result.Failed) != 0 {
+		t.Errorf("Failed length = %d, want 0, failed=%v", len(result.Failed), result.Failed)
 	}
 }

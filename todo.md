@@ -774,6 +774,8 @@
 
 **0% 函数清单扫尾（2026-09-27 晚，规则 b 复核）**：对当前 HEAD 全仓 `-func` 清单扫 0.0% 函数，8 条全部为 **numStmt=0 空函数体**（0/0 显示怪癖，语句级 19939/19939 精确 100% 下的不可修饰项，补测试无法改变覆盖率、写「断言空体仍是空」的用例即造假）：`internal/agent/rdp/rdp_stub.go` 七个 `{}` 方法（HandleDesktopData/HandleDesktopClose/Stop/HandleKeyboard/HandleMouse/HandleClipboard/HandleSetResolution——count>0 证明已被既有测试调用过，只是无语句可计）+ `internal/server/password_reset_handlers.go:169` 的 `printf`（函数体仅一行注释）。派发点名的 `auth/handler.go HandleRefresh` 与 `overlay_provider.go` 全部函数经当前 HEAD 新 profile 复核均为 **100.0%**，无缺口可补；rdp_stub 维持既有登记口径（grdp 回调闭包需真机、stub 空体为显示怪癖）。
 
+**覆盖率巡检·coverpkg 并集口径复跑（2026-09-29）**：`go test ./... -coverprofile -covermode=atomic -coverpkg=./...`（非 -short）并集核算——该口径下同一 block 在 32 个测试二进制各记一行，须按唯一 block 求并集（naive 逐行聚合会得出 ~3% 假象）。结果：28 包 100%，仅三包各缺 1 条语句（domain 154/155 `monitor.go:325` ResolveDNS 解析失败分支、cert 172/173 `monitor.go:357` BatchCheck 成功 append、health 203/204 `checker.go:344` CheckDNS 解析失败），全仓 99.98% 恰在 test.yml 99.9% 阈值绿线内（CI 绿掩盖；agent 家族语句级门禁不含这三包）。三任务并行派发补齐，全部**零生产代码改动**：domain/health 用既有可注入 var（`domainLookupIP`/`healthLookupIP`）注入解析失败；cert 起本地 TLS 服务（复用 `generateTestCert` + `tls.Listen`，**服务端 Accept 后必须 Read 触发握手再 Close，裸 Close 会令客户端握手收 EOF 拿不到证书**）替代既有 TestBatchCheck 的真实网络 example.com:443（负载下握手超时即丢分支）。终态：三包语句级精确 100%（防 `-func` 一位小数四舍五入压线，按零计数 block 核验），全仓 `-short` 门禁复跑全绿。运维坑：`/tmp/cov.out` 固定路径与另一工作区并行覆盖运行**同名撞车**被覆盖（log 显示本地跑完 EXIT=0 但 profile 内容是别项目的）——共享 /tmp 下 profile 路径必须带 $$ 或会话前缀。
+
 ## 远控三协议统一第三方集成（Guacamole SSH 接入，2026-09-25）
 
 方向对齐另一仓库：VNC / SSH / RDP 三协议远控统一集成第三方方案（guacd + guacamole-common-js 单栈），不再各自维护自研协议链路。设计文档 `docs/remote-access-integration-design.md`（选型总览/备选对比/数据流/衔接既有链路/决策 D1-D7）。RDP/VNC 已在 Guacamole 路线上，本次补齐 **SSH 接入同一栈**：

@@ -248,3 +248,20 @@ func TestCovCheckPingReachable(t *testing.T) {
 		t.Errorf("status = %s message = %s, want healthy reachable", res.Status, res.Message)
 	}
 }
+
+// TestCovCheckDNSLookupFail 注入解析失败，覆盖 CheckDNS 错误分支
+// （checker.go:344）。
+func TestCovCheckDNSLookupFail(t *testing.T) {
+	orig := healthLookupIP
+	t.Cleanup(func() { healthLookupIP = orig })
+	healthLookupIP = func(string) ([]net.IP, error) { return nil, errors.New("injected lookup failure") }
+
+	c := NewChecker(Config{Timeout: time.Second})
+	res := c.CheckDNS("svc", "nonexistent.invalid")
+	if res == nil {
+		t.Fatal("result is nil, want non-nil")
+	}
+	if res.Status != StatusUnhealthy || !strings.Contains(res.Message, "DNS lookup failed") || res.Type != "dns" {
+		t.Errorf("status = %s type = %s message = %s, want unhealthy dns DNS lookup failed", res.Status, res.Type, res.Message)
+	}
+}
