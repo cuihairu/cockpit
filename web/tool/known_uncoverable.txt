@@ -8,11 +8,11 @@
 pages/Proxy/index.tsx:131 selectedAgent 防御早退：操作入口仅在选中 agent 后渲染，空 agent 不可达
 pages/Proxy/index.tsx:167 同上（applyProxySite 前置防御）
 pages/Proxy/index.tsx:178 同上（删除前防御）
-pages/Services/index.tsx:120 selectedAgent 防御早退（runAction，按钮仅在选中后渲染）
-pages/Services/index.tsx:125 同上（保存 unit 前防御）
-pages/Services/index.tsx:133 同上（daemon-reload 前防御）
-pages/Services/index.tsx:149 同上（打开 unit 文件前防御）
-pages/Services/index.tsx:165 同上（保存 unit 文件前防御，!editUnit 复合防御）
+pages/Services/index.tsx:121 selectedAgent 防御早退（runAction，按钮仅在选中后渲染；原 120，b1e2413 挂 HealthPanel 后 +1 漂移）
+pages/Services/index.tsx:126 同上（保存 unit 前防御；原 125 漂移）
+pages/Services/index.tsx:134 同上（daemon-reload 前防御；原 133 漂移）
+pages/Services/index.tsx:150 同上（打开 unit 文件前防御；原 149 漂移）
+pages/Services/index.tsx:166 同上（保存 unit 文件前防御，!editUnit 复合防御；原 165 漂移）
 pages/Cron/index.tsx:172 selectedAgent 防御早退（saveJob）
 pages/Cron/index.tsx:199 同上（toggleEnabled）
 pages/Cron/index.tsx:210 同上（deleteJob）
@@ -109,3 +109,28 @@ pages/SetupTOTP/index.tsx:54 同上（data 判定）
 pages/SetupTOTP/index.tsx:55 同上（进入 step1）
 pages/SetupTOTP/index.tsx:56 同上（回调收尾）
 components/FileBrowser/index.tsx:534 该按钮仅特定目录态渲染：对应态不可达该渲染分支（既定判定，行为由其余态断言覆盖）
+
+# ---- Services/HealthPanel（b1e2413 健康探针面板，2026-09-29 收口）----
+# 两组形态，均经 HealthPanel.test.tsx 单文件 isolate 口径 lcov 实证（单跑
+# DA:0 仅 306/309 两行，其余全命中；全量 8-worker 口径 v8 合并丢计数稳定复现）：
+#   [合并丢计数] 全量跑 v8 对该文件 17 行不计数，行为均有断言实证：
+pages/Services/HealthPanel.tsx:111 探测 fail 警告文案 else 行：msgWarning 断言用例通过（单文件口径命中）
+pages/Services/HealthPanel.tsx:116 onSettled checking 复位：探测按钮 loading 复位行为由探测用例链路实证
+pages/Services/HealthPanel.tsx:122 openEditor setFieldsValue probes 预填：保存用例断言 body 预填值正确
+pages/Services/HealthPanel.tsx:123 同上（whitelist 预填；body 断言实证）
+pages/Services/HealthPanel.tsx:136 saveMut.mutate probes 参数行：saveAgentHealth mock 被调断言实证
+pages/Services/HealthPanel.tsx:137 同上（whitelist 参数）
+pages/Services/HealthPanel.tsx:146 rows memo states 缺省分支：未配置/正常两态渲染断言均有
+pages/Services/HealthPanel.tsx:163 自愈 Tag Tooltip：已自愈文案断言实证
+pages/Services/HealthPanel.tsx:178 http 目标列期望状态码拼接：fixture http 行渲染断言实证
+pages/Services/HealthPanel.tsx:187 状态徽标 STATUS_META fallback 表达式：正常/失败徽标断言实证
+pages/Services/HealthPanel.tsx:189 consecutiveFails ?? 0：连续 3 次 Tag 断言实证
+pages/Services/HealthPanel.tsx:209 lastCheck 格式化行：时间列渲染断言实证
+pages/Services/HealthPanel.tsx:219 lastHeal HEAL_META 取值行：最近自愈 Tag 断言实证
+pages/Services/HealthPanel.tsx:284 updatedAt 条件行：配置更新于文案断言实证
+pages/Services/HealthPanel.tsx:287 updatedBy 拼接行：by admin 断言实证
+pages/Services/HealthPanel.tsx:288 白名单摘要行：自愈目标白名单断言实证
+pages/Services/HealthPanel.tsx:363 target placeholder 三元 tcp 分支：类型切换用例已执行该分支（仅断言 target 清空，未断言 placeholder 文案本身），v8 全量合并口径对 JSX 内联三元漏计
+#   [JSX 内联箭头] 单文件口径亦为 0（v8 对 JSX 属性内联箭头不计数），行为有专门用例：
+pages/Services/HealthPanel.tsx:306 取消按钮内联 onClick（setEditing(false)）：取消用例断言 drawer wrapper 落 hidden class
+pages/Services/HealthPanel.tsx:309 保存按钮内联 onClick（void save()）：保存三用例断言 API 调用与文案

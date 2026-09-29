@@ -163,4 +163,75 @@ describe('HealthPanel', () => {
     })
     await waitFor(() => expect(msgError).toHaveBeenCalled())
   })
+
+  it('立即探测请求失败：错误提示透出响应文案（agent 不在线等 transport 错误）', async () => {
+    apiMock.checkAgentProbe.mockRejectedValue({ response: { data: { error: 'agent offline' } } })
+    renderPanel()
+    await screen.findByText('cloudflared-ready')
+    fireEvent.click(screen.getAllByText('探测')[0])
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('agent offline'))
+  })
+
+  it('校验失败：必填 id 清空后点保存不发请求，字段上标错', async () => {
+    renderPanel()
+    await screen.findByText('cloudflared-ready')
+    fireEvent.click(screen.getByText('编辑探针'))
+    const idInputs = await screen.findAllByPlaceholderText('id（如 cloudflared-ready）')
+    expect(idInputs).toHaveLength(2)
+    fireEvent.change(idInputs[0], { target: { value: '' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
+    })
+    // antd 字段级标错出现，且未触达保存 API
+    expect(await screen.findByText('必填')).toBeInTheDocument()
+    expect(apiMock.saveAgentHealth).not.toHaveBeenCalled()
+  })
+
+  it('编辑抽屉：取消按钮直接关闭不保存', async () => {
+    renderPanel()
+    await screen.findByText('cloudflared-ready')
+    fireEvent.click(screen.getByText('编辑探针'))
+    await screen.findByText('编辑健康探针')
+    fireEvent.click(screen.getByRole('button', { name: '取 消' }))
+    // Drawer 未设 destroyOnClose：关闭后内容 DOM 保留，可靠信号是
+    // wrapper 落 hidden class + mask 卸载（探针实验实证）
+    await waitFor(() =>
+      expect(document.querySelector('.ant-drawer-content-wrapper')).toHaveClass(
+        'ant-drawer-content-wrapper-hidden',
+      ),
+    )
+    expect(document.querySelector('.ant-drawer-mask')).not.toBeInTheDocument()
+    expect(apiMock.saveAgentHealth).not.toHaveBeenCalled()
+  })
+
+  it('编辑抽屉：添加探针行 / 删除探针行', async () => {
+    renderPanel()
+    await screen.findByText('cloudflared-ready')
+    fireEvent.click(screen.getByText('编辑探针'))
+    await screen.findByText('编辑健康探针')
+    // 添加：默认 http 类型的新行
+    fireEvent.click(screen.getByText('添加探针'))
+    expect(screen.getAllByPlaceholderText('id（如 cloudflared-ready）')).toHaveLength(3)
+    // 删除：移除第一行（cloudflared-ready）
+    fireEvent.click(screen.getAllByText('删除')[0])
+    expect(screen.getAllByPlaceholderText('id（如 cloudflared-ready）')).toHaveLength(2)
+    expect((screen.getAllByPlaceholderText('id（如 cloudflared-ready）')[0] as HTMLInputElement).value).toBe('sshd-active')
+  })
+
+  it('编辑抽屉：切换探针类型清空 target（换类型后旧目标无效）', async () => {
+    renderPanel()
+    await screen.findByText('cloudflared-ready')
+    fireEvent.click(screen.getByText('编辑探针'))
+    await screen.findByText('编辑健康探针')
+    // 第一行是 http 探针；其 target 输入框初始带值
+    const targetInput = screen.getAllByDisplayValue('http://127.0.0.1:20241/ready')[0] as HTMLInputElement
+    // 「HTTP 状态码」文本在主表格 Tag 与抽屉 Select 各有一份，取抽屉内
+    // 第一个 Select（第一行的 type）；rc-select 监听在 .ant-select-selector
+    // 上（父容器事件不冒泡给子），mouseDown 须打 selector
+    const selector = document.querySelector('.ant-drawer .ant-select .ant-select-selector')!
+    fireEvent.mouseDown(selector)
+    const opt = await screen.findByText('TCP 端口', { selector: '.ant-select-item-option-content' })
+    fireEvent.click(opt)
+    await waitFor(() => expect(targetInput.value).toBe(''))
+  })
 })

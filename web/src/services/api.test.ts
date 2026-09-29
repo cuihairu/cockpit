@@ -226,10 +226,13 @@ describe('ApiService 全方法驱动（URL/method/参数序列化不抛错）', 
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getDomainDrift('x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getAgentDomains('x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getAgentDomainsSnippet('x')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getAgentHealth('x')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).saveAgentHealth('x', {})
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).checkAgentProbe('x', 'x')
     // 全部方法都被驱动过（每个至少一次 client 调用）
     const total = mockInstance.get.mock.calls.length + mockInstance.post.mock.calls.length
       + mockInstance.put.mock.calls.length + mockInstance.delete.mock.calls.length
-    expect(total).toBeGreaterThanOrEqual(170)
+    expect(total).toBeGreaterThanOrEqual(173)
   })
 })
 
@@ -246,6 +249,18 @@ describe('ApiService 关键路径断言', () => {
   it('login POST /auth/login 且 body 含凭据', async () => {
     await api.login('admin', 'secret')
     expect(mockInstance.post).toHaveBeenCalledWith('/auth/login', { username: 'admin', password: 'secret' })
+  })
+
+  it('健康探针三方法：路径/方法/body 形状（agentId 与 probeId 均编码）', async () => {
+    await api.getAgentHealth('ag 1')
+    expect(mockInstance.get).toHaveBeenCalledWith('/agents/ag%201/health')
+
+    const body = { probes: [], whitelist: ['cloudflared.service'] }
+    await api.saveAgentHealth('ag-1', body)
+    expect(mockInstance.put).toHaveBeenCalledWith('/agents/ag-1/health', body)
+
+    await api.checkAgentProbe('ag-1', 'p/1')
+    expect(mockInstance.post).toHaveBeenCalledWith('/agents/ag-1/health/probes/p%2F1/check')
   })
 
   it('logout 清 localStorage 并跳登录页', async () => {
