@@ -166,6 +166,8 @@ void main() {
       expect(a.hasCron, isTrue);
       expect(a.hasFile, isTrue);
       expect(a.hasDocker, isFalse);
+      // stacks 与容器同门：docker/docker-api
+      expect(a.hasStacks, isFalse);
     });
 
     test('StatusSummary：子对象全缺省时落 0', () {
@@ -189,6 +191,70 @@ void main() {
       final t = RemoteTicket.fromJson({});
       expect(t.ticket, '');
       expect(t.expiresAt, '');
+    });
+
+    test('Stack 系列：camelCase 字段 + info 缺省 + task.done 判定', () {
+      final s = StackSummary.fromJson({
+        'agentId': 'ag-1',
+        'agentName': 'docker-1',
+        'name': 'blog',
+        'running': 2,
+        'total': 3,
+        'lastAction': 'up',
+        'lastStatus': 'success',
+        'lastDeployedAt': 1758586800,
+        'online': true,
+      });
+      expect(s.name, 'blog');
+      expect(s.running, 2);
+      expect(s.total, 3);
+      expect(s.online, isTrue);
+      // 全缺省落零值
+      final empty = StackSummary.fromJson({});
+      expect(empty.name, '');
+      expect(empty.lastDeployedAt, 0);
+      expect(empty.online, isFalse);
+
+      final info = StackInfo.fromJson(
+          {'dir': '/opt/stacks', 'dirWritable': false, 'dirError': 'denied'});
+      expect(info.dirWritable, isFalse);
+      expect(info.dirError, 'denied');
+      expect(info.composeVersion, isNull);
+      // dirWritable 缺省按 true 兜底（server 不回 false 即视为可写）
+      expect(StackInfo.fromJson({}).dirWritable, isTrue);
+
+      final running = StackTask.fromJson(
+          {'id': 't1', 'stack': 'blog', 'action': 'up', 'status': 'running'});
+      expect(running.done, isFalse);
+      expect(running.finishedAt, 0);
+      final failed = StackTask.fromJson(
+          {'status': 'failed', 'log': 'boom', 'finishedAt': 9});
+      expect(failed.done, isTrue);
+      expect(failed.log, 'boom');
+      expect(StackTask.fromJson({'status': 'success'}).done, isTrue);
+
+      final c = StackCompose.fromJson({
+        'name': 'blog',
+        'compose': 'services: {}',
+        'env': '',
+        'composeFile': '/opt/stacks/blog/compose.yml',
+        'modifiedAt': 1758586800,
+      });
+      expect(c.env, '');
+      expect(c.composeFile, '/opt/stacks/blog/compose.yml');
+
+      // info 可为 null（agent 自检拉取失败）或缺键；空条目字面量需显式
+      // <String, dynamic>（否则推断为 Map<dynamic, dynamic>，非真实 jsonDecode 形态）
+      final r1 = StacksResult.fromJson(
+          {'stacks': [<String, dynamic>{}], 'info': null});
+      expect(r1.stacks, hasLength(1));
+      expect(r1.info, isNull);
+      final r2 = StacksResult.fromJson({});
+      expect(r2.stacks, isEmpty);
+      expect(r2.info, isNull);
+      final r3 = StacksResult.fromJson(
+          {'stacks': [], 'info': {'dir': '/opt/stacks', 'dirWritable': true}});
+      expect(r3.info!.dir, '/opt/stacks');
     });
   });
 }

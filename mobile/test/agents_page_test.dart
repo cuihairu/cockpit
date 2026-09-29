@@ -142,7 +142,7 @@ void main() {
     expect(find.textContaining('加载失败'), findsOneWidget);
   });
 
-  testWidgets('主机行点开能力动作单，五入口齐全', (tester) async {
+  testWidgets('主机行点开能力动作单，六入口齐全', (tester) async {
     final a = MockAdapter()..on('GET', '/api/agents', 200, [_agent]);
     await _pump(tester, _api(a));
     await tester.pumpAndSettle();
@@ -154,9 +154,41 @@ void main() {
     expect(find.text('SSH 终端'), findsOneWidget);
     expect(find.text('10.0.0.1:22'), findsOneWidget);
     expect(find.text('容器'), findsOneWidget);
+    expect(find.text('应用部署'), findsOneWidget);
     expect(find.text('定时任务'), findsOneWidget);
     expect(find.text('文件'), findsOneWidget);
     expect(find.text('反代'), findsOneWidget);
+  });
+
+  testWidgets('动作单进应用部署页：stack 列表', (tester) async {
+    final a = MockAdapter()
+      ..on('GET', '/api/agents', 200, [_agent])
+      ..on('GET', '/api/stacks/agents/ag-1', 200, {
+        'stacks': [
+          {
+            'agentId': 'ag-1',
+            'agentName': 'web-1',
+            'name': 'blog',
+            'running': 2,
+            'total': 2,
+            'lastAction': 'up',
+            'lastStatus': 'success',
+            'lastDeployedAt': 1758586800,
+            'online': true,
+          },
+        ],
+        'info': {'dir': '/opt/stacks', 'dirWritable': true},
+      });
+    await _pump(tester, _api(a));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('web-1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('应用部署'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('应用部署 · web-1'), findsOneWidget);
+    expect(find.text('blog'), findsOneWidget);
   });
 
   testWidgets('动作单进反代页：状态卡与站点列表', (tester) async {
@@ -183,6 +215,10 @@ void main() {
       });
     await _pump(tester, _api(a));
     await tester.pumpAndSettle();
+
+    // 动作单已六项，默认视口装不下 → 拉高再点，避免反代入口被折到屏外
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.tap(find.text('web-1'));
     await tester.pumpAndSettle();

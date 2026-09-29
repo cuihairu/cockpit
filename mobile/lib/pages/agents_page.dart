@@ -6,6 +6,7 @@ import '../state/settings.dart';
 import 'cron_page.dart';
 import 'files_page.dart';
 import 'proxy_page.dart';
+import 'stacks_page.dart';
 import 'terminal_page.dart';
 
 /// 主机列表：hostname · region/zone · 在线徽标 · docker/cron/file 能力入口。
@@ -55,6 +56,14 @@ class _AgentsPageState extends ConsumerState<AgentsPage> {
               leading: const Icon(Icons.view_in_ar),
               title: const Text('容器'),
               onTap: () => _push(sheetContext, ContainersPage(agent: a)),
+            ),
+          // 动作单内入口，不加 trailing 捷径图标：docker 机常有
+          // 容器+应用部署+cron+文件+反代 五入口，窄屏 trailing 会溢出。
+          if (a.hasStacks)
+            ListTile(
+              leading: const Icon(Icons.layers),
+              title: const Text('应用部署'),
+              onTap: () => _push(sheetContext, StacksPage(agent: a)),
             ),
           if (a.hasCron)
             ListTile(

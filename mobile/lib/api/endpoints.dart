@@ -201,6 +201,42 @@ extension ProxyApi on CockpitApi {
   }
 }
 
+extension StackApi on CockpitApi {
+  /// GET /api/stacks/agents/{id}——单 agent stack 列表 + 目录自检信息。
+  Future<StacksResult> stacks(String agentId) async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/stacks/agents/$agentId');
+    return StacksResult.fromJson(r.data!);
+  }
+
+  /// GET /api/stacks/agents/{id}/{name}/compose——compose/.env 只读预览。
+  Future<StackCompose> stackCompose(String agentId, String name) async {
+    final r = await client.dio.get<Map<String, dynamic>>(
+        '/api/stacks/agents/$agentId/$name/compose');
+    return StackCompose.fromJson(r.data!);
+  }
+
+  /// GET /api/stacks/agents/{id}/tasks/{taskId}——异步任务状态轮询。
+  Future<StackTask> stackTask(String agentId, String taskId) async {
+    final r = await client.dio.get<Map<String, dynamic>>(
+        '/api/stacks/agents/$agentId/tasks/$taskId');
+    return StackTask.fromJson(r.data!);
+  }
+
+  /// POST /api/stacks/agents/{id}/{name}/{action}——up/down/restart/pull，
+  /// 返回 taskId（空串=agent 未回任务 id），终态由 stackTask 轮询。
+  /// 白名单对齐 server 路由面；compose 编辑与 remove 留桌面端。
+  Future<String> stackAction(String agentId, String name, String action) async {
+    const allowed = ['up', 'down', 'restart', 'pull'];
+    if (!allowed.contains(action)) {
+      throw ArgumentError('unsupported stack action: $action');
+    }
+    final r = await client.dio.post<Map<String, dynamic>>(
+        '/api/stacks/agents/$agentId/$name/$action');
+    return r.data?['taskId'] as String? ?? '';
+  }
+}
+
 extension RemoteApi on CockpitApi {
   /// POST /api/remote/tickets——换取终端 WS 子协议票据（body snake_case 对齐 web）。
   Future<RemoteTicket> createRemoteTicket({

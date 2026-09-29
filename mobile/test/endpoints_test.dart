@@ -176,4 +176,77 @@ void main() {
     expect(body2.containsKey('username'), isFalse);
     expect(body2.containsKey('password'), isFalse);
   });
+
+  test('stacks：列表 + info 解析（info null 安全）', () async {
+    final a = MockAdapter()
+      ..on('GET', '/api/stacks/agents/ag-1', 200, {
+        'stacks': [
+          {
+            'agentId': 'ag-1',
+            'agentName': 'docker-1',
+            'name': 'blog',
+            'running': 2,
+            'total': 2,
+            'lastAction': 'up',
+            'lastStatus': 'success',
+            'lastDeployedAt': 1758586800,
+            'online': true,
+          },
+        ],
+        'info': {'dir': '/opt/stacks', 'dirWritable': true},
+      });
+    final r = await _api(a).stacks('ag-1');
+    expect(r.stacks, hasLength(1));
+    expect(r.stacks.first.name, 'blog');
+    expect(r.info!.dirWritable, isTrue);
+
+    final b = MockAdapter()
+      ..on('GET', '/api/stacks/agents/ag-2', 200, {'stacks': [], 'info': null});
+    final r2 = await _api(b).stacks('ag-2');
+    expect(r2.stacks, isEmpty);
+    expect(r2.info, isNull);
+  });
+
+  test('stackAction：白名单外抛 ArgumentError', () async {
+    final a = MockAdapter();
+    expect(() => _api(a).stackAction('ag-1', 'blog', 'remove'),
+        throwsArgumentError);
+    expect(() => _api(a).stackAction('ag-1', 'blog', 'save'),
+        throwsArgumentError);
+    expect(a.requests, isEmpty);
+  });
+
+  test('stackAction：POST 路径与 taskId 解析', () async {
+    final a = MockAdapter()
+      ..on('POST', '/api/stacks/agents/ag-1/blog/restart', 200,
+          {'taskId': 'tk-9', 'status': 'started'})
+      ..on('POST', '/api/stacks/agents/ag-1/blog/pull', 200, <String, dynamic>{});
+    final api = _api(a);
+    expect(await api.stackAction('ag-1', 'blog', 'restart'), 'tk-9');
+    // taskId 缺省落空串
+    expect(await api.stackAction('ag-1', 'blog', 'pull'), '');
+    expect(a.requests.containsKey('POST /api/stacks/agents/ag-1/blog/restart'),
+        isTrue);
+    expect(a.requests.containsKey('POST /api/stacks/agents/ag-1/blog/pull'),
+        isTrue);
+  });
+
+  test('stackTask/stackCompose：GET 路径与解析', () async {
+    final a = MockAdapter()
+      ..on('GET', '/api/stacks/agents/ag-1/tasks/tk-9', 200,
+          {'id': 'tk-9', 'stack': 'blog', 'action': 'up', 'status': 'failed', 'log': 'x', 'startedAt': 1, 'finishedAt': 2})
+      ..on('GET', '/api/stacks/agents/ag-1/blog/compose', 200, {
+        'name': 'blog',
+        'compose': 'services: {}',
+        'env': 'A=1',
+        'composeFile': '/opt/stacks/blog/compose.yml',
+        'modifiedAt': 1758586800,
+      });
+    final api = _api(a);
+    final t = await api.stackTask('ag-1', 'tk-9');
+    expect(t.done, isTrue);
+    expect(t.action, 'up');
+    final c = await api.stackCompose('ag-1', 'blog');
+    expect(c.env, 'A=1');
+  });
 }

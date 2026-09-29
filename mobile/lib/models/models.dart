@@ -46,6 +46,9 @@ class Agent {
   bool get hasProxy => capabilities.any(
       (c) => c.type == 'nginx-proxy' || c.type == 'traefik-proxy');
 
+  /// stacks 与容器同一能力门（docker / docker-api，对齐 server requireStackAgent）。
+  bool get hasStacks => hasDocker;
+
   /// remote-services capability 里的 SSH 服务（agent 上报 running 才返回）。
   SshService? get sshService {
     for (final c in capabilities) {
@@ -661,5 +664,140 @@ class ProxyApplyResult {
   factory ProxyApplyResult.fromJson(Map<String, dynamic> j) => ProxyApplyResult(
         name: j['name'] as String? ?? '',
         file: j['file'] as String? ?? '',
+      );
+}
+
+/// 对齐 web StackView（agent stack.list 条目 + server 侧元数据）。
+/// services 明细移动端不展示，不建模。
+class StackSummary {
+  final String agentId;
+  final String agentName;
+  final String name;
+  final int running;
+  final int total;
+  final String lastAction; // 最近部署动作，如 up / down
+  final String lastStatus; // 最近部署结果，如 success / failed
+  final int lastDeployedAt; // Unix 秒，0 = 无部署记录
+  final bool online;
+
+  StackSummary({
+    required this.agentId,
+    required this.agentName,
+    required this.name,
+    required this.running,
+    required this.total,
+    required this.lastAction,
+    required this.lastStatus,
+    required this.lastDeployedAt,
+    required this.online,
+  });
+
+  factory StackSummary.fromJson(Map<String, dynamic> j) => StackSummary(
+        agentId: j['agentId'] as String? ?? '',
+        agentName: j['agentName'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        running: (j['running'] as num?)?.toInt() ?? 0,
+        total: (j['total'] as num?)?.toInt() ?? 0,
+        lastAction: j['lastAction'] as String? ?? '',
+        lastStatus: j['lastStatus'] as String? ?? '',
+        lastDeployedAt: (j['lastDeployedAt'] as num?)?.toInt() ?? 0,
+        online: j['online'] as bool? ?? false,
+      );
+}
+
+/// 对齐 web StackInfo（agent 侧 stacks 目录自检，M1.5）。
+class StackInfo {
+  final String dir;
+  final bool dirWritable;
+  final String? dirError;
+  final String? composeVersion;
+
+  StackInfo({
+    required this.dir,
+    required this.dirWritable,
+    this.dirError,
+    this.composeVersion,
+  });
+
+  factory StackInfo.fromJson(Map<String, dynamic> j) => StackInfo(
+        dir: j['dir'] as String? ?? '',
+        dirWritable: j['dirWritable'] as bool? ?? true,
+        dirError: j['dirError'] as String?,
+        composeVersion: j['composeVersion'] as String?,
+      );
+}
+
+/// 对齐 web StackTask（stack.task.get 响应；up/down/restart/pull 异步轮询）。
+class StackTask {
+  final String id;
+  final String stack;
+  final String action; // up / down / restart / pull / delete
+  final String status; // running / success / failed
+  final String log;
+  final int startedAt; // unix 秒
+  final int finishedAt; // unix 秒，0 = 未结束
+
+  StackTask({
+    required this.id,
+    required this.stack,
+    required this.action,
+    required this.status,
+    required this.log,
+    required this.startedAt,
+    required this.finishedAt,
+  });
+
+  bool get done => status == 'success' || status == 'failed';
+
+  factory StackTask.fromJson(Map<String, dynamic> j) => StackTask(
+        id: j['id'] as String? ?? '',
+        stack: j['stack'] as String? ?? '',
+        action: j['action'] as String? ?? '',
+        status: j['status'] as String? ?? '',
+        log: j['log'] as String? ?? '',
+        startedAt: (j['startedAt'] as num?)?.toInt() ?? 0,
+        finishedAt: (j['finishedAt'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// 对齐 web StackCompose（stack.file.get 响应；移动端只读预览，编辑留桌面）。
+class StackCompose {
+  final String name;
+  final String compose;
+  final String env;
+  final String composeFile; // agent 侧实际文件路径
+  final int modifiedAt; // unix 秒
+
+  StackCompose({
+    required this.name,
+    required this.compose,
+    required this.env,
+    required this.composeFile,
+    required this.modifiedAt,
+  });
+
+  factory StackCompose.fromJson(Map<String, dynamic> j) => StackCompose(
+        name: j['name'] as String? ?? '',
+        compose: j['compose'] as String? ?? '',
+        env: j['env'] as String? ?? '',
+        composeFile: j['composeFile'] as String? ?? '',
+        modifiedAt: (j['modifiedAt'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// GET /api/stacks/agents/{id} 响应：{stacks, info}（info 拉取失败为 null）。
+class StacksResult {
+  final List<StackSummary> stacks;
+  final StackInfo? info;
+
+  StacksResult({required this.stacks, this.info});
+
+  factory StacksResult.fromJson(Map<String, dynamic> j) => StacksResult(
+        stacks: (j['stacks'] as List<dynamic>? ?? [])
+            .map((e) => StackSummary.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        info: j['info'] is Map<String, dynamic>
+            ? StackInfo.fromJson(j['info'] as Map<String, dynamic>)
+            : null,
       );
 }
