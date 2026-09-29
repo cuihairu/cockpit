@@ -411,9 +411,14 @@ func (s *Server) handleAgentStacks(w http.ResponseWriter, r *http.Request, agent
 		s.handleError(w, r, http.StatusBadGateway, "Invalid agent response")
 		return
 	}
-	// agent 明确报错（如 stacks 目录不可读）时透传原因，不替换成笼统文案
+	// agent 明确报错（如 stacks 目录不可读）时透传原因，不替换成笼统文案；
+	// list 失败仍拉自检信息——目录类故障的 dirError 随 info 附在错误体里下发
+	// （error 字段保持原样，客户端只读 error 不受影响）
 	if rpcResp.Status != "success" {
-		s.handleError(w, r, http.StatusBadGateway, rpcResp.Error)
+		s.writeJSON(w, http.StatusBadGateway, map[string]interface{}{
+			"error": rpcResp.Error,
+			"info":  s.fetchStackInfo(agentID),
+		})
 		return
 	}
 
@@ -477,7 +482,9 @@ func (s *Server) handleStacksAll(w http.ResponseWriter, r *http.Request) {
 			}
 			rpcResp, err := protocol.DecodeRPCResponse(resp)
 			if err != nil || rpcResp.Status != "success" {
-				results <- fetchResult{agent: ag}
+				// list 失败仍拉自检信息：目录类故障（dirError）要能到列表页目录告警，
+				// agent 离线时 fetchStackInfo 自然返回 nil（无自检可拉）
+				results <- fetchResult{agent: ag, info: s.fetchStackInfo(ag.ID)}
 				return
 			}
 			items := make([]map[string]interface{}, 0)

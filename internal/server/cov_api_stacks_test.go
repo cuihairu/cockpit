@@ -556,6 +556,61 @@ func TestCovStacksAllAggregate(t *testing.T) {
 	}
 }
 
+// list 失败仍拉自检信息：stack.list 报错（目录不可读）但 stack.info 正常应答
+// dirError——聚合响应 agentInfo 必须带上该 agent 的目录自检结果（web 目录告警联动）
+func TestCovStacksAllListFailStillFetchInfo(t *testing.T) {
+	s := covNewServer(t)
+	covFakeAgent(t, s, "brokendir", covDockerCaps, func(method string, params map[string]interface{}) map[string]interface{} {
+		switch method {
+		case "stack.list":
+			return covErrPayload("read stacks dir: not a directory")
+		case "stack.info":
+			return covOKPayload(map[string]interface{}{
+				"dir": "/data/stacks", "dirWritable": false, "dirError": "write probe: permission denied",
+			})
+		}
+		return covErrPayload("unexpected method " + method)
+	})
+
+	rec := covRec()
+	s.handleStacksAll(rec, covReq(http.MethodGet, "/api/stacks", nil))
+	covWantCode(t, "stacks all list-fail", rec, http.StatusOK)
+	body := rec.Body.String()
+	if !strings.Contains(body, "write probe: permission denied") {
+		t.Errorf("agentInfo missing dirError from failed agent: %s", body)
+	}
+	if !strings.Contains(body, `"brokendir"`) {
+		t.Errorf("agentInfo missing failed agent id key: %s", body)
+	}
+}
+
+// 单 agent 列表失败：502 错误体透传 agent 原因且附 info（dirError 随 info 下发）
+func TestCovAgentStacksErrorCarriesInfo(t *testing.T) {
+	s := covNewServer(t)
+	covFakeAgent(t, s, "a1", covDockerCaps, func(method string, params map[string]interface{}) map[string]interface{} {
+		switch method {
+		case "stack.list":
+			return covErrPayload("read stacks dir: not a directory")
+		case "stack.info":
+			return covOKPayload(map[string]interface{}{
+				"dir": "/data/stacks", "dirWritable": false, "dirError": "write probe: permission denied",
+			})
+		}
+		return covErrPayload("unexpected method " + method)
+	})
+
+	rec := covRec()
+	s.handleAgentStacks(rec, covReq(http.MethodGet, "/api/stacks/agents/a1", nil), "a1")
+	covWantCode(t, "agent stacks list err", rec, http.StatusBadGateway)
+	body := rec.Body.String()
+	if !strings.Contains(body, "read stacks dir: not a directory") {
+		t.Errorf("error not passed through: %s", body)
+	}
+	if !strings.Contains(body, "write probe: permission denied") {
+		t.Errorf("info not attached to error body: %s", body)
+	}
+}
+
 // 聚合超时：agent 应答慢于 10s deadline → 主循环 deadline 分支截断
 func TestCovStacksAllDeadline(t *testing.T) {
 	t.Parallel()
