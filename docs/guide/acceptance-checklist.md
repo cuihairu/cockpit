@@ -79,6 +79,7 @@
 - [ ] nginx：语法错误被 `-t` 拦截不落盘；reload 失败回滚后再 reload，站点保持旧配置可用
 - [ ] nginx：systemd reload 与无 systemd 环境 `nginx -s reload` fallback 各验一次
 - [ ] nginx：80/443 端口冲突场景的错误摘要呈现
+  注（2026-09-30）：本机无 nginx——上方 nginx 4 项真机验收显式跳过（渲染/校验/回滚/端口冲突摘要是纯函数防御分支 + 单测覆盖面；待有 nginx 宿主机再补真机）
 - [x] Traefik：动态目录探测（静态配置 `providers.file.directory` 与缺省路径）；站点文件写入后热加载生效
   证据（2026-09-30）：探针 `scripts/acceptance/traefik/`（traefik:v3.5.6 容器挂载宿主目录 + host-gateway 回连双上游）T1/T2/T3/T9——env 覆盖探测（`COCKPIT_TRAEFIK_DIR`，D12 生产形态；静态配置解析分支为纯函数、单测覆盖）capability `traefik-proxy` dynamicDir 正确；新增/修改（upstream A→B）/删除（文件/路由/列表三面摘除）均 watch 热加载即时生效，`reloadMode=hot`；`probe.log`
 - [x] Traefik：坏 YAML 自检拒绝不落盘；router→service 引用校验拦截
@@ -138,10 +139,14 @@
 
 设计：[logs-design](./logs-design.md)。前置：多台 agent（含 systemd 主机与 docker 主机）。
 
-- [ ] 尾随真机项：journalctl 高频输出流畅尾随不重不漏
-- [ ] docker 容器停止后尾随以 `reason=exited` 正常终止
-- [ ] 10 分钟超时兜底生效
-- [ ] 跨机联邦检索：多 agent 并行扇出按主机分组返回；offline/无 logs capability/路径不存在三种 skipped 归因正确；单 agent 失败不整体报错
+- [x] 尾随真机项：journalctl 高频输出流畅尾随不重不漏
+  证据（2026-09-30）：探针 `scripts/acceptance/logs/`（系统域 transient unit 高频源，本机实验结论：`journalctl -u` 不匹配用户域瞬态单元须 sudo systemd-run 建系统域）T1——tail=2000 回填 500 行 + 600 行/s 实时突发 6000 行，6500 帧序列严格递增、零重复零缺口（序号带每轮唯一基址防 journal 跨轮累积干扰）；验收顺带修通两处流式链路缺陷：① agent 侧 logs POST（query/follow）被 RBAC 按 method 泛化推导成 `logs:write`——合法权限集合只有 `logs:read`，任何角色（含 admin）都 403，端点整体不可达（既有测试直调 handler 绕过中间件故未拦住），修为与 `/api/logs/search` 同口径 fixed read；② 审计中间件 `responseWriter` 包装器丢 `http.Flusher`，生产链路 `w.(http.Flusher)` 断言必失败 → 500「streaming unsupported」（/ws 的 Hijacker 教训同类，修为接口透传保审计）；`probe.log`
+- [x] docker 容器停止后尾随以 `reason=exited` 正常终止
+  证据（2026-09-30）：T2——alpine 循环输出容器 follow 收 ≥3 行后 `docker stop -t 2`，`docker logs -f` 随容器退出 → eof `reason="exited"`，DOCLINE 序列有序无重；`probe.log`
+- [x] 10 分钟超时兜底生效
+  证据（2026-09-30）：T3——空闲源（prewarm 后完全静默）follow 常驻（`journalctl -f` 对已结束 unit 不自退，本机实测常驻，超时是唯一出口），到点 eof `reason="exited"`、耗时精确 10m0s、沉淀期后零新增帧；单测面 `TestLogsFollowTimeoutKillsIdleSession`（`logsFollowTimeout` 行为中性 var 注入，生产恒 10min）；`probe.log`
+- [x] 跨机联邦检索：多 agent 并行扇出按主机分组返回；offline/无 logs capability/路径不存在三种 skipped 归因正确；单 agent 失败不整体报错
+  证据（2026-09-30）：T4a/T4b——3 agent 拓扑（全量 PATH / 空 PATH 无 logs capability / journalctl 失败 shim 遮蔽有 capability 但查询必败）+ ghost id 四样本齐：a1 ok=true 带 hostname 分组、a4 ok=false error 降级且 HTTP 200 不整体报错、a2 skipped `no-logs`、ghost skipped `offline`，结果按 agentId 排序；全量扇出 skipped 只列在线无 capability 者（离线者天然缺席不列）；口径注明：「路径不存在/not-found」归因已与 offline 合并（`api_logs_search.go` 注册表缺席即离线、不区分 not-found，ghost id 即该形态的现实验证）；原始请求/响应 `search-*.json`
 
 ## NAS
 

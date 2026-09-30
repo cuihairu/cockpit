@@ -234,6 +234,47 @@ func TestResponseWriterWriteHeader(t *testing.T) {
 	}
 }
 
+// TestResponseWriterFlushPassthrough 包装器必须透传 http.Flusher——真机
+// 验收发现：审计链包装后日志尾随（NDJSON 逐帧推送）的 w.(http.Flusher)
+// 断言失败，流式面整体 500「streaming unsupported」（/ws 的 Hijacker
+// 教训同类），回归钉住该接口不再次丢失
+func TestResponseWriterFlushPassthrough(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rw := &responseWriter{ResponseWriter: rec, statusCode: http.StatusOK}
+
+	f, ok := interface{}(rw).(http.Flusher)
+	if !ok {
+		t.Fatal("responseWriter 应实现 http.Flusher")
+	}
+	f.Flush()
+	if !rec.Flushed {
+		t.Error("Flush 应透传到底层 ResponseRecorder")
+	}
+}
+
+// TestAuditMiddlewarePreservesFlusher 全链验证：经 AuditMiddleware 包装的
+// handler 仍能拿到 Flusher 并成功 Flush（日志尾随端点的生产路径形态）
+func TestAuditMiddlewarePreservesFlusher(t *testing.T) {
+	s := newTestServer()
+	handler := s.AuditMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, ok := w.(http.Flusher)
+		if !ok {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		f.Flush()
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("经审计链 Flusher 断言失败，status = %d, want 200", rec.Code)
+	}
+	if !rec.Flushed {
+		t.Error("Flush 未透传到底层")
+	}
+}
+
 func TestCORSMiddlewareHandlesAPIOptionsBeforeNext(t *testing.T) {
 	t.Setenv("ALLOWED_ORIGINS", "https://example.com")
 	s := newTestServer()

@@ -248,3 +248,36 @@ func TestLogsFollowProcessExitCloses(t *testing.T) {
 		t.Fatalf("expected exactly one close, got %v", c.gotCloses())
 	}
 }
+
+// TestLogsFollowTimeoutKillsIdleSession 超时兜底：注入短超时（logsFollowTimeout
+// 为行为中性 var，生产恒 10min），空闲会话到点被 ctx kill（journalctl -f 对
+// 无输出的 unit 常驻不退，超时是唯一出口）、closeFn 以 "exited" 收尾、会话表
+// 清空——对应 acceptance-checklist 日志检索「10 分钟超时兜底」真机项的单测面。
+func TestLogsFollowTimeoutKillsIdleSession(t *testing.T) {
+	old := logsFollowTimeout
+	logsFollowTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { logsFollowTimeout = old })
+
+	p := newFollowTestProvider()
+	c := &followCollector{}
+	p.SetSender(c.sender)
+	p.SetCloser(c.closer)
+	// 空闲跟随进程：不输出、不退出，只有超时能终结它
+	p.followCmdFn = fakeFollowCmd(`exec sleep 30`)
+
+	if _, err := p.FollowStart(followParams("f-timeout", "")); err != nil {
+		t.Fatalf("FollowStart: %v", err)
+	}
+	waitClose(t, c, "exited")
+
+	// 会话表已清理；超时路径只发一次 close（once 幂等）
+	p.fs.mu.Lock()
+	n := len(p.fs.follows)
+	p.fs.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("expected session removed after timeout, got %d", n)
+	}
+	if n := len(c.gotCloses()); n != 1 {
+		t.Fatalf("expected exactly one close, got %v", c.gotCloses())
+	}
+}

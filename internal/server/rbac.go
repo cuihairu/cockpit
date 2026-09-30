@@ -63,7 +63,6 @@ var agentSubResources = map[string]string{
 	"cron/":     "cron",
 	"services/": "services",
 	"nas/":      "nas",
-	"logs/":     "logs",
 	"drift/":    "drift",
 	"domains":   "dns", // D7 只读清单/片段
 	"overlay/":  "overlay",
@@ -120,6 +119,14 @@ func requiredPerms(path, method string) (perms []string, governed bool) {
 		// 尾斜杠，agentSubResources 的 "/health/" 前缀匹配不到）
 		if strings.HasSuffix(rest, "/health") || strings.Contains(rest, "/health/") {
 			return actionPerm("services", method, ""), true
+		}
+		// agent 侧日志查询/尾随是读操作——POST 也归 logs:read（文件头约定
+		// 「audit/logs 的动作全是读（导出/检索也是 POST）」，与 /api/logs/search
+		// 同口径；且 logs 资源只有 read 档，按 method 泛化推导会把
+		// query/follow 卡成 logs:write——合法权限集合里不存在该点，任何角色
+		// （含 admin）都过不了，端点整体不可达）
+		if strings.Contains(rest, "/logs/") {
+			return actionPerm("logs", method, "read"), true
 		}
 		for sub, res := range agentSubResources {
 			if strings.Contains(rest, "/"+sub) {

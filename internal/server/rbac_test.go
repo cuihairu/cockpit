@@ -45,6 +45,12 @@ func TestRBACMatrix(t *testing.T) {
 		{"viewer read dns", "viewer", "GET", "/api/dns", 200},
 		{"viewer write dns", "viewer", "POST", "/api/dns/zones/z/records", 403},
 		{"viewer logs search(post is read)", "viewer", "POST", "/api/logs/search", 200},
+		// agent 侧日志面同为读（真机验收发现：POST 泛化推导成 logs:write——
+		// 合法权限集合只有 logs:read，admin 也 403，query/follow 整体不可达）
+		{"viewer agent logs follow(post is read)", "viewer", "POST", "/api/agents/a1/logs/follow", 200},
+		{"operator agent logs query", "operator", "POST", "/api/agents/a1/logs/query", 200},
+		{"admin agent logs follow", "admin", "POST", "/api/agents/a1/logs/follow", 200},
+		{"viewer agent logs sources", "viewer", "GET", "/api/agents/a1/logs/sources", 200},
 		{"viewer audit export(post is read)", "viewer", "POST", "/api/admin/audit/export", 200},
 		{"viewer users", "viewer", "GET", "/api/users", 403},
 		{"viewer roles list", "viewer", "GET", "/api/roles", 403},

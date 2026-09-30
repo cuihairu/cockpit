@@ -23,8 +23,6 @@ var execCommandContext = exec.CommandContext
 const (
 	// logsFollowMaxBytes 单会话累计输出上限（到达即停）
 	logsFollowMaxBytes = 4 << 20
-	// logsFollowTimeout 会话超时（防僵死跟随进程）
-	logsFollowTimeout = 10 * time.Minute
 	// logsFollowMaxActive 同时活跃的跟随会话上限
 	logsFollowMaxActive = 16
 	// logsFollowLineMax 单行上限（bufio.Scanner 缓冲，与 query 行边界一致）
@@ -32,6 +30,12 @@ const (
 	// logsFollowProxyPrefix follow 数据的 proxyId 前缀
 	logsFollowProxyPrefix = "logs:"
 )
+
+// logsFollowTimeout 会话超时，防僵死跟随进程（journalctl -f 对已结束/不存在的
+// unit 常驻不退，超时是唯一兜底出口）。行为中性 var 注入点：测试缩短超时验证
+// timeout → CommandContext kill → closeFn("exited") 路径（stdinPipeFn /
+// serverBackupNow 先例），生产恒为 10 分钟。
+var logsFollowTimeout = 10 * time.Minute
 
 // LogsSender follow 数据回推（agent 装配时注入，包装 proxy_data 发送）
 type LogsSender func(proxyID string, data []byte)

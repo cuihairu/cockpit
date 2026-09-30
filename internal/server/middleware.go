@@ -30,6 +30,16 @@ func (r *responseWriter) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
+// Flush 透传底层 Flusher。日志尾随（NDJSON 逐帧推送）经审计链时若包装器
+// 丢掉 http.Flusher，handleAgentLogsFollow 的 w.(http.Flusher) 断言必失败，
+// 流式面整体 500「streaming unsupported」——与 /ws 的 Hijacker 教训同类，
+// 但这里用接口透传而非跳过审计（follow 起停仍应入审计链）
+func (r *responseWriter) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // CORSMiddleware 统一处理 API 跨域响应和预检请求。
 func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
