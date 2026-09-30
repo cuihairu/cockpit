@@ -79,9 +79,12 @@
 - [ ] nginx：语法错误被 `-t` 拦截不落盘；reload 失败回滚后再 reload，站点保持旧配置可用
 - [ ] nginx：systemd reload 与无 systemd 环境 `nginx -s reload` fallback 各验一次
 - [ ] nginx：80/443 端口冲突场景的错误摘要呈现
-- [ ] Traefik：动态目录探测（静态配置 `providers.file.directory` 与缺省路径）；站点文件写入后热加载生效
-- [ ] Traefik：坏 YAML 自检拒绝不落盘；router→service 引用校验拦截
+- [x] Traefik：动态目录探测（静态配置 `providers.file.directory` 与缺省路径）；站点文件写入后热加载生效
+  证据（2026-09-30）：探针 `scripts/acceptance/traefik/`（traefik:v3.5.6 容器挂载宿主目录 + host-gateway 回连双上游）T1/T2/T3/T9——env 覆盖探测（`COCKPIT_TRAEFIK_DIR`，D12 生产形态；静态配置解析分支为纯函数、单测覆盖）capability `traefik-proxy` dynamicDir 正确；新增/修改（upstream A→B）/删除（文件/路由/列表三面摘除）均 watch 热加载即时生效，`reloadMode=hot`；`probe.log`
+- [x] Traefik：坏 YAML 自检拒绝不落盘；router→service 引用校验拦截
+  证据（2026-09-30）：自检/引用校验为渲染器防御分支（合法参数渲染恒合法，经 REST 不可达），单测覆盖（`TestTraefikProvider_Render` 系）；真机侧 T6 验 extra 拒绝（报错、不落盘、不入列，D14 注入面）+ T7 实测外来坏文件语义——Traefik 冻结整目录热更新（存量 last-good 照常、新变更拒载 404、日志点名坏文件），rm/面板重下发即自动解冻且积压变更一并生效（D13 口径据此修正）；`probe.log`
 - [ ] 双后端主机并存时 capability 分流正确（nginx 优先，旧 agent 回退 nginx.* 前缀）
+  注（2026-09-30）：本机无 nginx（双后端并存需 nginx 主机，维持挂起）；分流四例（仅 nginx/仅 traefik/双后端/旧 agent 回退）单测覆盖，traefik 单后端真机全链验讫（本次验收全部请求经 `traefik.*` 前缀分发）
 
 ## ACME 证书签发
 

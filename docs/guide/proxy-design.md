@@ -155,7 +155,7 @@ D1 承诺的后端扩展。**M2 仅 Traefik，且只走 file provider 动态目�
 |---|------|------|------------|
 | D11 | 后端范围 | 仅 Traefik file provider；渲染/校验/应用按 backend 抽象（`SiteRenderer`/`SiteApplier`），RPC 方法名 `proxy.*` 不变，provider 持有 backend 实现分发 | 方法表不动 server 与 web 路由；nginx 行为零变化 |
 | D12 | 目录探测与 capability | 动态目录取值：`COCKPIT_TRAEFIK_DIR` 覆盖 → 静态配置 `/etc/traefik/traefik.yml`（或 `.yaml`）解析 `providers.file.directory` → 缺省 `/etc/traefik/dynamic`；capability `traefik-proxy` = 目录存在（目录入 metadata 供 provider 初始化）。**不依赖 LookPath("traefik")** | Traefik 大多容器化跑，宿主机常无二进制；目录（含 docker 挂载的宿主侧路径）才是事实源；env 覆盖与 `COCKPIT_NGINX_CONF_DIR` 同惯例；版本探测失败仅置 version 空 |
-| D13 | 校验与应用 | 无 `nginx -t`/reload 等价物：渲染后 `yaml.Unmarshal` 语法自检 + router→service 引用一致性校验，**校验失败不落盘**；file provider 热加载（watch），写坏文件由 Traefik 拒载该文件、其余片段照常（局部隔离） | 比 nginx 弱在无全局预检（坏文件只影响本站点）、强在无 reload 失败回滚分支；apply 流程退化为 渲染→自检→原子写 |
+| D13 | 校验与应用 | 无 `nginx -t`/reload 等价物：渲染后 `yaml.Unmarshal` 语法自检 + router→service 引用一致性校验，**校验失败不落盘**；file provider 热加载（watch）。坏文件语义（真机实测 traefik:v3.5.6 修正，非局部隔离）：目录中任一坏文件（YAML/Go template 语法错，含非 cockpit 的用户文件）→ watcher callback 整体失败，**整目录热更新冻结**——存量站点保留末次有效配置照常服务，新变更（含面板下发）落盘成功但被拒载；坏文件删除/修复（含面板重下发覆盖）后的下一轮 watch 事件**自动解冻**，冻结期积压的变更一并生效 | 比 nginx 弱在无全局预检且坏文件影响面是整目录（但仅冻结「新变更」，存量流量不受扰动）、强在无 reload 失败回滚分支；apply 流程退化为 渲染→自检→原子写；自检保证 cockpit 自己永不产出坏文件——坏文件只能来自手工编辑/第三方工具，恰是 drift `drifted` 态的暴露面，面板重下发即治愈并连带解冻 |
 | D14 | 渲染映射 | 同站点模型（D7 字段不变）：`serverNames` → router rule 的 `Host(...)` 多值；`upstream` → service `loadBalancer.servers[].url`；https → 443 router `tls=true` + 文件级 `tls.certificates`（certFile/keyFile 路径引用，ACME 推送文件直引）+ 80 router 挂 `redirectScheme` 中间件永久跳转；**`websocket` 字段 no-op**（Traefik 原生透传 WS，字段保留兼容面板）；**`extra` 不支持**——非空时校验直接拒绝 | 跳转按站点双 router 而非静态 entrypoint 配置（不碰静态配置=零接触）；拒绝 extra 避免渲染任意 YAML 片段的注入面 |
 | D15 | 元数据与 drift | meta 首行 YAML 注释 `# cockpit:meta {json}` 与 nginx 同构；drift kind 白名单扩 `traefik`（`dynamicDir/cockpit-site-<name>.yml`，读文件即 current），drift 页 KIND_LABEL 加标签 | BaselineRecorder/diff 链路通用，仅扩 snapshot 分支与白名单 |
 | D16 | server / web | server 纯转发不感知 backend，零改动；web 状态卡显示 backend 名称与版本（无二进制则「-」），编辑 Modal 的 extra 控件在 traefik 后端禁用并提示不支持，其余 UI 复用 | 后端差异收敛在 agent 渲染层与两处 UI 提示 |
@@ -212,8 +212,11 @@ router/service 命名 `cockpit-<site>`（冲突域在 Traefik 全局命名空间
       生命周期（apply→get→delete + 基线登记/清除）、目录探测（env 覆盖/
       静态配置解析）、drift 四态+diff+目标校验、server 前缀分流（仅 nginx/
       仅 traefik/双后端/旧 agent 回退 + traefik 审计）
-- [ ] 真机验收（列入 todo.md）：Traefik 容器挂载宿主目录实测热加载与
-      证书文件引用
+- [x] 真机验收（列入 todo.md，2026-09-30 完成）：Traefik 容器
+      （traefik:v3.5.6）挂载宿主目录作 file provider 动态目录，探针
+      `scripts/acceptance/traefik/` 10/10——新增/修改/删除热加载、meta 回读、
+      https 301 跳转 + 证书文件引用加载（自有 CA 握手验证）、extra 拒绝、
+      drift 四态 + record、审计留痕；**坏文件语义实测修正 D13**（见上）
 
 ## 不做（后续项）
 

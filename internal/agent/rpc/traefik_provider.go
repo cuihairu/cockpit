@@ -19,7 +19,8 @@ import (
 // provider 动态目录，每站点一个 YAML 片段文件，与 nginx conf.d 片段
 // 模式同构，D2「自己名下片段、用户配置零接触」原样成立。
 // 无 nginx -t/reload 等价物——渲染后 yaml.Unmarshal 自检（失败不落盘），
-// file provider 热加载、坏文件局部隔离（D13）。
+// file provider 热加载；坏文件冻结整目录热更新、修复即自动解冻（D13
+// 真机实测口径，非局部隔离）。
 
 const (
 	// traefikVersionTimeout traefik version 探测超时
@@ -202,8 +203,9 @@ func (p *TraefikProvider) GetSite(name string) (interface{}, error) {
 }
 
 // ApplySite 校验 → 渲染 → yaml 自检（失败不落盘）→ 原子写（D13）。
-// file provider 热加载无 reload 分支：坏文件由 Traefik 拒载、其余片段照常，
-// 无「apply 失败站点照旧」的回滚需求。
+// file provider 热加载无 reload 分支：自检保证落盘产物永远合法；若目录里
+// 已有（外来的）坏文件，热更新整目录冻结、存量站点 last-good 照常服务，
+// 本方法覆盖坏片段即解冻——无「apply 失败站点照旧」的回滚需求。
 func (p *TraefikProvider) ApplySite(site *ProxySite) (interface{}, error) {
 	if err := site.validate(); err != nil {
 		return nil, err
