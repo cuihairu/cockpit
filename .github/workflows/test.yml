@@ -38,7 +38,10 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          go test -short ./... -coverprofile=coverage.out -covermode=atomic -timeout 600s
+          # server 包 -short 插桩峰值贴 600s（CI 慢机已两次撞线 panic，
+          # 本地负载下亦实测 600.7s——见 todo 2026-09-27 运维坑），对齐
+          # 下方 race 步骤放宽到 900s
+          go test -short ./... -coverprofile=coverage.out -covermode=atomic -timeout 900s
 
       # RDP 桌面客户端（grdp）仅在 -tags rdp 构建编译；默认 stub 分支已在
       # 上一步覆盖，此处验证真实现分支可编译、测试全绿且覆盖率与默认构建
