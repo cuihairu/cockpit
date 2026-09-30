@@ -856,3 +856,26 @@ func TestCovServerBackupLoopTicks(t *testing.T) {
 	s.cancel()
 	covWaitExit(t, "serverBackupLoop", exited)
 }
+
+// TestCovNextMetricsCleanupWait 首等时长纯函数的双分支与边界（alert_loop.go:
+// 顺延分支此前只被真实钟点顺带覆盖——03:00 前跑测试即缺，抽出后任意钟点可测）
+func TestCovNextMetricsCleanupWait(t *testing.T) {
+	loc := time.FixedZone("CST", 8*3600)
+	cases := []struct {
+		name string
+		now  time.Time
+		want time.Duration
+	}{
+		{"凌晨三点前等到今天 03:00", time.Date(2026, 9, 30, 1, 0, 0, 0, loc), 2 * time.Hour},
+		{"恰在 03:00 立即到期（Before 相等不顺延）", time.Date(2026, 9, 30, 3, 0, 0, 0, loc), 0},
+		{"午后已过 3 点顺延明天", time.Date(2026, 9, 30, 15, 0, 0, 0, loc), 12 * time.Hour},
+		{"23:59 顺延到明天 03:01 后", time.Date(2026, 9, 30, 23, 59, 0, 0, loc), 3*time.Hour + time.Minute},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := nextMetricsCleanupWait(c.now); got != c.want {
+				t.Errorf("nextMetricsCleanupWait(%v) = %v, want %v", c.now, got, c.want)
+			}
+		})
+	}
+}

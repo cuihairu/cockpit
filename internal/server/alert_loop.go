@@ -93,14 +93,20 @@ var (
 	// metricsCleanupFirstWait 计算距下次凌晨 3 点的等待时长。
 	// 包级变量仅为测试可注入，默认值即生产取值。
 	metricsCleanupFirstWait = func() time.Duration {
-		now := time.Now()
-		nextCleanup := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, now.Location())
-		if nextCleanup.Before(now) {
-			nextCleanup = nextCleanup.Add(24 * time.Hour)
-		}
-		return time.Until(nextCleanup)
+		return nextMetricsCleanupWait(time.Now())
 	}
 )
+
+// nextMetricsCleanupWait 纯函数版首等时长：传入 now 计算距下一个凌晨 3 点的
+// 等待（已过今天 3 点则顺延明天）。抽出为可注入时间源的纯函数，使「顺延」
+// 分支可在任意钟点被确定性测试（原闭包体内分支只在 03:00 后运行才执行）。
+func nextMetricsCleanupWait(now time.Time) time.Duration {
+	nextCleanup := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, now.Location())
+	if nextCleanup.Before(now) {
+		nextCleanup = nextCleanup.Add(24 * time.Hour)
+	}
+	return nextCleanup.Sub(now)
+}
 
 func (s *Server) metricsCleanupLoop() {
 	ticker := time.NewTicker(metricsCleanupInterval)
