@@ -28,7 +28,11 @@ import (
 
 // handleRecordings /api/recordings 与 /api/recordings/{sid}[/cast] 分发
 func (s *Server) handleRecordings(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
+	// serveAPI 分发前已剥 /api 前缀，这里必须同样剥掉再比对——此前直接用
+	// r.URL.Path（/api/recordings）与剥前缀路径比较，全部子路径落 404，
+	// Web 录制页（axios baseURL=/api + /recordings）整页不可用
+	//（真机验收发现，2026-09-30）
+	path := strings.TrimPrefix(r.URL.Path, "/api")
 	if path == "/recordings" {
 		if r.Method != http.MethodGet {
 			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")

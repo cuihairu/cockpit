@@ -315,7 +315,7 @@ func TestOpenWrtGetSystemInfoWithoutUbus(t *testing.T) {
 func TestRegisteredDetectorsIncludeCoreOnes(t *testing.T) {
 	want := map[string]bool{
 		"docker-api": false, "pve-api": false, "openwrt": false,
-		"overlay": false, "hardware-monitor": false,
+		"overlay": false, "hardware-monitor": false, "remote-services": false,
 	}
 	for _, d := range All() {
 		name := d.Name()

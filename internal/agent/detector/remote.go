@@ -14,6 +14,13 @@ type RemoteServiceDetector struct {
 	commonPorts map[protocol.RemoteProtocol][]int
 }
 
+// 远程服务探测是 Workbench 远控入口（SSH/RDP/VNC 面板 + 内置终端兜底）的数据源，
+// 实现一直存在但从未注册——真机验收发现 remote-services capability 永不上报（2026-09-30）。
+// 必须经 NewRemoteServiceDetector() 注册：直接 &RemoteServiceDetector{} 的 commonPorts 为 nil。
+func init() {
+	Register(NewRemoteServiceDetector())
+}
+
 // NewRemoteServiceDetector 创建远程服务检测器
 func NewRemoteServiceDetector() *RemoteServiceDetector {
 	return &RemoteServiceDetector{

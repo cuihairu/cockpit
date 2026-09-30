@@ -76,7 +76,7 @@
 | --- | --- | --- |
 | `username` | `username` | 直传（上游已统一处理） |
 | `password` | `password` | 直传；口令认证 |
-| `private_key` | `private-key` | **PEM 原文 → base64 编码**（guacd 约定：base64 编码的私钥内容）；私钥认证，优先于口令 |
+| `private_key` | `private-key` | **PEM 原文直传**（不 base64）；私钥认证，优先于口令 |
 | `domain` | 不传 | SSH 无域概念（RDP 专用） |
 | `width`/`height` | 不传 | 字符终端；尺寸经隧道层 `size` 指令（guacd 自行换算列/行） |
 
@@ -102,8 +102,10 @@
 
 - **D1 协议白名单扩 `ssh`**：`handleGuacamoleWebSocket` 放行 rdp/vnc/ssh；
   **telnet 不进**（方向只提三协议；telnet 无加密，维持 agent 通道现状）。
-- **D2 connect 参数映射**：见上表；私钥 base64 编码在 Go 网关侧完成
-  （ticket 存 PEM 原文，编码属 guacd 协议细节，不该散到前端）。
+- **D2 connect 参数映射**：见上表；私钥 PEM 原文直传（真机验收修正
+  2026-09-30：settings.h 注释 "encoded as base64" 与实现矛盾——
+  guac_user_parse_args_string → key_alloc 零解码，base64 文本进 libssh2
+  PEM_read 必失败；A/B 实测原文两格式认证全过、base64 全败）。
 - **D3 前端入口切换**：web 默认 SSH 入口从 TerminalModal 切到
   GuacamoleModal（Workbench SSH Tab 与 Agents 页统一分流），与 RDP/VNC
   一致；SSH Tab 保留「内置终端（经 Agent）」次入口作兜底。
@@ -161,8 +163,9 @@ guacd 的 ssh 终端是**服务端渲染的图块流**（guacamole 指令编码�
 
 **单测（本次落地）**：
 
-- Go：`guacConnectArgs` ssh 分支（username/password 直传、private-key
-  base64、无 width/height/domain）；WS 白名单 ssh 放行、telnet 拒绝；
+- Go：`guacConnectArgs` ssh 分支（username/password/private-key PEM 原文
+  直传、无 width/height/domain；私钥 base64 曾为缺陷，真机验收修正
+  2026-09-30）；WS 白名单 ssh 放行、telnet 拒绝；
   全链路（covGuacdServer）ssh 握手指令断言。
 - web：GuacamoleModal ssh 表单（用户名必填、口令/私钥可选、无私钥时
   不传 private_key）；Workbench SSH 分流到 GuacamoleModal、内置终端

@@ -58,12 +58,18 @@
 
 设计：[remote-access-integration-design](../remote-access-integration-design.md)。
 
-- [ ] 真 guacd + 真 sshd：口令认证连上、私钥认证连上（`private-key` base64 透传）
-- [ ] SSH 终端渲染正常（vim/top 全屏程序），窗口 `size` 变更后列/行随之变化
-- [ ] SSH 会话 `.guac` 录制收集进 `/recordings` 且 SessionRecording 回放正常
-- [ ] SSH 剪贴板双向（浏览器 ↔ sshd）
-- [ ] 「内置终端（经 Agent）」兜底入口仍可用（guacd 停机时退路）
-- [ ] RDP/VNC 既有链路无回归（三协议同栈并存）
+- [x] 真 guacd + 真 sshd：口令认证连上、私钥认证连上（`private-key` **PEM 原文**透传——设计口径的 base64 被实测推翻：guacd 侧 `guac_common_ssh_key_alloc` 零 base64 解码，base64 文本进 libssh2 必失败，A/B 实测 2026-09-30，网关已改原文直传）
+  证据（2026-09-30）：探针 S1–S4 全过——容器 sshd 口令/ed25519 OpenSSH/RSA PEM 三路认证 + 本机真 sshd（127.0.0.1:22 + `~/.ssh/cui` 只读）建连并远端落盘回读 `.acceptance/guac/evidence/probe.log`；浏览器侧 CDP C3 复验（GuacamoleModal 填私钥建连 + 终端打字回读）`.acceptance/guac/evidence/cdp.log` + `cdp-03b-guac-ssh-connected.png`
+- [x] SSH 终端渲染正常（vim/top 全屏程序），窗口 `size` 变更后列/行随之变化
+  证据（2026-09-30）：探针 S5（1280x800 → 1920x1080 → 复原，`stty size` 行列同步三态）+ S6（`vi` 全屏输入穿透落盘）+ S7（`top -d 1` 全屏周期重绘 img/copy/rect/sync 流量统计）`probe.log`；CDP C3 截图 `cdp-04-guac-ssh-top.png`（浏览器内 top 全屏渲染）
+- [x] SSH 会话 `.guac` 录制收集进 `/recordings` 且 SessionRecording 回放正常
+  证据（2026-09-30）：探针 S10（录制元数据入列 + `/api/recordings/{sid}/cast` HTTP 200、bytes≈49K、durationMs>5000，样本存 `evidence/<sid>.guac`）；浏览器侧 CDP C4——Recordings 页 GuacPlayer 播放渲染 canvas（截图 `cdp-05-recording-guac-playback.png`）。修复两处后达成：网关 recording-name 须传 `<sid>.guac`（guacd 原样作文件名）+ Web GuacPlayer 绕开 guacamole-common-js 1.5.0 `SessionRecording(Blob)` 上游缺陷（dist 双构建均缺 `recordingBlob = source` 赋值 → 恒 0 帧；改 duck tunnel 注入指令流）
+- [x] SSH 剪贴板双向（浏览器 ↔ sshd）
+  证据（2026-09-30）：探针 S8（入站 `clipboard`/`blob`/`end` 流指令 + 右键弹起与大写 V+Ctrl 两路粘贴，远端 `read` 收到标记）+ S9（终端跨行拖选弹起 → 服务端 clipboard 流载荷含远端输出文本）`probe.log`
+- [x] 「内置终端（经 Agent）」兜底入口仍可用（guacd 停机时退路）
+  证据（2026-09-30）：探针 S15（terminal WS（subprotocol 票据）connect 帧 + 输入落盘 `FALLBACK_OK`）+ S16（`docker stop guacd` 后 guac 隧道确定失败、内置终端照常建连，验毕恢复容器）`probe.log`；CDP C7 浏览器侧（Workbench SSH Tab「内置终端（经 Agent）」→ TerminalModal 凭据表单 → xterm 渲染 + agent 直连链路发起）`cdp-08a/08b-terminal-fallback*.png`
+- [x] RDP/VNC 既有链路无回归（三协议同栈并存）
+  证据（2026-09-30）：探针 S13（Xvnc:5900 口令认证 + 打字前后 img/copy/rect 增量帧）+ S14（xrdp:3389 建连 + 增量帧）`probe.log`；CDP C5/C6（浏览器 GuacamoleModal VNC/RDP 表单建连、桌面/登录屏 canvas 渲染）`cdp-06-guac-vnc.png`、`cdp-07-guac-rdp.png`。RDP/VNC 目标为验收自建容器（本机无真实 Windows/RDP 主机与物理 VNC 桌面），链路与图形流层面验讫
 
 ## 反向代理
 

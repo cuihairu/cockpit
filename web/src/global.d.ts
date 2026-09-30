@@ -49,6 +49,15 @@ declare module 'guacamole-common-js' {
     onstatechange?: (state: number) => void
   }
 
+  /** 隧道基类实例：receiveInstruction/setState 供 duck tunnel 驱动
+   *  SessionRecording 的 tunnel 分支（见 GuacPlayer makeBlobTunnel） */
+  export interface TunnelBase extends Tunnel {
+    /** 注入一条已解析指令（内部派发 oninstruction） */
+    receiveInstruction(opcode: string, parameters: string[]): void
+    /** 推移隧道状态（内部派发 onstatechange；CLOSED 触发录制收尾） */
+    setState(state: number): void
+  }
+
   export interface DisplayElement {
     getElement(): HTMLElement
   }
@@ -63,6 +72,11 @@ declare module 'guacamole-common-js' {
   const Guacamole: {
     /** WS 隧道：connect(data) 落到 URL query `?`+data，subprotocol 硬编码 "guacamole" */
     WebSocketTunnel: new (tunnelURL: string) => Tunnel
+    /** 隧道基类：可 new 后覆写 connect 做 duck tunnel（State 是静态枚举） */
+    Tunnel: {
+      new (): TunnelBase
+      State: { OPEN: number; CLOSED: number }
+    }
     Client: new (tunnel: Tunnel) => {
       connect(data?: string): void
       disconnect(): void
@@ -111,8 +125,13 @@ declare module 'guacamole-common-js' {
         state: string
       } | null
     }
-    /** .guac 会话录制回放：内部建 PlaybackTunnel + Client、自动 keyframe 帧索引 */
-    SessionRecording: new (source: Blob) => {
+    /** .guac 会话录制回放：内部建 PlaybackTunnel + Client、自动 keyframe 帧索引。
+     *  官方 1.5.0 dist 的 Blob 入参分支缺 recordingBlob=source 赋值（恒 0 帧），
+     *  传 tunnel 走 tunnel 分支（GuacPlayer makeBlobTunnel）——见组件注释 */
+    SessionRecording: new (source: Blob | Tunnel) => {
+      /** 触发 source 若为 tunnel 时的数据流（duck tunnel 在此注入指令） */
+      connect(): void
+      disconnect(): void
       play(): void
       pause(): void
       seek(position: number, callback?: () => void): void

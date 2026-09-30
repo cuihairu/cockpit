@@ -1,0 +1,21 @@
+# 远控三协议真机验收：VNC 目标容器（TigerVNC Xvnc + xterm）
+# guacd 网关需要一个真 VNC server 承接 VNC 协议验收；本机无 VNC 环境，
+# 起最小真 VNC（Xvnc 内置 X server，xterm 提供 GUI 客户端内容）。
+FROM debian:bookworm-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        tigervnc-standalone-server tigervnc-common tigervnc-tools \
+        xterm fonts-dejavu-core x11-utils && \
+    rm -rf /var/lib/apt/lists/*
+
+# bookworm 里 vncpasswd 叫 tigervncpasswd（tigervnc-tools 包）；-f = stdin 过滤模式
+RUN mkdir -p /root/.vnc && \
+    printf 'Accept-Guac-2026' | tigervncpasswd -f > /root/.vnc/passwd && \
+    chmod 600 /root/.vnc/passwd
+
+COPY start-vnc.sh /start-vnc.sh
+RUN chmod +x /start-vnc.sh
+
+EXPOSE 5900
+CMD ["/start-vnc.sh"]

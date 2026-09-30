@@ -633,9 +633,12 @@ func (s *Server) handleStorageGet(w http.ResponseWriter, r *http.Request, id str
 
 // storageAgentToResponse 将存储 Agent 转换为 API 响应格式
 func storageAgentToResponse(agent *storage.Agent) map[string]interface{} {
-	capabilities := make([]string, 0, len(agent.Capabilities))
-	for _, cap := range agent.Capabilities {
-		capabilities = append(capabilities, cap.Type)
+	// capabilities 保持对象数组（type/version/endpoint/metadata）——web/mobile 的
+	// Capability.fromJson 与 workbench getRemoteServices 都读 cap.type/cap.metadata，
+	// 此前扁平化成 []string 导致全部前端能力判断失效（真机验收发现，2026-09-30）。
+	capabilities := agent.Capabilities
+	if capabilities == nil {
+		capabilities = []storage.Capability{}
 	}
 
 	return map[string]interface{}{

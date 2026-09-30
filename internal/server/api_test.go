@@ -518,9 +518,12 @@ func TestStorageAgentToResponse(t *testing.T) {
 	if resp["hostname"] != "test" {
 		t.Errorf("hostname = %v", resp["hostname"])
 	}
-	caps, ok := resp["capabilities"].([]string)
+	caps, ok := resp["capabilities"].([]storage.Capability)
 	if !ok || len(caps) != 2 {
-		t.Errorf("capabilities = %v", resp["capabilities"])
+		t.Fatalf("capabilities = %v", resp["capabilities"])
+	}
+	if caps[0].Type != "proxy" || caps[1].Type != "docker" {
+		t.Errorf("capabilities types = %v,%v", caps[0].Type, caps[1].Type)
 	}
 	loc, ok := resp["location"].(map[string]string)
 	if !ok || loc["region"] != "us-east" {

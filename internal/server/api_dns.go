@@ -32,7 +32,10 @@ type dnsZoneOut struct {
 
 // handleDNS 分发 /api/dns 及子路径
 func (s *Server) handleDNS(w http.ResponseWriter, r *http.Request) {
-	sub := strings.Trim(strings.TrimPrefix(r.URL.Path, "/dns"), "/")
+	// 经 serveAPI 进入时 r.URL.Path 带 /api 前缀，须先剥再比对（否则全部
+	// 落 404 兜底，Web DNS 页不可用；与 handleRecordings 同类缺陷，
+	// 真机验收发现 2026-09-30）
+	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/api"), "/dns"), "/")
 	switch {
 	case sub == "status":
 		if r.Method != http.MethodGet {

@@ -15,6 +15,57 @@ interface GuacPlayerProps {
   onError?: (message: string) => void
 }
 
+// parseGuacInstructions 解析 .guac 指令流（长度前缀 `len.val,...;` 序列，
+// Guacamole 协议标准格式）。按 JS 字符口径切片——与官方 parser
+// （instruction 解析）一致；畸形流抛错（构造 try/catch 收口）。
+function parseGuacInstructions(text: string): Array<{ opcode: string; args: string[] }> {
+  const out: Array<{ opcode: string; args: string[] }> = []
+  let i = 0
+  while (i < text.length) {
+    if (text[i] === ';') {
+      i++
+      continue
+    }
+    const elements: string[] = []
+    while (i < text.length && text[i] !== ';') {
+      const dot = text.indexOf('.', i)
+      if (dot < 0) throw new Error('malformed guac stream')
+      const len = parseInt(text.slice(i, dot), 10)
+      if (Number.isNaN(len) || dot + 1 + len > text.length) throw new Error('malformed guac stream')
+      elements.push(text.slice(dot + 1, dot + 1 + len))
+      i = dot + 1 + len + 1 // 值尾 + 分隔符（',' 或 ';'）
+    }
+    i++ // 指令结尾 ';'
+    if (elements.length > 0) out.push({ opcode: elements[0], args: elements.slice(1) })
+  }
+  return out
+}
+
+// makeBlobTunnel 用 Blob 驱动 SessionRecording 的 tunnel 分支。
+// 为什么不直接 SessionRecording(blob)：guacamole-common-js 1.5.0 dist
+// （cjs/esm 双构建同缺）的 Blob 入参分支缺 `recordingBlob = source` 赋值，
+// parseBlob(undefined) 恒 0 帧（getDuration()=0、play() 立即暂停）——真机
+// 验收 2026-09-30 发现。duck tunnel 把 blob 解析成指令序列经基类
+// receiveInstruction 注入（SessionRecording 构造时已挂 oninstruction 收帧，
+// 帧索引/keyframe/seek/Display 全由官方实现承担），CLOSED 收尾对齐官方
+// notifyLoaded 语义。
+function makeBlobTunnel(blob: Blob): Guacamole.Tunnel {
+  const tunnel = new Guacamole.Tunnel()
+  tunnel.connect = () => {
+    blob
+      .text()
+      .then((text) => {
+        for (const ins of parseGuacInstructions(text)) {
+          tunnel.receiveInstruction(ins.opcode, ins.args)
+        }
+        tunnel.setState(Guacamole.Tunnel.State.CLOSED)
+      })
+      .catch(() => tunnel.setState(Guacamole.Tunnel.State.CLOSED))
+  }
+  tunnel.disconnect = () => {}
+  return tunnel
+}
+
 const GuacPlayer: React.FC<GuacPlayerProps> = ({ blob, onError }) => {
   const displayRef = useRef<HTMLDivElement>(null)
   const recRef = useRef<InstanceType<typeof Guacamole.SessionRecording> | null>(null)
@@ -26,7 +77,8 @@ const GuacPlayer: React.FC<GuacPlayerProps> = ({ blob, onError }) => {
     if (!displayRef.current) return
     let rec: InstanceType<typeof Guacamole.SessionRecording>
     try {
-      rec = new Guacamole.SessionRecording(blob)
+      rec = new Guacamole.SessionRecording(makeBlobTunnel(blob))
+      rec.connect() // 触发 duck tunnel 注入指令流（Blob 分支官方即坏，见上）
     } catch (err) {
       const msg = err instanceof Error ? err.message : '录制解析失败'
       onError?.(msg)
@@ -51,6 +103,7 @@ const GuacPlayer: React.FC<GuacPlayerProps> = ({ blob, onError }) => {
     // 才可靠；在 toggle 事件处理器里读，顺带更新 Slider 上限
     return () => {
       rec.pause()
+      rec.disconnect()
       recRef.current = null
     }
   }, [blob, onError])

@@ -1,0 +1,36 @@
+# 远控三协议真机验收：SSH 目标容器（真 OpenSSH，凭据可控）
+# 背景：本机 sshd 仅提供 publickey 认证（sshd -T / 探测实证
+# "Authentications that can continue: publickey"），口令认证无目标可测，
+# 故起一个容器化真 sshd 承接口令/私钥两种认证的验收。
+# guacd 1.5.5 的 libssh2 对新版算法支持视编译选项而定，显式保留
+# ssh-rsa 主机密钥/公钥算法位（+ 追加而非替换，不影响默认算法）。
+FROM debian:bookworm-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        openssh-server vim-tiny procps && \
+    rm -rf /var/lib/apt/lists/*
+
+# 验收专用账号（口令固定，同 e2e-smoke 内置凭据口径，不涉真实凭据）
+RUN useradd -m -s /bin/bash accept && \
+    echo 'accept:Accept-Guac-2026' | chpasswd && \
+    mkdir -p /home/accept/.ssh && chmod 700 /home/accept/.ssh
+
+RUN printf '%s\n' \
+    'Port 22' \
+    'PermitRootLogin no' \
+    'PasswordAuthentication yes' \
+    'PubkeyAuthentication yes' \
+    'AuthorizedKeysFile .ssh/authorized_keys' \
+    'HostKeyAlgorithms +ssh-rsa' \
+    'PubkeyAcceptedAlgorithms +ssh-rsa' \
+    > /etc/ssh/sshd_config.d/00-acceptance.conf
+
+RUN ssh-keygen -A && mkdir -p /run/sshd
+
+# 公钥由 setup-env.sh 生成后以只读卷挂到 /pubkeys，entrypoint 装载
+COPY entry-sshd.sh /entry-sshd.sh
+RUN chmod +x /entry-sshd.sh
+
+EXPOSE 22
+CMD ["/entry-sshd.sh"]

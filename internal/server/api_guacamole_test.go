@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/base64"
 	"net"
 	"net/http"
 	"os"
@@ -44,94 +43,154 @@ func TestGuacConnectArgsRDP(t *testing.T) {
 		"password": "s3cret",
 		"domain":   "CORP",
 	}
-	args := guacConnectArgs("rdp", "10.0.0.9", 3389, params, 1280, 800, false, "sid-1")
+	argNames := []string{"VERSION_1_5_0", "hostname", "port", "username", "password",
+		"domain", "security", "ignore-cert", "color-depth", "width", "height",
+		"recording-path", "recording-name", "create-recording-path"}
+	args := guacConnectArgs(argNames, "rdp", "10.0.0.9", 3389, params, 1280, 800, false, "sid-1")
+	m := guacZipConnect(t, argNames, args)
 
-	joined := strings.Join(args, ";")
-	for _, want := range []string{
-		"hostname=10.0.0.9",
-		"port=3389",
-		"username=admin",
-		"password=s3cret",
-		"domain=CORP",
-		"security=any",
-		"ignore-cert=true",
-		"color-depth=32",
-		"width=1280",
-		"height=800",
+	for k, want := range map[string]string{
+		"VERSION_1_5_0": "VERSION_1_5_0", // 版本位回显
+		"hostname":      "10.0.0.9",
+		"port":          "3389",
+		"username":      "admin",
+		"password":      "s3cret",
+		"domain":        "CORP",
+		"security":      "any",
+		"ignore-cert":   "true",
+		"color-depth":   "32",
+		"width":         "1280",
+		"height":        "800",
+		// 录制关闭：recording-* 全部留空（音频同理不传 audio 参数）
+		"recording-path": "",
 	} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("rdp args missing %q in %q", want, joined)
+		if m[k] != want {
+			t.Errorf("rdp connect[%s] = %q, want %q", k, m[k], want)
 		}
-	}
-	// 录制关闭时不传 recording-*（音频同理不传 audio 参数）
-	if strings.Contains(joined, "recording-") {
-		t.Errorf("record=false should not carry recording-*: %q", joined)
 	}
 }
 
 func TestGuacConnectArgsVNCAndRecording(t *testing.T) {
 	params := map[string]string{"password": "vncpw"}
-	args := guacConnectArgs("vnc", "10.0.0.5", 5900, params, 0, 0, true, "sid-2")
-	joined := strings.Join(args, ";")
+	argNames := []string{"VERSION_1_5_0", "hostname", "port", "username", "password",
+		"color-depth", "width", "height", "recording-path", "recording-name", "create-recording-path"}
+	// recording-name 由调用方传 <sid>.guac（guacd 原样作文件名，收集侧按
+	// recordingsExt(.guac) 找文件，见 handleGuacamoleWebSocket）
+	args := guacConnectArgs(argNames, "vnc", "10.0.0.5", 5900, params, 0, 0, true, "sid-2.guac")
+	m := guacZipConnect(t, argNames, args)
 
-	if !strings.Contains(joined, "port=5900") {
-		t.Errorf("vnc args missing port: %q", joined)
+	if m["port"] != "5900" {
+		t.Errorf("vnc connect port = %q", m["port"])
 	}
-	// VNC 无 width/height 参数（0 值不传）
-	if strings.Contains(joined, "width=") {
-		t.Errorf("vnc should not carry width: %q", joined)
+	// VNC 无 width/height 参数（票据 0 值不设置）
+	if m["width"] != "" || m["height"] != "" {
+		t.Errorf("vnc should not carry width/height: %q/%q", m["width"], m["height"])
 	}
-	// 录制开启：recording-path 指向 guacd 卷、recording-name 用会话 ID
-	if !strings.Contains(joined, "recording-path=/var/lib/guacamole") {
-		t.Errorf("record=true missing recording-path: %q", joined)
+	// 录制开启：recording-path 指向 guacd 卷、recording-name 透传（含 .guac）
+	if m["recording-path"] != "/var/lib/guacamole" {
+		t.Errorf("record=true recording-path = %q", m["recording-path"])
 	}
-	if !strings.Contains(joined, "recording-name=sid-2") {
-		t.Errorf("record=true missing recording-name: %q", joined)
+	if m["recording-name"] != "sid-2.guac" {
+		t.Errorf("record=true recording-name = %q (guacd 原样作文件名，须带 .guac)", m["recording-name"])
+	}
+	if m["create-recording-path"] != "true" {
+		t.Errorf("record=true create-recording-path = %q", m["create-recording-path"])
 	}
 }
 
 func TestGuacConnectArgsNoCredentials(t *testing.T) {
-	args := guacConnectArgs("rdp", "h", 3389, map[string]string{}, 0, 0, false, "s")
-	joined := strings.Join(args, ";")
-	for _, bad := range []string{"username=", "password=", "domain="} {
-		if strings.Contains(joined, bad) {
-			t.Errorf("empty params should not emit %q: %q", bad, joined)
+	argNames := []string{"VERSION_1_5_0", "hostname", "port", "username", "password", "domain"}
+	args := guacConnectArgs(argNames, "rdp", "h", 3389, map[string]string{}, 0, 0, false, "s")
+	m := guacZipConnect(t, argNames, args)
+	for _, k := range []string{"username", "password", "domain"} {
+		if m[k] != "" {
+			t.Errorf("empty params: connect[%s] = %q, want empty", k, m[k])
 		}
 	}
 }
 
 // ssh connect 参数映射（docs/remote-access-integration-design.md D2）：
-// username/password 直传；私钥 PEM 原文 → private-key base64；width/height/
+// username/password 直传；私钥 PEM 原文直传 private-key（guacd 侧零 base64
+// 解码，实测 base64 会认证失败，A/B 见 api_guacamole.go ssh 分支注释）；width/height/
 // domain 不进 connect（字符终端 + SSH 无域概念）
 func TestGuacConnectArgsSSH(t *testing.T) {
 	pem := "-----BEGIN OPENSSH PRIVATE KEY-----\nTEST\n-----END OPENSSH PRIVATE KEY-----\n"
-	args := guacConnectArgs("ssh", "10.0.0.4", 22, map[string]string{
+	argNames := []string{"VERSION_1_5_0", "hostname", "port", "username", "password",
+		"font-name", "font-size", "width", "height", "domain", "color-depth",
+		"security", "private-key", "recording-path"}
+	args := guacConnectArgs(argNames, "ssh", "10.0.0.4", 22, map[string]string{
 		"username": "ops", "password": "pw", "private_key": pem,
 	}, 1280, 800, false, "s")
-	joined := strings.Join(args, ";")
+	m := guacZipConnect(t, argNames, args)
 
-	for _, want := range []string{
-		"hostname=10.0.0.4", "port=22", "username=ops", "password=pw",
-		"private-key=" + base64.StdEncoding.EncodeToString([]byte(pem)),
+	for k, want := range map[string]string{
+		"hostname":    "10.0.0.4",
+		"port":        "22",
+		"username":    "ops",
+		"password":    "pw",
+		"private-key": pem, // PEM 原文直传，禁止 base64
+		// ssh 不设置桌面语义参数（位置占位留空）
+		"width":       "",
+		"height":      "",
+		"domain":      "",
+		"color-depth": "",
+		"security":    "",
 	} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("ssh connect args missing %q: %q", want, joined)
-		}
-	}
-	for _, bad := range []string{"width=", "height=", "domain=", "color-depth=", "security="} {
-		if strings.Contains(joined, bad) {
-			t.Errorf("ssh connect args should not emit %q: %q", bad, joined)
+		if m[k] != want {
+			t.Errorf("ssh connect[%s] = %q, want %q", k, m[k], want)
 		}
 	}
 
-	// 无私钥：不 emit private-key（guacd 走口令认证）
-	args = guacConnectArgs("ssh", "h", 22, map[string]string{"username": "ops"}, 0, 0, false, "s")
-	if joined := strings.Join(args, ";"); strings.Contains(joined, "private-key=") {
-		t.Errorf("no private key should not emit private-key: %q", joined)
+	// 无私钥：private-key 留空（guacd 走口令认证）
+	args = guacConnectArgs(argNames, "ssh", "h", 22, map[string]string{"username": "ops"}, 0, 0, false, "s")
+	if m := guacZipConnect(t, argNames, args); m["private-key"] != "" {
+		t.Errorf("no private key: private-key = %q, want empty", m["private-key"])
 	}
 }
 
-// ssh 全链路：select ssh 握手 + connect 携带 base64 私钥（协仪白名单放行）
+// guacZipConnect 把 connect 值序列与 args 名序列逐位对齐成 名字→值 映射；
+// 数量不对齐直接 Fatal（这正是真 guacd 的强约束）。
+func guacZipConnect(t *testing.T, names, values []string) map[string]string {
+	t.Helper()
+	if len(values) != len(names) {
+		t.Fatalf("connect 值数 %d 与 args 名数 %d 不对齐", len(values), len(names))
+	}
+	m := make(map[string]string, len(names))
+	for i, n := range names {
+		m[n] = values[i]
+	}
+	return m
+}
+
+// guacDecodeElems 解析一段以逗号分隔的长度前缀元素串（"len.val,len.val"）。
+// 解析不出前缀即止（容错截断的尾巴）。
+func guacDecodeElems(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		dot := strings.IndexByte(p, '.')
+		if dot < 0 {
+			return out
+		}
+		out = append(out, p[dot+1:])
+	}
+	return out
+}
+
+// guacExtractConnect 从网关→guacd 的握手字节流中抽出 connect 值序列
+func guacExtractConnect(t *testing.T, handshake string) []string {
+	t.Helper()
+	i := strings.Index(handshake, "7.connect,")
+	if i < 0 {
+		t.Fatalf("handshake 无 connect 指令: %q", handshake)
+	}
+	rest := handshake[i+len("7.connect,"):]
+	if j := strings.IndexByte(rest, ';'); j >= 0 {
+		rest = rest[:j]
+	}
+	return guacDecodeElems(rest)
+}
+
+// ssh 全链路：select ssh 握手 + connect 携带 PEM 原文私钥（协仪白名单放行）
 func TestGuacamoleTunnelSSHFullFlow(t *testing.T) {
 	defer covClearSessions()
 	s := covRemoteSetup(t)
@@ -158,11 +217,18 @@ func TestGuacamoleTunnelSSHFullFlow(t *testing.T) {
 	if !strings.HasPrefix(hs, "6.select,3.ssh;") {
 		t.Errorf("handshake should start with select ssh, got %q", hs)
 	}
-	if !strings.Contains(hs, "username=ops") {
-		t.Errorf("handshake missing username: %q", hs)
+	// connect 位置参数：username/private-key 均原文（私钥不经网关日志/审计——
+	// 日志只记 args 名列表与错误，不记 connect 值）
+	argNames := guacParseArgNames("4.args,13.VERSION_1_5_0,8.hostname,4.port," +
+		"8.username,8.password,6.domain,8.security,11.ignore-cert," +
+		"10.color-depth,5.width,6.height,11.private-key," +
+		"14.recording-path,14.recording-name,21.create-recording-path;")
+	m := guacZipConnect(t, argNames, guacExtractConnect(t, hs))
+	if m["username"] != "ops" {
+		t.Errorf("handshake connect username = %q", m["username"])
 	}
-	if !strings.Contains(hs, "private-key="+base64.StdEncoding.EncodeToString([]byte(pem))) {
-		t.Errorf("handshake missing base64 private-key: %q", hs)
+	if m["private-key"] != pem {
+		t.Errorf("handshake connect private-key = %q, want PEM verbatim", m["private-key"])
 	}
 
 	conn.Close()
@@ -274,10 +340,14 @@ func covStartGuacd(t *testing.T) *covGuacdServer {
 				g.mu.Lock()
 				g.handled = append(g.handled, got)
 				g.mu.Unlock()
-				// Guacamole 协议握手：收到 select 后回参数列表指令
-				//（真 guacd 行为；网关读此响应后才发 size+connect）
+				// Guacamole 协议握手：收到 select 后回 args 参数名列表
+				// （真 guacd 行为；网关按这份列表逐位组装 connect——
+				// 1.5.x 首位是协议版本标记 VERSION_1_5_0）
 				if strings.Contains(got, "6.select,") {
-					_, _ = c.Write([]byte("6.select,8.hostname,4.port;"))
+					_, _ = c.Write([]byte("4.args,13.VERSION_1_5_0,8.hostname,4.port," +
+						"8.username,8.password,6.domain,8.security,11.ignore-cert," +
+						"10.color-depth,5.width,6.height,11.private-key," +
+						"14.recording-path,14.recording-name,21.create-recording-path;"))
 				}
 			}
 			if err != nil {
@@ -335,7 +405,7 @@ func TestGuacamoleTunnelFullFlow(t *testing.T) {
 		t.Errorf("uuid frame should be a complete instruction, got %q", uuidFrame)
 	}
 
-	// 等 guacd 收到握手：size + connect（含凭据与分辨率，不解析参数内容）
+	// 等 guacd 收到握手：size + connect（connect 逐位对齐 args 名列表）
 	covWaitGone(t, "handshake", func() bool {
 		return strings.Contains(g.handshakeText(), "7.connect")
 	})
@@ -346,14 +416,32 @@ func TestGuacamoleTunnelFullFlow(t *testing.T) {
 	if !strings.Contains(hs, "4.size,4.1024,3.768") {
 		t.Errorf("handshake missing size, got %q", hs)
 	}
-	for _, want := range []string{"username=admin", "password=pw", "hostname=10.0.0.9"} {
-		if !strings.Contains(hs, want) {
-			t.Errorf("handshake missing %q in %q", want, hs)
+	// connect 位置参数：与 mock guacd 声明的 args 列表逐位对齐
+	argNames := guacParseArgNames("4.args,13.VERSION_1_5_0,8.hostname,4.port," +
+		"8.username,8.password,6.domain,8.security,11.ignore-cert," +
+		"10.color-depth,5.width,6.height,11.private-key," +
+		"14.recording-path,14.recording-name,21.create-recording-path;")
+	m := guacZipConnect(t, argNames, guacExtractConnect(t, hs))
+	for k, want := range map[string]string{
+		"VERSION_1_5_0": "VERSION_1_5_0",
+		"hostname":      "10.0.0.9",
+		"username":      "admin",
+		"password":      "pw",
+		"width":         "1024",
+		"height":        "768",
+	} {
+		if m[k] != want {
+			t.Errorf("handshake connect[%s] = %q, want %q", k, m[k], want)
 		}
 	}
-	// 音频/视频不传（阶段二，见设计风险章节）
-	if strings.Contains(hs, "5.audio") || strings.Contains(hs, "5.video") {
-		t.Errorf("audio/video should not be negotiated in phase 1: %q", hs)
+	// 媒体能力声明：audio/video 空声明（阶段二不启用），image 必须声明 png
+	//（缺声明 → guacd user->info.image_mimetypes=NULL，supports_webp 空指针
+	// 解引用 → guacd 子进程 segfault，真机验收 2026-09-30 定位）
+	if !strings.Contains(hs, "5.audio;") || !strings.Contains(hs, "5.video;") {
+		t.Errorf("audio/video should be empty declarations: %q", hs)
+	}
+	if !strings.Contains(hs, "5.image,9.image/png;") {
+		t.Errorf("handshake must declare image/png: %q", hs)
 	}
 
 	// guacd → 浏览器：按指令边界（分号）切分下发

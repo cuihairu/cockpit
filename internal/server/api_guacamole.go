@@ -2,7 +2,6 @@ package server
 
 import (
 	"bufio"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -49,16 +48,9 @@ var dialGuacd = func(addr string, timeout time.Duration) (net.Conn, error) {
 }
 
 // guacamoleReadBuf guacd→WS 段读缓冲（Guacamole 指令是文本行，含 base64
-// blob，单条可较大）
+// blob，单条可较大）。upgrader 按请求构造（子协议回显因票据而异），
+// 见 handleGuacamoleWebSocket 第 4 步。
 const guacamoleReadBuf = 256 * 1024
-
-// guacamoleUpgrader Guacamole 隧道专用 upgrader：文本帧承载指令流，
-// 位图 blob 经 base64 文本传输，缓冲给足
-var guacamoleUpgrader = websocket.Upgrader{
-	CheckOrigin:     isOriginAllowed,
-	ReadBufferSize:  guacamoleReadBuf,
-	WriteBufferSize: guacamoleReadBuf,
-}
 
 // guacdAddr 返回 guacd 地址（可经 GUACD_ADDR 覆盖）。
 func guacdAddr() string {
@@ -78,10 +70,13 @@ type GuacamoleSession struct {
 	AgentID  string
 	Host     string
 	Port     int
-	ClientWS *websocket.Conn
-	guacd    net.Conn
-	guacdRd  *bufio.Reader // 握手阶段建立，guacdToWS 复用（select 响应不丢）
-	Created  time.Time
+	// Recording 本会话是否开了 guacd 录制（connect 带 recording-*）——
+	// collect 用它做零延迟跳过（未录制会话不必等 guacd finalize 轮询）
+	Recording bool
+	ClientWS  *websocket.Conn
+	guacd     net.Conn
+	guacdRd   *bufio.Reader // 握手阶段建立，guacdToWS 复用（select 响应不丢）
+	Created   time.Time
 
 	writeMu sync.Mutex // gorilla WS 单写者
 	done    chan struct{}
@@ -102,64 +97,95 @@ func guacEncode(opcode string, args ...string) string {
 	return b.String()
 }
 
-// guacConnectArgs 组装 connect 指令参数（name=value 形式）。
+// guacConnectArgs 组装 connect 指令参数：与 guacd args 指令声明的参数名
+// 逐位对齐的值序列（未设置的参数留空占位，首元素回显协议版本位）。
+// Guacamole 协议的 connect 是位置参数——稀疏 name=value 形态会被真 guacd
+// 以「Client did not return the expected number of arguments」拒绝
+// （真机验收 guacamole/guacd:1.5.5 发现，2026-09-30）。
 // 凭据来自票据 params（handleTicketCreate 存储），不经浏览器二次经手
 // （见设计「为什么参数由服务端放进 connect 指令」）。
-func guacConnectArgs(protocol, host string, port int, params map[string]string, width, height int, record bool, recordingName string) []string {
-	args := []string{
-		"hostname=" + host,
-		"port=" + strconv.Itoa(port),
+func guacConnectArgs(argNames []string, protocol, host string, port int, params map[string]string, width, height int, record bool, recordingName string) []string {
+	values := map[string]string{
+		"hostname": host,
+		"port":     strconv.Itoa(port),
 	}
 	if v := params["username"]; v != "" {
-		args = append(args, "username="+v)
+		values["username"] = v
 	}
 	if v := params["password"]; v != "" {
-		args = append(args, "password="+v)
+		values["password"] = v
 	}
 	if v := params["domain"]; v != "" {
-		args = append(args, "domain="+v)
+		values["domain"] = v
 	}
 	switch protocol {
 	case "rdp":
 		// 办公场景验收（设计风险章节）：色深 32、忽略证书（自签/内网常见）。
 		// 音频：不传 disable-audio（guacd 默认启用），音频流由服务端主动推
 		// audio 指令 + blob 流，自动经本网关字节管道透传（见 todo.md M4 D1）
-		args = append(args,
-			"security=any",
-			"ignore-cert=true",
-			"color-depth=32",
-			"create-drive-path=true",
-		)
+		values["security"] = "any"
+		values["ignore-cert"] = "true"
+		values["color-depth"] = "32"
+		values["create-drive-path"] = "true"
 		if width > 0 && height > 0 {
-			args = append(args, "width="+strconv.Itoa(width), "height="+strconv.Itoa(height))
+			values["width"] = strconv.Itoa(width)
+			values["height"] = strconv.Itoa(height)
 		}
 	case "vnc":
-		args = append(args, "color-depth=32")
-		if v := params["password"]; v != "" {
-			// VNC 的 password 即 connect 的 password 参数（上面已传），
-			// 这里不重复
-			_ = v
-		}
+		// VNC 的 password 即同名参数，上面已统一映射
+		values["color-depth"] = "32"
 	case "ssh":
 		// guacd ssh 插件（libssh2，docs/remote-access-integration-design.md D2）：
-		// username/password 上面已统一传；私钥走 private-key 参数（guacd 约定
-		// base64 编码的 PEM 内容，ticket 存原文、编码在网关侧完成）。
+		// username/password 上面已统一传；私钥走 private-key 参数。
+		// 必须传 PEM 原文，不能 base64——settings.h 注释写 "encoded as
+		// base64" 是误导，实现链 guac_user_parse_args_string →
+		// guac_common_ssh_key_alloc 是 strlen+memcpy 零解码，base64 文本
+		// 直接进 libssh2 PEM_read 必失败（真机 A/B 实测 2026-09-30：
+		// base64 → "Unsupported private key file format"，原文 → 两格式
+		// 认证全过、终端输出正常）。
 		// width/height 不进 connect——字符终端，尺寸经隧道层 size 指令由
 		// guacd 按字体度量换算列/行；domain 是 RDP 专属概念不传。
 		if v := params["private_key"]; v != "" {
-			args = append(args, "private-key="+base64.StdEncoding.EncodeToString([]byte(v)))
+			values["private-key"] = v
 		}
 	}
 	// 桌面会话录制（设计「guacd session recording 白捡」）：recording-path/
 	// recording-name 指向 guacd 容器卷（deployments/guacd 的
-	// guacd-recordings 卷挂载点）；recording.enabled 关闭时不传
+	// guacd-recordings 卷挂载点）；recording.enabled 关闭时不设置
 	if record {
-		args = append(args,
-			"recording-path="+guacamoleRecordingPath(),
-			"recording-name="+recordingName,
-		)
+		values["recording-path"] = guacamoleRecordingPath()
+		values["recording-name"] = recordingName
+		values["create-recording-path"] = "true"
 	}
-	return args
+	out := make([]string, 0, len(argNames))
+	for _, name := range argNames {
+		if strings.HasPrefix(name, "VERSION_") {
+			// args 列表首位的协议版本标记（1.5.0 握手协商），原样回显
+			out = append(out, name)
+			continue
+		}
+		out = append(out, values[name]) // 未配置参数留空占位
+	}
+	return out
+}
+
+// guacParseArgNames 解析 guacd 对 select 的响应（args 指令）：返回去 opcode
+// 后的参数名列表；畸形输入返回 nil（调用方按握手失败处理）。
+func guacParseArgNames(line string) []string {
+	s := strings.TrimSuffix(line, ";")
+	parts := strings.Split(s, ",")
+	if len(parts) < 2 {
+		return nil
+	}
+	names := make([]string, 0, len(parts)-1)
+	for _, p := range parts[1:] {
+		dot := strings.IndexByte(p, '.')
+		if dot < 0 {
+			return nil
+		}
+		names = append(names, p[dot+1:])
+	}
+	return names
 }
 
 // guacdRecordingPathEnv guacd 录制目录（M3 D3）：同一路径同时作 guacd 的
@@ -181,10 +207,32 @@ func guacamoleRecordingPath() string {
 // 源文件缺失静默跳过（guacd 未写或已被外部清理），失败只记日志不阻塞
 // 会话出口路径（与 .cast 的「写失败停录不影响转发」同纪律）。
 func (s *Server) collectGuacRecording(gs *GuacamoleSession) {
+	// 未开录制（connect 指令未带 recording-*）零延迟跳过
+	if !gs.Recording {
+		return
+	}
 	src := filepath.Join(guacamoleRecordingPath(), gs.ID+".guac")
+	// guacd 在 TCP 关闭后才 finalize 录制文件（client 析构时 flush）：
+	// 先等文件出现，再等 size 稳定（两次一致），防拷到截断文件
+	var size int64
+	stable := false
+	for i := 0; i < 10; i++ {
+		info, err := os.Stat(src)
+		if err == nil && info.Size() == size && size > 0 {
+			stable = true
+			break
+		}
+		if err == nil {
+			size = info.Size()
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if !stable {
+		log.Printf("Guacamole: recording %s not finalized by guacd, skip collect", gs.ID)
+		return
+	}
 	info, err := os.Stat(src)
 	if err != nil {
-		// 未开录制（connect 指令未带 recording-*）或 guacd 未落盘
 		return
 	}
 	dst := filepath.Join(s.recordingsDir(), gs.ID+".guac")
@@ -315,8 +363,20 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 4. 升级 WS（票据作子协议回显，与 terminal/desktop 一致）
-	conn, err := guacamoleUpgrader.Upgrade(w, r, nil)
+	// 4. 升级 WS。子协议必须回显其一：浏览器按 RFC 6455，服务端未选中任何
+	// 所 offering 的子协议时直接判握手失败（1006 断开）。common-js 的
+	// WebSocketTunnel 硬编码 offering "guacamole"；自定义 Tunnel 用票据作
+	// 子协议传票据时回显票据本身（真机验收发现缺省不回显，2026-09-30）。
+	up := websocket.Upgrader{
+		CheckOrigin:     isOriginAllowed,
+		ReadBufferSize:  guacamoleReadBuf,
+		WriteBufferSize: guacamoleReadBuf,
+		Subprotocols:    []string{"guacamole"},
+	}
+	if ticketID != "guacamole" {
+		up.Subprotocols = append(up.Subprotocols, ticketID)
+	}
+	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Guacamole WebSocket upgrade failed: %v", err)
 		_ = guacdConn.Close()
@@ -345,8 +405,13 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	session.writeWS([]byte(guacEncode("", sessionID)))
 
 	// 5b. 握手（Guacamole 协议，设计 line 91 的 select/size/connect 序列）：
-	// select → guacd 回参数列表 → size + connect。音频/视频不传 = 不启用
-	//（音频放阶段二，见设计风险章节）。
+	// select → guacd 回参数列表 → size + 媒体能力声明 + connect。
+	// audio/video 空声明 = 不启用（音频放阶段二，见设计风险章节）；image 必须声明：
+	// 官方架构里 guacd 握手由服务端（Java webapp）代客户端完成，always 声明
+	// image/png——若不声明，guacd 侧 user->info.image_mimetypes 为 NULL，渲染
+	// 走 guac_user_supports_webp 遍历该数组时空指针解引用，guacd 子进程直接
+	// segfault（首帧能渲染、一旦有输入触发新字形 img 流即断，VNC/RDP 同理）。
+	// guacamole/guacd 1.5.5 与 1.6.0 均复现（真机验收定位，2026-09-30）。
 	hsReader := bufio.NewReaderSize(guacdConn, guacamoleReadBuf)
 	if _, err := guacdConn.Write([]byte(guacEncode("select", protocolStr))); err != nil {
 		log.Printf("Guacamole: select write failed: %v", err)
@@ -354,10 +419,19 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		_ = guacdConn.Close()
 		return
 	}
-	// 读 guacd 的 select 响应（参数名列表指令）——网关不解析内容，但必须
-	// 消费掉（共享 reader 才能继续读后续 img/sync 流）
-	if _, err := hsReader.ReadString(';'); err != nil {
+	// 读 guacd 的 select 响应：args 参数名列表。connect 必须与这份列表逐位
+	// 对齐（含 VERSION 版本位）——解析出名字再按位组装值
+	// （真机验收发现稀疏形态被真 guacd 拒绝，2026-09-30）
+	argsLine, err := hsReader.ReadString(';')
+	if err != nil {
 		log.Printf("Guacamole: read select response failed: %v", err)
+		conn.Close()
+		_ = guacdConn.Close()
+		return
+	}
+	argNames := guacParseArgNames(argsLine)
+	if len(argNames) == 0 {
+		log.Printf("Guacamole: guacd args response malformed: %q", argsLine)
 		conn.Close()
 		_ = guacdConn.Close()
 		return
@@ -368,10 +442,18 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	if height <= 0 {
 		height = 800
 	}
-	// recording-name 用会话 ID（可追溯到审计的 Session 字段）
-	connectArgs := guacConnectArgs(protocolStr, host, port, ticket.Params, width, height,
-		s.recordingEnabled(), sessionID)
+	// recording-name 用会话 ID（可追溯到审计的 Session 字段）+ .guac 后缀：
+	// guacd 把 recording-name 原样作文件名（不补后缀），不带后缀则
+	// collectGuacRecording 的 <sid>.guac 永远 Stat 不到（真机验收发现
+	// 2026-09-30：rec/ 里全是无后缀孤儿文件、录制页恒空）
+	recording := s.recordingEnabled()
+	session.Recording = recording
+	connectArgs := guacConnectArgs(argNames, protocolStr, host, port, ticket.Params, width, height,
+		recording, sessionID+".guac")
 	handshake := guacEncode("size", strconv.Itoa(width), strconv.Itoa(height), "96") +
+		guacEncode("audio") + // 空 = 不启用音频（阶段二）
+		guacEncode("video") + // 空 = 不启用视频
+		guacEncode("image", "image/png") + // 必须声明，见上方 5b 注释（guacd segfault 根因）
 		guacEncode("connect", connectArgs...)
 	if _, err := guacdConn.Write([]byte(handshake)); err != nil {
 		log.Printf("Guacamole: handshake write failed: %v", err)

@@ -34,11 +34,12 @@ func TestCovServeAPIRoutes(t *testing.T) {
 		{"agents list wrong method", http.MethodPost, "/api/agents", http.StatusMethodNotAllowed},
 		{"agents list", http.MethodGet, "/api/agents", http.StatusOK},
 		{"drift config", http.MethodGet, "/api/drift/config", http.StatusOK},
-		// handleRecordings/handleServerBackups/handleDNS 以 r.URL.Path 判路径，
-		// 经 serveAPI 进入时带 /api 前缀，均落到各自的 404 兜底分支
-		{"recordings", http.MethodGet, "/api/recordings", http.StatusNotFound},
-		{"recordings sub", http.MethodGet, "/api/recordings/xyz", http.StatusNotFound},
-		{"server-backups", http.MethodGet, "/api/server-backups", http.StatusNotFound},
+		// handleRecordings/handleServerBackups/handleDNS 均先剥 /api 前缀再比对
+		//（曾以 r.URL.Path 直比剥前缀路径 → 全 404，Web 三页不可用；
+		// 真机验收发现并修复，2026-09-30）
+		{"recordings", http.MethodGet, "/api/recordings", http.StatusOK},
+		{"recordings sub", http.MethodGet, "/api/recordings/xyz", http.StatusMethodNotAllowed},
+		{"server-backups", http.MethodGet, "/api/server-backups", http.StatusOK},
 		{"dns", http.MethodGet, "/api/dns", http.StatusNotFound},
 		{"agent files", http.MethodPost, "/api/agents/a1/files/list", http.StatusServiceUnavailable},
 		{"agent proxy", http.MethodGet, "/api/agents/a1/proxy/status", http.StatusServiceUnavailable},

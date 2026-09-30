@@ -125,9 +125,10 @@ retry 30 ag_online || { fail "agent 上线"; tail -20 "$WORK/agent.log"; exit 1;
 pass "agent $AGENT_ID 在线"
 
 cap_ok() {
+  # capabilities 已是对象数组（storageAgentToResponse 保留 metadata），按 .type 取
   curl -s -H "Authorization: Bearer $TOKEN" "$API/agents" | jq -e \
     --arg id "$AGENT_ID" '(.agents? // .)[] | select(.id == $id)
-      | (.capabilities | index("docker-api"))' >/dev/null
+      | (.capabilities | map(.type) | index("docker-api"))' >/dev/null
 }
 check_eq "A1 agent 带 docker-api capability" "$(cap_ok && echo yes || echo no)" "yes"
 

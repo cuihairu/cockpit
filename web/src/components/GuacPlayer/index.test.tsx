@@ -9,6 +9,8 @@ const recMock = vi.hoisted(() => ({
   play: vi.fn(),
   pause: vi.fn(),
   seek: vi.fn(),
+  connect: vi.fn(),
+  disconnect: vi.fn(),
   getDisplay: vi.fn(),
   getDuration: vi.fn(() => 5000),
   getPosition: vi.fn(() => 0),
@@ -19,10 +21,22 @@ const recMock = vi.hoisted(() => ({
   onerror: undefined as unknown,
 }))
 
+// Tunnel 基类 mock：makeBlobTunnel 会覆写 connect/disconnect（注入指令流），
+// receiveInstruction/setState 保留 mock 供断言
+const tunnelMock = vi.hoisted(() => ({
+  connect: vi.fn(),
+  disconnect: vi.fn(),
+  receiveInstruction: vi.fn(),
+  setState: vi.fn(),
+}))
+
 vi.mock('guacamole-common-js', () => ({
   default: {
     SessionRecording: vi.fn(function () {
       return recMock
+    }),
+    Tunnel: vi.fn(function () {
+      return tunnelMock
     }),
   },
 }))
@@ -43,11 +57,17 @@ describe('GuacPlayer', () => {
     recMock.isPlaying.mockReturnValue(false)
   })
 
-  it('挂载 Display 并出播放控制', async () => {
+  it('挂载 Display 并出播放控制；经 duck tunnel 构造并立即 connect 注入指令流', async () => {
     render(<GuacPlayer blob={blob} />)
     await waitFor(() => expect(recMock.getDisplay).toHaveBeenCalled())
     expect(screen.getByTestId('guac-display')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /播\s*放/ })).toBeInTheDocument()
+    // 1.5.0 的 SessionRecording(Blob) 分支官方即坏（恒 0 帧）：组件必须走
+    // tunnel 分支（构造入参是 Tunnel 实例）且构造后立即 connect 触发注入
+    const Guacamole = (await import('guacamole-common-js')).default
+    const ctor = Guacamole.SessionRecording as unknown as ReturnType<typeof vi.fn>
+    expect(ctor).toHaveBeenCalledWith(expect.objectContaining({ receiveInstruction: expect.any(Function) }))
+    expect(recMock.connect).toHaveBeenCalled()
   })
 
   it('播放时读 duration；isPlaying 切换到暂停态', async () => {

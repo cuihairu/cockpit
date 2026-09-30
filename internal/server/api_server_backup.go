@@ -27,7 +27,10 @@ import (
 
 // handleServerBackups 分发 /api/server-backups 及子路径
 func (s *Server) handleServerBackups(w http.ResponseWriter, r *http.Request) {
-	sub := strings.Trim(strings.TrimPrefix(r.URL.Path, "/server-backups"), "/")
+	// 经 serveAPI 进入时 r.URL.Path 带 /api 前缀，须先剥再比对（否则全部
+	// 落 404 兜底，Web 备份页不可用；与 handleRecordings/handleDNS 同类
+	// 缺陷，真机验收发现 2026-09-30）
+	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/api"), "/server-backups"), "/")
 	switch {
 	case sub == "":
 		if r.Method != http.MethodGet {
