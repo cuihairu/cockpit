@@ -778,6 +778,8 @@
 
 **覆盖率巡检·三口径终验 + 钟点依赖分支收口（2026-09-30）**：非豁免包按「缺口最大」排查跑了三个口径——①默认构建 coverpkg 并集：31/31 包 100%；②`-tags rdp` agent 家族：6/6 包 100%（**台账「剩余 21 语句挂起」已过期**：d0cb75b 补登录/改分辨率成功路径单测 90.1%→100.0%，2a785c9 rdp-tag CI 步骤已带 100% 门禁）；③CI 门禁镜像（`-short` 无 coverpkg）：20568 语句缺 1 条——`internal/server/alert_loop.go:99` `metricsCleanupFirstWait` 的「已过今天 3 点顺延明天」分支。根因是**钟点依赖**：两个既有测试（cov_loops_test.go:57/:755）都整体注入 `func(){return 0}`，真闭包体从未被测试直接调用，99 行只在「测试跑于 03:00 后」被真实调用顺带盖住——凌晨 0-3 点跑测试/CI 即缺（99.9% 阈值放行，绿灯掩盖）。收口（行为中性纯函数注入，`stdinPipeFn`/`overlayStatusSnapshot` 先例）：闭包体抽为纯函数 `nextMetricsCleanupWait(now time.Time)`（`time.Until` 改 `Sub(now)` 求值等价），var 包装 `time.Now()`；表驱动 4 用例覆盖双分支与边界。**坑位**：恰 03:00:00 用例首版预期写反——原语义 `nextCleanup.Before(now)` 相等时不顺延（等待 0、立即触发），生产行为本就如此，测试预期按事实修正而非改生产逻辑。终态：server 包 `-short` 语句级精确 100%（0 零块，且于 02:5x 原失效钟点验证）；三口径（默认并集 / rdp-tag 家族 / CI -short 门禁）全部语句级 100%，剩余不可覆盖面仅平台专属构建标签文件（darwin launchd / windows SCM 执行层，Linux 无法运行其测试，结构性豁免）。
 
+**同轮续：c2237b5 推送后 CI race 步骤红的根治（2026-09-30）**：Test workflow 的 `go test -race -short` 步骤挂 `TestCovServerBackup`「second same-second backup err = <nil>」——与钟点收口改动无关（该新增用例是纯函数表驱动），是**存量概率性 flake 被 race 慢机放大**：`-race` 下每次 `VACUUM INTO` ~1s，两次备份调用系统性跨秒，「连续三次都跨秒概率近似为零」的注释假设不成立（系统性慢不是独立随机事件，三连重试环整轮击穿）。根治按环境确定性纪律：`serverBackup.go` 备份文件名时钟 var 化 `serverBackupNow`（行为中性注入点，`osChmod`/`stdinPipeFn` 先例），测试冻结时钟令文件名恒定——同秒冲突在 `os.Stat` 早退，第二次调用零 VACUUM 成本，重试环整体删除；其余直接调用点（cov_final/server_backup/server_backup_remote 测试）均为各自 TempDir 单次调用，无同秒语义不受影响。本地 `-race -count=5` 复跑该族全绿。
+
 ## 远控三协议统一第三方集成（Guacamole SSH 接入，2026-09-25）
 
 方向对齐另一仓库：VNC / SSH / RDP 三协议远控统一集成第三方方案（guacd + guacamole-common-js 单栈），不再各自维护自研协议链路。设计文档 `docs/remote-access-integration-design.md`（选型总览/备选对比/数据流/衔接既有链路/决策 D1-D7）。RDP/VNC 已在 Guacamole 路线上，本次补齐 **SSH 接入同一栈**：

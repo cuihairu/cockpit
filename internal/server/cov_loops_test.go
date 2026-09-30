@@ -506,6 +506,15 @@ func TestCovServerBackup(t *testing.T) {
 		t.Error("no backup should give zero time")
 	}
 
+	// 冻结命名时钟（serverBackupNow 注入点）：备份文件名时间戳恒定，同秒
+	// already exists 分支确定性触发——真实时钟下 -race 慢机每次 VACUUM INTO
+	// ~1s，两次调用系统性跨秒，三连重试环曾被整轮击穿（CI 2026-09-30 Test
+	// run 实证）。冲突在 Stat 处早退，第二次调用零 VACUUM 成本
+	frozen := time.Now()
+	origBackupNow := serverBackupNow
+	serverBackupNow = func() time.Time { return frozen }
+	t.Cleanup(func() { serverBackupNow = origBackupNow })
+
 	// 正常备份一次
 	name, err := s.runServerBackup()
 	if err != nil || !isValidServerBackupName(name) {
@@ -519,19 +528,8 @@ func TestCovServerBackup(t *testing.T) {
 		t.Error("latest backup time should be parsed")
 	}
 
-	// 同秒再备 → already exists（CI 慢机器上两次调用可能恰好跨秒、
-	// 真建出新备份：删掉重试，保证目录里始终只有第一个备份——后续
-	// 数量断言的前提；连续三次都跨秒的概率近似为零）
-	var dupErr error
-	for i := 0; i < 3; i++ {
-		name2, err := s.runServerBackup()
-		if err != nil {
-			dupErr = err
-			break
-		}
-		os.Remove(filepath.Join(s.serverBackupDir(), name2))
-	}
-	if dupErr == nil || !strings.Contains(dupErr.Error(), "already exists") {
+	// 同秒再备 → already exists（时钟已冻结，文件名必然同名）
+	if _, dupErr := s.runServerBackup(); dupErr == nil || !strings.Contains(dupErr.Error(), "already exists") {
 		t.Fatalf("second same-second backup err = %v", dupErr)
 	}
 

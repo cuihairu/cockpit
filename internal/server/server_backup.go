@@ -21,6 +21,11 @@ import (
 // osChmod 注入点：TempDir 内 chmod 恒成功，失败告警分支仅供测试覆盖。
 var osChmod = os.Chmod
 
+// serverBackupNow 注入点：备份文件名时间戳的时钟，默认即生产取值。测试
+// 冻结该时钟使「同秒再备 → already exists」分支确定性触发（-race 慢机上
+// 每次 VACUUM INTO 约 1s，真实时钟会系统性跨秒，击穿概率性重试环）。
+var serverBackupNow = time.Now
+
 // authGenerateResetToken 注入点：重置令牌生成仅 crypto/rand 失败可达，
 // 错误分支仅供测试覆盖。
 var authGenerateResetToken = auth.GenerateResetToken
@@ -216,7 +221,7 @@ func (s *Server) runServerBackup() (string, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("create server-backups dir: %w", err)
 	}
-	name := "cockpit-" + time.Now().Format("20060102-150405") + ".db"
+	name := "cockpit-" + serverBackupNow().Format("20060102-150405") + ".db"
 	path := filepath.Join(dir, name)
 	if _, err := os.Stat(path); err == nil {
 		return "", fmt.Errorf("backup already exists this second: %s", name)
