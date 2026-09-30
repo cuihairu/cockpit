@@ -780,6 +780,8 @@
 
 **同轮续：c2237b5 推送后 CI race 步骤红的根治（2026-09-30）**：Test workflow 的 `go test -race -short` 步骤挂 `TestCovServerBackup`「second same-second backup err = <nil>」——与钟点收口改动无关（该新增用例是纯函数表驱动），是**存量概率性 flake 被 race 慢机放大**：`-race` 下每次 `VACUUM INTO` ~1s，两次备份调用系统性跨秒，「连续三次都跨秒概率近似为零」的注释假设不成立（系统性慢不是独立随机事件，三连重试环整轮击穿）。根治按环境确定性纪律：`serverBackup.go` 备份文件名时钟 var 化 `serverBackupNow`（行为中性注入点，`osChmod`/`stdinPipeFn` 先例），测试冻结时钟令文件名恒定——同秒冲突在 `os.Stat` 早退，第二次调用零 VACUUM 成本，重试环整体删除；其余直接调用点（cov_final/server_backup/server_backup_remote 测试）均为各自 TempDir 单次调用，无同秒语义不受影响。本地 `-race -count=5` 复跑该族全绿。
 
+**同轮续二：第二例 CI race 步骤红——driftScanLoop 睡后读包级变量（2026-09-30）**：上笔修复推送后 Test workflow 再红，`TestCovForgotPasswordWithEmail` 失败体仅 `race detected during execution of test`（竞态归因，非自身断言），全 log 仅 1 例 DATA RACE：泄漏的 `driftScanLoop` 生产 goroutine（`TestStartWithDNSProviderEnabled` 经 `Server.Start()` 起的，server.go:227）在 `time.Sleep(90s)` 醒来后读包级 `driftScanTick`（drift_scan.go:69），与很久之后 `TestCovDriftScan` 的 t.Cleanup 恢复写入相撞——**裸 Sleep 不受 ctx 中断，即便测试规范 Shutdown 也拦不住醒来后的读**。排查同形态兄弟循环：`serverBackupLoop`/`metricsCleanupLoop` 均入口一次性读（泄漏后首 tick 1h 超出测试套时长，不可达）；`cleanupLoop` 循环内读 `recordingCleanupInterval` 但无任何测试写它（读读无竞争）——唯一病灶就是 driftScanLoop。修复（alertCheckLoop 既有纪律）：节奏先读局部量（goroutine 不再碰包级变量）+ 初始等待改 ctx 可中断 select（server 关闭不留 90s 僵尸，同款形态即 alertCheckLoop 首查路径）；新增 `TestCovDriftScanStartWaitCancel` 覆盖初始等待期取消分支，server 包语句级 74/74 精确 100% 维持。**教训**：带长初始等待的后台循环，包级注入变量的读取必须全部发生在入口（进局部量），否则泄漏 goroutine 醒来即与任意后续测试的注入/恢复构成竞争——本地全量 race 绿不能证伪（时序窗口依赖 CI 慢机的 90s 恰好落进后续测试段）。
+
 ## 远控三协议统一第三方集成（Guacamole SSH 接入，2026-09-25）
 
 方向对齐另一仓库：VNC / SSH / RDP 三协议远控统一集成第三方方案（guacd + guacamole-common-js 单栈），不再各自维护自研协议链路。设计文档 `docs/remote-access-integration-design.md`（选型总览/备选对比/数据流/衔接既有链路/决策 D1-D7）。RDP/VNC 已在 Guacamole 路线上，本次补齐 **SSH 接入同一栈**：

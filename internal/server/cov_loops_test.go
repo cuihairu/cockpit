@@ -796,6 +796,20 @@ func TestCovDriftScanLoopTicks(t *testing.T) {
 	covWaitExit(t, "driftScanLoop", exited)
 }
 
+// TestCovDriftScanStartWaitCancel 初始等待期内 ctx 取消 → 未经首扫立即退出
+// （该分支随 2026-09-30 竞态修复引入：初始等待从裸 Sleep 改为 ctx 可中断 select）
+func TestCovDriftScanStartWaitCancel(t *testing.T) {
+	saveTick, saveWait := driftScanTick, driftScanStartWait
+	driftScanTick, driftScanStartWait = time.Minute, 10*time.Second
+	t.Cleanup(func() { driftScanTick, driftScanStartWait = saveTick, saveWait })
+
+	s := covLoopServer(t)
+	exited := covSpawnLoop(s.driftScanLoop)
+	time.Sleep(50 * time.Millisecond) // 仍在初始等待窗口内
+	s.cancel()
+	covWaitExit(t, "driftScanLoop start-wait cancel", exited)
+}
+
 // TestCovServerBackupLoopTicks serverBackupLoop 全部分支：关闭跳过、间隔未到
 // 跳过、真实备份成功 + cleanup、关库后 VacuumInto 失败
 func TestCovServerBackupLoopTicks(t *testing.T) {

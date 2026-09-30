@@ -65,8 +65,18 @@ type driftScanItem struct {
 
 // driftScanLoop 定时巡检循环（每分钟醒来对比间隔，间隔可动态改）
 func (s *Server) driftScanLoop() {
-	time.Sleep(driftScanStartWait)
-	ticker := time.NewTicker(driftScanTick)
+	// 节奏先进局部量：本 goroutine 不再读包级变量——启动长等待（默认 90s）
+	// 醒来时可能已跨进其它测试对注入变量的恢复窗口，裸读即数据竞争
+	// （CI -race 实证：泄漏的巡检循环醒来读 driftScanTick，撞上另一测试
+	// t.Cleanup 的恢复写入）；alertCheckLoop 同纪律。初始等待改 ctx 可中断
+	// select，server 关闭不再留 90s 僵尸 goroutine
+	startWait, tick := driftScanStartWait, driftScanTick
+	select {
+	case <-time.After(startWait):
+	case <-s.ctx.Done():
+		return
+	}
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
 	var lastScan time.Time
