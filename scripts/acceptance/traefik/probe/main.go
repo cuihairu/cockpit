@@ -88,9 +88,13 @@ func check(name string, ok bool, detail string) {
 	ev("[%s] %s — %s", status, name, detail)
 }
 
+// 行为中性注入点（先例：guac/probe osExit、logs/probe systemdRunCmd、
+// services/probe shExec）——fatal 退出在单测注入桩覆盖分支，默认值即原行为
+var osExit = os.Exit
+
 func fatal(format string, args ...interface{}) {
 	ev("[FATAL] "+format, args...)
-	os.Exit(2)
+	osExit(2)
 }
 
 func truncate(s string, n int) string {

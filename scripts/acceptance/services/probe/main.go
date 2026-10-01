@@ -66,6 +66,16 @@ var (
 	httpC  = &http.Client{Timeout: 30 * time.Second}
 )
 
+// 行为中性注入点（先例：guac/probe osExit/dockerExecCmd、logs/probe
+// systemdRunCmd）——fatal 退出与本机 systemctl 命令面在单测注入桩覆盖分支，
+// 默认值即原行为
+var (
+	osExit = os.Exit
+	shExec = func(name string, args ...string) ([]byte, error) {
+		return exec.Command(name, args...).CombinedOutput()
+	}
+)
+
 // ---------- 证据 ----------
 
 func ev(format string, args ...interface{}) {
@@ -91,7 +101,7 @@ func check(name string, ok bool, detail string) {
 
 func fatal(format string, args ...interface{}) {
 	ev("[FATAL] "+format, args...)
-	os.Exit(2)
+	osExit(2)
 }
 
 func truncate(s string, n int) string {
@@ -240,7 +250,7 @@ func auditBody() string {
 // shOut 组合输出（忽略退出码——is-active/is-enabled 对 inactive/disabled 退出码
 // 本就非 0，stdout 才是事实）
 func shOut(args ...string) (string, error) {
-	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
+	out, err := shExec(args[0], args[1:]...)
 	return strings.TrimSpace(string(out)), err
 }
 

@@ -66,6 +66,22 @@ var (
 	followC = &http.Client{}
 )
 
+// 行为中性注入点（先例：guac/probe osExit/dockerExecCmd、生产码
+// stdinPipeFn）——fatal 退出与真机 systemd-run/journalctl 命令面在单测
+// 注入桩覆盖分支，默认值即原行为
+var (
+	osExit        = os.Exit
+	busyRetryWait = 500 * time.Millisecond
+	systemdRunCmd = func(unit, script string) ([]byte, error) {
+		return exec.Command("sudo", "-n", "systemd-run",
+			"--unit="+unit, "--collect", "/bin/bash", "-c", script).CombinedOutput()
+	}
+	journalCtlCmd = func(unit string) ([]byte, error) {
+		return exec.Command("journalctl", "-u", unit, "--no-pager",
+			"-q", "-n", "2000").CombinedOutput()
+	}
+)
+
 // ---------- 证据 ----------
 
 func ev(format string, args ...interface{}) {
@@ -91,7 +107,7 @@ func check(name string, ok bool, detail string) {
 
 func fatal(format string, args ...interface{}) {
 	ev("[FATAL] "+format, args...)
-	os.Exit(2)
+	osExit(2)
 }
 
 func truncate(s string, n int) string {
@@ -182,14 +198,13 @@ func agentHasLogsCapability(id string) (bool, error) {
 func runUnit(unit, script string) error {
 	var last string
 	for i := 0; i < 20; i++ {
-		out, err := exec.Command("sudo", "-n", "systemd-run",
-			"--unit="+unit, "--collect", "/bin/bash", "-c", script).CombinedOutput()
+		out, err := systemdRunCmd(unit, script)
 		if err == nil {
 			return nil
 		}
 		last = fmt.Sprintf("%v: %s", err, truncate(strings.TrimSpace(string(out)), 200))
 		if strings.Contains(strings.ToLower(string(out)), "already exist") {
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(busyRetryWait)
 			continue
 		}
 		return fmt.Errorf("systemd-run %s: %s", unit, last)
@@ -201,8 +216,7 @@ func runUnit(unit, script string) error {
 func waitJournal(unit, marker string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		out, _ := exec.Command("journalctl", "-u", unit, "--no-pager",
-			"-q", "-n", "2000").CombinedOutput()
+		out, _ := journalCtlCmd(unit)
 		if strings.Contains(string(out), marker) {
 			return true
 		}

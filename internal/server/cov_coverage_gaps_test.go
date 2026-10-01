@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -83,7 +84,10 @@ func TestCollectGuacRecordingErrorBranches(t *testing.T) {
 	}
 	guacDir := t.TempDir()
 	t.Setenv("GUACD_RECORDING_PATH", guacDir)
-	gs := &GuacamoleSession{ID: "sess-mkdir-fail", Created: time.Now()}
+	// Recording: true 是必需前置——collectGuacRecording 首行 !gs.Recording 即
+	// 返回，漏设时本用例声称覆盖的 MkdirAll 失败分支从未到达（存量测试缺陷，
+	// 2026-10-01 覆盖率门禁修 Go 侧豁免机制时实测暴露）
+	gs := &GuacamoleSession{ID: "sess-mkdir-fail", Created: time.Now(), Recording: true}
 	if err := os.WriteFile(filepath.Join(guacDir, gs.ID+".guac"), []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +98,7 @@ func TestCollectGuacRecordingErrorBranches(t *testing.T) {
 	s2.cfg = &config.Config{Database: &config.DatabaseConfig{Path: filepath.Join(t.TempDir(), "cockpit.db")}}
 	guacDir2 := t.TempDir()
 	t.Setenv("GUACD_RECORDING_PATH", guacDir2)
-	gs2 := &GuacamoleSession{ID: "sess-copy-fail", Created: time.Now()}
+	gs2 := &GuacamoleSession{ID: "sess-copy-fail", Created: time.Now(), Recording: true}
 	if err := os.MkdirAll(filepath.Join(guacDir2, gs2.ID+".guac"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +109,9 @@ func TestCollectGuacRecordingErrorBranches(t *testing.T) {
 	s3.cfg = &config.Config{Database: &config.DatabaseConfig{Path: filepath.Join(t.TempDir(), "cockpit.db")}}
 	guacDir3 := t.TempDir()
 	t.Setenv("GUACD_RECORDING_PATH", guacDir3)
-	gs3 := &GuacamoleSession{ID: "sess-finish-fail", Created: time.Now()}
+	// Recording: true 同样必需，否则首行即返回，FinishTerminalRecording 失败
+	// 分支（250-251）不可达
+	gs3 := &GuacamoleSession{ID: "sess-finish-fail", Created: time.Now(), Recording: true}
 	if err := os.WriteFile(filepath.Join(guacDir3, gs3.ID+".guac"), []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -266,6 +272,7 @@ const (
 	guacStubFailSelectWrite                        // Accept 后立即 RST：select write 失败
 	guacStubFailReadSelect                         // Accept 后 EOF：read select 响应失败
 	guacStubFailHandshakeWrite                     // 回 select 响应后 RST：handshake write 失败
+	guacStubMalformedArgs                          // 回无逗号 select 响应：args 解析为 nil（畸形分支）
 )
 
 // startGuacStub 确定性假 guacd：按 mode 精确控制握手失败点（不依赖 RST 传播
@@ -309,11 +316,16 @@ func serveGuacStub(c net.Conn, mode guacStubMode) {
 	case guacStubFailReadSelect:
 		// 立即 FIN/RST 但不回数据：网关 read select 响应失败
 		return
-	case guacStubOK, guacStubFailHandshakeWrite:
+	case guacStubOK, guacStubFailHandshakeWrite, guacStubMalformedArgs:
 		// 先读掉 select 指令再回响应（确定性同步点）：网关 read select 成功
 		buf := make([]byte, 256)
 		_, _ = c.Read(buf)
-		_, _ = c.Write([]byte("6.select,8.hostname,4.port;"))
+		if mode == guacStubMalformedArgs {
+			// 无逗号：guacParseArgNames len(parts)<2 → nil，网关走畸形 args 分支
+			_, _ = c.Write([]byte("6.select;"))
+		} else {
+			_, _ = c.Write([]byte("6.select,8.hostname,4.port;"))
+		}
 		if mode == guacStubFailHandshakeWrite {
 			// 响应已写入内核缓冲 + RST：网关 read select 拿到响应后
 			// handshake write 撞 RST 失败
@@ -401,5 +413,47 @@ func TestGuacamoleSelectReadFailInjected(t *testing.T) {
 	}
 	// select 响应读取失败 → 记日志后 return；显式关 conn 防污染
 	conn.Close()
+	time.Sleep(300 * time.Millisecond)
+}
+
+// TestGuacParseArgNames 覆盖 args 指令解析：正常去 opcode、畸形返回 nil。
+// 两个 nil 分支（178-179 无逗号、184-185 段内无点）此前只有 handler 路径，
+// 且真实 guacd 恒回合法响应，用单元测试直达。
+func TestGuacParseArgNames(t *testing.T) {
+	got := guacParseArgNames("6.select,8.hostname,4.port;")
+	want := []string{"hostname", "port"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("guacParseArgNames(ok) = %#v, want %#v", got, want)
+	}
+
+	// 无逗号：strings.Split 仅 1 段 → len(parts) < 2 → nil
+	if got := guacParseArgNames("6.select;"); got != nil {
+		t.Fatalf("guacParseArgNames(no comma) = %#v, want nil", got)
+	}
+
+	// 参数段内无点：无法切出参数名 → nil
+	if got := guacParseArgNames("6.select,bad;"); got != nil {
+		t.Fatalf("guacParseArgNames(no dot) = %#v, want nil", got)
+	}
+}
+
+// TestGuacamoleMalformedArgsResponse 覆盖 guacd select 响应畸形分支
+// （api_guacamole.go 433-438）：假 guacd 回无逗号响应 → guacParseArgNames
+// nil → 记日志、关双连接并 return，不再发 handshake。
+func TestGuacamoleMalformedArgsResponse(t *testing.T) {
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+	t.Setenv("GUACD_ADDR", startGuacStub(t, guacStubMalformedArgs))
+
+	conn, _, _ := covDirectWSJoined(t, s.handleGuacamoleWebSocket, "/api/remote/guacamole",
+		covTicket(t, s, map[string]string{
+			"agent_id": "a", "host": "10.0.0.9", "port": "3389", "protocol": "rdp",
+		}))
+	t.Cleanup(func() { conn.Close() })
+	// net.Pipe 同步无缓冲：writeWS(uuid) 阻塞到读完，先消费首帧放行
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read uuid frame: %v", err)
+	}
+	// 畸形分支触发即达成覆盖；等 goroutine 退出，防测试间状态残留
 	time.Sleep(300 * time.Millisecond)
 }

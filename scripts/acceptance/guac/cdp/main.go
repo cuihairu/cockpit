@@ -67,9 +67,18 @@ func check(name string, ok bool, detail string) {
 	ev("[%s] %s — %s", status, name, detail)
 }
 
+// 行为中性注入点（先例：guac/probe osExit、traefik/probe osExit、logs/probe
+// systemdRunCmd）——fatal 退出与 call 等待上限在单测注入桩覆盖分支，
+// 默认值即原行为
+var (
+	osExit = os.Exit
+	// callWait 单请求等待上限（真机 30s；单测缩短以覆盖 timeout 分支）
+	callWait = 30 * time.Second
+)
+
 func fatal(format string, args ...interface{}) {
 	ev("[FATAL] "+format, args...)
-	os.Exit(2)
+	osExit(2)
 }
 
 // ---------- CDP 客户端（手写，仅本验收用） ----------
@@ -201,7 +210,7 @@ func (c *cdp) call(method string, params map[string]interface{}) (json.RawMessag
 			return nil, fmt.Errorf("%s: %s", method, m.Error.Message)
 		}
 		return m.Result, nil
-	case <-time.After(30 * time.Second):
+	case <-time.After(callWait):
 		return nil, fmt.Errorf("%s: timeout", method)
 	}
 }

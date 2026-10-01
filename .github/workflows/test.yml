@@ -51,32 +51,17 @@ jobs:
 
       - name: Check RDP coverage threshold
         run: |
-          # 必须锚定 ^total:——探针包有 totalOps 等含 "total" 的函数名，
-          # 裸 grep 会把函数行混进 coverage 变量（多行值令 bc 语法错 →
-          # (( )) 恒假 → 门禁在真实低于阈值时静默放行，2026-10-01 实锤）
-          coverage=$(go tool cover -func=coverage-rdp.out | grep '^total:' | awk '{print $3}' | sed 's/%//')
-          echo "RDP coverage: ${coverage}%"
-          if (( $(echo "$coverage < 100" | bc -l) )); then
-            echo "Coverage ${coverage}% is below 100% threshold"
-            echo '--- functions below 100% ---'
-            go tool cover -func=coverage-rdp.out | awk '{gsub(/%/, "", $3)} $3 + 0 < 100 {print}' | head -50
-            exit 1
-          fi
-          echo "Coverage ${coverage}% meets threshold"
+          # 与全量同口径：未覆盖语句块必须登记 tool/known_uncoverable.txt
+          # （块级校验，取代原 go tool cover -func 百分比取整的 ^total: grep；
+          # 本 rdp 子集实测 0 未覆盖块）
+          bash tool/coverage_check.sh coverage-rdp.out
 
       - name: Check coverage threshold
         run: |
-          # 同上：锚定 ^total: 防 totalOps 类函数名误匹配（修复前 CI 日志
-          # 曾出现 coverage 变量为 "0.0\n89.3" 两行 → bc 语法错 → 门禁假绿）
-          coverage=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $3}' | sed 's/%//')
-          echo "Total coverage: ${coverage}%"
-          if (( $(echo "$coverage < 100" | bc -l) )); then
-            echo "Coverage ${coverage}% is below 100% threshold"
-            echo '--- functions below 100% ---'
-            go tool cover -func=coverage.out | awk '{gsub(/%/, "", $3)} $3 + 0 < 100 {print}' | head -50
-            exit 1
-          fi
-          echo "Coverage ${coverage}% meets threshold"
+          # 块级校验：未覆盖语句块必须登记 tool/known_uncoverable.txt 并附理由，
+          # 有效覆盖 100%。取代原「total 恒 100%」grep——探针 main() 场景编排、
+          # 真机命令默认闭包、死防御等无法进程内确定性覆盖，属结构性边界须登记豁免
+          bash tool/coverage_check.sh coverage.out
 
       - name: Run tests with race detector
         run: go test -race -short ./... -timeout 900s
