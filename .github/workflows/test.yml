@@ -51,7 +51,10 @@ jobs:
 
       - name: Check RDP coverage threshold
         run: |
-          coverage=$(go tool cover -func=coverage-rdp.out | grep total | awk '{print $3}' | sed 's/%//')
+          # 必须锚定 ^total:——探针包有 totalOps 等含 "total" 的函数名，
+          # 裸 grep 会把函数行混进 coverage 变量（多行值令 bc 语法错 →
+          # (( )) 恒假 → 门禁在真实低于阈值时静默放行，2026-10-01 实锤）
+          coverage=$(go tool cover -func=coverage-rdp.out | grep '^total:' | awk '{print $3}' | sed 's/%//')
           echo "RDP coverage: ${coverage}%"
           if (( $(echo "$coverage < 100" | bc -l) )); then
             echo "Coverage ${coverage}% is below 100% threshold"
@@ -63,7 +66,9 @@ jobs:
 
       - name: Check coverage threshold
         run: |
-          coverage=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          # 同上：锚定 ^total: 防 totalOps 类函数名误匹配（修复前 CI 日志
+          # 曾出现 coverage 变量为 "0.0\n89.3" 两行 → bc 语法错 → 门禁假绿）
+          coverage=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $3}' | sed 's/%//')
           echo "Total coverage: ${coverage}%"
           if (( $(echo "$coverage < 100" | bc -l) )); then
             echo "Coverage ${coverage}% is below 100% threshold"

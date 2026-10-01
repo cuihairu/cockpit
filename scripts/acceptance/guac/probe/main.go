@@ -84,9 +84,22 @@ func check(name string, ok bool, detail string) {
 	ev("[%s] %s — %s", status, name, detail)
 }
 
+// 行为中性注入点（先例：生产码 stdinPipeFn/overlayStatusSnapshot）——单测
+// 覆盖 fatal/login 重试/docker 命令/心跳与首指令超时的分支，默认值即原行为
+var (
+	osExit             = os.Exit
+	loginRetryWait     = 500 * time.Millisecond
+	pingInterval       = 3 * time.Second
+	dialFirstInstrWait = 10 * time.Second
+	dockerExecCmd      = func(args ...string) ([]byte, error) {
+		cmd := exec.Command("docker", append([]string{"exec", *container}, args...)...)
+		return cmd.CombinedOutput()
+	}
+)
+
 func fatal(format string, args ...interface{}) {
 	ev("[FATAL] "+format, args...)
-	os.Exit(2)
+	osExit(2)
 }
 
 // ---------- REST ----------
@@ -125,7 +138,7 @@ func login() {
 				return
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(loginRetryWait)
 	}
 	fatal("登录失败")
 }
@@ -202,7 +215,7 @@ func dialGuac(ticket string) (*guacSession, error) {
 		pingStop: make(chan struct{}),
 	}
 	go gs.readLoop()
-	go gs.pingLoop()
+	go gs.pingLoop(pingInterval)
 	// 首条：网关内部 UUID 指令（单元素、空 opcode）
 	select {
 	case in := <-gs.instrCh:
@@ -213,7 +226,7 @@ func dialGuac(ticket string) (*guacSession, error) {
 		}
 	case err := <-gs.errCh:
 		return gs, err
-	case <-time.After(10 * time.Second):
+	case <-time.After(dialFirstInstrWait):
 		return gs, fmt.Errorf("等待网关 UUID 指令超时")
 	}
 	return gs, nil
@@ -254,9 +267,11 @@ func (gs *guacSession) readLoop() {
 }
 
 // pingLoop 心跳：common-js 的 WebSocketTunnel 每 ~1s 发内部 ping、网关原样
-// 回显；探针同款义务（guacd 15s 无指令判 "User is not responding"）
-func (gs *guacSession) pingLoop() {
-	ticker := time.NewTicker(3 * time.Second)
+// 回显；探针同款义务（guacd 15s 无指令判 "User is not responding"）。
+// 间隔走参数值捕获（driftScanLoop 同纪律）：goroutine 体内不读包级注入
+// var——泄漏实例醒来读与测试 cleanup 的注入恢复写不构成数据竞争
+func (gs *guacSession) pingLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -449,8 +464,7 @@ func (gs *guacSession) close() {
 // dockerExec 容器侧信道读文件/执行命令；失败返回 ""（错误另行记证据，
 // 不混进断言文本——错误串里若含标记词会造成假阳性）
 func dockerExec(args ...string) string {
-	cmd := exec.Command("docker", append([]string{"exec", *container}, args...)...)
-	out, err := cmd.CombinedOutput()
+	out, err := dockerExecCmd(args...)
 	if err != nil {
 		ev("[sidechannel] docker exec 失败: %v: %s", err, strings.TrimSpace(string(out)))
 		return ""
