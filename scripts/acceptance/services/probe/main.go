@@ -1,5 +1,5 @@
 // 服务管理真实环境验收探针（acceptance-checklist「服务管理（三后端）」systemd
-// 行、todo.md systemd 服务管理条目剩余三件）。以面板用户身份走真实 REST→agent
+// 行、todo.md systemd 服务管理条目）。以面板用户身份走真实 REST→agent
 // →systemctl 链路，本机 systemd 主机、测试 unit（cockpit-acc-*，不碰业务 unit）：
 //
 //	T0  前置：登录；双 agent service capability；a1 系统状态可读
@@ -13,6 +13,18 @@
 //	T3  非 root agent 报错透传（a2，cui）：polkit 拒非交互授权（实测
 //	    Access denied ... interactive authentication），restart/enable 均
 //	    502 + systemctl 原文（含 unit 名）——与 a1 同操作 200 构成对照
+//	T4  unit 文件查看/编辑（D13，a1 root）：GET 有效视图（fragmentPath=
+//	    /usr/lib 包管位）→ PUT 改 Description → 包管文件先复制 /etc 覆盖位
+//	    再写 + 捆绑 daemon-reload（systemctl show 即时反映新值）→ GET 复读
+//	    fragmentPath 已是 /etc；超 256KB 拒 413；坏 unit 名 400 / 多余段
+//	    404（路径穿越面只收 unit 名）；非 root PUT 502 permission denied
+//	    透传；审计 details.action=unitfile-save 落账
+//	T5  journal 日志跳转（D11，含未加载 unit，a1）：PUT jlog 换带唯一
+//	    marker 的 ExecStart（dogfood 覆盖位 + 捆绑 reload——start 执行的
+//	    是新内容即铁证）→ start 产 journal 历史 → stop + daemon-reload
+//	    端点 → jlog 成未加载安装项（list-units --all 无 / 表 loadState 空 /
+//	    logs.sources 不含）→ /logs/query 按 unit 派生 source 仍查得到
+//	    历史 marker（LogsPanel initialSource 无条件优先派生同款路径）
 //
 // is-active/is-enabled 非 root 可读（stdout 为准、退出码非 0 忽略：inactive/
 // disabled 的 is-* 退出码本就非 0）。证据落 .acceptance/services/evidence/
@@ -42,6 +54,7 @@ var (
 	agentA2   = flag.String("a2", "svc-acc-a2", "非 root agent（报错透传组）")
 	unit      = flag.String("unit", "cockpit-acc-svc.service", "测试操作 unit")
 	ghostUnit = flag.String("ghost", "cockpit-acc-ghost.service", "未加载样本 unit")
+	jlogUnit  = flag.String("jlog", "cockpit-acc-jlog.service", "journal 历史样本 unit")
 )
 
 var (
@@ -167,6 +180,61 @@ func serviceAction(agentID, act string) (int, []byte) {
 		*apiBase+"/api/agents/"+agentID+"/services/"+*unit+"/"+act, nil)
 }
 
+// serviceActionUnit 对指定 unit 执行动词（jlog 的 start/stop 等）
+func serviceActionUnit(agentID, name, act string) (int, []byte) {
+	return reqJSON(http.MethodPost,
+		*apiBase+"/api/agents/"+agentID+"/services/"+name+"/"+act, nil)
+}
+
+// daemonReload POST /services/daemon-reload（D12 工具栏「重载配置」按钮链路）
+func daemonReload(agentID string) (int, []byte) {
+	return reqJSON(http.MethodPost,
+		*apiBase+"/api/agents/"+agentID+"/services/daemon-reload", nil)
+}
+
+// unitFileGet GET /services/{unit}/file（D13 有效视图）
+func unitFileGet(agentID, name string) (int, []byte) {
+	return reqJSON(http.MethodGet,
+		*apiBase+"/api/agents/"+agentID+"/services/"+name+"/file", nil)
+}
+
+// unitFilePut PUT /services/{unit}/file（D13 保存：覆盖位复制 + 捆绑 reload）
+func unitFilePut(agentID, name, content string) (int, []byte) {
+	return reqJSON(http.MethodPut,
+		*apiBase+"/api/agents/"+agentID+"/services/"+name+"/file",
+		map[string]string{"content": content})
+}
+
+// logsQuery POST /logs/query（服务行「日志」跳转的查询端点，D11）
+func logsQuery(agentID, source string, tail int) (int, string) {
+	code, raw := reqJSON(http.MethodPost,
+		*apiBase+"/api/agents/"+agentID+"/logs/query",
+		map[string]interface{}{
+			"type": "systemd", "source": source, "tail": tail,
+			"since_minutes": 0, "grep": "",
+		})
+	var resp struct {
+		Lines string `json:"lines"`
+	}
+	_ = json.Unmarshal(raw, &resp)
+	return code, resp.Lines
+}
+
+// logsSources GET /logs/sources（只列 loaded/running——未加载 unit 不在表，
+// LogsPanel initialSource 无条件优先派生正是为该场景）
+func logsSources(agentID string) (int, string) {
+	code, raw := reqJSON(http.MethodGet,
+		*apiBase+"/api/agents/"+agentID+"/logs/sources", nil)
+	return code, string(raw)
+}
+
+// auditBody 拉审计（action=service_action 面）原文
+func auditBody() string {
+	_, raw := reqJSON(http.MethodGet,
+		*apiBase+"/api/admin/audit/logs?action=service_action&resource=service&page_size=50", nil)
+	return string(raw)
+}
+
 // ---------- 本机只读对照（probe 以 cui 直跑）----------
 
 // shOut 组合输出（忽略退出码——is-active/is-enabled 对 inactive/disabled 退出码
@@ -244,8 +312,8 @@ func main() {
 	defer evFile.Close()
 
 	ev("=== 服务管理真实环境验收 %s ===", time.Now().Format(time.RFC3339))
-	ev("api=%s unit=%s ghost=%s a1(root)=%s a2(nonroot)=%s",
-		*apiBase, *unit, *ghostUnit, *agentA1, *agentA2)
+	ev("api=%s unit=%s ghost=%s jlog=%s a1(root)=%s a2(nonroot)=%s",
+		*apiBase, *unit, *ghostUnit, *jlogUnit, *agentA1, *agentA2)
 
 	login()
 	ev("登录成功（%s）", *adminUser)
@@ -399,6 +467,165 @@ func main() {
 		// 收尾：a1 把自启态复位 enabled（T2c 结束已是 enabled；unmask 后亦 enabled）
 		// —— teardown 会彻底移除测试 unit，此处仅记录末态
 		ev("      末态：is-active=%s is-enabled=%s", isActive(), isEnabled())
+	}()
+
+	// ---- T4 unit 文件查看/编辑（D13 全链，a1 root；拒绝面走 a2/直接构造）----
+	func() {
+		type unitFile struct {
+			Name         string `json:"name"`
+			FragmentPath string `json:"fragmentPath"`
+			Content      string `json:"content"`
+			Path         string `json:"path"`
+			Reloaded     bool   `json:"reloaded"`
+		}
+
+		// T4a GET 有效视图：包管位 fragmentPath + systemctl cat 全文
+		name := "T4a GET unit 文件有效视图（/usr/lib 包管位）"
+		codeG, rawG := unitFileGet(*agentA1, *unit)
+		var f unitFile
+		_ = json.Unmarshal(rawG, &f)
+		check(name, codeG == 200 && f.Name == *unit &&
+			f.FragmentPath == "/usr/lib/systemd/system/"+*unit &&
+			strings.Contains(f.Content, "cockpit acceptance test unit"),
+			fmt.Sprintf("HTTP=%d name=%q fragmentPath=%q content=%dB",
+				codeG, f.Name, f.FragmentPath, len(f.Content)))
+
+		// T4b PUT 改 Description：包管 → /etc 覆盖位 + 捆绑 daemon-reload
+		//（systemctl show 即时反映新值 = reload 真的发生了）+ GET 复读换位 + 审计
+		name = "T4b PUT 保存（包管→/etc 覆盖位 + 捆绑 daemon-reload 即时生效）"
+		newDesc := fmt.Sprintf("cockpit acceptance test unit R3 %d", time.Now().Unix())
+		newContent := strings.Replace(f.Content,
+			"cockpit acceptance test unit (throwaway)", newDesc, 1)
+		codeP, rawP := unitFilePut(*agentA1, *unit, newContent)
+		var r unitFile
+		_ = json.Unmarshal(rawP, &r)
+		etcPath := "/etc/systemd/system/" + *unit
+		etcFile, _ := shOut("cat", etcPath)
+		showDesc, _ := shOut("systemctl", "show", "-p", "Description", "--value", *unit)
+		codeG2, rawG2 := unitFileGet(*agentA1, *unit)
+		var f2 unitFile
+		_ = json.Unmarshal(rawG2, &f2)
+		auditHasSave := strings.Contains(auditBody(), "unitfile-save")
+		check(name, codeP == 200 && r.Path == etcPath && r.Reloaded &&
+			strings.Contains(etcFile, newDesc) && showDesc == newDesc &&
+			codeG2 == 200 && f2.FragmentPath == etcPath &&
+			strings.Contains(f2.Content, newDesc) && auditHasSave,
+			fmt.Sprintf("put=%d path=%q reloaded=%v；/etc 落盘含新值=%v systemctl show Description=%q（捆绑 reload 铁证）；复读 fragmentPath=%q 含新值=%v；审计 unitfile-save=%v",
+				codeP, r.Path, r.Reloaded, strings.Contains(etcFile, newDesc),
+				showDesc, f2.FragmentPath, strings.Contains(f2.Content, newDesc), auditHasSave))
+
+		// T4c 超限拒绝：256KB+1 → 413（server MaxBytesReader 门；agent 侧同限双端防御）
+		name = "T4c 内容超限拒绝（256KB+1 → 413）"
+		codeBig, _ := unitFilePut(*agentA1, *unit, strings.Repeat("#", 256*1024+1))
+		check(name, codeBig == http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("HTTP=%d（期望 413）", codeBig))
+
+		// T4d 拒绝面：并集白名单外 400；多余路径段 404（写哪由 FragmentPath
+		// 决定、只收 unit 名，无路径参数即无穿越面）；windows 形名过 server
+		// 并集、systemd 后端 agent 兜底拒并 502 透传（D9.4 设计内行为）
+		name = "T4d 拒绝面（白名单外 400 / 多余段 404 / 后端兜底 502 透传）"
+		codeBad, _ := unitFileGet(*agentA1, "zzz:notaservice")
+		codeSeg, _ := unitFileGet(*agentA1, *unit+"/file/x")
+		codeW, rawW := unitFileGet(*agentA1, "zzz-notaservice")
+		var eW struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(rawW, &eW)
+		check(name, codeBad == http.StatusBadRequest && codeSeg == http.StatusNotFound &&
+			codeW == http.StatusBadGateway && strings.Contains(eW.Error, "invalid unit name"),
+			fmt.Sprintf("白名单外(:)=%d（期望 400） extra-seg=%d（期望 404）windows形名=%d error=%q（agent systemd 兜底拒，透传）",
+				codeBad, codeSeg, codeW, truncate(eW.Error, 100)))
+
+		// T4e 非 root PUT 透传：/etc 写入 EACCES → 502 permission denied 原文
+		name = "T4e 非 root PUT 报错透传（502 permission denied）"
+		codeN, rawN := unitFilePut(*agentA2, *unit, newContent)
+		var eN struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(rawN, &eN)
+		check(name, codeN == http.StatusBadGateway &&
+			strings.Contains(strings.ToLower(eN.Error), "permission denied"),
+			fmt.Sprintf("HTTP=%d error=%q（a1 同操作 200 见 T4b——权限对照）",
+				codeN, truncate(eN.Error, 160)))
+	}()
+
+	// ---- T5 journal 日志跳转（D11，含未加载 unit，a1）----
+	func() {
+		// T5a PUT jlog 换带唯一 marker 的 ExecStart（基线 /bin/true 无输出）→
+		// start 执行新内容产 journal 历史——捆绑 daemon-reload 的端到端铁证
+		name := "T5a PUT jlog（marker 版）+ start 产 journal 历史"
+		marker := fmt.Sprintf("cockpit-jlog-marker-%d", time.Now().UnixNano())
+		jlogContent := "[Unit]\nDescription=cockpit acceptance journal sample R3\n" +
+			"[Service]\nType=oneshot\n" +
+			"ExecStart=/bin/sh -c 'echo " + marker + "'\n" +
+			"[Install]\nWantedBy=multi-user.target\n"
+		codeP, rawP := unitFilePut(*agentA1, *jlogUnit, jlogContent)
+		var r struct {
+			Path     string `json:"path"`
+			Reloaded bool   `json:"reloaded"`
+		}
+		_ = json.Unmarshal(rawP, &r)
+		codeS, _ := serviceActionUnit(*agentA1, *jlogUnit, "start")
+		found := false
+		for i := 0; i < 20 && !found; i++ { // oneshot 即完，轮询吸收 journal 异步
+			if _, lines := logsQuery(*agentA1, *jlogUnit, 50); strings.Contains(lines, marker) {
+				found = true
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		check(name, codeP == 200 && r.Path == "/etc/systemd/system/"+*jlogUnit &&
+			r.Reloaded && codeS == 200 && found,
+			fmt.Sprintf("put=%d path=%q reloaded=%v start=%d marker 见于查询=%v（start 执行 PUT 后内容=捆绑 reload 生效）",
+				codeP, r.Path, r.Reloaded, codeS, found))
+
+		// T5b stop + daemon-reload 端点 → jlog 成未加载安装项（三面证据）
+		name = "T5b stop + daemon-reload 端点 → jlog 成未加载安装项"
+		codeStop, _ := serviceActionUnit(*agentA1, *jlogUnit, "stop")
+		codeR, rawR := daemonReload(*agentA1)
+		var rR struct {
+			Reloaded bool `json:"reloaded"`
+		}
+		_ = json.Unmarshal(rawR, &rR)
+		auditHasDR := strings.Contains(auditBody(), "daemon-reload")
+		unitsAll, _ := shOut("systemctl", "list-units", "--all", "--type=service",
+			"--no-legend", "--no-pager")
+		list, _, _ := listServices(*agentA1)
+		jlog := findUnit(list, *jlogUnit)
+		codeSrc, srcBody := logsSources(*agentA1)
+		check(name, codeStop == 200 && codeR == 200 && rR.Reloaded && auditHasDR &&
+			jlog != nil && jlog.LoadState == "" && jlog.UnitFileState == "disabled" &&
+			!strings.Contains(unitsAll, *jlogUnit) &&
+			codeSrc == 200 && !strings.Contains(srcBody, *jlogUnit),
+			fmt.Sprintf("stop=%d reload=%d reloaded=%v 审计=%v；list-units --all 含 jlog=%v；表 loadState=%q unitFileState=%q；logs.sources 含 jlog=%v",
+				codeStop, codeR, rR.Reloaded, auditHasDR,
+				strings.Contains(unitsAll, *jlogUnit),
+				func() string {
+					if jlog != nil {
+						return jlog.LoadState
+					}
+					return "<不在表>"
+				}(),
+				func() string {
+					if jlog != nil {
+						return jlog.UnitFileState
+					}
+					return "-"
+				}(),
+				strings.Contains(srcBody, *jlogUnit)))
+
+		// （对照记录，不判分）非 root daemon-reload 的透传口径
+		codeDR2, rawDR2 := daemonReload(*agentA2)
+		ev("      （对照记录）非 root daemon-reload：HTTP=%d %s",
+			codeDR2, truncate(string(rawDR2), 120))
+
+		// T5c 未加载 unit 历史日志可查（/logs/query 按 unit 派生 source——
+		// LogsPanel initialSource 无条件优先派生同款路径）
+		name = "T5c 未加载 unit 历史日志可查（marker 仍在）"
+		codeQ, lines := logsQuery(*agentA1, *jlogUnit, 100)
+		check(name, codeQ == 200 && strings.Contains(lines, marker),
+			fmt.Sprintf("HTTP=%d marker 在结果=%v（返回 %dB）",
+				codeQ, strings.Contains(lines, marker), len(lines)))
 	}()
 
 	ev("=== 汇总：PASS=%d FAIL=%d（%s） ===", passes, fails, time.Now().Format(time.RFC3339))

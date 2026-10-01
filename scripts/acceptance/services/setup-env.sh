@@ -21,6 +21,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SV_DIR="${REPO_ROOT}/.acceptance/services"
 UNIT=cockpit-acc-svc.service
 GHOST=cockpit-acc-ghost.service
+# R3 journal 样本：装 /usr/lib 永不 enable——探针先 PUT 换带 marker 的
+# ExecStart（dogfood 覆盖位 + 捆绑 daemon-reload），start 产 journal 历史，
+# stop + daemon-reload 后成「未加载安装项」，日志跳转按 unit 查历史
+JLOG=cockpit-acc-jlog.service
 
 command -v systemctl >/dev/null || { echo "ERROR: 需要 systemctl" >&2; exit 1; }
 [ -d /run/systemd/system ] || { echo "ERROR: 非 systemd 主机（/run/systemd/system 不存在）" >&2; exit 1; }
@@ -34,9 +38,12 @@ mkdir -p "${SV_DIR}"/{logs,evidence} "${SV_DIR}"/instance/{data,bin,logs}
 sudo -n systemctl unmask "${UNIT}" >/dev/null 2>&1 || true
 sudo -n systemctl disable --now "${UNIT}" >/dev/null 2>&1 || true
 sudo -n systemctl stop "${UNIT}" >/dev/null 2>&1 || true
+sudo -n systemctl stop "${JLOG}" >/dev/null 2>&1 || true
 sudo -n rm -f "/etc/systemd/system/${UNIT}" "/etc/systemd/system/${GHOST}" \
     "/usr/lib/systemd/system/${UNIT}" \
-    "/etc/systemd/system/multi-user.target.wants/${UNIT}"
+    "/etc/systemd/system/${JLOG}" "/usr/lib/systemd/system/${JLOG}" \
+    "/etc/systemd/system/multi-user.target.wants/${UNIT}" \
+    "/etc/systemd/system/multi-user.target.wants/${JLOG}"
 sudo -n systemctl daemon-reload
 
 # 未加载样本：装文件不 enable 不 start（reload 后无引用 → list-units 不含）
@@ -62,6 +69,19 @@ ExecStart=/bin/sleep infinity
 WantedBy=multi-user.target
 EOF
 sudo -n cp /tmp/cockpit-acc-svc.service "/usr/lib/systemd/system/${UNIT}"
+
+# journal 样本：装 /usr/lib（PUT 覆盖位链路需要）永不 enable/start——基线
+# ExecStart=/bin/true 无 marker，探针 PUT 换带 marker 版后 start 才有输出
+cat > /tmp/cockpit-acc-jlog.service <<'EOF'
+[Unit]
+Description=cockpit acceptance journal sample (throwaway)
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo -n cp /tmp/cockpit-acc-jlog.service "/usr/lib/systemd/system/${JLOG}"
 sudo -n systemctl daemon-reload
 sudo -n systemctl enable --now "${UNIT}"
 
@@ -73,6 +93,7 @@ sudo -n systemctl enable --now "${UNIT}"
     echo "svc baseline: active=$(systemctl is-active "${UNIT}") enabled=$(systemctl is-enabled "${UNIT}")"
     echo "ghost in list-units (want 0): $(systemctl list-units --type=service --no-legend --no-pager | grep -c "${GHOST}" || true)"
     echo "ghost in list-unit-files: $(systemctl list-unit-files --type=service --no-legend --no-pager | grep "${GHOST}" || echo MISSING)"
+    echo "jlog baseline: active=$(systemctl is-active "${JLOG}") enabled=$(systemctl is-enabled "${JLOG}") path=$(systemctl show -p FragmentPath --value "${JLOG}")"
     echo "unit path: $(systemctl show -p FragmentPath --value "${UNIT}")"
 } > "${SV_DIR}/evidence/setup.log"
 

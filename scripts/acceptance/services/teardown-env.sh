@@ -8,14 +8,18 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SV_DIR="${REPO_ROOT}/.acceptance/services"
 UNIT=cockpit-acc-svc.service
 GHOST=cockpit-acc-ghost.service
+JLOG=cockpit-acc-jlog.service
 
-# 测试 unit（mask 可能残链 / enable symlink / 两处 unit 文件）
+# 测试 unit（mask 可能残链 / enable symlink / 两处 unit 文件 / PUT 产生的
+# /etc 覆盖位副本 / jlog 的双位与 wants 链）
 sudo -n systemctl unmask "${UNIT}" >/dev/null 2>&1 || true
 sudo -n systemctl disable --now "${UNIT}" >/dev/null 2>&1 || true
-sudo -n systemctl stop "${UNIT}" >/dev/null 2>&1 || true
+sudo -n systemctl stop "${UNIT}" "${JLOG}" >/dev/null 2>&1 || true
 sudo -n rm -f "/usr/lib/systemd/system/${UNIT}" "/etc/systemd/system/${UNIT}" \
     "/etc/systemd/system/${GHOST}" \
-    "/etc/systemd/system/multi-user.target.wants/${UNIT}"
+    "/usr/lib/systemd/system/${JLOG}" "/etc/systemd/system/${JLOG}" \
+    "/etc/systemd/system/multi-user.target.wants/${UNIT}" \
+    "/etc/systemd/system/multi-user.target.wants/${JLOG}"
 sudo -n systemctl daemon-reload
 
 # root agent 产物
