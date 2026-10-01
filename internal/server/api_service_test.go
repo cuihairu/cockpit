@@ -275,6 +275,34 @@ func TestServiceUnitFileAPI(t *testing.T) {
 	}
 }
 
+// TestServiceListDispatcherRoutesBarePath 裸 GET /api/agents/{id}/services
+// 必须经 serveAPI 分发器到达 service.list——真机验收逮到分发器仅
+// Contains "/services/"（要求尾斜杠），裸列表掉进 handleAgentGet 报
+// 404 Agent not found，Web 服务页列表（api.ts:1043 同款裸路径）整体不可达；
+// 既有测试直调 handleAgentServiceAPI 绕过分发器故未拦住。
+func TestServiceListDispatcherRoutesBarePath(t *testing.T) {
+	s := newBackupTestServer(t)
+	var gotMethod string
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotMethod = method
+		return map[string]interface{}{"services": []map[string]interface{}{}}, ""
+	})
+	_, req := doAuthenticatedRequest(s, http.MethodGet, "/api/agents/a1/services", nil)
+	rec := httptest.NewRecorder()
+	s.serveAPI(rec, req)
+	if rec.Code != http.StatusOK || gotMethod != "service.list" {
+		t.Fatalf("bare list via dispatcher: code=%d method=%s body=%s",
+			rec.Code, gotMethod, truncateForTest(rec.Body.String(), 200))
+	}
+}
+
+func truncateForTest(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
 func TestValidateServiceAction(t *testing.T) {
 	// systemd unit 名：字母数字与 @ . _ + - 且 .service 结尾
 	for _, name := range []string{"nginx.service", "user@1000.service", "openvpn@server.service", "my-app.service"} {

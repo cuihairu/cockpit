@@ -85,8 +85,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			s.handleAgentCronAPI(w, r, agentID)
 			return
 		}
-		// systemd 服务管理 /agents/{id}/services/...（见 api_service.go）
-		if strings.Contains(agentID, "/services/") {
+		// systemd 服务管理 /agents/{id}/services/...（见 api_service.go；
+		// 裸 GET /agents/{id}/services 是服务列表端点，HasSuffix 兜底——
+		// 真机验收逮到：仅 Contains "/services/" 时裸列表掉进 handleAgentGet
+		// 报 404 Agent not found，Web 服务页列表整体不可达）
+		if strings.HasSuffix(agentID, "/services") || strings.Contains(agentID, "/services/") {
 			s.handleAgentServiceAPI(w, r, agentID)
 			return
 		}

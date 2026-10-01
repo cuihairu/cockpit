@@ -164,6 +164,7 @@
 设计：[service-design](./service-design.md)。前置：systemd Linux 主机、Windows 主机、macOS 主机各一。
 
 - [ ] systemd：列表含未加载 unit；start/stop/restart/enable/disable 实测；mask 后隐藏启动并显解屏蔽、unmask 还原
+  证据（2026-10-01，部分）：探针 `scripts/acceptance/services/`（本机双 agent：root 动词成功样本 + cui 非 root 报错透传样本，测试 unit `cockpit-acc-svc.service` 专属）9/9 PASS——T1 列表 total=313>active=72，files-only 未加载项在列（`apport-coredump-hook@.service` 等模板/未加载类，`mergeServiceUnits` 分支）；T2 restart→active/running、enable→enabled；T3 非 root restart/enable 同一 unit 均 502 且体含 `systemctl` 原文（Access denied…interactive authentication）原样透传，对照组非 root 读列表 200（纯权限失败）；T4 stop→inactive、disable→disabled 收尾，teardown 删 unit 文件 + daemon-reload；验收逮到一处生产缺陷：`serveAPI` 分发器仅 `Contains "/services/"`（要求尾斜杠），裸 `GET /api/agents/{id}/services`（文档与 Web `api.ts:1043` 调的列表端点）掉进 `handleAgentGet` 报 404，Web 服务页列表整体不可达（既有测试直调 handler 绕过分发器故未拦住），修为与 `/health`、`/domains` 行同款 `HasSuffix || Contains` + 分发器回归 `TestServiceListDispatcherRoutesBarePath`（反向验证无修复必 FAIL）；`probe.log` + `services-list.json`。剩余：start 显式断言、mask/unmask 后续补验，本项暂不勾选
 - [ ] systemd：daemon-reload 工具栏按钮；unit 文件查看/编辑（包管文件先复制 `/etc/systemd/system` 覆盖位再改，升级不丢）
 - [ ] systemd：服务行「日志」跳转 journalctl 历史可查（含未加载 unit）
 - [ ] Windows SCM：列表/启停/自启切换/restart 等待 30s 超时路径实测；无权限服务报错透传；reload 按钮确认隐藏
