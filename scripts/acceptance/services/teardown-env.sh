@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
-# systemd 服务管理验收：拆除环境（cockpit 实例由 stop-server.sh 清理）
-# 测试 unit 停用→停→删文件→daemon-reload，还原系统原状；
+# 服务管理验收：拆除环境（cockpit 实例由 stop-server.sh 清理）
+# 测试 unit 彻底移除：unmask 残链 → disable --now → 双位 unit 文件删除 →
+# daemon-reload；root agent 产物（drift-baseline-a1.json）sudo 清
 # 证据目录 .acceptance/services/evidence/ 保留，确认后手动清理
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SV_DIR="${REPO_ROOT}/.acceptance/services"
-UNIT="cockpit-acc-svc.service"
+UNIT=cockpit-acc-svc.service
+GHOST=cockpit-acc-ghost.service
 
-# 测试 unit 收尾（只动自己名下；每步都可失败——探针 T4 已做 stop/disable 断言，
-# 这里是中断/复跑兜底）
-sudo -n systemctl disable --now "${UNIT}" >/dev/null 2>&1 \
-    && echo "disabled+stopped ${UNIT}" || true
-if [[ -f "/etc/systemd/system/${UNIT}" ]]; then
-    sudo -n rm -f "/etc/systemd/system/${UNIT}" && echo "removed ${UNIT}" || true
-    sudo -n systemctl daemon-reload && echo "daemon-reloaded" || true
-fi
+# 测试 unit（mask 可能残链 / enable symlink / 两处 unit 文件）
+sudo -n systemctl unmask "${UNIT}" >/dev/null 2>&1 || true
+sudo -n systemctl disable --now "${UNIT}" >/dev/null 2>&1 || true
+sudo -n systemctl stop "${UNIT}" >/dev/null 2>&1 || true
+sudo -n rm -f "/usr/lib/systemd/system/${UNIT}" "/etc/systemd/system/${UNIT}" \
+    "/etc/systemd/system/${GHOST}" \
+    "/etc/systemd/system/multi-user.target.wants/${UNIT}"
+sudo -n systemctl daemon-reload
+
+# root agent 产物
+sudo -n rm -f "${SV_DIR}/drift-baseline-a1.json"
+
+# 残留验收实例进程（pid 文件已失效时的兜底；root agent 需 sudo pkill）
+pkill -f "cockpit-agent start -server ws://127.0.0.1:19993" >/dev/null 2>&1 \
+    && echo "killed stray agent" || true
+sudo -n pkill -f "cockpit-agent start -server ws://127.0.0.1:19993" >/dev/null 2>&1 \
+    && echo "killed stray root agent" || true
 
 echo "done（.acceptance/services 下的证据文件保留，确认后手动清理）"
