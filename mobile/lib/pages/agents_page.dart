@@ -5,7 +5,10 @@ import '../models/models.dart';
 import '../state/settings.dart';
 import 'cron_page.dart';
 import 'files_page.dart';
+import 'nas_page.dart';
+import 'overlay_page.dart';
 import 'proxy_page.dart';
+import 'smart_page.dart';
 import 'stacks_page.dart';
 import 'terminal_page.dart';
 
@@ -82,6 +85,26 @@ class _AgentsPageState extends ConsumerState<AgentsPage> {
               leading: const Icon(Icons.lan),
               title: const Text('反代'),
               onTap: () => _push(sheetContext, ProxyPage(agent: a)),
+            ),
+          // M3 观测只读三入口（web 导航语义 Hdd/Database/Cluster；
+          // Icons.lan 已被反代占用，磁盘→storage / NAS→dataset / 组网→hub）
+          if (a.hasSmart)
+            ListTile(
+              leading: const Icon(Icons.storage),
+              title: const Text('磁盘健康'),
+              onTap: () => _push(sheetContext, SmartPage(agent: a)),
+            ),
+          if (a.hasNas)
+            ListTile(
+              leading: const Icon(Icons.dataset),
+              title: const Text('存储观测'),
+              onTap: () => _push(sheetContext, NasPage(agent: a)),
+            ),
+          if (a.hasOverlay)
+            ListTile(
+              leading: const Icon(Icons.hub),
+              title: const Text('组网观测'),
+              onTap: () => _push(sheetContext, OverlayPage(agent: a)),
             ),
           const SizedBox(height: 8),
         ]),

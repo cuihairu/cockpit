@@ -249,4 +249,56 @@ void main() {
     final c = await api.stackCompose('ag-1', 'blog');
     expect(c.env, 'A=1');
   });
+
+  test('smartStatus：GET 路径与裸 map 解析', () async {
+    final a = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/smart/status', 200, {
+        'available': true,
+        'devices': [
+          {'name': 'sda', 'health': 'passed', 'temperatureC': 36},
+        ],
+      });
+    final r = await _api(a).smartStatus('ag-1');
+    expect(r.available, isTrue);
+    expect(r.devices.single.health, 'passed');
+    expect(a.requests.containsKey('GET /api/agents/ag-1/smart/status'), isTrue);
+  });
+
+  test('nasStatus/nasConfig：GET 路径与解析', () async {
+    final a = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/nas/status', 200, {
+        'available': true,
+        'source': 'linux',
+        'pools': [
+          {'name': 'md0', 'kind': 'mdadm', 'state': 'healthy',
+           'totalGB': 2, 'usedGB': 1, 'devices': ['sda1'], 'detail': '',
+           'host': ''},
+        ],
+        'mounts': [],
+        'shares': [],
+      })
+      ..on('GET', '/api/nas/config', 200,
+          {'scan_interval_seconds': 1800, 'usage_warn_percent': 75});
+    final api = _api(a);
+    final s = await api.nasStatus('ag-1');
+    expect(s.available, isTrue);
+    expect(s.pools.single.kind, 'mdadm');
+    final cfg = await api.nasConfig();
+    expect(cfg.usageWarnPercent, 75);
+    expect(a.requests.containsKey('GET /api/agents/ag-1/nas/status'), isTrue);
+    expect(a.requests.containsKey('GET /api/nas/config'), isTrue);
+  });
+
+  test('overlayStatus：GET 路径与解析', () async {
+    final a = MockAdapter()
+      ..on('GET', '/api/agents/ag-1/overlay/status', 200, {
+        'tools': [
+          {'tool': 'zerotier', 'status': 'ok'},
+        ],
+      });
+    final r = await _api(a).overlayStatus('ag-1');
+    expect(r.tools.single.tool, 'zerotier');
+    expect(a.requests.containsKey('GET /api/agents/ag-1/overlay/status'),
+        isTrue);
+  });
 }

@@ -64,6 +64,17 @@ const _agent = {
         'ssh': {'host': '10.0.0.1', 'port': 22, 'running': true},
       },
     },
+    // M3 观测三能力（hardware-monitor 需 metadata.smart 才算 SMART 主机）
+    {'type': 'hardware-monitor', 'metadata': {'smart': true}},
+    {'type': 'nas'},
+    {
+      'type': 'overlay',
+      'metadata': {
+        'identity': {
+          'zerotier': {'nodeId': 'abc123def', 'networks': ['net-1']},
+        },
+      },
+    },
   ],
 };
 
@@ -142,7 +153,7 @@ void main() {
     expect(find.textContaining('加载失败'), findsOneWidget);
   });
 
-  testWidgets('主机行点开能力动作单，六入口齐全', (tester) async {
+  testWidgets('主机行点开能力动作单，九入口齐全', (tester) async {
     final a = MockAdapter()..on('GET', '/api/agents', 200, [_agent]);
     await _pump(tester, _api(a));
     await tester.pumpAndSettle();
@@ -158,6 +169,10 @@ void main() {
     expect(find.text('定时任务'), findsOneWidget);
     expect(find.text('文件'), findsOneWidget);
     expect(find.text('反代'), findsOneWidget);
+    // M3 观测只读三入口
+    expect(find.text('磁盘健康'), findsOneWidget);
+    expect(find.text('存储观测'), findsOneWidget);
+    expect(find.text('组网观测'), findsOneWidget);
   });
 
   testWidgets('动作单进应用部署页：stack 列表', (tester) async {
@@ -216,8 +231,8 @@ void main() {
     await _pump(tester, _api(a));
     await tester.pumpAndSettle();
 
-    // 动作单已六项，默认视口装不下 → 拉高再点，避免反代入口被折到屏外
-    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    // 动作单已九项，默认视口装不下 → 拉高再点，避免反代入口被折到屏外
+    await tester.binding.setSurfaceSize(const Size(800, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.tap(find.text('web-1'));
@@ -228,6 +243,67 @@ void main() {
     expect(find.text('反代 · web-1'), findsOneWidget);
     expect(find.textContaining('后端 Nginx'), findsOneWidget);
     expect(find.text('blog'), findsOneWidget);
+  });
+
+  testWidgets('动作单进 M3 观测三页：磁盘健康 / 存储观测 / 组网观测',
+      (tester) async {
+    final a = MockAdapter()
+      ..on('GET', '/api/agents', 200, [_agent])
+      ..on('GET', '/api/agents/ag-1/smart/status', 200, {
+        'available': true,
+        'devices': [
+          {'name': 'sda', 'health': 'passed', 'temperatureC': 36},
+        ],
+      })
+      ..on('GET', '/api/agents/ag-1/nas/status', 200, {
+        'available': true,
+        'source': 'linux',
+        'pools': [
+          {'name': 'md0', 'kind': 'mdadm', 'state': 'healthy',
+           'totalGB': 2000, 'usedGB': 1000, 'devices': ['sda1'],
+           'detail': '', 'host': ''},
+        ],
+        'mounts': <Object?>[],
+        'shares': <Object?>[],
+      })
+      ..on('GET', '/api/agents/ag-1/overlay/status', 200, {
+        'tools': [
+          {'tool': 'zerotier', 'status': 'ok'},
+        ],
+      });
+    await _pump(tester, _api(a));
+    await tester.pumpAndSettle();
+
+    // 动作单已九项，观测三入口在尾部 → 拉高再点
+    await tester.binding.setSurfaceSize(const Size(800, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.tap(find.text('web-1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('磁盘健康'));
+    await tester.pumpAndSettle();
+    expect(find.text('磁盘健康 · web-1'), findsOneWidget);
+    expect(find.text('sda'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('web-1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('存储观测'));
+    await tester.pumpAndSettle();
+    expect(find.text('存储观测 · web-1'), findsOneWidget);
+    expect(find.text('md0'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('web-1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('组网观测'));
+    await tester.pumpAndSettle();
+    expect(find.text('组网观测 · web-1'), findsOneWidget);
+    expect(find.text('ZeroTier'), findsOneWidget);
+    // overlay capability 的 identity 芯片也随页展示
+    expect(find.text('ZeroTier abc123def（1 个网络）'), findsOneWidget);
   });
 
   testWidgets('动作单进容器页：列表 + 停止动作 SnackBar + 刷新', (tester) async {

@@ -237,6 +237,39 @@ extension StackApi on CockpitApi {
   }
 }
 
+/// SMART 磁盘健康（per-agent 只读，server 纯转发——响应为裸 map 无包装壳）。
+extension SmartApi on CockpitApi {
+  Future<SmartStatus> smartStatus(String agentId) async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/agents/$agentId/smart/status');
+    return SmartStatus.fromJson(r.data!);
+  }
+}
+
+/// NAS 存储观测（per-agent 快照 + 全局巡检配置只读）。
+extension NasApi on CockpitApi {
+  Future<NasStatus> nasStatus(String agentId) async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/agents/$agentId/nas/status');
+    return NasStatus.fromJson(r.data!);
+  }
+
+  /// GET /api/nas/config——挂载容量红高亮阈值（usage_warn_percent）。
+  Future<NasConfig> nasConfig() async {
+    final r = await client.dio.get<Map<String, dynamic>>('/api/nas/config');
+    return NasConfig.fromJson(r.data!);
+  }
+}
+
+/// 组网观测（per-agent 只读快照）。
+extension OverlayApi on CockpitApi {
+  Future<OverlayStatus> overlayStatus(String agentId) async {
+    final r = await client.dio
+        .get<Map<String, dynamic>>('/api/agents/$agentId/overlay/status');
+    return OverlayStatus.fromJson(r.data!);
+  }
+}
+
 extension RemoteApi on CockpitApi {
   /// POST /api/remote/tickets——换取终端 WS 子协议票据（body snake_case 对齐 web）。
   Future<RemoteTicket> createRemoteTicket({

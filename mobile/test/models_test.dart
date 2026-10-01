@@ -256,5 +256,195 @@ void main() {
           {'stacks': [], 'info': {'dir': '/opt/stacks', 'dirWritable': true}});
       expect(r3.info!.dir, '/opt/stacks');
     });
+
+    test('Agent：smart/nas/overlay 能力判定（观测三入口的门）', () {
+      // hardware-monitor 但无 smart 标志（仅温度/UPS）不算 SMART 主机
+      final a = Agent.fromJson({
+        'id': 'ag-1',
+        'capabilities': [
+          {'type': 'hardware-monitor', 'metadata': {'temperature': true}},
+          {'type': 'nas'},
+          {'type': 'overlay'},
+        ],
+        'hostname': 'n1',
+        'ip': '10.0.0.1',
+        'status': 'online',
+        'lastSeen': '',
+      });
+      expect(a.hasSmart, isFalse);
+      expect(a.hasNas, isTrue);
+      expect(a.hasOverlay, isTrue);
+
+      final b = Agent.fromJson({
+        'id': 'ag-2',
+        'capabilities': [
+          {'type': 'hardware-monitor', 'metadata': {'smart': true}},
+        ],
+        'hostname': 'n2',
+        'ip': '10.0.0.2',
+        'status': 'online',
+        'lastSeen': '',
+      });
+      expect(b.hasSmart, isTrue);
+      expect(b.hasNas, isFalse);
+      expect(b.hasOverlay, isFalse);
+    });
+
+    test('Smart 系列：available/devices + 指针字段缺省', () {
+      final s = SmartStatus.fromJson({
+        'available': true,
+        'devices': [
+          {
+            'name': 'sda',
+            'model': 'WD Red',
+            'health': 'passed',
+            'sizeBytes': 4000787030016,
+            'temperatureC': 38,
+            'powerOnHours': 12345,
+          },
+          {
+            'name': 'sdb',
+            'health': 'failed',
+            'reallocatedSectors': 12,
+            'error': 'smartctl exit 4',
+          },
+        ],
+      });
+      expect(s.available, isTrue);
+      expect(s.devices, hasLength(2));
+      final d0 = s.devices.first;
+      expect(d0.powerOnHours, 12345);
+      expect(d0.reallocatedSectors, isNull); // Go omitempty 指针字段
+      final d1 = s.devices.last;
+      expect(d1.health, 'failed');
+      expect(d1.error, 'smartctl exit 4');
+
+      // 全缺省：unknown 健康态 + 空列表
+      final empty = SmartStatus.fromJson({});
+      expect(empty.available, isFalse);
+      expect(empty.devices, isEmpty);
+      expect(empty.devices, isA<List<SmartDevice>>());
+    });
+
+    test('Nas 系列：快照三段 + host 来源设备', () {
+      final n = NasStatus.fromJson({
+        'available': true,
+        'source': 'linux',
+        'pools': [
+          {
+            'name': 'md0',
+            'kind': 'mdadm',
+            'state': 'degraded',
+            'totalGB': 2000,
+            'usedGB': 1000.5,
+            'devices': ['sda1', 'sdb1'],
+            'detail': 'U_',
+            'host': '',
+          },
+        ],
+        'mounts': [
+          {
+            'device': '/dev/md0',
+            'mountPath': '/mnt/pool',
+            'fsType': 'ext4',
+            'totalGB': 2000,
+            'usedGB': 1848,
+            'host': '',
+          },
+        ],
+        'shares': [
+          {
+            'protocol': 'smb',
+            'name': 'media',
+            'path': '/mnt/pool/media',
+            'comment': '媒体库',
+            'hosts': '192.168.0.0/16',
+            'host': 'dsm1',
+          },
+        ],
+      });
+      expect(n.pools.single.state, 'degraded');
+      expect(n.pools.single.usedGB, 1000.5);
+      expect(n.mounts.single.mountPath, '/mnt/pool');
+      expect(n.shares.single.host, 'dsm1');
+
+      final empty = NasStatus.fromJson({});
+      expect(empty.available, isFalse);
+      expect(empty.source, '');
+      expect(empty.pools, isEmpty);
+      expect(empty.mounts, isEmpty);
+      expect(empty.shares, isEmpty);
+    });
+
+    test('NasConfig：usage_warn_percent 阈值', () {
+      final c = NasConfig.fromJson(
+          {'scan_interval_seconds': 1800, 'usage_warn_percent': 75});
+      expect(c.scanIntervalSeconds, 1800);
+      expect(c.usageWarnPercent, 75);
+      // 缺省兜底对齐 server 默认（1800 / 80）
+      expect(NasConfig.fromJson({}).usageWarnPercent, 80);
+    });
+
+    test('Overlay 系列：tools/peers/interfaces 白名单字段', () {
+      final o = OverlayStatus.fromJson({
+        'tools': [
+          {
+            'tool': 'zerotier',
+            'status': 'ok',
+            'version': '1.14.0',
+            'networks': [
+              {
+                'id': '8056c2e21c',
+                'name': 'home',
+                'status': 'OK',
+                'type': 'PRIVATE',
+                'dev': 'zt0',
+                'ips': ['10.147.20.10'],
+              },
+            ],
+            'peers': [
+              {
+                'id': 'a1b2c3',
+                'latencyMs': 12,
+                'online': true,
+                'endpoint': '1.2.3.4/9993',
+                'role': 'LEAF',
+              },
+            ],
+          },
+          {
+            'tool': 'wireguard',
+            'status': 'ok',
+            'interfaces': [
+              {
+                'name': 'wg0',
+                'listenPort': '51820',
+                'peerCount': 2,
+                'peers': [
+                  {'id': 'pubkey==', 'online': true, 'virtualIps': ['10.9.0.2']},
+                ],
+              },
+            ],
+          },
+          {'tool': 'tailscale', 'status': 'unavailable'},
+        ],
+      });
+      expect(o.tools, hasLength(3));
+      final zt = o.tools.first;
+      expect(zt.networks.single.id, '8056c2e21c');
+      expect(zt.networks.single.online, isNull); // ZT 网络无该键
+      expect(zt.peers.single.online, isTrue);
+      expect(zt.peers.single.latencyMs, 12);
+      final wg = o.tools[1];
+      expect(wg.interfaces.single.listenPort, '51820'); // wg dump 字符串列
+      expect(wg.interfaces.single.peers.single.virtualIps, ['10.9.0.2']);
+      expect(o.tools.last.status, 'unavailable');
+      expect(o.tools.last.networks, isEmpty);
+
+      // 空/缺省形态
+      final empty = OverlayStatus.fromJson({});
+      expect(empty.tools, isEmpty);
+    });
+
   });
 }

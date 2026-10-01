@@ -49,6 +49,17 @@ class Agent {
   /// stacks 与容器同一能力门（docker / docker-api，对齐 server requireStackAgent）。
   bool get hasStacks => hasDocker;
 
+  /// SMART 与 web Disk 页同口径：hardware-monitor 且 metadata.smart 已探测
+  /// （detector/hardware.go 只有 hasSmartctl 才置 smart=true）。
+  bool get hasSmart => capabilities.any(
+      (c) => c.type == 'hardware-monitor' && c.metadata?['smart'] == true);
+
+  /// NAS 存储观测能力（agent.go DetectNas，无 metadata）。
+  bool get hasNas => capabilities.any((c) => c.type == 'nas');
+
+  /// 组网观测能力（detector/overlay.go，四类工具任一可用）。
+  bool get hasOverlay => capabilities.any((c) => c.type == 'overlay');
+
   /// remote-services capability 里的 SSH 服务（agent 上报 running 才返回）。
   SshService? get sshService {
     for (final c in capabilities) {
@@ -799,5 +810,367 @@ class StacksResult {
         info: j['info'] is Map<String, dynamic>
             ? StackInfo.fromJson(j['info'] as Map<String, dynamic>)
             : null,
+      );
+}
+
+/// SMART 磁盘健康（对齐 internal/agent/rpc smart_parse.go smartDevice 与
+/// web SmartDevice：白名单字段，取不到的数值 Go 侧 omitempty → Dart int?；
+/// health ∈ passed / failed / unknown）。
+class SmartDevice {
+  final String name;
+  final String model;
+  final String serial;
+  final int? sizeBytes;
+  final String health;
+  final int? temperatureC;
+  final int? powerOnHours;
+  final int? reallocatedSectors;
+  final int? pendingSectors;
+  final int? mediaErrors;
+  final int? percentUsed;
+  final String? error;
+
+  SmartDevice({
+    required this.name,
+    this.model = '',
+    this.serial = '',
+    this.sizeBytes,
+    required this.health,
+    this.temperatureC,
+    this.powerOnHours,
+    this.reallocatedSectors,
+    this.pendingSectors,
+    this.mediaErrors,
+    this.percentUsed,
+    this.error,
+  });
+
+  factory SmartDevice.fromJson(Map<String, dynamic> j) => SmartDevice(
+        name: j['name'] as String? ?? '',
+        model: j['model'] as String? ?? '',
+        serial: j['serial'] as String? ?? '',
+        sizeBytes: (j['sizeBytes'] as num?)?.toInt(),
+        health: j['health'] as String? ?? 'unknown',
+        temperatureC: (j['temperatureC'] as num?)?.toInt(),
+        powerOnHours: (j['powerOnHours'] as num?)?.toInt(),
+        reallocatedSectors: (j['reallocatedSectors'] as num?)?.toInt(),
+        pendingSectors: (j['pendingSectors'] as num?)?.toInt(),
+        mediaErrors: (j['mediaErrors'] as num?)?.toInt(),
+        percentUsed: (j['percentUsed'] as num?)?.toInt(),
+        error: j['error'] as String?,
+      );
+}
+
+/// smart.status 返回（agent 侧只读快照，server 纯转发无包装壳）。
+class SmartStatus {
+  final bool available;
+  final List<SmartDevice> devices;
+
+  SmartStatus({required this.available, required this.devices});
+
+  factory SmartStatus.fromJson(Map<String, dynamic> j) => SmartStatus(
+        available: j['available'] as bool? ?? false,
+        devices: (j['devices'] as List<dynamic>? ?? [])
+            .map((e) => SmartDevice.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// NAS 存储观测（对齐 internal/agent/rpc nas_provider.go 与 web NasStatus；
+/// host 为网络 NAS 来源设备名，本地观测为空）。
+
+/// 存储池 / RAID / 卷组。
+class NasPool {
+  final String name;
+  final String kind; // mdadm | zfs | lvm | dsm | truenas | omv
+  final String state; // healthy | degraded | resync | failed | unknown
+  final double totalGB;
+  final double usedGB;
+  final List<String> devices;
+  final String detail;
+  final String host;
+
+  NasPool({
+    required this.name,
+    required this.kind,
+    required this.state,
+    required this.totalGB,
+    required this.usedGB,
+    required this.devices,
+    this.detail = '',
+    this.host = '',
+  });
+
+  factory NasPool.fromJson(Map<String, dynamic> j) => NasPool(
+        name: j['name'] as String? ?? '',
+        kind: j['kind'] as String? ?? '',
+        state: j['state'] as String? ?? 'unknown',
+        totalGB: (j['totalGB'] as num?)?.toDouble() ?? 0,
+        usedGB: (j['usedGB'] as num?)?.toDouble() ?? 0,
+        devices: (j['devices'] as List<dynamic>? ?? [])
+            .map((e) => e as String)
+            .toList(),
+        detail: j['detail'] as String? ?? '',
+        host: j['host'] as String? ?? '',
+      );
+}
+
+/// 本地文件系统挂载容量。
+class NasMount {
+  final String device;
+  final String mountPath;
+  final String fsType;
+  final double totalGB;
+  final double usedGB;
+  final String host;
+
+  NasMount({
+    required this.device,
+    required this.mountPath,
+    required this.fsType,
+    required this.totalGB,
+    required this.usedGB,
+    this.host = '',
+  });
+
+  factory NasMount.fromJson(Map<String, dynamic> j) => NasMount(
+        device: j['device'] as String? ?? '',
+        mountPath: j['mountPath'] as String? ?? '',
+        fsType: j['fsType'] as String? ?? '',
+        totalGB: (j['totalGB'] as num?)?.toDouble() ?? 0,
+        usedGB: (j['usedGB'] as num?)?.toDouble() ?? 0,
+        host: j['host'] as String? ?? '',
+      );
+}
+
+/// SMB / NFS 共享导出。
+class NasShare {
+  final String protocol; // smb | nfs
+  final String name;
+  final String path;
+  final String comment;
+  final String hosts;
+  final String host;
+
+  NasShare({
+    required this.protocol,
+    required this.name,
+    required this.path,
+    this.comment = '',
+    this.hosts = '',
+    this.host = '',
+  });
+
+  factory NasShare.fromJson(Map<String, dynamic> j) => NasShare(
+        protocol: j['protocol'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        path: j['path'] as String? ?? '',
+        comment: j['comment'] as String? ?? '',
+        hosts: j['hosts'] as String? ?? '',
+        host: j['host'] as String? ?? '',
+      );
+}
+
+/// nas.status 返回（多 provider 统一快照）。
+class NasStatus {
+  final bool available;
+  final String source;
+  final List<NasPool> pools;
+  final List<NasMount> mounts;
+  final List<NasShare> shares;
+
+  NasStatus({
+    required this.available,
+    required this.source,
+    required this.pools,
+    required this.mounts,
+    required this.shares,
+  });
+
+  factory NasStatus.fromJson(Map<String, dynamic> j) => NasStatus(
+        available: j['available'] as bool? ?? false,
+        source: j['source'] as String? ?? '',
+        pools: (j['pools'] as List<dynamic>? ?? [])
+            .map((e) => NasPool.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        mounts: (j['mounts'] as List<dynamic>? ?? [])
+            .map((e) => NasMount.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        shares: (j['shares'] as List<dynamic>? ?? [])
+            .map((e) => NasShare.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// GET /api/nas/config（全局巡检配置）；移动端只读 usage_warn_percent
+/// 作挂载容量红高亮阈值，配置修改留桌面端。
+class NasConfig {
+  final int scanIntervalSeconds;
+  final int usageWarnPercent;
+
+  NasConfig({required this.scanIntervalSeconds, required this.usageWarnPercent});
+
+  factory NasConfig.fromJson(Map<String, dynamic> j) => NasConfig(
+        scanIntervalSeconds:
+            (j['scan_interval_seconds'] as num?)?.toInt() ?? 1800,
+        usageWarnPercent: (j['usage_warn_percent'] as num?)?.toInt() ?? 80,
+      );
+}
+
+/// 组网观测（对齐 internal/agent/rpc overlay_provider.go / overlay_parse.go
+/// 与 web OverlayStatus）。
+
+/// 对端节点（ZT/TS/WG 三源同构，白名单字段）。
+class OverlayPeer {
+  final String id;
+  final String name;
+  final List<String> virtualIps;
+  final String version;
+  final int? latencyMs;
+  final bool online;
+  final String endpoint;
+  final String relay;
+  final String role;
+  final String lastHandshake;
+
+  OverlayPeer({
+    required this.id,
+    this.name = '',
+    required this.virtualIps,
+    this.version = '',
+    this.latencyMs,
+    required this.online,
+    this.endpoint = '',
+    this.relay = '',
+    this.role = '',
+    this.lastHandshake = '',
+  });
+
+  factory OverlayPeer.fromJson(Map<String, dynamic> j) => OverlayPeer(
+        id: j['id'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        virtualIps: (j['virtualIps'] as List<dynamic>? ?? [])
+            .map((e) => e as String)
+            .toList(),
+        version: j['version'] as String? ?? '',
+        latencyMs: (j['latencyMs'] as num?)?.toInt(),
+        online: j['online'] as bool? ?? false,
+        endpoint: j['endpoint'] as String? ?? '',
+        relay: j['relay'] as String? ?? '',
+        role: j['role'] as String? ?? '',
+        lastHandshake: j['lastHandshake'] as String? ?? '',
+      );
+}
+
+/// 工具网络（ZT {id,name,status,type,dev,ips} / TS {id,name,status,online,ips}
+/// 键集不同，按并集建模，缺席字段空值呈现）。
+class OverlayNetwork {
+  final String id;
+  final String name;
+  final String status;
+  final String type;
+  final String dev;
+  final bool? online;
+  final List<String> ips;
+
+  OverlayNetwork({
+    required this.id,
+    this.name = '',
+    this.status = '',
+    this.type = '',
+    this.dev = '',
+    this.online,
+    required this.ips,
+  });
+
+  factory OverlayNetwork.fromJson(Map<String, dynamic> j) => OverlayNetwork(
+        id: j['id'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        status: j['status'] as String? ?? '',
+        type: j['type'] as String? ?? '',
+        dev: j['dev'] as String? ?? '',
+        online: j['online'] as bool?,
+        ips: (j['ips'] as List<dynamic>? ?? [])
+            .map((e) => e as String)
+            .toList(),
+      );
+}
+
+/// WireGuard 接口（listenPort 在 wg dump 里是字符串列，宽限解析）。
+class OverlayWGInterface {
+  final String name;
+  final String listenPort;
+  final int peerCount;
+  final List<OverlayPeer> peers;
+
+  OverlayWGInterface({
+    required this.name,
+    this.listenPort = '',
+    required this.peerCount,
+    required this.peers,
+  });
+
+  factory OverlayWGInterface.fromJson(Map<String, dynamic> j) =>
+      OverlayWGInterface(
+        name: j['name'] as String? ?? '',
+        listenPort: j['listenPort']?.toString() ?? '',
+        peerCount: (j['peerCount'] as num?)?.toInt() ?? 0,
+        peers: (j['peers'] as List<dynamic>? ?? [])
+            .map((e) => OverlayPeer.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// 单工具观测快照（status ∈ ok | degraded | error | unavailable；
+/// extra 为 frp 分级观测的进程/隧道计数，web 端同样未展开渲染）。
+class OverlayTool {
+  final String tool;
+  final String status;
+  final String version;
+  final String error;
+  final List<OverlayNetwork> networks;
+  final List<OverlayPeer> peers;
+  final List<OverlayWGInterface> interfaces;
+  final Map<String, dynamic>? extra;
+
+  OverlayTool({
+    required this.tool,
+    required this.status,
+    this.version = '',
+    this.error = '',
+    required this.networks,
+    required this.peers,
+    required this.interfaces,
+    this.extra,
+  });
+
+  factory OverlayTool.fromJson(Map<String, dynamic> j) => OverlayTool(
+        tool: j['tool'] as String? ?? '',
+        status: j['status'] as String? ?? 'unavailable',
+        version: j['version'] as String? ?? '',
+        error: j['error'] as String? ?? '',
+        networks: (j['networks'] as List<dynamic>? ?? [])
+            .map((e) => OverlayNetwork.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        peers: (j['peers'] as List<dynamic>? ?? [])
+            .map((e) => OverlayPeer.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        interfaces: (j['interfaces'] as List<dynamic>? ?? [])
+            .map((e) => OverlayWGInterface.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        extra: j['extra'] as Map<String, dynamic>?,
+      );
+}
+
+/// overlay.status 返回。
+class OverlayStatus {
+  final List<OverlayTool> tools;
+
+  OverlayStatus({required this.tools});
+
+  factory OverlayStatus.fromJson(Map<String, dynamic> j) => OverlayStatus(
+        tools: (j['tools'] as List<dynamic>? ?? [])
+            .map((e) => OverlayTool.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
 }
