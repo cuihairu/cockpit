@@ -8,6 +8,8 @@ export type RemoteService = {
   port: number
   name: string
   running: boolean
+  /** SSH 服务器支持的认证方式（如 ["publickey","password"]；缺省视为都支持） */
+  authMethods?: string[]
 }
 
 export type SessionConfig = {
@@ -16,4 +18,5 @@ export type SessionConfig = {
   port: number
   protocol: RemoteProtocol
   title: string
+  authMethods?: string[]
 }

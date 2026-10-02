@@ -137,6 +137,8 @@ func (h *Handler) HandleProxyNew(msg *protocol.Message) error {
 
 // openSSHProxy 建立 SSH 终端代理：SSH 会话即 Conn，转发管道复用裸 TCP 路径。
 func (h *Handler) openSSHProxy(p protocol.ProxyNewPayload) error {
+	log.Printf("SSH proxy: target=%s username=%q hasPassword=%v hasKey=%v",
+		p.Target, p.Username, p.Password != "", p.PrivateKey != "")
 	sshSess, err := NewSSHSession(p.Target, p.Username, p.Password, p.PrivateKey, 24, 80)
 	if err != nil {
 		log.Printf("Failed to establish SSH session to %s: %v", p.Target, err)

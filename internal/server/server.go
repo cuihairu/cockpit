@@ -617,4 +617,18 @@ func (s *Server) handleProxyError(agent *Agent, msg *protocol.Message) {
 		return
 	}
 	log.Printf("Proxy error from agent %s, proxy %s: %s", agent.ID, p.ProxyID, p.Error)
+
+	// 终端连接错误：转发给浏览器显示
+	if hasPrefix(p.ProxyID, "terminal") {
+		connID := strings.TrimPrefix(p.ProxyID, "terminal-")
+		terminalSessionsMu.Lock()
+		session, exists := terminalByConn[connID]
+		terminalSessionsMu.Unlock()
+		if exists {
+			session.ClientWS.WriteJSON(map[string]interface{}{
+				"type":    "error",
+				"message": p.Error,
+			})
+		}
+	}
 }

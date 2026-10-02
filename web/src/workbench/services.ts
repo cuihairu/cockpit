@@ -12,7 +12,7 @@ export const getRemoteServices = (agent: Agent | null): RemoteService[] => {
       if (typeof value !== 'object' || value === null || !['ssh', 'rdp', 'vnc', 'telnet'].includes(key)) {
         return null
       }
-      const service = value as { host?: string; port?: number; name?: string; running?: boolean }
+      const service = value as { host?: string; port?: number; name?: string; running?: boolean; authMethods?: string[] }
       if (!service.running || !service.port) return null
       return {
         protocol: key as RemoteProtocol,
@@ -20,6 +20,7 @@ export const getRemoteServices = (agent: Agent | null): RemoteService[] => {
         port: service.port,
         name: service.name || `${key.toUpperCase()} Server`,
         running: true,
+        authMethods: service.authMethods,
       }
     })
     .filter((service): service is RemoteService => Boolean(service))

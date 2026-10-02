@@ -1,11 +1,15 @@
 package detector
 
 import (
+	"fmt"
 	"net"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
+	"golang.org/x/crypto/ssh"
 )
 
 // RemoteServiceDetector 远程服务检测器
@@ -52,12 +56,19 @@ func (d *RemoteServiceDetector) Detect() (*protocol.Capability, error) {
 	// 构建 capability metadata
 	metadata := make(map[string]interface{})
 	for _, svc := range services {
-		metadata[string(svc.Protocol)] = map[string]interface{}{
+		entry := map[string]interface{}{
 			"host":    svc.Host,
 			"port":    svc.Port,
 			"name":    svc.Name,
 			"running": svc.Running,
 		}
+		// SSH 探测支持的认证方式
+		if svc.Protocol == protocol.RemoteProtocolSSH {
+			if methods, err := probeSSHAuthMethods(svc.Host, svc.Port); err == nil {
+				entry["authMethods"] = methods
+			}
+		}
+		metadata[string(svc.Protocol)] = entry
 	}
 
 	return &protocol.Capability{
@@ -157,6 +168,36 @@ func (d *RemoteServiceDetector) ScanRange(host string, startPort, endPort int) [
 	}
 
 	return openPorts
+}
+
+// authMethodsRe 从 SSH 错误消息中提取认证方式列表。
+// 错误格式: "ssh: unable to authenticate, attempted methods [password publickey]"
+var authMethodsRe = regexp.MustCompile(`attempted methods \[([^\]]*)\]`)
+
+// probeSSHAuthMethods 探测 SSH 服务器支持的认证方式。
+// 用假用户名尝试认证，服务器会返回它支持的方法列表（如 password, publickey）。
+func probeSSHAuthMethods(host string, port int) ([]string, error) {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	config := &ssh.ClientConfig{
+		User:            "probe-auth-check",
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         3 * time.Second,
+	}
+	_, err := ssh.Dial("tcp", addr, config)
+	if err == nil {
+		return []string{"password", "publickey"}, nil
+	}
+
+	// 从错误消息中解析认证方式
+	// "ssh: unable to authenticate, attempted methods [password publickey]"
+	if m := authMethodsRe.FindStringSubmatch(err.Error()); len(m) > 1 {
+		methods := strings.Fields(m[1])
+		if len(methods) > 0 {
+			return methods, nil
+		}
+	}
+
+	return nil, fmt.Errorf("cannot determine auth methods: %w", err)
 }
 
 // RemoteCapabilityInfo 远程能力信息（供外部使用）

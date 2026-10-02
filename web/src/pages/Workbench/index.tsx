@@ -115,6 +115,7 @@ const Workbench = () => {
       port: service.port,
       protocol: service.protocol,
       title: `SSH (Agent) - ${selectedAgent.hostname || selectedAgent.id}`,
+      authMethods: service.authMethods,
     })
   }
 
@@ -227,6 +228,7 @@ const Workbench = () => {
           port={terminalConfig.port}
           protocol={terminalConfig.protocol}
           title={terminalConfig.title}
+          authMethods={terminalConfig.authMethods}
         />
       )}
 

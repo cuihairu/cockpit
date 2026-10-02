@@ -20,6 +20,8 @@ interface TerminalModalProps {
   username?: string;
   /** SSH 登录口令（仅经加密 WS 通道转发，不落盘） */
   password?: string;
+  /** SSH 服务器支持的认证方式（如 ["publickey","password"]；缺省视为都支持） */
+  authMethods?: string[];
 }
 
 const TerminalModal: React.FC<TerminalModalProps> = ({
@@ -32,6 +34,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   title,
   username,
   password,
+  authMethods,
 }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
@@ -39,8 +42,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
+  // SSH 认证方式判断
+  const passwordSupported = !authMethods || authMethods.includes('password');
+  const keySupported = !authMethods || authMethods.includes('publickey');
   // SSH 需要登录凭据；调用方未提供时先出表单（telnet 等裸协议免认证）
-  const needsCredentials = protocol === 'ssh' && !username;
+  const needsCredentials = protocol === 'ssh' && !username && passwordSupported;
   const [authPending, setAuthPending] = useState(needsCredentials);
   const [authError, setAuthError] = useState<string | null>(null);
   const [credentials, setCredentials] = useState({ username: username || '', password: password || '' });
@@ -217,7 +223,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       terminalInstanceRef.current.reset();
       setConnected(false);
     }
-  }, [visible]);
+    // 重新打开时重置认证状态（SSH 每次都需输入凭据）
+    if (visible && protocol === 'ssh' && !username && passwordSupported) {
+      setAuthPending(true);
+    }
+  }, [visible, protocol, username, passwordSupported]);
 
   const handleReconnect = () => {
     if (terminalInstanceRef.current) {
@@ -245,7 +255,20 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       footer={null}
       styles={{ body: { padding: 0, background: '#1e1e1e' } }}
     >
-      {authPending ? (
+      {protocol === 'ssh' && !passwordSupported && !keySupported ? (
+        <div style={{ padding: 24, background: '#1e1e1e', color: '#d4d4d4' }}>
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="SSH 服务器认证方式受限"
+            description={`该 SSH 服务器支持的认证方式：${authMethods?.join(', ') || '未知'}。当前不支持密码登录，请使用 SSH 密钥认证或修改服务器配置。`}
+          />
+          <Space>
+            <Button onClick={onClose}>关闭</Button>
+          </Space>
+        </div>
+      ) : authPending ? (
         <div style={{ padding: 24, background: '#1e1e1e', color: '#d4d4d4' }}>
           <Alert
             type="info"
