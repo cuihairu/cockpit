@@ -45,9 +45,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   // SSH 认证方式判断
   const passwordSupported = !authMethods || authMethods.includes('password');
   const keySupported = !authMethods || authMethods.includes('publickey');
-  // SSH 需要登录凭据；调用方未提供时先出表单（telnet 等裸协议免认证）
-  const needsCredentials = protocol === 'ssh' && !username && passwordSupported;
+  // SSH 需要登录凭据：仅当支持密码认证时才弹表单；
+  // 纯密钥认证（publickey only）弹用户名表单，密码留空让 agent 用默认密钥
+  const needsCredentials = protocol === 'ssh' && !username;
   const [authPending, setAuthPending] = useState(needsCredentials);
+  const [keyAuthUsername, setKeyAuthUsername] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [credentials, setCredentials] = useState({ username: username || '', password: password || '' });
 
@@ -224,10 +226,11 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       setConnected(false);
     }
     // 重新打开时重置认证状态（SSH 每次都需输入凭据）
-    if (visible && protocol === 'ssh' && !username && passwordSupported) {
+    if (visible && protocol === 'ssh' && !username) {
       setAuthPending(true);
+      setKeyAuthUsername(null);
     }
-  }, [visible, protocol, username, passwordSupported]);
+  }, [visible, protocol, username]);
 
   const handleReconnect = () => {
     if (terminalInstanceRef.current) {
@@ -243,6 +246,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       return;
     }
     setAuthError(null);
+    // 密钥认证时记录用户名（密码留空）
+    if (!passwordSupported && keySupported) {
+      setKeyAuthUsername(credentials.username);
+    }
     setAuthPending(false);
   };
 
@@ -262,11 +269,37 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
             showIcon
             style={{ marginBottom: 16 }}
             message="SSH 服务器认证方式受限"
-            description={`该 SSH 服务器支持的认证方式：${authMethods?.join(', ') || '未知'}。当前不支持密码登录，请使用 SSH 密钥认证或修改服务器配置。`}
+            description={`该 SSH 服务器支持的认证方式：${authMethods?.join(', ') || '未知'}。请修改服务器配置启用密码或密钥认证。`}
           />
           <Space>
             <Button onClick={onClose}>关闭</Button>
           </Space>
+        </div>
+      ) : protocol === 'ssh' && keySupported && !passwordSupported ? (
+        <div style={{ padding: 24, background: '#1e1e1e', color: '#d4d4d4' }}>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="SSH 密钥认证"
+            description={`该服务器仅支持密钥认证，将使用 Agent 默认密钥连接。请输入用户名。`}
+          />
+          <Form layout="vertical" onFinish={(e) => { e.preventDefault?.(); setKeyAuthUsername(credentials.username || 'root'); }}>
+            <Form.Item label="用户名" required>
+              <Input
+                autoFocus
+                value={credentials.username}
+                onChange={(e) => setCredentials((c) => ({ ...c, username: e.target.value }))}
+                placeholder="root"
+              />
+            </Form.Item>
+            <Space>
+              <Button type="primary" onClick={() => { setKeyAuthUsername(credentials.username || 'root'); setAuthPending(false); }}>
+                连接
+              </Button>
+              <Button onClick={onClose}>取消</Button>
+            </Space>
+          </Form>
         </div>
       ) : authPending ? (
         <div style={{ padding: 24, background: '#1e1e1e', color: '#d4d4d4' }}>
