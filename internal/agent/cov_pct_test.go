@@ -133,6 +133,14 @@ func TestCovRegisterConnClearedBeforeSnapshot(t *testing.T) {
 
 	DetectVirtualization() // 预热 sync.Once 缓存，避免探测耗时挤占下方时序窗口
 
+	// publicIP 真实端点本机实测 ~500ms（首端点成功），恰好压在下方 500ms
+	// 时序窗口边上——网络稍慢 register 就还没走到 writeMu，测试必闪。注入
+	// 不可达本地地址（连接拒绝，微秒级失败）让 register 的前置耗时确定性地
+	// 落在窗口内（localip.go publicIPEndpoints 注入点，测试后恢复）
+	savedEndpoints := publicIPEndpoints
+	publicIPEndpoints = []string{"http://127.0.0.1:1/"}
+	defer func() { publicIPEndpoints = savedEndpoints }()
+
 	conn := covDial(t, covWSURL(srv))
 	a.mu.Lock()
 	a.conn = conn

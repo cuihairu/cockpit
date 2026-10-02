@@ -9,6 +9,11 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// passwdPath 覆盖率注入点（同 internal/agent agent.go goos 范式）：默认
+// 生产路径，同包测试注入不存在路径覆盖「读不到 passwd → 兜底 root」分支，
+// 注入前后 defer 恢复。读方仅 inferUsername（RPC 测试同步调用）。
+var passwdPath = "/etc/passwd"
+
 // SSHProvider 远程 SSH 密钥管理 Provider。
 // 提供 getDefaultKey action：返回默认 SSH 私钥 PEM，供 guacd 认证。
 type SSHProvider struct {
@@ -80,8 +85,8 @@ func inferUsername() string {
 	if u := os.Getenv("USER"); u != "" {
 		return u
 	}
-	// 读 /etc/passwd 的当前 UID
-	if out, err := os.ReadFile("/etc/passwd"); err == nil {
+	// 读 /etc/passwd 的当前 UID（passwdPath 见包级注入点注释）
+	if out, err := os.ReadFile(passwdPath); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			parts := strings.Split(line, ":")
 			if len(parts) >= 3 && parts[2] == "0" {
