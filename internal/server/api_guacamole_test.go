@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -424,7 +425,10 @@ func TestGuacamoleTunnelFullFlow(t *testing.T) {
 	m := guacZipConnect(t, argNames, guacExtractConnect(t, hs))
 	for k, want := range map[string]string{
 		"VERSION_1_5_0": "VERSION_1_5_0",
-		"hostname":      "10.0.0.9",
+		// connect 的 hostname/port 被改写成回环中继地址（guacd 只拨本机
+		// 中继，真实目标 10.0.0.9 由 agent 经 WS 通道拨出——设计修正
+		// 2026-10-02，见 api_guacamole.go 3.5 节与 guac_relay.go）
+		"hostname":      "127.0.0.1",
 		"username":      "admin",
 		"password":      "pw",
 		"width":         "1024",
@@ -433,6 +437,14 @@ func TestGuacamoleTunnelFullFlow(t *testing.T) {
 		if m[k] != want {
 			t.Errorf("handshake connect[%s] = %q, want %q", k, m[k], want)
 		}
+	}
+	// 端口必须是中继的临时端口（回环 bind :0 恒在 ephemeral 段 32768+），
+	// 绝不能是原始目标 3389——否则 guacd 又在直拨真实目标
+	if m["port"] == "3389" {
+		t.Errorf("handshake connect[port] = %q, relay port must replace original target port", m["port"])
+	}
+	if _, err := strconv.Atoi(m["port"]); err != nil {
+		t.Errorf("handshake connect[port] = %q, want numeric relay port", m["port"])
 	}
 	// 媒体能力声明：audio/video 空声明（阶段二不启用），image 必须声明 png
 	//（缺声明 → guacd user->info.image_mimetypes=NULL，supports_webp 空指针
