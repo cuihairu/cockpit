@@ -448,21 +448,10 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	// 2026-09-30：rec/ 里全是无后缀孤儿文件、录制页恒空）
 	recording := s.recordingEnabled()
 	session.Recording = recording
-	// SSH 密钥自动获取：票据没传 private_key 时，向 agent 要默认密钥
-	if protocolStr == "ssh" && ticket.Params["private_key"] == "" {
-		if resp, err := s.CallAgent(agentID, "ssh.getDefaultKey", nil); err == nil {
-			if key, ok := resp.Payload["data"].(map[string]interface{}); ok {
-				if pem, ok := key["privateKey"].(string); ok && pem != "" {
-					ticket.Params["private_key"] = pem
-					log.Printf("Guacamole: using agent default SSH key for %s", host)
-				}
-				if username, ok := key["username"].(string); ok && ticket.Params["username"] == "" {
-					ticket.Params["username"] = username
-				}
-			}
-		} else {
-			log.Printf("Guacamole: failed to get agent SSH key: %v", err)
-		}
+	// SSH 密钥自动获取：票据既没传 private_key 也没传 password 时，向 agent
+	// 要默认密钥兜底（门控细则见 applySSHDefaultKey）
+	if protocolStr == "ssh" {
+		s.applySSHDefaultKey(ticket.Params, agentID, host)
 	}
 
 	connectArgs := guacConnectArgs(argNames, protocolStr, host, port, ticket.Params, width, height,
@@ -519,6 +508,46 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 
 	// 8. 任一侧断开 → 关闭 + 审计结束
 	s.closeGuacamoleSession(session)
+}
+
+// sshDefaultKeyLookup agent 默认 SSH 密钥查询。包级变量仅为测试可注入
+// （同 wsRegistryLookup 惯例），生产路径固定打 ssh.getDefaultKey RPC。
+var sshDefaultKeyLookup = func(s *Server, agentID string) (pem, username string, err error) {
+	resp, err := s.CallAgent(agentID, "ssh.getDefaultKey", nil)
+	if err != nil {
+		return "", "", err
+	}
+	key, ok := resp.Payload["data"].(map[string]interface{})
+	if !ok {
+		return "", "", nil
+	}
+	pem, _ = key["privateKey"].(string)
+	username, _ = key["username"].(string)
+	return pem, username, nil
+}
+
+// applySSHDefaultKey SSH 密钥自动获取的门控：票据**既没传 private_key 也
+// 没传 password** 时才向 agent 要默认密钥兜底。只在 private_key 上判空
+// 会把口令认证也劫持成公钥认证——guacd/libssh2 双参数并存时优先公钥，
+// agent 密钥又未必在目标机 authorized_keys 里，显式口令的会话直接起不来
+// （2026-10-02 验收探针 S1/S5-S9 全挂的回归根因）。显式凭据（口令或密钥）
+// 一律原样透传。
+func (s *Server) applySSHDefaultKey(params map[string]string, agentID, host string) {
+	if params["private_key"] != "" || params["password"] != "" {
+		return
+	}
+	pem, username, err := sshDefaultKeyLookup(s, agentID)
+	if err != nil {
+		log.Printf("Guacamole: failed to get agent SSH key: %v", err)
+		return
+	}
+	if pem != "" {
+		params["private_key"] = pem
+		log.Printf("Guacamole: using agent default SSH key for %s", host)
+	}
+	if username != "" && params["username"] == "" {
+		params["username"] = username
+	}
 }
 
 // wsToGuacd 浏览器 → guacd：WS 文本帧内容直写 TCP。
