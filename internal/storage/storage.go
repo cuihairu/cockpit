@@ -297,9 +297,14 @@ func (d *DB) RegenerateAgentSecret(agentID string) (string, error) {
 
 // UpsertComputeInstance 插入或更新计算实例
 func (d *DB) UpsertComputeInstance(inst *ComputeInstance) error {
-	return d.db.Where("id = ?", inst.ID).
-		Assign(inst).
-		FirstOrCreate(inst).Error
+	var existing ComputeInstance
+	if err := d.db.First(&existing, "id = ?", inst.ID).Error; err != nil {
+		// 不存在，创建
+		return d.db.Create(inst).Error
+	}
+	// 存在，更新所有字段
+	inst.CreatedAt = existing.CreatedAt
+	return d.db.Save(inst).Error
 }
 
 // GetComputeInstance 获取单个计算实例
