@@ -1,13 +1,66 @@
 package proxy
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
 )
+
+// EnsureSSHKeys 确保 keyDir 下有可用的 SSH 密钥。
+// 如果不存在，自动生成 Ed25519 密钥对。返回使用的密钥路径。
+func EnsureSSHKeys(keyDir string) (string, error) {
+	if keyDir == "" {
+		keyDir = defaultSSHDir()
+	}
+
+	// 已有可用密钥，直接返回
+	for _, name := range defaultKeyNames {
+		keyPath := filepath.Join(keyDir, name)
+		if _, err := os.Stat(keyPath); err == nil {
+			return keyPath, nil
+		}
+	}
+
+	// 没有密钥，自动生成 Ed25519
+	if err := os.MkdirAll(keyDir, 0700); err != nil {
+		return "", fmt.Errorf("create ssh dir %s: %w", keyDir, err)
+	}
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", fmt.Errorf("generate ed25519 key: %w", err)
+	}
+
+	// 序列化私钥为 PEM
+	privDER, err := ssh.MarshalPrivateKey(priv, "cockpit-agent@auto")
+	if err != nil {
+		return "", fmt.Errorf("marshal private key: %w", err)
+	}
+	privPEM := pem.EncodeToMemory(privDER)
+
+	keyPath := filepath.Join(keyDir, "id_ed25519")
+	if err := os.WriteFile(keyPath, privPEM, 0600); err != nil {
+		return "", fmt.Errorf("write private key: %w", err)
+	}
+
+	// 写公钥
+	pub, _ := ssh.NewPublicKey(priv.Public())
+	pubLine := string(ssh.MarshalAuthorizedKey(pub))
+	pubPath := keyPath + ".pub"
+	if err := os.WriteFile(pubPath, []byte(pubLine), 0644); err != nil {
+		return "", fmt.Errorf("write public key: %w", err)
+	}
+
+	log.Printf("Auto-generated SSH key: %s", keyPath)
+	return keyPath, nil
+}
 
 // 默认私钥文件名（按优先级排列）
 var defaultKeyNames = []string{

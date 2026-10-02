@@ -448,6 +448,23 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	// 2026-09-30：rec/ 里全是无后缀孤儿文件、录制页恒空）
 	recording := s.recordingEnabled()
 	session.Recording = recording
+	// SSH 密钥自动获取：票据没传 private_key 时，向 agent 要默认密钥
+	if protocolStr == "ssh" && ticket.Params["private_key"] == "" {
+		if resp, err := s.CallAgent(agentID, "ssh.getDefaultKey", nil); err == nil {
+			if key, ok := resp.Payload["data"].(map[string]interface{}); ok {
+				if pem, ok := key["privateKey"].(string); ok && pem != "" {
+					ticket.Params["private_key"] = pem
+					log.Printf("Guacamole: using agent default SSH key for %s", host)
+				}
+				if username, ok := key["username"].(string); ok && ticket.Params["username"] == "" {
+					ticket.Params["username"] = username
+				}
+			}
+		} else {
+			log.Printf("Guacamole: failed to get agent SSH key: %v", err)
+		}
+	}
+
 	connectArgs := guacConnectArgs(argNames, protocolStr, host, port, ticket.Params, width, height,
 		recording, sessionID+".guac")
 	handshake := guacEncode("size", strconv.Itoa(width), strconv.Itoa(height), "96") +

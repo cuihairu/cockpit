@@ -103,6 +103,13 @@ func NewAgent(cfg Config) *Agent {
 func (a *Agent) Start() error {
 	log.Printf("Starting Cockpit Agent...")
 
+	// 0. 确保 SSH 密钥存在（没有则自动生成）
+	if keyPath, err := proxy.EnsureSSHKeys(a.config.SSHKeys); err != nil {
+		log.Printf("SSH key setup warning: %v", err)
+	} else {
+		log.Printf("SSH key ready: %s", keyPath)
+	}
+
 	// 1. 运行能力检测
 	log.Printf("Running capability detection...")
 	a.capabilities = a.detectCapabilities()

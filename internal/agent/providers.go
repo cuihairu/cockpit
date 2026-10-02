@@ -49,6 +49,9 @@ func (a *Agent) setupProviders() {
 	// 无条件注册（与 detectCapabilities 追加 file capability 的条件一致）
 	a.rpc.RegisterProvider(rpc.NewFileProvider())
 
+	// 1.7 SSH Provider：远程 SSH 密钥管理（guacd 密钥认证用）
+	a.rpc.RegisterProvider(rpc.NewSSHProvider(a.config.SSHKeys))
+
 	// 2. 按检测到的能力注册
 	for _, cap := range a.capabilities {
 		switch cap.Type {
