@@ -73,8 +73,19 @@ for i in $(seq 1 30); do
         -d "{\"username\":\"${ADMIN_USER}\",\"password\":\"${ADMIN_PASS}\"}" \
         | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null) || TOKEN=""
     if [[ -n "${TOKEN}" ]]; then
+        # online 判定必须叠加 lastSeen 新鲜度：server 非优雅重启时 DB 行还带着
+        # 上次的 online 状态（没人改 offline），陈旧行会让探针打在 agent 注册前
+        # （2026-10-02 vault 验收复现：0/16 全 404，agent 注册晚探针 4s）
         ONLINE=$(curl -sf "http://127.0.0.1:${PORT}/api/agents" -H "Authorization: Bearer ${TOKEN}" \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); a=d.get("agents", d) if isinstance(d, dict) else d; print(sum(1 for x in a if x.get("status")=="online"))' 2>/dev/null) || ONLINE=0
+            | python3 -c 'import json,sys,datetime; d=json.load(sys.stdin); a=d.get("agents", d) if isinstance(d, dict) else d; now=datetime.datetime.now(datetime.timezone.utc);
+import re
+def fresh(x):
+    ls=x.get("lastSeen","");
+    if not ls: return False
+    try: t=datetime.datetime.fromisoformat(ls.replace("Z","+00:00"))
+    except Exception: return False
+    return (now-t).total_seconds() < 60
+print(sum(1 for x in a if x.get("status")=="online" and fresh(x)))' 2>/dev/null) || ONLINE=0
         [[ "${ONLINE}" != "0" ]] && break
     fi
     sleep 1
