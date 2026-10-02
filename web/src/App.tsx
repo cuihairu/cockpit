@@ -42,7 +42,11 @@ import './App.less'
 
 // Route-level code splitting
 const Dashboard = lazy(() => import('./pages/Dashboard'))
-const Resources = lazy(() => import('./pages/Resources'))
+const ComputePage = lazy(() => import('./pages/Resources/ComputePage'))
+const ServicesResPage = lazy(() => import('./pages/Resources/ServicesPage'))
+const DomainsPage = lazy(() => import('./pages/Resources/DomainsPage'))
+const GatewaysPage = lazy(() => import('./pages/Resources/GatewaysPage'))
+const StoragesPage = lazy(() => import('./pages/Resources/StoragesPage'))
 const Workbench = lazy(() => import('./pages/Workbench'))
 const LogSearch = lazy(() => import('./pages/LogSearch'))
 const Docker = lazy(() => import('./pages/Docker'))
@@ -460,8 +464,12 @@ const MainLayout = () => {
           {permDenied ? <ForbiddenPage /> : (
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/resources" element={<Resources />} />
-            <Route path="/resources/*" element={<Resources />} />
+            <Route path="/resources/compute" element={<ComputePage />} />
+            <Route path="/resources/services" element={<ServicesResPage />} />
+            <Route path="/resources/domains" element={<DomainsPage />} />
+            <Route path="/resources/certificates" element={<DomainsPage />} />
+            <Route path="/resources/gateways" element={<GatewaysPage />} />
+            <Route path="/resources/storages" element={<StoragesPage />} />
             <Route path="/workbench" element={<Workbench />} />
             <Route path="/logsearch" element={<LogSearch />} />
             <Route path="/agents" element={<Navigate to="/workbench" replace />} />
