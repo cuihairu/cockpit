@@ -255,11 +255,14 @@ func (h *Handler) readFromTarget(conn *AgentTargetConn) {
 			break
 		}
 
-		// 发送数据给 Server
+		// 发送数据给 Server。必须拷贝：SendMessage 只是把消息入队（writeLoop
+		// 异步序列化），buf 下一轮 Read 即被覆写——RDP 握手这类亚毫秒连发
+		// 场景会读到被覆写后的垃圾字节，TLS 流直接损坏（2026-10-02 验收
+		// S14 间歇失败的根因）
 		dataMsg := protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{
 			"proxyId": conn.ProxyID,
 			"connId":  conn.ID,
-			"data":    buf[:n],
+			"data":    append([]byte(nil), buf[:n]...),
 		})
 
 		if err := h.SendMessage(dataMsg); err != nil {

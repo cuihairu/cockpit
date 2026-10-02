@@ -286,11 +286,13 @@ func (m *Manager) readFromClient(proxy *Proxy, proxyConn *ProxyConn) {
 		proxyConn.LastRead = time.Now()
 		proxyConn.mu.Unlock()
 
-		// 转发数据给 Agent
+		// 转发数据给 Agent。必须拷贝：SendToAgent 入队后由写泵异步序列化，
+		// buf 下一轮 Read 即被覆写（同 proxy/handler.go readFromTarget 的
+		// 覆写竞态，2026-10-02 修复）
 		dataMsg := protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{
 			"proxyId": proxy.config.ID,
 			"connId":  proxyConn.ID,
-			"data":    buf[:n],
+			"data":    append([]byte(nil), buf[:n]...),
 		})
 
 		if err := m.server.SendToAgent(proxy.config.AgentID, dataMsg); err != nil {
