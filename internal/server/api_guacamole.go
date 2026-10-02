@@ -73,7 +73,11 @@ type GuacamoleSession struct {
 	// Recording 本会话是否开了 guacd 录制（connect 带 recording-*）——
 	// collect 用它做零延迟跳过（未录制会话不必等 guacd finalize 轮询）
 	Recording bool
-	ClientWS  *websocket.Conn
+	// relay 目标转发器（guac_relay.go）：guacd 拨中继、agent 拨真实目标。
+	// Host/Port 保留用户视角（审计/录制元数据/出口策略语义），connect 指令
+	// 里放的是中继地址
+	relay    *guacRelay
+	ClientWS *websocket.Conn
 	guacd     net.Conn
 	guacdRd   *bufio.Reader // 握手阶段建立，guacdToWS 复用（select 响应不丢）
 	Created   time.Time
@@ -347,6 +351,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	}
 
 	// 3. 拨 guacd TCP（不暴露 guacd 端口给浏览器——网关反代，见设计 D2）
+	sessionID := uuid.New().String()
 	guacdConn, err := dialGuacd(guacdAddr(), guacdDialTimeout)
 	if err != nil {
 		log.Printf("Guacamole: dial guacd %s failed: %v", guacdAddr(), err)
@@ -360,6 +365,27 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 				Reason:   "guacd unreachable",
 			})
 		http.Error(w, `{"error":"Guacamole daemon unavailable"}`, http.StatusBadGateway)
+		return
+	}
+
+	// 3.5 目标转发器：guacd 拨回环中继，字节流经 agent WS 通道到 agent、
+	// 由 agent 拨真实目标（架构：agent 是目标内网的唯一落点，guacd 不直拨
+	// ——设计修正 2026-10-02）。中继起不来按 agent 不可达处理。
+	relay, relayAddr, err := startGuacRelay(agentID, guacRelayPrefix+sessionID,
+		net.JoinHostPort(host, portStr), s.SendToAgent)
+	if err != nil {
+		log.Printf("Guacamole: start target relay failed: %v", err)
+		s.auditRemoteFailure(ticket.UserID, ticket.Username, r.RemoteAddr, r.UserAgent(),
+			&audit.RemoteSessionDetails{
+				Protocol: protocolStr,
+				AgentID:  agentID,
+				Host:     host,
+				Port:     port,
+				Egress:   egressMatch.summary(),
+				Reason:   "target relay unavailable",
+			})
+		_ = guacdConn.Close()
+		http.Error(w, `{"error":"Agent relay unavailable"}`, http.StatusBadGateway)
 		return
 	}
 
@@ -380,10 +406,10 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		log.Printf("Guacamole WebSocket upgrade failed: %v", err)
 		_ = guacdConn.Close()
+		relay.Close()
 		return
 	}
 
-	sessionID := uuid.New().String()
 	session := &GuacamoleSession{
 		ID:       sessionID,
 		UserID:   ticket.UserID,
@@ -392,6 +418,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		AgentID:  agentID,
 		Host:     host,
 		Port:     port,
+		relay:    relay,
 		ClientWS: conn,
 		guacd:    guacdConn,
 		Created:  time.Now(),
@@ -417,6 +444,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		log.Printf("Guacamole: select write failed: %v", err)
 		conn.Close()
 		_ = guacdConn.Close()
+		relay.Close()
 		return
 	}
 	// 读 guacd 的 select 响应：args 参数名列表。connect 必须与这份列表逐位
@@ -427,6 +455,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		log.Printf("Guacamole: read select response failed: %v", err)
 		conn.Close()
 		_ = guacdConn.Close()
+		relay.Close()
 		return
 	}
 	argNames := guacParseArgNames(argsLine)
@@ -434,6 +463,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		log.Printf("Guacamole: guacd args response malformed: %q", argsLine)
 		conn.Close()
 		_ = guacdConn.Close()
+		relay.Close()
 		return
 	}
 	if width <= 0 {
@@ -454,7 +484,18 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		s.applySSHDefaultKey(ticket.Params, agentID, host)
 	}
 
-	connectArgs := guacConnectArgs(argNames, protocolStr, host, port, ticket.Params, width, height,
+	// connect 的 hostname/port 用中继地址（guacd 拨回环，真实目标由 agent 拨）；
+	// username/password/private-key 等凭据参数语义不变
+	relayHost, relayPortStr, err := net.SplitHostPort(relayAddr)
+	if err != nil {
+		log.Printf("Guacamole: relay addr malformed %q: %v", relayAddr, err)
+		conn.Close()
+		_ = guacdConn.Close()
+		relay.Close()
+		return
+	}
+	relayPort, _ := strconv.Atoi(relayPortStr)
+	connectArgs := guacConnectArgs(argNames, protocolStr, relayHost, relayPort, ticket.Params, width, height,
 		recording, sessionID+".guac")
 	handshake := guacEncode("size", strconv.Itoa(width), strconv.Itoa(height), "96") +
 		guacEncode("audio") + // 空 = 不启用音频（阶段二）
@@ -465,6 +506,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		log.Printf("Guacamole: handshake write failed: %v", err)
 		conn.Close()
 		_ = guacdConn.Close()
+		relay.Close()
 		return
 	}
 	session.guacdRd = hsReader
@@ -646,6 +688,9 @@ func (s *Server) closeGuacamoleSession(gs *GuacamoleSession) {
 	gs.once.Do(func() {
 		gs.ClientWS.Close()
 		_ = gs.guacd.Close()
+		if gs.relay != nil {
+			gs.relay.Close() // 拆中继 + 通知 agent 拆目标连接
+		}
 		log.Printf("Guacamole session closed: %s", gs.ID)
 
 		// M3 D2：收集 guacd 卷里的 .guac → recordingsDir（先于审计，

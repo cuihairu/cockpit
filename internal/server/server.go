@@ -548,6 +548,14 @@ func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
 		return
 	}
 
+	// Guacamole 目标转发：proxyId 以 "guac:" 前缀（不依赖 proxyMgr，见 guac_relay.go）
+	if hasPrefix(p.ProxyID, guacRelayPrefix) {
+		if err := guacRelayDeliver(p.ProxyID, p.ConnID, p.Data); err != nil {
+			log.Printf("Guacamole relay deliver: %v", err)
+		}
+		return
+	}
+
 	if s.proxyMgr == nil {
 		return
 	}
@@ -592,6 +600,12 @@ func (s *Server) handleProxyClose(agent *Agent, msg *protocol.Message) {
 		return
 	}
 
+	// Guacamole 目标转发：agent 侧目标断开 → 关 guacd 侧连接
+	if hasPrefix(p.ProxyID, guacRelayPrefix) {
+		guacRelayHandleClose(p.ProxyID, p.ConnID, p.Reason)
+		return
+	}
+
 	if s.proxyMgr == nil {
 		return
 	}
@@ -619,6 +633,12 @@ func (s *Server) handleProxyError(agent *Agent, msg *protocol.Message) {
 		return
 	}
 	log.Printf("Proxy error from agent %s, proxy %s: %s", agent.ID, p.ProxyID, p.Error)
+
+	// Guacamole 目标转发：agent 拨目标失败 → 关 guacd 侧连接，connect 立即失败
+	if hasPrefix(p.ProxyID, guacRelayPrefix) {
+		guacRelayHandleError(p.ProxyID, p.ConnID, p.Error)
+		return
+	}
 
 	// 终端连接错误：转发给浏览器显示
 	if hasPrefix(p.ProxyID, "terminal") {
