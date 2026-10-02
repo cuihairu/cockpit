@@ -10,7 +10,7 @@
 #
 #   # 带参数（注册开机自启服务）:
 #   curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | \
-#     bash -s -- --with-service --server wss://cockpit.example.com/ws
+#     bash -s -- --with-service --server wss://cockpit.cuihairu.site/ws
 #
 #   # 本地执行:
 #   ./install.sh [--with-service] [--server URL] [选项]
@@ -485,7 +485,7 @@ fi
 info ""
 info "完成。下一步:"
 if [ "$WITH_SERVICE" != "1" ]; then
-	info "  注册开机自启服务: ./install.sh --with-service --server wss://<server>/ws"
-	info "  或手动启动: cockpit-agent start -server ws://<server>/ws"
+	info "  注册开机自启服务: ./install.sh --with-service --server wss://cockpit.cuihairu.site/ws"
+	info "  或手动启动: cockpit-agent start -server wss://cockpit.cuihairu.site/ws"
 fi
 info "  验证版本: cockpit-agent --version"

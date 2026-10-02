@@ -26,18 +26,92 @@
 
 ## 快速开始
 
-起 Server（Docker，部署机无需编译环境）：
+> 前置：先有一台 Cockpit Server（Docker 一条起，部署机无需编译环境）：
 
 ```bash
 cp deployments/docker/.env.example deployments/docker/.env && vi deployments/docker/.env
 docker compose -f deployments/docker/docker-compose.yml up -d
 ```
 
-装 Agent（Linux / macOS 一行；Windows PowerShell：`irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex`）：
+### Linux
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | bash
-```
+1. 下载并安装（自动检测架构，从每日构建匿名直链下载，装完自动验证）：
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | bash
+   ```
+
+2. 连接服务器（示例用本站域名，替换为你的 Cockpit 服务端地址）：
+
+   ```bash
+   cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+   ```
+
+3. 验证安装：
+
+   ```bash
+   cockpit-agent --version
+   ```
+
+   验证成功预期输出：
+
+   ```text
+   Cockpit Agent v20261001
+   ```
+
+   （版本号为安装当日日期；agent 日志出现 `Registered as agent: ...` 即已连上服务器）
+
+### macOS
+
+1. 下载并安装（与 Linux 共用 `install.sh`，自动识别 Darwin 与 arm64/amd64）：
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | bash
+   ```
+
+2. 连接服务器：
+
+   ```bash
+   cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+   ```
+
+3. 验证安装：
+
+   ```bash
+   cockpit-agent --version
+   ```
+
+   验证成功预期输出：
+
+   ```text
+   Cockpit Agent v20261001
+   ```
+
+### Windows（PowerShell 5.1+）
+
+1. 下载并安装（免管理员，装到当前用户目录并写入用户 PATH）：
+
+   ```powershell
+   irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
+   ```
+
+2. 连接服务器（新开一个终端使 PATH 生效）：
+
+   ```powershell
+   cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+   ```
+
+3. 验证安装：
+
+   ```powershell
+   cockpit-agent --version
+   ```
+
+   验证成功预期输出：
+
+   ```text
+   Cockpit Agent v20261001
+   ```
 
 ## 文档
 

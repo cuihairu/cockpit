@@ -127,12 +127,12 @@ irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | \
-  bash -s -- --with-service --server wss://cockpit.example.com/ws
+  bash -s -- --with-service --server wss://cockpit.cuihairu.site/ws
 ```
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1))) `
-  -WithService -ServerUrl "wss://cockpit.example.com/ws"
+  -WithService -ServerUrl "wss://cockpit.cuihairu.site/ws"
 ```
 
 支持矩阵：Linux amd64 / arm64 / armv7、macOS amd64 / arm64、Windows
@@ -149,20 +149,20 @@ OpenWrt 路由器无需手工编译：nightly release 提供多架构
 在被管理节点上运行：
 
 ```bash
-./cockpit-agent start -server ws://127.0.0.1:9000/ws -region home -zone datacenter
+./cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
 ```
 
 主二进制也提供兼容入口，参数与 `cockpit-agent start` 相同：
 
 ```bash
-./cockpit agent -server ws://127.0.0.1:9000/ws -region home -zone datacenter
+./cockpit agent -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
 ```
 
 常用参数：
 
 ```bash
 ./cockpit-agent start \
-  -server wss://cockpit.example.com/ws \
+  -server wss://cockpit.cuihairu.site/ws \
   -id server01 \
   -secret YOUR_AGENT_SECRET \
   -region home \
@@ -183,7 +183,7 @@ OpenWrt 路由器无需手工编译：nightly release 提供多架构
 ```bash
 export ADMIN_PASSWORD='use-a-strong-password'
 export TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)"
-export ALLOWED_ORIGINS="https://cockpit.example.com"
+export ALLOWED_ORIGINS="https://cockpit.cuihairu.site"
 export PRODUCTION=true
 ```
 

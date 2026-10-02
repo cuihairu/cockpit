@@ -77,7 +77,7 @@ curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | \
-  sudo bash -s -- --with-service --server wss://cockpit.example.com/ws
+  sudo bash -s -- --with-service --server wss://cockpit.cuihairu.site/ws
 ```
 
 脚本会创建 `/usr/local/bin/cockpit-agent`、`cockpit` 系统用户、`/etc/default/cockpit-agent` 与 `/etc/systemd/system/cockpit-agent.service`；重跑即升级（覆盖二进制并重启既有服务）。
@@ -93,7 +93,7 @@ sudo systemctl restart cockpit-agent
 示例：
 
 ```dotenv
-SERVER_URL=wss://cockpit.example.com/ws
+SERVER_URL=wss://cockpit.cuihairu.site/ws
 REGION=home
 ZONE=datacenter
 AGENT_ID=server01
@@ -146,7 +146,7 @@ irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1))) `
-  -WithService -ServerUrl "wss://cockpit.example.com/ws" `
+  -WithService -ServerUrl "wss://cockpit.cuihairu.site/ws" `
   -AgentId "server01" -Region "home" -Zone "datacenter" -Secret "optional-agent-secret"
 ```
 
@@ -170,7 +170,7 @@ Stop-Service -Name CockpitAgent
 
 - 必须设置强密码 `ADMIN_PASSWORD`。
 - 设置 `PRODUCTION=true` 时必须提供强随机 `TOTP_ENCRYPTION_KEY`。
-- 建议设置 `ALLOWED_ORIGINS=https://cockpit.example.com`。
+- 建议设置 `ALLOWED_ORIGINS=https://cockpit.cuihairu.site`。
 - 对外访问建议由 Nginx、Caddy、Traefik 等反向代理提供 HTTPS/WSS。
 - Agent 主动连接 Server，不需要在 Agent 节点开放入站端口。
 

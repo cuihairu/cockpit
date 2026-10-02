@@ -937,6 +937,11 @@
 
 部署与走查：`CGO_ENABLED=1` 构建（同 deploy-dev.yml 参数）→ scp 至 dev（ali/106.14.216.177），备份 `cockpit.bak.20261002134042` 后替换 `/opt/cockpit/cockpit` 并 restart；本机跑用户同款命令 `cockpit-agent start -server wss://cockpit.cuihairu.site/ws`：客户端 `Registered as agent: agent-coding-...`、服务端同秒 `Agent registered: ...`，双向确认。本地先复现验证（临时 server 设 `ALLOWED_ORIGINS` 生产态 + 无 Origin agent → 注册成功）。
 
+## README/文档整改：快速开始三平台拆分 + 示例域名统一（2026-10-02）
+
+1. [**README「快速开始」按平台拆三节**：Linux / macOS / Windows（PowerShell）各自独立小节，步骤编号统一为 下载安装→连服务器→验证安装，每节结尾给「验证成功」预期输出（`Cockpit Agent v20261001`，版本号=安装当日日期）；sh 与 ps1 命令不再混段；前置保留 Docker 起 Server 两行。macOS 节注明与 Linux 共用 install.sh（自动识别 Darwin/arm64）。]
+2. [**装机示例域名统一 `wss://cockpit.cuihairu.site/ws`**：README、install.sh/install.ps1（usage 头注释 + 装完提示）、deployments/README.md（含 ALLOWED_ORIGINS 示例）、docs/guide/getting-started.md（一键安装/手动启动/常用参数/ALLOWED_ORIGINS）全部替换；`ws://<server>/ws`、`wss://cockpit.example.com/ws`、`ws://127.0.0.1:9000/ws` 五类旧写法清零（grep 残留为 0）。wss 口径与 nginx 80 端口 301 的现实一致（见 WS 故障修复节）。]
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。

@@ -9,7 +9,7 @@
 #
 #   # 带参数（注册 Windows 服务，需管理员 PowerShell）:
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1))) `
-#       -WithService -ServerUrl "wss://cockpit.example.com/ws"
+#       -WithService -ServerUrl "wss://cockpit.cuihairu.site/ws"
 #
 #   # 管道形态传参不便时用环境变量:
 #   $env:COCKPIT_WITH_SERVICE='1'; $env:COCKPIT_SERVER='wss://...'; irm <url> | iex
@@ -214,8 +214,8 @@ LABELS=$Labels
     Write-Host "完成。下一步:" -ForegroundColor Cyan
     if (-not $WithService) {
         Write-Host "  注册 Windows 服务（管理员 PowerShell）:" -ForegroundColor White
-        Write-Host "    & ([scriptblock]::Create((irm <本脚本URL>))) -WithService -ServerUrl `"wss://<server>/ws`"" -ForegroundColor White
-        Write-Host "  或手动启动: cockpit-agent start -server ws://<server>/ws" -ForegroundColor White
+        Write-Host "    & ([scriptblock]::Create((irm <本脚本URL>))) -WithService -ServerUrl `"wss://cockpit.cuihairu.site/ws`"" -ForegroundColor White
+        Write-Host "  或手动启动: cockpit-agent start -server wss://cockpit.cuihairu.site/ws" -ForegroundColor White
     }
     Write-Host "  验证版本: cockpit-agent --version" -ForegroundColor White
     Write-Host "  查看服务: Get-Service -Name $ServiceName" -ForegroundColor White
