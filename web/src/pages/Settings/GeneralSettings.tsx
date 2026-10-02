@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Button, Form, Input, InputNumber, Radio, Select, Switch, Tabs } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
+import ThemeSkinCards from '@/components/ThemeSkinCards'
 import type { UISettings } from '@/contexts/settingsTypes'
 import { THEME_PRESETS } from '@/theme/themePresets'
 
@@ -16,6 +17,7 @@ export interface GeneralSettingsValues {
   enableNotifications?: boolean
   theme?: 'light' | 'dark' | 'auto'
   themeColor?: string
+  themeSkin?: string
   compactMode?: boolean
   showResourceCount?: boolean
 }
@@ -81,6 +83,12 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ loading, setti
               <Select.Option value="dark">深色</Select.Option>
               <Select.Option value="auto">跟随系统</Select.Option>
             </Select>
+          </Form.Item>
+          <Form.Item
+            label="主题皮肤"
+            extra="整屏配色方案，点选即换；与主题色（强调色）相互独立，可任意组合"
+          >
+            <ThemeSkinCards />
           </Form.Item>
           <Form.Item label="主题色" name="themeColor">
             <Radio.Group>

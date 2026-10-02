@@ -139,6 +139,20 @@ describe('Settings', () => {
     await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('设置已保存'))
   })
 
+  it('显示设置：主题皮肤卡片渲染并点选即换（写 context，不经表单）', async () => {
+    renderPage()
+    expect(await screen.findByText('站点名称')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('显示设置'))
+    await screen.findByRole('radiogroup', { name: '主题皮肤' })
+    // 四套皮肤都有卡片，默认皮肤选中
+    for (const name of ['默认 · 雾白', '深邃 · 夜航', '护眼 · 米纸', '石墨 · 曜岩']) {
+      expect(screen.getByRole('radio', { name: `主题皮肤 ${name}` })).toBeInTheDocument()
+    }
+    expect(screen.getByRole('radio', { name: '主题皮肤 默认 · 雾白' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(screen.getByRole('radio', { name: '主题皮肤 护眼 · 米纸' }))
+    expect(updateSettings).toHaveBeenCalledWith({ themeSkin: 'eyecare' })
+  })
+
   it('安全设置：TOTP 未启用出引导与认证器链接、立即启用跳转', async () => {
     renderPage()
     await openSecurity()

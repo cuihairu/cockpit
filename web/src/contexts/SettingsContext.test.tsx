@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsProvider } from './SettingsContext'
 import { useSettingsContext } from './useSettingsContext'
 import type { UISettings } from './settingsTypes'
+import { lightenColor, resolveThemeSkin } from '@/theme/themeSkins'
 
 // 消费者探针：读 context 值并渲染标记
 const Probe = ({ patch }: { patch?: Partial<UISettings> }) => {
@@ -13,6 +14,7 @@ const Probe = ({ patch }: { patch?: Partial<UISettings> }) => {
       <span data-testid="interval">{settings.refreshInterval}</span>
       <span data-testid="theme">{resolvedTheme}</span>
       <span data-testid="color">{settings.themeColor}</span>
+      <span data-testid="skin">{settings.themeSkin}</span>
       <button onClick={() => patch && updateSettings(patch)}>update</button>
     </div>
   )
@@ -81,6 +83,49 @@ describe('SettingsContext', () => {
     })
     expect(screen.getByTestId('color').textContent).toBe('purple')
     expect(document.documentElement.style.getPropertyValue('--cockpit-primary')).toBe('#722ed1')
+  })
+
+  it('themeSkin：默认 default、非法回退 default、合法值加载', () => {
+    // 无存量 → 默认皮肤
+    const { unmount } = render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('skin').textContent).toBe('default')
+    unmount()
+    // 非法 key 回退默认
+    localStorage.setItem('cockpit.ui.settings', JSON.stringify({ themeSkin: 'neon' }))
+    const { unmount: unmount2 } = render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('skin').textContent).toBe('default')
+    unmount2()
+    // 合法皮肤加载
+    localStorage.setItem('cockpit.ui.settings', JSON.stringify({ themeSkin: 'eyecare' }))
+    render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('skin').textContent).toBe('eyecare')
+  })
+
+  it('换皮肤同步 <html> 变量全集与 data-skin 标记（整套配色即时切换）', () => {
+    render(<SettingsProvider><Probe patch={{ themeSkin: 'midnight' }} /></SettingsProvider>)
+    act(() => {
+      screen.getByText('update').click()
+    })
+    const root = document.documentElement
+    const midnight = resolveThemeSkin('midnight')
+    expect(root.getAttribute('data-skin')).toBe('midnight')
+    expect(root.style.getPropertyValue('--cockpit-bg')).toBe(midnight.light.bg)
+    expect(root.style.getPropertyValue('--cockpit-surface')).toBe(midnight.light.surface)
+    expect(root.style.getPropertyValue('--cockpit-border')).toBe(midnight.light.border)
+    expect(root.style.getPropertyValue('--cockpit-text')).toBe(midnight.light.text)
+    expect(root.style.getPropertyValue('--cockpit-chrome')).toBe(midnight.light.surface)
+    expect(localStorage.getItem('cockpit.ui.settings')).toContain('"themeSkin":"midnight"')
+  })
+
+  it('深色档下顶栏变量跟页面底色，主色派生量改提亮', () => {
+    localStorage.setItem('cockpit.ui.settings', JSON.stringify({ theme: 'dark', themeColor: 'blue' }))
+    render(<SettingsProvider><Probe /></SettingsProvider>)
+    const root = document.documentElement
+    const defaultSkin = resolveThemeSkin('default')
+    expect(root.getAttribute('data-theme')).toBe('dark')
+    expect(root.style.getPropertyValue('--cockpit-chrome')).toBe(defaultSkin.dark.bg)
+    expect(root.style.getPropertyValue('--cockpit-primary-hover')).toBe(lightenColor('#1677ff', 0.18))
+    expect(root.style.getPropertyValue('--cockpit-primary')).toBe('#1677ff')
   })
 
   it('updateSettings 规范化并持久化双键 + 广播事件', () => {

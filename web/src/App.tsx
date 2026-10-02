@@ -40,6 +40,7 @@ import { logger } from '@/utils/logger'
 import { BrandLogo } from '@/components/BrandLogo'
 import { ThemeColorSwatches } from '@/components/ThemeColorSwatches'
 import { resolveThemePreset } from '@/theme/themePresets'
+import { resolveSkinTokens } from '@/theme/themeSkins'
 import './App.less'
 
 // Route-level code splitting
@@ -508,6 +509,9 @@ const MainLayout = () => {
 
 const AppShell = () => {
   const { settings, resolvedTheme } = useSettingsContext()
+  // 中性色板取当前皮肤 × 当前档位（与 SettingsContext 写入的 CSS 变量同源），
+  // 保证 antd 内置组件（弹层/下拉/表格）与 App.less 的手绘样式不脱节
+  const skin = resolveSkinTokens(settings.themeSkin, resolvedTheme, resolveThemePreset(settings.themeColor).color)
 
   return (
     <ConfigProvider
@@ -518,15 +522,22 @@ const AppShell = () => {
           borderRadius: 4,
           fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
           fontSize: 13,
-          colorText: resolvedTheme === 'dark' ? '#e2e8f0' : '#0f172a',
-          colorTextSecondary: resolvedTheme === 'dark' ? '#64748b' : '#64748b',
-          colorBorder: resolvedTheme === 'dark' ? 'rgba(255,255,255,0.06)' : '#e2e8f0',
+          colorText: skin.text,
+          colorTextSecondary: skin.textMuted,
+          colorTextTertiary: skin.textMuted,
+          colorBorder: skin.border,
+          colorBorderSecondary: skin.borderSoft,
+          colorBgLayout: skin.bg,
+          colorBgContainer: skin.surface,
+          colorBgElevated: skin.surface,
+          colorFillAlter: skin.surfaceAlt,
           controlHeight: 32,
         },
         components: {
           Layout: {
-            headerBg: resolvedTheme === 'dark' ? '#0c0e14' : '#fff',
-            siderBg: resolvedTheme === 'dark' ? '#0c0e14' : '#fff',
+            headerBg: skin.chrome,
+            siderBg: skin.chrome,
+            bodyBg: skin.bg,
           },
           Card: { borderRadiusLG: 4 },
           Button: { borderRadius: 4 },

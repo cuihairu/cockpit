@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:cockpit_mobile/state/auth.dart';
 import 'package:cockpit_mobile/state/settings.dart';
+import 'package:cockpit_mobile/theme/app_theme.dart';
 
 const _storageChannel =
     MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
@@ -97,6 +98,53 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('server_url'), 'http://next');
     expect(prefs.getBool('allow_self_signed'), isFalse);
+    c.dispose();
+  });
+
+  test('SettingsNotifier：外观键缺省 system + default 皮肤，存量可加载', () async {
+    final store = <String, String>{};
+    _mockSecureStorage(store);
+    // setUp 只写了三键：无外观键 → 缺省跟随系统 + 默认皮肤
+    final c = ProviderContainer();
+    await _settle(c);
+    var state = c.read(settingsProvider);
+    expect(state.themeMode, 'system');
+    expect(state.themeSkin, defaultAppSkin);
+    c.dispose();
+
+    // 存量含外观键 → 读出
+    SharedPreferences.setMockInitialValues({
+      'server_url': 'http://initial',
+      'theme_mode': 'dark',
+      'theme_skin': 'eyecare',
+    });
+    final c2 = ProviderContainer();
+    await _settle(c2);
+    state = c2.read(settingsProvider);
+    expect(state.themeMode, 'dark');
+    expect(state.themeSkin, 'eyecare');
+    expect(state.copyWith(themeSkin: 'midnight').themeSkin, 'midnight');
+    expect(state.copyWith().themeMode, 'dark');
+    c2.dispose();
+  });
+
+  test('SettingsNotifier：setThemeMode / setThemeSkin 落盘并广播（即时生效源）',
+      () async {
+    final store = <String, String>{};
+    _mockSecureStorage(store);
+    final c = ProviderContainer();
+    final s = c.read(settingsProvider.notifier);
+    await _settle(c);
+
+    await s.setThemeMode('light');
+    await s.setThemeSkin('midnight');
+    final state = c.read(settingsProvider);
+    expect(state.themeMode, 'light');
+    expect(state.themeSkin, 'midnight');
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('theme_mode'), 'light');
+    expect(prefs.getString('theme_skin'), 'midnight');
     c.dispose();
   });
 

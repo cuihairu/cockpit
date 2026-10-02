@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { SettingsContext } from './settingsContextValue'
 import type { UISettings, UITheme } from './settingsTypes'
 import { DEFAULT_THEME_COLOR, resolveThemePreset } from '@/theme/themePresets'
+import { DEFAULT_THEME_SKIN, buildSkinVars, resolveThemeSkin } from '@/theme/themeSkins'
 
 const SETTINGS_STORAGE_KEYS = ['cockpit.ui.settings', 'cockpit:settings']
 
@@ -11,6 +12,7 @@ const DEFAULT_SETTINGS: UISettings = {
   enableNotifications: true,
   theme: 'light',
   themeColor: DEFAULT_THEME_COLOR,
+  themeSkin: DEFAULT_THEME_SKIN,
   compactMode: false,
   showResourceCount: true,
 }
@@ -26,6 +28,7 @@ const normalizeSettings = (input: Partial<UISettings> | null | undefined): UISet
     enableNotifications: input?.enableNotifications ?? DEFAULT_SETTINGS.enableNotifications,
     theme: input?.theme === 'dark' || input?.theme === 'auto' ? input.theme : DEFAULT_SETTINGS.theme,
     themeColor: resolveThemePreset(input?.themeColor).key,
+    themeSkin: resolveThemeSkin(input?.themeSkin).key,
     compactMode: input?.compactMode ?? DEFAULT_SETTINGS.compactMode,
     showResourceCount: input?.showResourceCount ?? DEFAULT_SETTINGS.showResourceCount,
   }
@@ -82,11 +85,21 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
     document.documentElement.setAttribute('data-theme', resolvedTheme)
   }, [resolvedTheme])
 
-  // 主题色落到 <html style> CSS 变量：App.less 的 @primary-color 即
-  // var(--cockpit-primary)，手绘样式与 antd colorPrimary 同步换色
+  // 皮肤 + 档位 + 主题色 → <html> 的 CSS 变量全集：App.less 的 @bg-color /
+  // @surface-color / @primary-color 即这些变量的引用，换皮肤只重写变量，
+  // 不重编样式表；同时打 data-skin 标记供自绘样式做皮肤级微调
   useEffect(() => {
-    document.documentElement.style.setProperty('--cockpit-primary', resolveThemePreset(settings.themeColor).color)
-  }, [settings.themeColor])
+    const root = document.documentElement
+    root.setAttribute('data-skin', resolveThemeSkin(settings.themeSkin).key)
+    const vars = buildSkinVars(
+      resolveThemeSkin(settings.themeSkin),
+      resolvedTheme,
+      resolveThemePreset(settings.themeColor).color,
+    )
+    for (const [name, value] of Object.entries(vars)) {
+      root.style.setProperty(name, value)
+    }
+  }, [settings.themeSkin, settings.themeColor, resolvedTheme])
 
   const updateSettings = (patch: Partial<UISettings>) => {
     setSettings((current) => normalizeSettings({ ...current, ...patch }))

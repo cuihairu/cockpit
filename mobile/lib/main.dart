@@ -7,6 +7,7 @@ import 'pages/login_page.dart';
 import 'pages/server_setup_page.dart';
 import 'state/auth.dart';
 import 'state/settings.dart';
+import 'theme/app_theme.dart';
 import 'widgets/lock_gate.dart';
 
 void main() {
@@ -71,32 +72,13 @@ class _CockpitAppState extends ConsumerState<CockpitApp> {
       );
     }
 
+    final skin = resolveAppSkin(settings.themeSkin);
     return MaterialApp(
       title: 'Cockpit',
-      theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF1E88E5),
-        // 浅色：深色状态栏图标 + 浅色导航栏
-        appBarTheme: const AppBarTheme(
-          systemOverlayStyle: SystemUiOverlayStyle(
-            statusBarColor: Colors.transparent,
-            statusBarIconBrightness: Brightness.dark,
-            statusBarBrightness: Brightness.light,
-          ),
-        ),
-      ),
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        colorSchemeSeed: const Color(0xFF1E88E5),
-        // 深色：浅色状态栏图标 + 深色导航栏
-        appBarTheme: const AppBarTheme(
-          systemOverlayStyle: SystemUiOverlayStyle(
-            statusBarColor: Colors.transparent,
-            statusBarIconBrightness: Brightness.light,
-            statusBarBrightness: Brightness.dark,
-          ),
-        ),
-      ),
-      themeMode: ThemeMode.system,
+      // 主题皮肤 + 明暗档位可配（设置页 → 主题外观），色板口径同 Web 端
+      theme: buildAppTheme(skin, Brightness.light),
+      darkTheme: buildAppTheme(skin, Brightness.dark),
+      themeMode: themeModeOf(settings.themeMode),
       home: page,
     );
   }

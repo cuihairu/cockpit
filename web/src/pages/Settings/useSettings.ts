@@ -50,6 +50,8 @@ export const useSettings = () => {
         enableNotifications: values.enableNotifications ?? settings.enableNotifications,
         theme: values.theme ?? settings.theme,
         themeColor: values.themeColor ?? settings.themeColor,
+        // 皮肤卡片点选即生效（不经表单），保存时沿用当前值不回退
+        themeSkin: values.themeSkin ?? settings.themeSkin,
         compactMode: values.compactMode ?? settings.compactMode,
         showResourceCount: values.showResourceCount ?? settings.showResourceCount,
       })

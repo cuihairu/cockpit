@@ -6,16 +6,29 @@
 // - 克制的色彩（深色为主，强调色只用于交互状态）
 // - 强排版层级（字重/字号拉开差距，不留「均匀」感）
 
-// 主色走运行时 CSS 变量（SettingsContext 随主题色预设写入 <html>），
-// 兜底 #e11d8f = 默认预设「蔷薇红」，变量未就绪时观感与历史一致
+// 全部色值走运行时 CSS 变量（SettingsContext 的 buildSkinVars 随「皮肤 ×
+// 档位 × 主题色」写入 <html>）：换皮肤只重写变量，样式表无需重编。
+// 兜底值 = 默认皮肤「雾白」浅色档 + 蔷薇红，变量未就绪时观感与历史一致。
 @primary-color: var(--cockpit-primary, #e11d8f);
+@primary-hover: var(--cockpit-primary-hover, #be185d);
+@primary-strong: var(--cockpit-primary-strong, #be185d);
+@primary-soft: var(--cockpit-primary-soft, rgba(225, 29, 143, 0.1));
+@primary-faint: var(--cockpit-primary-faint, rgba(225, 29, 143, 0.06));
+@primary-border: var(--cockpit-primary-border, rgba(225, 29, 143, 0.2));
+@hover-tint: var(--cockpit-hover, rgba(225, 29, 143, 0.03));
 @success-color: #22c55e;
 @warning-color: #f59e0b;
 @error-color: #ef4444;
-@text-color: #0f172a;
-@text-secondary: #64748b;
-@border-color: #e2e8f0;
-@bg-color: #f8fafc;
+@text-color: var(--cockpit-text, #0f172a);
+@text-secondary: var(--cockpit-text-muted, #64748b);
+@border-color: var(--cockpit-border, #e2e8f0);
+@border-soft: var(--cockpit-border-soft, #e2e8f0);
+@bg-color: var(--cockpit-bg, #f8fafc);
+@surface-color: var(--cockpit-surface, #fff);
+@surface-alt: var(--cockpit-surface-alt, #fff);
+@input-bg: var(--cockpit-input-bg, #fff);
+// 顶栏/侧栏底：浅色下与面板同色（白底立体），深色下与页面底同色（整屏一色）
+@chrome-color: var(--cockpit-chrome, #fff);
 @header-height: 48px;
 
 // ─── 全局 ─────────────────────────────────────────
@@ -28,88 +41,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-// ─── 暗色主题 ─────────────────────────────────────
-html[data-theme='dark'] body {
-  background-color: #0c0e14;
-  color: #e2e8f0;
-}
-
-html[data-theme='dark'] {
-  .ant-pro-basicLayout {
-    .ant-pro-top-nav-header {
-      background: #0c0e14;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-      box-shadow: none;
-
-      .ant-menu.ant-menu-top .ant-menu-item {
-        color: #94a3b8;
-      }
-    }
-
-    .ant-pro-sider {
-      background: #0c0e14;
-      border-right: 1px solid rgba(255, 255, 255, 0.06);
-    }
-
-    .ant-pro-basicLayout-content {
-      background: #0c0e14;
-    }
-  }
-
-  .ant-card {
-    background: #141620;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    box-shadow: none;
-
-    .ant-card-head {
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-
-      .ant-card-head-title {
-        color: #e2e8f0;
-      }
-    }
-  }
-
-  .ant-table {
-    .ant-table-thead > tr > th {
-      background-color: #141620;
-      color: #94a3b8;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    }
-
-    .ant-table-tbody > tr {
-      &:hover > td {
-        background-color: rgba(255, 255, 255, 0.02) !important;
-      }
-
-      > td {
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      }
-    }
-  }
-
-  .ant-breadcrumb .ant-breadcrumb-link {
-    color: #64748b;
-  }
-
-  .ant-input-search .ant-input {
-    background: #141620;
-    border-color: rgba(255, 255, 255, 0.08) !important;
-
-    &:focus,
-    &:hover {
-      background: #141620;
-      border-color: @primary-color !important;
-    }
-  }
-}
-
 // ─── ProLayout ────────────────────────────────────
+// 明暗/皮肤差异全部由上方 CSS 变量承载，故此处不再有 html[data-theme='dark']
+// 覆盖块：一套规则同时服务所有皮肤 × 档位组合。
 .ant-pro-basicLayout {
   .ant-pro-top-nav-header {
     height: @header-height;
     line-height: @header-height;
-    background: #fff;
+    background: @chrome-color;
     border-bottom: 1px solid @border-color;
     box-shadow: none;
     padding: 0 20px;
@@ -185,7 +124,7 @@ html[data-theme='dark'] {
   }
 
   .ant-pro-sider {
-    background: #fff;
+    background: @chrome-color;
     border-right: 1px solid @border-color;
 
     .ant-pro-sider-logo h1 {
@@ -207,11 +146,11 @@ html[data-theme='dark'] {
         font-size: 13px;
 
         &:hover {
-          background: rgba(225, 29, 143, 0.06);
+          background: @primary-faint;
         }
 
         &.ant-menu-item-selected {
-          background: rgba(225, 29, 143, 0.08);
+          background: @primary-soft;
           color: @primary-color;
           font-weight: 500;
 
@@ -231,13 +170,13 @@ html[data-theme='dark'] {
           font-size: 13px;
 
           &:hover {
-            background: rgba(225, 29, 143, 0.06);
+            background: @primary-faint;
             color: @text-color;
           }
         }
 
         &.ant-menu-submenu-open > .ant-menu-submenu-title {
-          background: rgba(225, 29, 143, 0.06);
+          background: @primary-faint;
           color: @text-color;
         }
 
@@ -285,7 +224,7 @@ html[data-theme='dark'] {
 .ant-input-search {
   .ant-input {
     border-radius: 4px !important;
-    background: #fff;
+    background: @input-bg;
     border: 1px solid @border-color !important;
     transition: border-color 0.15s;
 
@@ -295,7 +234,7 @@ html[data-theme='dark'] {
     }
 
     &:hover {
-      border-color: #94a3b8 !important;
+      border-color: @text-secondary !important;
     }
   }
 
@@ -309,7 +248,7 @@ html[data-theme='dark'] {
   border-radius: 4px;
   border: 1px solid @border-color;
   box-shadow: none;
-  background: #fff;
+  background: @surface-color;
 
   .ant-card-head {
     border-bottom: 1px solid @border-color;
@@ -333,7 +272,7 @@ html[data-theme='dark'] {
 // ─── 表格 ─────────────────────────────────────────
 .ant-table {
   .ant-table-thead > tr > th {
-    background-color: transparent;
+    background-color: @surface-alt;
     font-weight: 600;
     color: @text-secondary;
     border-bottom: 1px solid @border-color;
@@ -349,11 +288,11 @@ html[data-theme='dark'] {
 
   .ant-table-tbody > tr {
     &:hover > td {
-      background-color: rgba(225, 29, 143, 0.03) !important;
+      background-color: @hover-tint !important;
     }
 
     > td {
-      border-bottom: 1px solid @border-color;
+      border-bottom: 1px solid @border-soft;
       padding: 10px 12px;
       font-size: 13px;
     }
@@ -392,9 +331,30 @@ html[data-theme='dark'] {
 
   &.ant-tag-processing,
   &.ant-tag-blue {
-    background: rgba(225, 29, 143, 0.1);
-    color: #be185d;
-    border-color: rgba(225, 29, 143, 0.2);
+    background: @primary-soft;
+    color: @primary-strong;
+    border-color: @primary-border;
+  }
+}
+
+// 语义色（成功/警告/危险）与皮肤无关：深色档位下提亮以保可读性
+html[data-theme='dark'] {
+  .ant-tag.ant-tag-success {
+    background: rgba(34, 197, 94, 0.16);
+    color: #4ade80;
+    border-color: rgba(34, 197, 94, 0.32);
+  }
+
+  .ant-tag.ant-tag-warning {
+    background: rgba(245, 158, 11, 0.16);
+    color: #fbbf24;
+    border-color: rgba(245, 158, 11, 0.32);
+  }
+
+  .ant-tag.ant-tag-error {
+    background: rgba(239, 68, 68, 0.16);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.32);
   }
 }
 
@@ -413,8 +373,8 @@ html[data-theme='dark'] {
     border-color: @primary-color;
 
     &:hover {
-      background: #be185d;
-      border-color: #be185d;
+      background: @primary-hover;
+      border-color: @primary-hover;
     }
   }
 
@@ -424,7 +384,7 @@ html[data-theme='dark'] {
 
     &:hover {
       color: @primary-color;
-      background: rgba(225, 29, 143, 0.06);
+      background: @primary-faint;
     }
   }
 }

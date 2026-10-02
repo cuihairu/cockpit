@@ -93,12 +93,12 @@ components/GuacamoleModal/index.tsx:470 disconnected && !showCredentials 复合�
 components/GuacPlayer/index.tsx:82 Slider tooltip formatter：悬停才触发的内联纯函数，jsdom 不可悬停；格式化逻辑已由等价断言覆盖
 components/MetricsChart/index.tsx:85 tooltip formatter：params 四向（name/seriesName/value 缺省）均已断言，echarts 内联回调漏计
 components/TerminalModal/index.tsx:223 同 211 清理家族（reset 前判空）
-App.tsx:290 路由树递归展开 routes ?? [] 兜底：静态路由树叶子 children 恒存在，数据演进防御
-App.tsx:316 user?.permissions 空值侧：user 未加载场景已由「顶栏用户名兜底 Admin」用例覆盖，v8 漏计
-App.tsx:430 菜单项内联 onClick（preventDefault + navigate）：菜单导航跳转断言已有
-App.tsx:447 面包屑 itemRender 首项分支：面包屑渲染断言已有，内联回调漏计
-App.tsx:448 同上（navigate('/') 调用）
-App.tsx:449 同上（面包屑文案渲染）
+App.tsx:298 路由树递归展开 routes ?? [] 兜底：静态路由树叶子 children 恒存在，数据演进防御
+App.tsx:324 user?.permissions 空值侧：user 未加载场景已由「顶栏用户名兜底 Admin」用例覆盖，v8 漏计
+App.tsx:439 菜单项内联 onClick（preventDefault + navigate）：菜单导航跳转断言已有
+App.tsx:456 面包屑 itemRender 首项分支：面包屑渲染断言已有，内联回调漏计
+App.tsx:457 同上（navigate('/') 调用）
+App.tsx:458 同上（面包屑文案渲染）
 pages/Cron/index.tsx:372 用户筛选 onChange v ?? '' 兜底：选择不可清空，null 分支防御
 pages/Cron/index.tsx:376 filterOption 内联 option?.value 兜底：下拉过滤已实证，防御侧漏计
 pages/Cron/index.tsx:543 cron 校验 validator 内联：表达式校验主路径已实证

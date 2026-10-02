@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/client.dart';
 import '../api/endpoints.dart';
+import '../theme/app_theme.dart';
 import 'auth.dart';
 
 /// 非敏感配置走 SharedPreferences，token 走 secure storage（D4）。
@@ -12,12 +13,21 @@ class SettingsState {
     this.serverUrl = '',
     this.allowSelfSigned = false,
     this.biometricLock = false,
+    this.themeMode = 'system',
+    this.themeSkin = defaultAppSkin,
     this.loaded = false,
   });
 
   final String serverUrl;
   final bool allowSelfSigned;
   final bool biometricLock;
+
+  /// 明暗档位：system / light / dark（与 Web 端 UITheme 同名同义）
+  final String themeMode;
+
+  /// 皮肤 key（与 Web 端 THEME_SKINS 同名同值，见 theme/app_theme.dart）
+  final String themeSkin;
+
   final bool loaded;
 
   bool get configured => serverUrl.isNotEmpty;
@@ -26,12 +36,16 @@ class SettingsState {
     String? serverUrl,
     bool? allowSelfSigned,
     bool? biometricLock,
+    String? themeMode,
+    String? themeSkin,
     bool? loaded,
   }) =>
       SettingsState(
         serverUrl: serverUrl ?? this.serverUrl,
         allowSelfSigned: allowSelfSigned ?? this.allowSelfSigned,
         biometricLock: biometricLock ?? this.biometricLock,
+        themeMode: themeMode ?? this.themeMode,
+        themeSkin: themeSkin ?? this.themeSkin,
         loaded: loaded ?? this.loaded,
       );
 }
@@ -40,6 +54,8 @@ class SettingsNotifier extends Notifier<SettingsState> {
   static const _serverKey = 'server_url';
   static const _selfSignedKey = 'allow_self_signed';
   static const _biometricKey = 'biometric_lock';
+  static const _themeModeKey = 'theme_mode';
+  static const _themeSkinKey = 'theme_skin';
 
   final _secure = const FlutterSecureStorage();
   SharedPreferences? _prefs;
@@ -55,10 +71,15 @@ class SettingsNotifier extends Notifier<SettingsState> {
     final url = _prefs!.getString(_serverKey) ?? '';
     final selfSigned = _prefs!.getBool(_selfSignedKey) ?? false;
     final biometric = _prefs!.getBool(_biometricKey) ?? false;
+    // 存量 app 无外观键：缺省跟随系统 + 默认皮肤
+    final mode = _prefs!.getString(_themeModeKey) ?? 'system';
+    final skin = _prefs!.getString(_themeSkinKey) ?? defaultAppSkin;
     state = SettingsState(
         serverUrl: url,
         allowSelfSigned: selfSigned,
         biometricLock: biometric,
+        themeMode: mode,
+        themeSkin: skin,
         loaded: true);
   }
 
@@ -78,6 +99,19 @@ class SettingsNotifier extends Notifier<SettingsState> {
     _prefs ??= await SharedPreferences.getInstance();
     await _prefs!.setBool(_biometricKey, v);
     state = state.copyWith(biometricLock: v);
+  }
+
+  /// 切外观即时生效：落盘 + 广播 state，MaterialApp 随之重算主题
+  Future<void> setThemeMode(String mode) async {
+    _prefs ??= await SharedPreferences.getInstance();
+    await _prefs!.setString(_themeModeKey, mode);
+    state = state.copyWith(themeMode: mode);
+  }
+
+  Future<void> setThemeSkin(String skin) async {
+    _prefs ??= await SharedPreferences.getInstance();
+    await _prefs!.setString(_themeSkinKey, skin);
+    state = state.copyWith(themeSkin: skin);
   }
 
   Future<String?> readToken() =>

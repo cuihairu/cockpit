@@ -12,6 +12,7 @@ import 'package:cockpit_mobile/pages/settings_page.dart';
 import 'package:cockpit_mobile/state/auth.dart';
 import 'package:cockpit_mobile/state/biometric.dart';
 import 'package:cockpit_mobile/state/settings.dart';
+import 'package:cockpit_mobile/theme/app_theme.dart';
 
 class _FakeBiometric implements BiometricAuth {
   _FakeBiometric({required this.supported});
@@ -38,6 +39,8 @@ class _WritableSettings extends SettingsNotifier {
   final bool biometricLock;
   bool? savedSelfSigned;
   bool? savedBiometric;
+  String? savedThemeMode;
+  String? savedThemeSkin;
 
   @override
   SettingsState build() => SettingsState(
@@ -51,6 +54,12 @@ class _WritableSettings extends SettingsNotifier {
 
   @override
   Future<void> setBiometricLock(bool v) async => savedBiometric = v;
+
+  @override
+  Future<void> setThemeMode(String mode) async => savedThemeMode = mode;
+
+  @override
+  Future<void> setThemeSkin(String skin) async => savedThemeSkin = skin;
 }
 
 class _FakeAuth extends AuthNotifier {
@@ -164,6 +173,45 @@ void main() {
     await tester.tap(find.text('退出登录'));
     await tester.pumpAndSettle();
     expect(auth.logouts, 1);
+  });
+
+  testWidgets('设置页：主题外观面板列出档位与四套皮肤，点选即时写入', (tester) async {
+    // 面板较长：放大视口让四项皮肤都在可视区内，避免滚动干扰
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final settings = _WritableSettings();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(() => settings),
+        authProvider.overrideWith(() => _FakeAuth(const AuthAnonymous())),
+        biometricProvider.overrideWithValue(_FakeBiometric(supported: false)),
+      ],
+      child: const MaterialApp(home: Scaffold(body: SettingsPage())),
+    ));
+    await tester.pumpAndSettle();
+
+    // 入口副标题回填当前外观
+    expect(find.text('跟随系统 · 默认 · 雾白'), findsOneWidget);
+
+    await tester.tap(find.text('主题外观'));
+    await tester.pumpAndSettle();
+    for (final label in ['明暗模式', '跟随系统', '浅色', '深色', '主题皮肤']) {
+      expect(find.text(label), findsOneWidget, reason: '面板应含 $label');
+    }
+    for (final skin in appSkins) {
+      expect(find.text(skin.name), findsOneWidget);
+    }
+
+    // 选深色档 + 护眼皮肤 → 立即写 notifier
+    await tester.tap(find.text('深色'));
+    await tester.pumpAndSettle();
+    expect(settings.savedThemeMode, 'dark');
+
+    await tester.tap(find.text('护眼 · 米纸'));
+    await tester.pumpAndSettle();
+    expect(settings.savedThemeSkin, 'eyecare');
   });
 
   testWidgets('设置页：审计日志入口跳转', (tester) async {
