@@ -45,6 +45,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'))
 const ComputePage = lazy(() => import('./pages/Resources/ComputePage'))
 const ServicesResPage = lazy(() => import('./pages/Resources/ServicesPage'))
 const DomainsPage = lazy(() => import('./pages/Resources/DomainsPage'))
+const CertsPage = lazy(() => import('./pages/Resources/CertsPage'))
 const GatewaysPage = lazy(() => import('./pages/Resources/GatewaysPage'))
 const StoragesPage = lazy(() => import('./pages/Resources/StoragesPage'))
 const Workbench = lazy(() => import('./pages/Workbench'))
@@ -467,7 +468,7 @@ const MainLayout = () => {
             <Route path="/resources/compute" element={<ComputePage />} />
             <Route path="/resources/services" element={<ServicesResPage />} />
             <Route path="/resources/domains" element={<DomainsPage />} />
-            <Route path="/resources/certificates" element={<DomainsPage />} />
+            <Route path="/resources/certificates" element={<CertsPage />} />
             <Route path="/resources/gateways" element={<GatewaysPage />} />
             <Route path="/resources/storages" element={<StoragesPage />} />
             <Route path="/workbench" element={<Workbench />} />

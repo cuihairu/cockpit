@@ -1,15 +1,15 @@
 import { Button, Card, Space, Table, Tooltip } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useResources } from './useResources'
-import { domainColumns } from './columns'
+import { certificateColumns } from './columns'
 
-const DomainsPage = () => {
-  const { loading, domains, fetchAll } = useResources()
+const CertsPage = () => {
+  const { loading, certificates, fetchAll } = useResources()
 
   return (
     <div className="page-container">
       <Card
-        title="域名"
+        title="证书"
         extra={
           <Space>
             <Button icon={<ReloadOutlined />} onClick={fetchAll} loading={loading} size="small">
@@ -24,8 +24,8 @@ const DomainsPage = () => {
         }
       >
         <Table
-          columns={domainColumns}
-          dataSource={domains}
+          columns={certificateColumns}
+          dataSource={certificates}
           rowKey="id"
           loading={loading}
           pagination={{ pageSize: 20 }}
@@ -36,4 +36,4 @@ const DomainsPage = () => {
   )
 }
 
-export default DomainsPage
+export default CertsPage
