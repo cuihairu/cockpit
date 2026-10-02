@@ -61,19 +61,22 @@ echo "== 启动 agent =="
 AGENT_PID=$!
 echo "${AGENT_PID}" > "${WORK_DIR}/agent.pid"
 
-# 等 agent 注册上线
+# 等 agent 真正注册上线：必须等 /api/agents 里 status=online 的活连接，
+# 不能数 DB 记录——离线记录也占行，探测期（pve-api 探测器可达 6s+）
+# 提前放行会让探针全打在注册前（2026-10-02 走查踩坑）
 for i in $(seq 1 30); do
     TOKEN=$(curl -sf -X POST "http://127.0.0.1:${PORT}/api/auth/login" \
         -H 'Content-Type: application/json' \
         -d "{\"username\":\"${ADMIN_USER}\",\"password\":\"${ADMIN_PASS}\"}" \
         | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null) || TOKEN=""
     if [[ -n "${TOKEN}" ]]; then
-        COUNT=$(curl -sf "http://127.0.0.1:${PORT}/api/agents" -H "Authorization: Bearer ${TOKEN}" \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("agents", d)) if isinstance(d, dict) else len(d))' 2>/dev/null) || COUNT=0
-        [[ "${COUNT}" != "0" ]] && break
+        ONLINE=$(curl -sf "http://127.0.0.1:${PORT}/api/agents" -H "Authorization: Bearer ${TOKEN}" \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); a=d.get("agents", d) if isinstance(d, dict) else d; print(sum(1 for x in a if x.get("status")=="online"))' 2>/dev/null) || ONLINE=0
+        [[ "${ONLINE}" != "0" ]] && break
     fi
     sleep 1
 done
 [[ -n "${TOKEN}" ]] || { echo "登录失败"; tail -20 "${WORK_DIR}/logs/server.log"; exit 1; }
+[[ "${ONLINE}" != "0" ]] || { echo "agent 30s 内未上线"; tail -20 "${WORK_DIR}/logs/agent.log"; exit 1; }
 echo "${TOKEN}" > "${WORK_DIR}/token"
-echo "agent 在线（/api/agents=${COUNT}），token 已存 ${WORK_DIR}/token"
+echo "agent 在线（status=online ×${ONLINE}），token 已存 ${WORK_DIR}/token"

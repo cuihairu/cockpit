@@ -953,6 +953,19 @@
 
 验证边界如实注明：launchd 与 Windows 服务注册仍无实机（plist/服务参数逻辑沿用既有走读口径）；本机走查时有用户并行安装的系统级 cockpit-agent 服务（enabled+active），带 --server 的走查会触发其幂等重启（ExecStart 不变、同版本二进制）。
 
+## guacd 调通：SSH 口令认证被 agent 默认密钥劫持（2026-10-02）
+
+`f7fab94`（SSH 密钥自动生成 + Guacamole 自动获取 agent 密钥）上线后，远控三协议验收探针 16 场景 **10 PASS / 6 FAIL**：S1 口令认证 + 走口令会话的 S5-S7（stty/vim/top）与 S8/S9（剪贴板双向）全挂，表象都是「会话开了、shell 没起来、输入全丢」。
+
+1. [**回归根因**：Guacamole handler 只在 `ticket.Params["private_key"]` 上判空就向 agent 拉 `ssh.getDefaultKey` 注入——**用户显式传了 password 也照样注入**。guacd/libssh2 双参数并存时优先公钥认证，agent 密钥又未必在目标机 `authorized_keys` 里 → 口令认证被静默劫持成必败的公钥认证。S2-S4（自带 private_key）不触发注入所以全 PASS，与故障面完全自洽。]
+2. [**修法**：门控收紧为「private_key 与 password **都为空**才兜底拉密钥」，显式凭据（口令或密钥）一律原样透传。逻辑抽成 `applySSHDefaultKey` + 包级 `sshDefaultKeyLookup` 可注入变量（同 `wsRegistryLookup` 惯例），单测 `cov_guac_default_key_test.go` 钉死五分支：显式口令/显式私钥不触发查询、空凭据注入+补 username、已有 username 不覆盖、注入必须是 PEM 原文（guacd 零 base64 解码）。]
+3. [**验收全绿复现**：本地三协议探针重跑 **PASS=16 FAIL=0** 两轮（口令认证回读 AUTH_PW_OK、stty 42x126→56x190 同步、vim 落盘、top 重绘 303 指令/4.5s、剪贴板双向、.guac 录制+回放、审计无凭据泄漏、出口策略 403、VNC/RDP 图形流、guacd 停机兜底）。]
+4. [**harness 竞态顺带修**：`run-server.sh` 的「agent 在线」数的是 /api/agents 的 DB 记录（离线记录也占行），而 agent 能力探测（pve-api 探测器）可达 6s+，提前放行让探针全打在注册前、16 场景假性全挂；改为等 `status=="online"` 的活连接且超时显式报错。另一坑：连跑 run-server 不先 stop 会泄漏上一轮 agent，双 agent 互踢 `duplicate_connection`——重跑前先 stop-server.sh。]
+
+**Why**: 「没传密钥就自动补密钥」的正确语义是**兜底**而不是**覆盖**——凭据优先级必须是 显式密钥 > 显式口令 > agent 默认密钥；只看单一参数判空会把兜底写成劫持。该路径 f7fab94 上线时无单测（回归直接漏到真机）。
+
+**How to apply**: 凭据/配置注入类 feature 一律先问「显式值存在时行为是什么」并按显式>兜底写门控 + 单测；guacd 链路回归用 `scripts/acceptance/guac/` 三件套（setup-env → run-server → probe）本地全链验证，探针 FAIL 先看是不是会话没起来（sidechannel cat 不到文件=输入没进去），再分认证/渲染归因。
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
