@@ -9,6 +9,11 @@
 [![Test](https://github.com/cuihairu/cockpit/actions/workflows/test.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/test.yml)
 [![Docs](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml/badge.svg)](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml)
 [![codecov](https://codecov.io/gh/cuihairu/cockpit/branch/main/graph/badge.svg)](https://codecov.io/gh/cuihairu/cockpit)
+[![Agent: Windows](https://img.shields.io/badge/platform-Windows-0078D4?logo=windows&logoColor=white)](https://github.com/cuihairu/cockpit#一键安装)
+[![Agent: Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](https://github.com/cuihairu/cockpit#一键安装)
+[![Agent: macOS](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white)](https://github.com/cuihairu/cockpit#一键安装)
+[![Agent: x86_64](https://img.shields.io/badge/arch-x86__64-5B5B5B)](https://github.com/cuihairu/cockpit#一键安装)
+[![Agent: aarch64](https://img.shields.io/badge/arch-aarch64-5B5B5B)](https://github.com/cuihairu/cockpit#一键安装)
 
 ## 当前能力
 
