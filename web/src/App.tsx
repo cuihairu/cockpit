@@ -502,14 +502,26 @@ const AppShell = () => {
       theme={{
         algorithm: resolvedTheme === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {
-          colorPrimary: '#165DFF',
+          colorPrimary: '#3b82f6',
+          borderRadius: 4,
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
+          fontSize: 13,
+          colorText: resolvedTheme === 'dark' ? '#e2e8f0' : '#0f172a',
+          colorTextSecondary: resolvedTheme === 'dark' ? '#64748b' : '#64748b',
+          colorBorder: resolvedTheme === 'dark' ? 'rgba(255,255,255,0.06)' : '#e2e8f0',
+          controlHeight: 32,
         },
         components: {
           Layout: {
-            // 头/侧栏底色与 App.less 暗色覆盖段保持一致（容器层 #1d1d1d）
-            headerBg: resolvedTheme === 'dark' ? '#1d1d1d' : '#fff',
-            siderBg: resolvedTheme === 'dark' ? '#1d1d1d' : '#fff',
+            headerBg: resolvedTheme === 'dark' ? '#0c0e14' : '#fff',
+            siderBg: resolvedTheme === 'dark' ? '#0c0e14' : '#fff',
           },
+          Card: { borderRadiusLG: 4 },
+          Button: { borderRadius: 4 },
+          Table: { borderRadius: 4 },
+          Input: { borderRadius: 4 },
+          Select: { borderRadius: 4 },
+          Modal: { borderRadiusLG: 6 },
         },
       }}
     >

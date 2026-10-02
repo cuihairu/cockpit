@@ -1,111 +1,121 @@
-// 阿里云控制台风格主题
-@primary-color: #165DFF; // 主色（与 ConfigProvider colorPrimary 一致，Arco 蓝）
-@success-color: #00A870;
-@warning-color: #FF7D00;
-@error-color: #F53F3F;
-@text-color: #1D2129;
-@text-secondary: #86909C;
-@border-color: #E5E6EB;
-@bg-color: #F2F3F5;
-@header-height: 56px;
+// Cockpit — 基础设施监控主题（去 AI 味，做高级感）
+//
+// 设计原则：
+// - 锐利而非圆润（border-radius 2px，卡片 4px）
+// - 边框而非阴影（1px solid 边界，不用 box-shadow）
+// - 克制的色彩（深色为主，强调色只用于交互状态）
+// - 强排版层级（字重/字号拉开差距，不留「均匀」感）
 
-// 全局样式
+@primary-color: #3b82f6;
+@success-color: #22c55e;
+@warning-color: #f59e0b;
+@error-color: #ef4444;
+@text-color: #0f172a;
+@text-secondary: #64748b;
+@border-color: #e2e8f0;
+@bg-color: #f8fafc;
+@header-height: 48px;
+
+// ─── 全局 ─────────────────────────────────────────
 body {
   background-color: @bg-color;
   color: @text-color;
   margin: 0;
   padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-// 暗色跟随 <html data-theme>（SettingsContext 同步）
+// ─── 暗色主题 ─────────────────────────────────────
 html[data-theme='dark'] body {
-  background-color: #141414;
-  color: rgba(255, 255, 255, 0.85);
+  background-color: #0c0e14;
+  color: #e2e8f0;
 }
 
-// 暗色覆盖：上文 ProLayout/卡片/表格覆盖层原为亮色硬编码（#fff/#F7F8FA），
-// 与 antd darkAlgorithm 打架时类选择器覆盖 CSS-in-JS，这里集中接管。
-// 色板对齐 antd dark：布局 #141414、容器 #1d1d1d、填充 #222、弱边框。
 html[data-theme='dark'] {
   .ant-pro-basicLayout {
     .ant-pro-top-nav-header {
-      background: #1d1d1d;
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      background: #0c0e14;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      box-shadow: none;
 
       .ant-menu.ant-menu-top .ant-menu-item {
-        color: rgba(255, 255, 255, 0.65);
+        color: #94a3b8;
       }
     }
 
     .ant-pro-sider {
-      background: #1d1d1d;
-      border-right: 1px solid rgba(255, 255, 255, 0.08);
+      background: #0c0e14;
+      border-right: 1px solid rgba(255, 255, 255, 0.06);
     }
 
     .ant-pro-basicLayout-content {
-      background: #141414;
-    }
-  }
-
-  .ant-input-search .ant-input {
-    background: #222222;
-
-    &:focus,
-    &:hover {
-      background: #1d1d1d;
+      background: #0c0e14;
     }
   }
 
   .ant-card {
-    background: #1d1d1d;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    background: #141620;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: none;
 
     .ant-card-head {
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 
       .ant-card-head-title {
-        color: rgba(255, 255, 255, 0.85);
+        color: #e2e8f0;
       }
     }
   }
 
   .ant-table {
     .ant-table-thead > tr > th {
-      background-color: #222222;
-      color: rgba(255, 255, 255, 0.85);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      background-color: #141620;
+      color: #94a3b8;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     }
 
     .ant-table-tbody > tr {
       &:hover > td {
-        background-color: #222222 !important;
+        background-color: rgba(255, 255, 255, 0.02) !important;
       }
 
       > td {
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
       }
     }
   }
 
   .ant-breadcrumb .ant-breadcrumb-link {
-    color: #a0a4ab;
+    color: #64748b;
+  }
+
+  .ant-input-search .ant-input {
+    background: #141620;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+
+    &:focus,
+    &:hover {
+      background: #141620;
+      border-color: @primary-color !important;
+    }
   }
 }
 
-// ProLayout 样式覆盖
+// ─── ProLayout ────────────────────────────────────
 .ant-pro-basicLayout {
-  // 顶部 Header 样式
   .ant-pro-top-nav-header {
     height: @header-height;
     line-height: @header-height;
     background: #fff;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
-    padding: 0 24px;
+    border-bottom: 1px solid @border-color;
+    box-shadow: none;
+    padding: 0 20px;
 
     .ant-pro-top-nav-header-left {
       display: flex;
       align-items: center;
-      gap: 24px;
+      gap: 20px;
 
       .ant-pro-top-nav-header-logo {
         display: flex;
@@ -114,20 +124,20 @@ html[data-theme='dark'] {
         text-decoration: none;
 
         img {
-          width: 28px;
-          height: 28px;
+          width: 24px;
+          height: 24px;
         }
 
         h1 {
-          color: @primary-color;
-          font-size: 18px;
+          color: @text-color;
+          font-size: 15px;
           font-weight: 600;
           margin: 0;
+          letter-spacing: -0.01em;
         }
       }
     }
 
-    // 顶部菜单样式
     .ant-menu.ant-menu-top {
       border-bottom: none;
       background: transparent;
@@ -136,19 +146,20 @@ html[data-theme='dark'] {
       .ant-menu-item {
         height: @header-height;
         line-height: @header-height;
-        padding: 0 20px;
-        color: #4E5969;
-        font-size: 14px;
+        padding: 0 16px;
+        color: @text-secondary;
+        font-size: 13px;
+        font-weight: 500;
         border-bottom: none;
         position: relative;
 
         &:hover {
-          color: @primary-color;
+          color: @text-color;
         }
 
         &.ant-menu-item-selected {
-          color: @primary-color;
-          font-weight: 500;
+          color: @text-color;
+          font-weight: 600;
 
           &::after {
             content: '';
@@ -156,7 +167,7 @@ html[data-theme='dark'] {
             bottom: 0;
             left: 50%;
             transform: translateX(-50%);
-            width: 20px;
+            width: 16px;
             height: 2px;
             background: @primary-color;
           }
@@ -167,21 +178,18 @@ html[data-theme='dark'] {
     .ant-pro-top-nav-header-right {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 12px;
     }
   }
 
-  // 侧边栏样式
   .ant-pro-sider {
     background: #fff;
     border-right: 1px solid @border-color;
 
-    .ant-pro-sider-logo {
-      h1 {
-        color: @primary-color !important;
-        font-weight: 600;
-        font-size: 16px;
-      }
+    .ant-pro-sider-logo h1 {
+      color: @text-color !important;
+      font-weight: 600;
+      font-size: 15px;
     }
 
     .ant-menu {
@@ -189,19 +197,21 @@ html[data-theme='dark'] {
       border-right: none;
 
       .ant-menu-item {
-        margin: 4px 8px;
-        padding: 0 16px;
-        height: 36px;
-        line-height: 36px;
+        margin: 2px 8px;
+        padding: 0 12px;
+        height: 32px;
+        line-height: 32px;
         border-radius: 4px;
+        font-size: 13px;
 
         &:hover {
-          background: rgba(22, 93, 255, 0.06);
+          background: rgba(59, 130, 246, 0.06);
         }
 
         &.ant-menu-item-selected {
-          background: rgba(22, 93, 255, 0.1);
+          background: rgba(59, 130, 246, 0.08);
           color: @primary-color;
+          font-weight: 500;
 
           &::after {
             display: none;
@@ -211,51 +221,48 @@ html[data-theme='dark'] {
 
       .ant-menu-submenu {
         .ant-menu-submenu-title {
-          margin: 4px 8px;
-          padding: 0 16px;
-          height: 36px;
-          line-height: 36px;
+          margin: 2px 8px;
+          padding: 0 12px;
+          height: 32px;
+          line-height: 32px;
           border-radius: 4px;
+          font-size: 13px;
 
           &:hover {
-            background: rgba(22, 93, 255, 0.06);
-            color: @primary-color;
+            background: rgba(59, 130, 246, 0.06);
+            color: @text-color;
           }
         }
 
-        &.ant-menu-submenu-open {
-          > .ant-menu-submenu-title {
-            background: rgba(22, 93, 255, 0.06);
-            color: @primary-color;
-          }
+        &.ant-menu-submenu-open > .ant-menu-submenu-title {
+          background: rgba(59, 130, 246, 0.06);
+          color: @text-color;
         }
 
         .ant-menu-sub {
           background: transparent;
 
           .ant-menu-item {
-            padding-left: 44px !important;
+            padding-left: 40px !important;
           }
         }
       }
     }
   }
 
-  // 内容区域样式
   .ant-pro-basicLayout-content {
     margin: 0;
     background: @bg-color;
     min-height: calc(100vh - @header-height);
   }
 
-  // 面包屑样式
   .ant-pro-breadcrumb {
-    margin-bottom: 16px;
-    padding: 16px 24px 0;
+    margin-bottom: 12px;
+    padding: 12px 20px 0;
     background: transparent;
 
     .ant-breadcrumb {
-      font-size: 14px;
+      font-size: 13px;
 
       .ant-breadcrumb-link {
         color: @text-secondary;
@@ -267,76 +274,71 @@ html[data-theme='dark'] {
     }
   }
 
-  // 页面内容区域
   .ant-pro-page-container {
     padding: 0;
   }
 }
 
-// 搜索框样式（阿里云风格）
+// ─── 搜索框 ───────────────────────────────────────
 .ant-input-search {
   .ant-input {
-    border-radius: 8px !important;
-    background: #F7F8FA;
-    border: 1px solid transparent !important;
-    transition: all 0.2s;
+    border-radius: 4px !important;
+    background: #fff;
+    border: 1px solid @border-color !important;
+    transition: border-color 0.15s;
 
     &:focus {
-      background: #fff;
       border-color: @primary-color !important;
-      box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.1);
+      box-shadow: none;
     }
 
     &:hover {
-      background: #fff;
-      border-color: @border-color !important;
+      border-color: #94a3b8 !important;
     }
   }
 
   .ant-input-search-button {
-    border-radius: 0 8px 8px 0 !important;
-    border: none !important;
-    background: transparent;
-
-    &:hover {
-      color: @primary-color;
-    }
+    border-radius: 0 4px 4px 0 !important;
   }
 }
 
-// 卡片样式（阿里云风格）
+// ─── 卡片 ─────────────────────────────────────────
 .ant-card {
-  border-radius: 8px;
-  border: none;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  border: 1px solid @border-color;
+  box-shadow: none;
   background: #fff;
 
   .ant-card-head {
     border-bottom: 1px solid @border-color;
-    padding: 16px 20px;
+    padding: 12px 16px;
+    min-height: auto;
 
     .ant-card-head-title {
-      font-size: 16px;
-      font-weight: 500;
-      color: @text-color;
+      font-size: 13px;
+      font-weight: 600;
+      color: @text-secondary;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }
   }
 
   .ant-card-body {
-    padding: 20px;
+    padding: 16px;
   }
 }
 
-
-// 表格样式（阿里云风格）
+// ─── 表格 ─────────────────────────────────────────
 .ant-table {
   .ant-table-thead > tr > th {
-    background-color: #F7F8FA;
-    font-weight: 500;
-    color: @text-color;
+    background-color: transparent;
+    font-weight: 600;
+    color: @text-secondary;
     border-bottom: 1px solid @border-color;
-    padding: 12px 16px;
-    font-size: 14px;
+    padding: 8px 12px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 
     &::before {
       display: none;
@@ -345,68 +347,72 @@ html[data-theme='dark'] {
 
   .ant-table-tbody > tr {
     &:hover > td {
-      background-color: #F7F8FA !important;
+      background-color: rgba(59, 130, 246, 0.03) !important;
     }
 
     > td {
       border-bottom: 1px solid @border-color;
-      padding: 12px 16px;
+      padding: 10px 12px;
+      font-size: 13px;
     }
   }
 
   .ant-table-cell {
-    font-size: 14px;
+    font-size: 13px;
   }
 }
 
-// 标签样式（阿里云风格）
+// ─── 标签 ─────────────────────────────────────────
 .ant-tag {
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
+  border-radius: 2px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
   border: 1px solid transparent;
 
   &.ant-tag-success {
-    background: rgba(0, 168, 112, 0.1);
-    color: #00A870;
-    border-color: rgba(0, 168, 112, 0.2);
+    background: rgba(34, 197, 94, 0.1);
+    color: #16a34a;
+    border-color: rgba(34, 197, 94, 0.2);
   }
 
   &.ant-tag-warning {
-    background: rgba(255, 125, 0, 0.1);
-    color: #FF7D00;
-    border-color: rgba(255, 125, 0, 0.2);
+    background: rgba(245, 158, 11, 0.1);
+    color: #d97706;
+    border-color: rgba(245, 158, 11, 0.2);
   }
 
   &.ant-tag-error {
-    background: rgba(245, 63, 63, 0.1);
-    color: #F53F3F;
-    border-color: rgba(245, 63, 63, 0.2);
+    background: rgba(239, 68, 68, 0.1);
+    color: #dc2626;
+    border-color: rgba(239, 68, 68, 0.2);
   }
 
   &.ant-tag-processing,
   &.ant-tag-blue {
-    background: rgba(22, 93, 255, 0.1);
-    color: #1366EC;
-    border-color: rgba(19, 102, 236, 0.2);
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+    border-color: rgba(59, 130, 246, 0.2);
   }
 }
 
-// 按钮样式（阿里云风格）
+// ─── 按钮 ─────────────────────────────────────────
 .ant-btn {
-  border-radius: 6px;
+  border-radius: 4px;
   height: 32px;
-  font-size: 14px;
-  padding: 4px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 14px;
   border: 1px solid @border-color;
+  transition: all 0.15s;
 
   &.ant-btn-primary {
     background: @primary-color;
     border-color: @primary-color;
 
     &:hover {
-      background: lighten(@primary-color, 5%);
-      border-color: lighten(@primary-color, 5%);
+      background: #2563eb;
+      border-color: #2563eb;
     }
   }
 
@@ -416,33 +422,28 @@ html[data-theme='dark'] {
 
     &:hover {
       color: @primary-color;
-      background: rgba(22, 93, 255, 0.06);
+      background: rgba(59, 130, 246, 0.06);
     }
   }
 }
 
-// 进度条样式
+// ─── 进度条 ───────────────────────────────────────
 .ant-progress {
   .ant-progress-bg {
-    border-radius: 4px;
-  }
-
-  &.ant-progress-success .ant-progress-bg {
-    background: linear-gradient(90deg, #00A870, #52C41A);
+    border-radius: 1px;
   }
 }
 
-// Dashboard 容器
+// ─── 页面容器 ─────────────────────────────────────
 .dashboard-container {
-  padding: 24px;
+  padding: 20px;
 }
 
-// 页面容器（统一所有页面的样式）
 .page-container {
-  padding: 24px;
+  padding: 20px;
 
   .ant-card {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
 
     &:last-child {
       margin-bottom: 0;
@@ -450,50 +451,49 @@ html[data-theme='dark'] {
   }
 }
 
+// ─── 紧凑模式 ─────────────────────────────────────
 .app-density-compact {
   .page-container,
   .dashboard-container {
-    padding: 16px;
+    padding: 12px;
   }
 
   .ant-card {
     .ant-card-head {
-      min-height: 48px;
-      padding: 0 16px;
+      min-height: 40px;
+      padding: 0 12px;
     }
 
     .ant-card-body {
-      padding: 16px;
+      padding: 12px;
     }
   }
 
   .ant-tabs > .ant-tabs-nav {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
   }
 
   .ant-table-wrapper .ant-table-thead > tr > th,
   .ant-table-wrapper .ant-table-tbody > tr > td {
-    padding-top: 10px;
-    padding-bottom: 10px;
+    padding-top: 6px;
+    padding-bottom: 6px;
   }
 }
 
-// 响应式（见 docs/guide/mobile-design.md）
+// ─── 响应式 ───────────────────────────────────────
 @media (max-width: 768px) {
   .ant-pro-top-nav-header {
-    padding: 0 16px;
+    padding: 0 12px;
 
     .ant-input-search {
       display: none;
     }
   }
 
-  // header「文档」按钮只留图标（D4）
   .header-doc-text {
     display: none;
   }
 
-  // Modal 兜底：默认 520px 在手机屏溢出（D5）
   .ant-modal {
     max-width: calc(100vw - 16px);
     margin: 8px auto;
@@ -501,25 +501,24 @@ html[data-theme='dark'] {
 
   .dashboard-container,
   .page-container {
-    padding: 12px;
-  }
-
-  .ant-card .ant-card-body {
-    padding: 16px;
-  }
-
-  // 表格密度收紧（列内容换行时行高别撑太大）
-  .ant-table .ant-table-thead > tr > th,
-  .ant-table .ant-table-tbody > tr > td {
     padding: 8px;
   }
 
-  .stat-card {
-    min-height: 88px;
+  .ant-card .ant-card-body {
     padding: 12px;
+  }
+
+  .ant-table .ant-table-thead > tr > th,
+  .ant-table .ant-table-tbody > tr > td {
+    padding: 6px 8px;
+  }
+
+  .stat-card {
+    min-height: 80px;
+    padding: 10px;
 
     .ant-statistic-content-value {
-      font-size: 22px;
+      font-size: 20px;
     }
   }
 }
