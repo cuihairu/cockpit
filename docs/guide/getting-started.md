@@ -105,11 +105,47 @@ $env:ADMIN_PASSWORD = 'change-this-password'
 
 ## 启动 Agent
 
-OpenWrt 路由器无需手工编译：nightly release 提供 5 架构
+### 一键安装（推荐）
+
+三平台各一行命令（从每日构建 nightly release 匿名直链下载，自动检测
+OS 与 CPU 架构，装完自动执行 `cockpit-agent --version` 验证；重跑即升级）：
+
+Linux / macOS：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | bash
+```
+
+Windows（PowerShell 5.1+ / pwsh）：
+
+```powershell
+irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
+```
+
+可选注册开机自启服务（systemd / launchd / Windows 服务），连接信息随
+`--with-service` 一并传入：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | \
+  bash -s -- --with-service --server wss://cockpit.example.com/ws
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1))) `
+  -WithService -ServerUrl "wss://cockpit.example.com/ws"
+```
+
+支持矩阵：Linux amd64 / arm64 / armv7、macOS amd64 / arm64、Windows
+amd64 / arm64（全部每日构建产物）；架构不认识时脚本会明确报错。
+手动部署、服务参数与故障排查见 [deployments/README.md](https://github.com/cuihairu/cockpit/blob/main/deployments/README.md)。
+
+### 手动启动
+
+OpenWrt 路由器无需手工编译：nightly release 提供多架构
 `.ipk` 安装包（opkg 即装、procd 托管、UCI 配置），安装步骤见
 [OpenWrt Agent 打包设计](/guide/openwrt-agent-design#安装与升级)。
 
-其余 Linux/Windows/macOS 节点：下载对应平台 `cockpit-agent` 二进制，
+其余场景：下载对应平台 `cockpit-agent` 二进制（或本地编译），
 在被管理节点上运行：
 
 ```bash
@@ -160,6 +196,26 @@ server:
 ```
 
 建议通过反向代理终止 TLS，并让 Agent 使用 `wss://.../ws` 连接。
+
+默认配置路径优先级：
+
+1. `-config` 指定路径
+2. `./config/cockpit.yaml`
+3. `./cockpit.yaml`
+4. `/etc/cockpit/config.yaml`
+
+通知渠道（Herald / ntfy / webhook / Telegram）、DNS 与 ACME 凭据（Cloudflare / DNSPod / 阿里云）、组网云 token（ZeroTier / Tailscale）等完整键位见仓库 [`config/cockpit.yaml`](https://github.com/cuihairu/cockpit/blob/main/config/cockpit.yaml) 内注释；密钥类配置建议用环境变量注入（`CLOUDFLARE_API_TOKEN`、`DNSPOD_LOGIN_TOKEN`、`ALIYUN_ACCESS_KEY`、`ZEROTIER_API_TOKEN`、`TAILSCALE_API_TOKEN` 等）。
+
+## 端到端冒烟
+
+仓库内置最小闭环验证脚本（临时目录起 server + agent，sync inventory，校验资源 API 非空）：
+
+```bash
+./scripts/e2e-smoke.sh          # Linux/macOS
+pwsh ./scripts/e2e-smoke.ps1    # Windows
+```
+
+退出码 0 表示全链路正常；非 0 时自动打印 `server.log` 末尾。保留日志调试：`E2E_KEEP_LOGS=1` / `-KeepLogs`。
 
 ## 不想编译？用 Docker
 

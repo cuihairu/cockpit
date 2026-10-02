@@ -914,6 +914,15 @@
 
 **M9 web 覆盖率台账收口·健康探针批次缺口（2026-09-29）**：b1e2413（健康探针面板，09-28）推送时未过 web 覆盖率门禁——`HealthPanel.tsx` 24 行 + `Services/index.tsx` 5 行行号漂移 + `api.ts` 3 行新方法无测试，Test workflow 自此 5 连红（含 4 个 dependabot merge 跟着红）。本批按「重跑→挑最大模块→补测或登记」收口。**判定方法**（关键）：全量 8-worker 口径缺口 24 行 vs **单文件 isolate 口径缺口仅 7 行**（`--coverage.include` 单文件 + 独立 `--coverage.reportsDirectory` 重跑对照）——差值 17 行是 v8 全量合并丢计数（行为均有现有用例断言实证），单文件口径另剩 306/309 两行 JSX 内联箭头（onClick 内联 `setEditing(false)`/`void save()`，v8 恒计 0，M7 同类形态）。**补测 6 用例**（HealthPanel.test.tsx 9→14）：探测请求 reject（axios 形态错误透出响应文案）、校验失败早退（id 清空点保存→字段标错+不发请求）、抽屉取消、添加/删除探针行、类型切换清空 target。**api.ts 3 行**：健康探针三方法补进全方法驱动清单（阈值 170→173）+ 关键路径精确断言（agentId/probeId encodeURIComponent、PUT body 透传）。**台账**：HealthPanel 19 行登记（17 行合并丢计数 + 2 行 JSX 内联箭头，逐行注明实证用例）；Services/index 5 条行号 +1 漂移更新（b1e2413 挂 HealthPanel 加 import 所致，理由不变）。**坑位沉淀**：① antd Drawer 未设 destroyOnClose 时关闭后**内容 DOM 保留**，可靠关闭信号是 wrapper 落 `ant-drawer-content-wrapper-hidden` class + mask 卸载（「标题 not.toBeInTheDocument」断言对这类 Drawer 恒超时，Stacks 页能用是因其关闭路径不同——实证法：断言失败消息带 DOM dump）；② `getAllByText('HTTP 状态码')[0]` 会命中主表格 Tag 而非抽屉内 Select（同文本两处）——用 `document.querySelector('.ant-drawer .ant-select .ant-select-selector')` 定位；③ `getApiErrorMessage(new Error(...))` 恒落 fallback（只解析 axios `response.data.error` 形态），要透出错误文案须 mock `{response:{data:{error:...}}}`。**并行会话协同**：收口期间另一会话在同一工作树反复跑全量覆盖率（coverage/ 共享目录被其 clean 导致本地 lcov 消失）——验证改用独立 `--coverage.reportsDirectory` + `--maxWorkers=4`，互不干扰。**验收边界**：全量 vitest 943→949 全绿、coverage_check.sh 输出「有效覆盖 100%」、CI Test workflow 恢复绿。
 
+## README 瘦身：详情收口文档站（2026-10-02）
+
+口径：README 只留门面（logo + 徽章行 + 一句话定位 + 核心特性短清单 + 最短快速开始 + 文档站链接 + 许可证），安装细节/平台矩阵/配置说明/架构图/使用指南全部只在 docs，README 不重复；README 不重复放图（既有规矩）。
+
+1. [**README 236 行 → 55 行**：删「当前能力」长清单（挪 introduction.md，替换其过时的 7 行能力表为完整 9 条）、「架构」mermaid 图（architecture.md 已有 ASCII 拓扑+边界全文，无需搬运）、「一键安装」细节节（挪 getting-started.md「启动 Agent → 一键安装（推荐）」，原手动安装内容保留为「手动启动」子节）、「关键配置」（路径优先级+config 键位注释/env 注入说明补进 getting-started「生产环境最小配置」）、「Docker 部署」长节（deploy-docker.md + getting-started 已覆盖）、「端到端冒烟」长节（补进 getting-started 新「端到端冒烟」节）。平台徽章链接从 `#一键安装` 锚改指文档站 getting-started。]
+2. [**docs 三处缺口补齐**（本轮挪移落点）：getting-started.md 补一键安装节（curl|bash / irm|iex、--with-service 两形态、平台矩阵、deployments/README 链接）+ 配置路径优先级/键位段 + e2e 冒烟节；introduction.md 当前能力表 → 9 条完整清单。vitepress 导航 config.ts 无需改动（未新增页面）。]
+
+验收：徽章行 8 枚保留（3 CI + 3 平台 + 2 架构）；`web/public/logo.svg` 存在；文档站四页链接与 operations/deploy-docker 链接齐全。
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
