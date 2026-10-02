@@ -34,7 +34,11 @@ import (
 
 // handleACME 分发 /api/acme[...]
 func (s *Server) handleACME(w http.ResponseWriter, r *http.Request) {
-	sub := strings.Trim(strings.TrimPrefix(r.URL.Path, "/acme"), "/")
+	// r.URL.Path 是完整路径（/api/acme/...）——剥前缀必须带 /api。
+	// 此前剥 "/acme" 导致真实请求永远匹配不上、全部子路径 404，
+	// 而单测直接用 "/acme/certs" 构造请求测不出来（真机 2026-10-02 发现，
+	// 与 api_recordings.go 2026-09-30 修复的同款 bug）
+	sub := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/acme"), "/")
 	switch {
 	case sub == "config":
 		s.handleAcmeConfigAPI(w, r)

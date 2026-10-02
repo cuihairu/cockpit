@@ -151,7 +151,7 @@ func TestDDNSScanConfigAPI(t *testing.T) {
 
 	// GET：默认值 + 合法范围
 	rec := httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodGet, "/ddns/config", nil))
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodGet, "/api/ddns/config", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET config: code=%d", rec.Code)
 	}
@@ -169,13 +169,13 @@ func TestDDNSScanConfigAPI(t *testing.T) {
 
 	// PUT：合法值写入并回读生效
 	rec = httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/ddns/config",
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/api/ddns/config",
 		strings.NewReader(`{"scan_interval_seconds":600}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT config: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 	rec = httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodGet, "/ddns/config", nil))
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodGet, "/api/ddns/config", nil))
 	json.Unmarshal(rec.Body.Bytes(), &cfgResp)
 	if cfgResp.ScanIntervalSeconds != 600 {
 		t.Fatalf("after PUT interval = %d, want 600", cfgResp.ScanIntervalSeconds)
@@ -183,7 +183,7 @@ func TestDDNSScanConfigAPI(t *testing.T) {
 
 	// PUT：0 = 关闭，合法
 	rec = httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/ddns/config",
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/api/ddns/config",
 		strings.NewReader(`{"scan_interval_seconds":0}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT 0: code=%d", rec.Code)
@@ -192,7 +192,7 @@ func TestDDNSScanConfigAPI(t *testing.T) {
 	// PUT：越界（低于 min / 高于 max / 负数）
 	for _, bad := range []int{ddnsMinIntervalSeconds - 1, ddnsMaxIntervalSeconds + 1, -5} {
 		rec = httptest.NewRecorder()
-		s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/ddns/config",
+		s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/api/ddns/config",
 			strings.NewReader(`{"scan_interval_seconds":`+strconv.Itoa(bad)+`}`)))
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("PUT %d: code=%d, want 400", bad, rec.Code)
@@ -201,14 +201,14 @@ func TestDDNSScanConfigAPI(t *testing.T) {
 
 	// PUT：非法 body
 	rec = httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/ddns/config", strings.NewReader(`{bad`)))
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/api/ddns/config", strings.NewReader(`{bad`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("bad body: code=%d, want 400", rec.Code)
 	}
 
 	// 其他方法 405
 	rec = httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodDelete, "/ddns/config", nil))
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodDelete, "/api/ddns/config", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("DELETE config: code=%d, want 405", rec.Code)
 	}
@@ -220,7 +220,7 @@ func TestDDNSConfigAPI(t *testing.T) {
 	// 创建：合法
 	rec := httptest.NewRecorder()
 	body := `{"agentId":"a1","zoneId":"zone-1","zoneName":"example.com","recordName":"home.example.com","type":"a","enabled":true}`
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodPost, "/ddns", strings.NewReader(body)))
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPost, "/api/ddns", strings.NewReader(body)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create: code=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -233,13 +233,13 @@ func TestDDNSConfigAPI(t *testing.T) {
 	// 创建：类型拒绝
 	rec = httptest.NewRecorder()
 	bad := `{"agentId":"a1","zoneId":"zone-1","recordName":"x.example.com","type":"CNAME"}`
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodPost, "/ddns", strings.NewReader(bad)))
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPost, "/api/ddns", strings.NewReader(bad)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("CNAME should be rejected: code = %d", rec.Code)
 	}
 	// 创建：缺名称
 	rec = httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodPost, "/ddns",
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPost, "/api/ddns",
 		strings.NewReader(`{"agentId":"a1","zoneId":"z","type":"A"}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("empty recordName should be rejected: code = %d", rec.Code)
@@ -247,7 +247,7 @@ func TestDDNSConfigAPI(t *testing.T) {
 
 	// 列表
 	rec = httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodGet, "/ddns", nil))
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodGet, "/api/ddns", nil))
 	var list []*storage.DDNSConfig
 	json.Unmarshal(rec.Body.Bytes(), &list)
 	if len(list) != 1 {
@@ -256,7 +256,7 @@ func TestDDNSConfigAPI(t *testing.T) {
 
 	// 更新：关闭启用
 	rec = httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/ddns/"+strconv.Itoa(int(created.ID)),
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPut, "/api/ddns/"+strconv.Itoa(int(created.ID)),
 		strings.NewReader(`{"agentId":"a1","zoneId":"zone-1","recordName":"home.example.com","type":"A","enabled":false}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update: code=%d", rec.Code)
@@ -268,7 +268,7 @@ func TestDDNSConfigAPI(t *testing.T) {
 
 	// 删除
 	rec = httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodDelete, "/ddns/"+strconv.Itoa(int(created.ID)), nil))
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodDelete, "/api/ddns/"+strconv.Itoa(int(created.ID)), nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete: code=%d", rec.Code)
 	}
@@ -401,7 +401,7 @@ func TestDDNSCheckEndpoint(t *testing.T) {
 	mkDDNSConfig(t, s, nil)
 
 	rec := httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodPost, "/ddns/1/check", nil))
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPost, "/api/ddns/1/check", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("check: code=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -420,7 +420,7 @@ func TestDDNSCheckEndpoint(t *testing.T) {
 
 	// 未知 id
 	rec = httptest.NewRecorder()
-	s.handleDDNS(rec, httptest.NewRequest(http.MethodPost, "/ddns/999/check", nil))
+	s.handleDDNS(rec, httptest.NewRequest(http.MethodPost, "/api/ddns/999/check", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown id: code = %d", rec.Code)
 	}

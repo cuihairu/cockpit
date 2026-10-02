@@ -259,13 +259,13 @@ func TestCovDDNSCheckEndpoint(t *testing.T) {
 	}
 	// 非法 id
 	rec := covRec()
-	s.handleDDNS(rec, covReq(http.MethodPost, "/ddns/abc/check", nil))
+	s.handleDDNS(rec, covReq(http.MethodPost, "/api/ddns/abc/check", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("bad id: %d", rec.Code)
 	}
 	// provider 未配置 → 5xx
 	rec = covRec()
-	s.handleDDNS(rec, covReq(http.MethodPost, "/ddns/"+strconv.Itoa(int(cfg.ID))+"/check", nil))
+	s.handleDDNS(rec, covReq(http.MethodPost, "/api/ddns/"+strconv.Itoa(int(cfg.ID))+"/check", nil))
 	if rec.Code == http.StatusOK {
 		t.Fatalf("check should fail without provider: %d", rec.Code)
 	}

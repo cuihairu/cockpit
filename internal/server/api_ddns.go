@@ -25,7 +25,9 @@ import (
 
 // handleDDNS 分发 /api/ddns[...]
 func (s *Server) handleDDNS(w http.ResponseWriter, r *http.Request) {
-	sub := strings.Trim(strings.TrimPrefix(r.URL.Path, "/ddns"), "/")
+	// r.URL.Path 是完整路径（/api/ddns/...）——剥前缀必须带 /api
+	// （同 api_acme.go 2026-10-02 修复的 TrimPrefix 前缀 bug）
+	sub := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/ddns"), "/")
 	switch {
 	case sub == "config":
 		// GET/PUT 全局巡检间隔（与 /api/drift/config、/api/smart/config 同构）

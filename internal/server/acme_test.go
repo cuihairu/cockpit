@@ -81,7 +81,7 @@ func TestAcmeCertAPIValidation(t *testing.T) {
 
 	// domains 空
 	rec := httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs",
 		strings.NewReader(`{"caDirectory":"staging","autoRenew":true}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("empty domains: code = %d", rec.Code)
@@ -89,7 +89,7 @@ func TestAcmeCertAPIValidation(t *testing.T) {
 
 	// 坏域名
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs",
 		strings.NewReader(`{"domains":["bad_domain!"],"caDirectory":"staging"}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("bad domain: code = %d", rec.Code)
@@ -97,7 +97,7 @@ func TestAcmeCertAPIValidation(t *testing.T) {
 
 	// 泛域名合法、大小写归一
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs",
 		strings.NewReader(`{"domains":["*.Example.com"],"caDirectory":"staging","autoRenew":true}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("wildcard domain: code = %d body = %s", rec.Code, rec.Body.String())
@@ -105,7 +105,7 @@ func TestAcmeCertAPIValidation(t *testing.T) {
 
 	// CA 白名单
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs",
 		strings.NewReader(`{"domains":["a.example.com"],"caDirectory":"zerossl"}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown CA: code = %d", rec.Code)
@@ -115,7 +115,7 @@ func TestAcmeCertAPIValidation(t *testing.T) {
 	for _, bad := range []int{0, 6, 91} {
 		rec = httptest.NewRecorder()
 		body := `{"domains":["a.example.com"],"renewBeforeDays":` + strconv.Itoa(bad) + `}`
-		s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs", strings.NewReader(body)))
+		s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs", strings.NewReader(body)))
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("renewBeforeDays=%d: code = %d", bad, rec.Code)
 		}
@@ -127,7 +127,7 @@ func TestAcmeCertAPICRUDAndAudit(t *testing.T) {
 
 	// 创建：默认 CA = staging（D4 防误触生产限频）
 	rec := httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs",
 		strings.NewReader(`{"domains":["home.example.com","*.example.com"],"autoRenew":true}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create: code=%d body=%s", rec.Code, rec.Body.String())
@@ -140,7 +140,7 @@ func TestAcmeCertAPICRUDAndAudit(t *testing.T) {
 
 	// 列表：无 PEM 字段
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/acme/certs", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/api/acme/certs", nil))
 	body := rec.Body.String()
 	if strings.Contains(body, "PEM") || strings.Contains(body, "PRIVATE KEY") {
 		t.Error("list response must not contain PEM fields")
@@ -148,7 +148,7 @@ func TestAcmeCertAPICRUDAndAudit(t *testing.T) {
 
 	// 更新：域名变更重置 pending
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/certs/"+strconv.Itoa(int(created.ID)),
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/api/acme/certs/"+strconv.Itoa(int(created.ID)),
 		strings.NewReader(`{"domains":["other.example.com"],"caDirectory":"production","autoRenew":false,"renewBeforeDays":14}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update: code=%d", rec.Code)
@@ -160,7 +160,7 @@ func TestAcmeCertAPICRUDAndAudit(t *testing.T) {
 
 	// 删除
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodDelete, "/acme/certs/"+strconv.Itoa(int(created.ID)), nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodDelete, "/api/acme/certs/"+strconv.Itoa(int(created.ID)), nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete: code=%d", rec.Code)
 	}
@@ -188,7 +188,7 @@ func TestAcmeIssueEndpoint(t *testing.T) {
 
 	// 签发成功 → 状态回写 + 观测表联动
 	rec := httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("issue: code=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -215,7 +215,7 @@ func TestAcmeIssueEndpoint(t *testing.T) {
 	// token 未配置 → 503（D12）
 	s.cfg.DNS.Cloudflare.APIToken = ""
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("no token: code = %d, want 503", rec.Code)
 	}
@@ -224,7 +224,7 @@ func TestAcmeIssueEndpoint(t *testing.T) {
 	// 签发失败 → 400 + failed 状态 + 告警
 	f.issueErr = errors.New("dns propagation timeout")
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("failed issue: code = %d", rec.Code)
 	}
@@ -239,7 +239,7 @@ func TestAcmeIssueEndpoint(t *testing.T) {
 
 	// 重复失败 → 告警真去重（手动 issue 不节流，连续两次都执行）
 	s.handleACME(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost,
-		"/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
+		"/api/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
 	alerts, _ = s.db.ListAlerts(10)
 	if len(alerts) != 1 {
 		t.Errorf("alerts after re-issue = %d, want 1 (dedup)", len(alerts))
@@ -266,7 +266,7 @@ func TestAcmeDownload(t *testing.T) {
 		c.IssuerPEM = "ISSUER-PEM-BODY"
 		c.PrivateKeyPEM = "KEY-PEM-BODY"
 	})
-	idPath := "/acme/certs/" + strconv.Itoa(int(cert.ID)) + "/download"
+	idPath := "/api/acme/certs/" + strconv.Itoa(int(cert.ID)) + "/download"
 
 	// cert / issuer 不记审计
 	rec := httptest.NewRecorder()
@@ -290,7 +290,7 @@ func TestAcmeDownload(t *testing.T) {
 	pending := mkAcmeCert(t, s, nil)
 	rec = httptest.NewRecorder()
 	s.handleACME(rec, httptest.NewRequest(http.MethodGet,
-		"/acme/certs/"+strconv.Itoa(int(pending.ID))+"/download", nil))
+		"/api/acme/certs/"+strconv.Itoa(int(pending.ID))+"/download", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("pending download: code = %d", rec.Code)
 	}
@@ -393,14 +393,14 @@ func TestAcmeAccountAPI(t *testing.T) {
 
 	// 未注册视图
 	rec := httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/acme/account", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/api/acme/account", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"registered":false`) {
 		t.Errorf("empty account: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	// 设置 email
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/account",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/api/acme/account",
 		strings.NewReader(`{"email":"me@example.com"}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set email: code=%d", rec.Code)
@@ -416,7 +416,7 @@ func TestAcmeAccountAPI(t *testing.T) {
 
 	// 坏 email 拒绝
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/account",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/api/acme/account",
 		strings.NewReader(`{"email":"not-an-email"}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("bad email: code = %d", rec.Code)
@@ -526,7 +526,7 @@ func TestAcmeConfigDNSField(t *testing.T) {
 
 	// 默认 provider（空 = cloudflare）+ token 已配 → configured
 	rec := httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/acme/config", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/api/acme/config", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET config: code = %d", rec.Code)
 	}
@@ -546,7 +546,7 @@ func TestAcmeConfigDNSField(t *testing.T) {
 	// 切 dnspod 未配凭据：config 报未就绪；issue 503 文案报 DNSPod（不再检查 cloudflare token）
 	s.cfg.DNS.Provider = "dnspod"
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/acme/config", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/api/acme/config", nil))
 	body.DNS = struct {
 		Provider   string `json:"provider"`
 		Configured bool   `json:"configured"`
@@ -560,7 +560,7 @@ func TestAcmeConfigDNSField(t *testing.T) {
 
 	cert := mkAcmeCert(t, s, nil)
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("issue under dnspod: code = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -586,7 +586,7 @@ func TestAcmeDeployValidation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/acme/certs", strings.NewReader(tc.body)))
+			s.handleACME(rec, httptest.NewRequest(http.MethodPost, "/api/acme/certs", strings.NewReader(tc.body)))
 			if tc.ok && rec.Code != http.StatusOK {
 				t.Fatalf("code = %d body = %s", rec.Code, rec.Body.String())
 			}
@@ -609,13 +609,13 @@ func TestAcmeDeployAPI(t *testing.T) {
 		c.DeployCertPath = "/etc/cockpit/certs/home.example.com.crt.pem"
 		c.DeployKeyPath = "/etc/cockpit/certs/home.example.com.key.pem"
 	})
-	idPath := "/acme/certs/" + strconv.Itoa(int(cert.ID)) + "/deploy"
+	idPath := "/api/acme/certs/" + strconv.Itoa(int(cert.ID)) + "/deploy"
 
 	// 未绑定 → 400
 	cert2 := mkAcmeCert(t, s, nil)
 	rec := httptest.NewRecorder()
 	s.handleACME(rec, httptest.NewRequest(http.MethodPost,
-		"/acme/certs/"+strconv.Itoa(int(cert2.ID))+"/deploy", nil))
+		"/api/acme/certs/"+strconv.Itoa(int(cert2.ID))+"/deploy", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("no target: code = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -719,7 +719,7 @@ func TestAcmeIssueAutoDeploy(t *testing.T) {
 	}()
 	rec := httptest.NewRecorder()
 	s.handleACME(rec, httptest.NewRequest(http.MethodPost,
-		"/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
+		"/api/acme/certs/"+strconv.Itoa(int(cert.ID))+"/issue", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("issue: code = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -814,7 +814,7 @@ func TestAcmeAccountRegisteredViewAndUpdate(t *testing.T) {
 
 	// GET：registered=true 视图带 email/caDirectory/registrationURI
 	rec := httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/acme/account", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/api/acme/account", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET: code=%d", rec.Code)
 	}
@@ -832,7 +832,7 @@ func TestAcmeAccountRegisteredViewAndUpdate(t *testing.T) {
 
 	// PUT：走 UpdateAcmeAccountEmail 分支（账户已存在）
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/account",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/api/acme/account",
 		strings.NewReader(`{"email":"new@example.com"}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT update: code=%d body=%s", rec.Code, rec.Body.String())
@@ -848,7 +848,7 @@ func TestAcmeAccountRegisteredViewAndUpdate(t *testing.T) {
 
 	// PUT：空 email 合法（允许清除，跳过正则）
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/account",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/api/acme/account",
 		strings.NewReader(`{"email":"  "}`)))
 	if rec.Code != http.StatusOK {
 		t.Errorf("PUT empty email: code=%d", rec.Code)
@@ -859,14 +859,14 @@ func TestAcmeAccountRegisteredViewAndUpdate(t *testing.T) {
 
 	// PUT：坏 body
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/account", strings.NewReader(`{bad`)))
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/api/acme/account", strings.NewReader(`{bad`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("bad body: code=%d", rec.Code)
 	}
 
 	// 其他方法 405
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodDelete, "/acme/account", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodDelete, "/api/acme/account", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("DELETE: code=%d", rec.Code)
 	}
@@ -879,7 +879,7 @@ func TestAcmeConfigIntervalAPI(t *testing.T) {
 
 	// GET：默认值 + 范围字段
 	rec := httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/acme/config", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodGet, "/api/acme/config", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET config: code=%d", rec.Code)
 	}
@@ -897,7 +897,7 @@ func TestAcmeConfigIntervalAPI(t *testing.T) {
 
 	// PUT：合法值写入并回读生效
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/config",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/api/acme/config",
 		strings.NewReader(`{"scan_interval_seconds":7200}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT config: code=%d body=%s", rec.Code, rec.Body.String())
@@ -908,7 +908,7 @@ func TestAcmeConfigIntervalAPI(t *testing.T) {
 
 	// PUT：0 = 关闭，合法
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/config",
+	s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/api/acme/config",
 		strings.NewReader(`{"scan_interval_seconds":0}`)))
 	if rec.Code != http.StatusOK {
 		t.Errorf("PUT 0: code=%d", rec.Code)
@@ -922,7 +922,7 @@ func TestAcmeConfigIntervalAPI(t *testing.T) {
 		`{bad`,
 	} {
 		rec = httptest.NewRecorder()
-		s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/acme/config", strings.NewReader(body)))
+		s.handleACME(rec, httptest.NewRequest(http.MethodPut, "/api/acme/config", strings.NewReader(body)))
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("PUT %s: code = %d, want 400", body, rec.Code)
 		}
@@ -930,7 +930,7 @@ func TestAcmeConfigIntervalAPI(t *testing.T) {
 
 	// 其他方法 405
 	rec = httptest.NewRecorder()
-	s.handleACME(rec, httptest.NewRequest(http.MethodDelete, "/acme/config", nil))
+	s.handleACME(rec, httptest.NewRequest(http.MethodDelete, "/api/acme/config", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("DELETE config: code=%d", rec.Code)
 	}

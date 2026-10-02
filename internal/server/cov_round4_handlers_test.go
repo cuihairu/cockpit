@@ -75,18 +75,18 @@ func TestCovDDNSHandlers(t *testing.T) {
 
 	// Check：405 / 坏 id / missing / dns 未配置 503（在 Delete 之前，记录尚在）
 	rec = covRec()
-	s.handleDDNSCheck(rec, covReq(http.MethodGet, "/ddns/x/check", nil), "x")
+	s.handleDDNSCheck(rec, covReq(http.MethodGet, "/api/ddns/x/check", nil), "x")
 	if rec.Code != 405 {
 		t.Errorf("check GET: code = %d", rec.Code)
 	}
 	rec = covRec()
-	s.handleDDNSCheck(rec, covReq(http.MethodPost, "/ddns/999/check", nil), "999")
+	s.handleDDNSCheck(rec, covReq(http.MethodPost, "/api/ddns/999/check", nil), "999")
 	if rec.Code != 404 {
 		t.Errorf("check missing: code = %d", rec.Code)
 	}
 	rec = covRec()
 	checkID := strconv.Itoa(int(createdID))
-	s.handleDDNSCheck(rec, covReq(http.MethodPost, "/ddns/"+checkID+"/check", nil), checkID)
+	s.handleDDNSCheck(rec, covReq(http.MethodPost, "/api/ddns/"+checkID+"/check", nil), checkID)
 	if rec.Code != 503 {
 		t.Errorf("check no dns provider: code = %d", rec.Code)
 	}
@@ -125,15 +125,15 @@ func TestCovDDNSHandlers(t *testing.T) {
 		t.Errorf("config PUT bad json: code = %d", rec.Code)
 	}
 
-	// 分发层：坏 id 404 / 不允许的方法 405（直调路径以 /ddns 为前缀，
-	// handler 内部 TrimPrefix 的是 "/ddns" 而非 "/api/ddns"）
+	// 分发层：坏 id 404 / 不允许的方法 405（直调路径与线上同形：
+	// r.URL.Path 携带完整 /api 前缀，handler TrimPrefix 的也是 "/api/ddns"）
 	rec = covRec()
-	s.handleDDNS(rec, covReq(http.MethodGet, "/ddns/abc", nil))
+	s.handleDDNS(rec, covReq(http.MethodGet, "/api/ddns/abc", nil))
 	if rec.Code != 404 {
 		t.Errorf("dispatch bad id: code = %d", rec.Code)
 	}
 	rec = covRec()
-	s.handleDDNS(rec, covReq(http.MethodDelete, "/ddns", nil))
+	s.handleDDNS(rec, covReq(http.MethodDelete, "/api/ddns", nil))
 	if rec.Code != 405 {
 		t.Errorf("dispatch bad method: code = %d", rec.Code)
 	}

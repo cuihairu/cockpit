@@ -32,12 +32,12 @@ func TestCovServeAPIRouting(t *testing.T) {
 		t.Errorf("nas config: %d", c)
 	}
 	// 生产 mux 挂 StripPrefix("/api") 之下，serveAPI 收到的 URL 无 /api 前缀；
-	// ddns/acme 的子分发从 r.URL.Path 二次剥前缀（剥掉 "/ddns" / "/acme"），
+	// ddns/acme 的子分发从 r.URL.Path 二次剥前缀（剥掉 "/api/ddns" / "/api/acme"），
 	// 直调须同形态
-	if c := get("/ddns"); c != http.StatusOK {
+	if c := get("/api/ddns"); c != http.StatusOK {
 		t.Errorf("ddns list: %d", c)
 	}
-	if c := get("/acme/certs"); c != http.StatusOK {
+	if c := get("/api/acme/certs"); c != http.StatusOK {
 		t.Errorf("acme list: %d", c)
 	}
 	rec := covRec()
@@ -164,13 +164,13 @@ func TestCovAcmeDispatchMisc(t *testing.T) {
 			t.Errorf("%s: code = %d, want %d", name, rec.Code, want)
 		}
 	}
-	check("certs 405", http.MethodPatch, "/acme/certs", http.StatusMethodNotAllowed)
-	check("unknown 404", http.MethodGet, "/acme/bogus", http.StatusNotFound)
-	check("cert sub 405", http.MethodPatch, "/acme/certs/1", http.StatusMethodNotAllowed)
+	check("certs 405", http.MethodPatch, "/api/acme/certs", http.StatusMethodNotAllowed)
+	check("unknown 404", http.MethodGet, "/api/acme/bogus", http.StatusNotFound)
+	check("cert sub 405", http.MethodPatch, "/api/acme/certs/1", http.StatusMethodNotAllowed)
 	// 无用户上下文调用审计（username 空）；再经 Middleware 注入用户
 	// 走 username 赋值分支（借一个合法 create 请求触发审计）
-	s.auditAcme(covReq(http.MethodPost, "/acme/x", nil), "acme_test", "res", nil)
-	rec := covCallAuth(s, s.handleACME, covAuthReq(http.MethodPost, "/acme/certs",
+	s.auditAcme(covReq(http.MethodPost, "/api/acme/x", nil), "acme_test", "res", nil)
+	rec := covCallAuth(s, s.handleACME, covAuthReq(http.MethodPost, "/api/acme/certs",
 		strings.NewReader(`{"domains":["audit.test"],"caDirectory":"staging"}`), "u1", "admin", "admin"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("authed create: %d (%s)", rec.Code, rec.Body.String())

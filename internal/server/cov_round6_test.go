@@ -134,25 +134,25 @@ func TestCovDDNSHandlerValidationFamily(t *testing.T) {
 	})
 
 	rec := covRec()
-	s.handleDDNS(rec, covReq(http.MethodPatch, "/ddns/"+strconv.Itoa(int(cfg.ID)), nil))
+	s.handleDDNS(rec, covReq(http.MethodPatch, "/api/ddns/"+strconv.Itoa(int(cfg.ID)), nil))
 	covWantCode(t, "patch 405", rec, http.StatusMethodNotAllowed)
 
 	rec = covRec()
-	s.handleDDNS(rec, covReq(http.MethodPut, "/ddns/999999", strings.NewReader(`{}`)))
+	s.handleDDNS(rec, covReq(http.MethodPut, "/api/ddns/999999", strings.NewReader(`{}`)))
 	covWantCode(t, "update missing", rec, http.StatusNotFound)
 
 	rec = covRec()
-	s.handleDDNS(rec, covReq(http.MethodPut, "/ddns/"+strconv.Itoa(int(cfg.ID)), strings.NewReader(`{bad`)))
+	s.handleDDNS(rec, covReq(http.MethodPut, "/api/ddns/"+strconv.Itoa(int(cfg.ID)), strings.NewReader(`{bad`)))
 	covWantCode(t, "update bad json", rec, http.StatusBadRequest)
 
 	rec = covRec()
-	s.handleDDNS(rec, covReq(http.MethodPut, "/ddns/"+strconv.Itoa(int(cfg.ID)),
+	s.handleDDNS(rec, covReq(http.MethodPut, "/api/ddns/"+strconv.Itoa(int(cfg.ID)),
 		strings.NewReader(`{"type":"bogus"}`)))
 	covWantCode(t, "update bad type", rec, http.StatusBadRequest)
 
 	// check 端点：provider 已注入 + agent 可应答 → 200 且带回 IP
 	rec = covRec()
-	s.handleDDNS(rec, covReq(http.MethodPost, "/ddns/"+strconv.Itoa(int(cfg.ID))+"/check", nil))
+	s.handleDDNS(rec, covReq(http.MethodPost, "/api/ddns/"+strconv.Itoa(int(cfg.ID))+"/check", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "203.0.113.9") {
 		t.Errorf("check: %d %s", rec.Code, rec.Body.String())
 	}
