@@ -38,7 +38,7 @@ func TestNewSSHSessionWithValidPrivateKey(t *testing.T) {
 	ResetTOFUHostKeys()
 	pemKey := genTestPEMPrivateKey(t)
 	// 目标不可达：过 ParsePrivateKey 成功路径（auths append）后 Dial 失败
-	_, err := NewSSHSession("127.0.0.1:1", "user", "", pemKey, 24, 80)
+	_, err := NewSSHSession("127.0.0.1:1", "user", "", pemKey, "", 24, 80)
 	if err == nil {
 		t.Fatal("unreachable target should fail")
 	}
@@ -138,7 +138,7 @@ func (ts *rejectSSHServer) serve(rejectSession, rejectPty, rejectShell bool) {
 
 func TestNewSSHSessionNewSessionRejected(t *testing.T) {
 	ts := startRejectSSHServer(t, true, false, false)
-	_, err := NewSSHSession(ts.addr(), "u", "p", "", 24, 80)
+	_, err := NewSSHSession(ts.addr(), "u", "p", "", "", 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "new session") {
 		t.Errorf("err = %v, want new session failure", err)
 	}
@@ -146,7 +146,7 @@ func TestNewSSHSessionNewSessionRejected(t *testing.T) {
 
 func TestNewSSHSessionRequestPtyRejected(t *testing.T) {
 	ts := startRejectSSHServer(t, false, true, false)
-	_, err := NewSSHSession(ts.addr(), "u", "p", "", 24, 80)
+	_, err := NewSSHSession(ts.addr(), "u", "p", "", "", 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "request PTY") {
 		t.Errorf("err = %v, want request PTY failure", err)
 	}
@@ -154,7 +154,7 @@ func TestNewSSHSessionRequestPtyRejected(t *testing.T) {
 
 func TestNewSSHSessionShellRejected(t *testing.T) {
 	ts := startRejectSSHServer(t, false, false, true)
-	_, err := NewSSHSession(ts.addr(), "u", "p", "", 24, 80)
+	_, err := NewSSHSession(ts.addr(), "u", "p", "", "", 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "start shell") {
 		t.Errorf("err = %v, want start shell failure", err)
 	}
@@ -229,7 +229,7 @@ func TestNewSSHSessionStdinPipeFail(t *testing.T) {
 
 	// NewSession/RequestPty 成功后走到 StdinPipe
 	ts := startRejectSSHServer(t, false, false, false)
-	_, err := NewSSHSession(ts.addr(), "u", "p", "", 24, 80)
+	_, err := NewSSHSession(ts.addr(), "u", "p", "", "", 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "stdin pipe") {
 		t.Errorf("err = %v, want stdin pipe failure", err)
 	}

@@ -90,21 +90,21 @@ func TestTOFUHostKeysIsolatedPerHost(t *testing.T) {
 // ============ NewSSHSession 参数校验（不发起真连接） ============
 
 func TestNewSSHSessionRejectsNoAuth(t *testing.T) {
-	_, err := NewSSHSession("127.0.0.1:22", "user", "", "", 24, 80)
+	_, err := NewSSHSession("127.0.0.1:22", "user", "", "", "/nonexistent-cockpit-test-keydir", 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "password or private key") {
 		t.Errorf("err = %v, want require password or private key", err)
 	}
 }
 
 func TestNewSSHSessionRejectsNoUsername(t *testing.T) {
-	_, err := NewSSHSession("127.0.0.1:22", "", "pw", "", 24, 80)
+	_, err := NewSSHSession("127.0.0.1:22", "", "pw", "", "", 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "username is required") {
 		t.Errorf("err = %v, want require username", err)
 	}
 }
 
 func TestNewSSHSessionRejectsBadPrivateKey(t *testing.T) {
-	_, err := NewSSHSession("127.0.0.1:22", "user", "", "not-a-pem", 24, 80)
+	_, err := NewSSHSession("127.0.0.1:22", "user", "", "not-a-pem", "", 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "parse private key") {
 		t.Errorf("err = %v, want parse private key failure", err)
 	}
@@ -112,7 +112,7 @@ func TestNewSSHSessionRejectsBadPrivateKey(t *testing.T) {
 
 func TestNewSSHSessionDefaultsSize(t *testing.T) {
 	// rows/cols <=0 取 24x80；因目标不可达会失败，但先过参数分支
-	_, err := NewSSHSession("127.0.0.1:1", "user", "pw", "", 0, -5)
+	_, err := NewSSHSession("127.0.0.1:1", "user", "pw", "", "", 0, -5)
 	if err == nil {
 		t.Fatal("unreachable target should fail")
 	}

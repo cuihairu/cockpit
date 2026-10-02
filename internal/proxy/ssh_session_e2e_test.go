@@ -201,7 +201,7 @@ func (ts *sshTestServer) handleSession(ch ssh.Channel, reqs <-chan *ssh.Request)
 func TestNewSSHSessionEndToEnd(t *testing.T) {
 	ts := startSSHTestServer(t)
 
-	sess, err := NewSSHSession(ts.addr(), "testuser", "testpass", "", 30, 100)
+	sess, err := NewSSHSession(ts.addr(), "testuser", "testpass", "", "", 30, 100)
 	if err != nil {
 		t.Fatalf("NewSSHSession: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestNewSSHSessionEndToEnd(t *testing.T) {
 // TestNewSSHSessionBadPassword 认证失败路径
 func TestNewSSHSessionBadPassword(t *testing.T) {
 	ts := startSSHTestServer(t)
-	_, err := NewSSHSession(ts.addr(), "testuser", "wrong", "", 24, 80)
+	_, err := NewSSHSession(ts.addr(), "testuser", "wrong", "", "", 24, 80)
 	if err == nil {
 		t.Fatal("bad password should fail")
 	}
@@ -300,7 +300,7 @@ func TestNewSSHSessionHostKeyChangeRejected(t *testing.T) {
 	ts := startSSHTestServer(t)
 
 	// 首连登记
-	sess, err := NewSSHSession(ts.addr(), "testuser", "testpass", "", 24, 80)
+	sess, err := NewSSHSession(ts.addr(), "testuser", "testpass", "", "", 24, 80)
 	if err != nil {
 		t.Fatalf("first connect: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestNewSSHSessionHostKeyChangeRejected(t *testing.T) {
 		}
 	}()
 
-	_, err = NewSSHSession(ts.addr(), "testuser", "testpass", "", 24, 80)
+	_, err = NewSSHSession(ts.addr(), "testuser", "testpass", "", "", 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "has changed") {
 		t.Errorf("err = %v, want host key change rejection", err)
 	}
