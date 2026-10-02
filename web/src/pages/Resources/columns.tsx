@@ -3,6 +3,7 @@ import {
   EditOutlined,
   PlayCircleOutlined,
   PoweroffOutlined,
+  CloudServerOutlined,
 } from '@ant-design/icons'
 import { Button, Space, Tag, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -61,14 +62,20 @@ export const computeColumns: ColumnsType<ComputeInstance> = [
   {
     title: '配置',
     key: 'config',
-    width: 200,
-    render: (_, record) => (
-      <Space direction="vertical" size="small">
-        <span>CPU: {record.cpuCores} 核</span>
-        <span>内存: {record.memoryMb} MB</span>
-        <span>磁盘: {record.diskGb} GB</span>
-      </Space>
-    ),
+    width: 180,
+    render: (_, record) => {
+      const cpu = record.cpuCores || 0
+      const mem = record.memoryMb || 0
+      const disk = record.diskGb || 0
+      if (!cpu && !mem && !disk) return <span style={{ color: '#94a3b8' }}>—</span>
+      return (
+        <Space direction="vertical" size={0}>
+          {cpu > 0 && <span>{cpu} 核</span>}
+          {mem > 0 && <span>{mem >= 1024 ? `${(mem / 1024).toFixed(0)} GB` : `${mem} MB`}</span>}
+          {disk > 0 && <span>{disk} GB</span>}
+        </Space>
+      )
+    },
   },
   {
     title: 'IP',
@@ -80,16 +87,22 @@ export const computeColumns: ColumnsType<ComputeInstance> = [
   {
     title: '操作',
     key: 'actions',
-    width: 180,
+    width: 140,
     render: (_, record) => (
       <Space>
-        <Tooltip title={record.status === 'running' ? '停止' : '启动'}>
-          <Button
-            type="text"
-            icon={record.status === 'running' ? <PoweroffOutlined /> : <PlayCircleOutlined />}
-            size="small"
-          />
-        </Tooltip>
+        {record.type === 'vm' || record.type === 'container' ? (
+          <Tooltip title={record.status === 'running' ? '停止' : '启动'}>
+            <Button
+              type="text"
+              icon={record.status === 'running' ? <PoweroffOutlined /> : <PlayCircleOutlined />}
+              size="small"
+            />
+          </Tooltip>
+        ) : (
+          <Tooltip title="终端">
+            <Button type="text" icon={<CloudServerOutlined />} size="small" />
+          </Tooltip>
+        )}
         <Button type="text" icon={<EditOutlined />} size="small" />
         <Button type="text" danger icon={<DeleteOutlined />} size="small" />
       </Space>
