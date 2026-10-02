@@ -61,13 +61,14 @@ func handleStart(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	startCmd := &agent.StartCmd{}
 	startCmd.BindWithUsage(fs, agent.StartUsage{
-		Server: "Server WebSocket 地址 (必需)",
-		ID:     "Agent ID (可选，默认基于 machine-id 自动生成，重启不变)",
-		Secret: "Agent 认证密钥 (可选，但推荐使用)",
-		Region: "地域 (可选)",
-		Zone:   "可用区 (可选)",
-		Labels: "标签 (可选)，格式: key1=value1,key2=value2,key3=[a,b,c]",
-		Bias:   "同机器多 Agent 偏移量 (可选，默认 0)",
+		Server:  "Server WebSocket 地址 (必需)",
+		ID:      "Agent ID (可选，默认基于 machine-id 自动生成，重启不变)",
+		Secret:  "Agent 认证密钥 (可选，但推荐使用)",
+		Region:  "地域 (可选)",
+		Zone:    "可用区 (可选)",
+		Labels:  "标签 (可选)，格式: key1=value1,key2=value2,key3=[a,b,c]",
+		Bias:    "同机器多 Agent 偏移量 (可选，默认 0)",
+		SSHKeys: "SSH 私钥目录 (可选，默认 ~/.ssh/)",
 	})
 	help := fs.Bool("h", false, "显示帮助")
 

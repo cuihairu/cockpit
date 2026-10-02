@@ -79,9 +79,10 @@ var stdinPipeFn = func(s *ssh.Session) (io.WriteCloser, error) {
 }
 
 // NewSSHSession 建立 SSH 终端会话。
-// target 形如 "host:22"；认证：PrivateKey（PEM）优先，其次 Password；
+// target 形如 "host:22"；认证：PrivateKey（PEM）优先，其次 Password，
+// 均未提供时自动加载 keyDir 下的默认私钥（id_ed25519/id_rsa 等）；
 // rows/cols 为 PTY 初始尺寸（<=0 取 24x80）。
-func NewSSHSession(target, username, password, privateKey string, rows, cols int) (*SSHSession, error) {
+func NewSSHSession(target, username, password, privateKey, keyDir string, rows, cols int) (*SSHSession, error) {
 	var auths []ssh.AuthMethod
 	if privateKey != "" {
 		signer, err := ssh.ParsePrivateKey([]byte(privateKey))
@@ -93,8 +94,15 @@ func NewSSHSession(target, username, password, privateKey string, rows, cols int
 	if password != "" {
 		auths = append(auths, ssh.Password(password))
 	}
+	// 显式凭据不足时，尝试加载默认 SSH 密钥
 	if len(auths) == 0 {
-		return nil, fmt.Errorf("SSH requires password or private key")
+		defaultKeys, err := LoadDefaultSSHKeys(keyDir)
+		if err == nil && len(defaultKeys) > 0 {
+			auths = append(auths, defaultKeys...)
+		}
+	}
+	if len(auths) == 0 {
+		return nil, fmt.Errorf("SSH requires password or private key (none provided and no default keys found in %s)", keyDir)
 	}
 	if username == "" {
 		return nil, fmt.Errorf("SSH username is required")

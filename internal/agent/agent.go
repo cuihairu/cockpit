@@ -75,8 +75,9 @@ type Config struct {
 	Region    string                 `json:"region,omitempty"`
 	Zone      string                 `json:"zone,omitempty"`
 	Labels    map[string]interface{} `json:"labels,omitempty"`
-	Bias      int                    `json:"bias,omitempty"` // 同机器多 agent 偏移量，默认 0
+	Bias      int                    `json:"bias,omitempty"`      // 同机器多 agent 偏移量，默认 0
 	Metadata  map[string]interface{} `json:"metadata,omitempty"` // 自定义元数据 key-value
+	SSHKeys   string                 `json:"ssh_keys,omitempty"` // SSH 密钥目录，默认 ~/.ssh/
 }
 
 // NewAgent 创建新 Agent
@@ -186,6 +187,7 @@ func (a *Agent) connect() error {
 
 	// 启动代理处理器
 	a.proxyHandler.SetSendFunc(a.sendMessage)
+	a.proxyHandler.SetKeyDir(a.config.SSHKeys)
 	a.proxyHandler.Start(conn)
 
 	// 启动桌面处理器

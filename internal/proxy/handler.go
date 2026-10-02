@@ -21,6 +21,12 @@ type Handler struct {
 	connSeq  atomic.Uint64
 	sendFunc func(*protocol.Message) error
 	running  atomic.Bool
+	keyDir   string // SSH 密钥目录，默认 ~/.ssh/
+}
+
+// SetKeyDir 设置 SSH 密钥目录。
+func (h *Handler) SetKeyDir(dir string) {
+	h.keyDir = dir
 }
 
 // AgentTargetConn Agent 端的连接。
@@ -137,9 +143,9 @@ func (h *Handler) HandleProxyNew(msg *protocol.Message) error {
 
 // openSSHProxy 建立 SSH 终端代理：SSH 会话即 Conn，转发管道复用裸 TCP 路径。
 func (h *Handler) openSSHProxy(p protocol.ProxyNewPayload) error {
-	log.Printf("SSH proxy: target=%s username=%q hasPassword=%v hasKey=%v",
-		p.Target, p.Username, p.Password != "", p.PrivateKey != "")
-	sshSess, err := NewSSHSession(p.Target, p.Username, p.Password, p.PrivateKey, 24, 80)
+	log.Printf("SSH proxy: target=%s username=%q hasPassword=%v hasKey=%v keyDir=%s",
+		p.Target, p.Username, p.Password != "", p.PrivateKey != "", h.keyDir)
+	sshSess, err := NewSSHSession(p.Target, p.Username, p.Password, p.PrivateKey, h.keyDir, 24, 80)
 	if err != nil {
 		log.Printf("Failed to establish SSH session to %s: %v", p.Target, err)
 		h.SendError(p.ProxyID, p.ConnID, err.Error())
