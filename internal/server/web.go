@@ -38,11 +38,16 @@ func (s *Server) spaHandler() http.Handler {
 
 		fsPath := filepath.Join(staticDir, cleanPath)
 		if info, err := os.Stat(fsPath); err == nil && !info.IsDir() {
+			// index.html 不缓存（SPA 入口，hash 变了旧页面就废了）
+			if cleanPath == "index.html" {
+				w.Header().Set("Cache-Control", "no-cache")
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 
-		// SPA fallback: 文件不存在则返回 index.html
+		// SPA fallback: 文件不存在则返回 index.html（不缓存）
+		w.Header().Set("Cache-Control", "no-cache")
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	})
