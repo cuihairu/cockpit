@@ -218,7 +218,13 @@ func (s *Server) sendRegisterError(conn *websocket.Conn, code, message string) {
 
 // readLoop 读取循环
 func (s *Server) readLoop(agent *Agent) {
-	defer s.registry.Unregister(agent.ID)
+	defer func() {
+		s.registry.Unregister(agent.ID)
+		// 更新数据库状态为离线
+		if err := s.db.UpdateAgentStatus(agent.ID, "offline", time.Now()); err != nil {
+			log.Printf("Agent %s failed to update offline status: %v", agent.ID, err)
+		}
+	}()
 
 	for {
 		msg, err := s.codec.ReadMessage(agent.Conn)

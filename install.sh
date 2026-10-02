@@ -286,29 +286,33 @@ normalize_server_url() {
 prompt_server_interactive() {
 	# 交互输入服务端地址。curl | bash 下 stdin 是脚本本身，必须读 /dev/tty；
 	# 输入有效 → SERVER 置规范化 URL 返回 0；跳过 / 非交互 / 重试耗尽 → 返回 1
+	# 注意：exec 的重定向持久生效，吞错须用组内重定向（否则 stderr 被永久
+	# 指向 /dev/null，后续提示与 xtrace 全部静默——本节走查踩过的坑）
 	[ "$SILENT" = "1" ] && return 1
 	local input tries=3
-	exec 3</dev/tty 2>/dev/null || return 1
+	if ! { exec 3</dev/tty; } 2>/dev/null; then
+		return 1
+	fi
 	while [ "$tries" -gt 0 ]; do
 		printf '请输入 Cockpit 服务端地址（域名或 IP，例: cockpit.cuihairu.site 或 10.0.0.5:9000；完整 wss:// 地址亦可；直接回车跳过）: ' >&2
 		IFS= read -r input <&3 || {
-			exec 3<&- 2>/dev/null || true
+			{ exec 3<&-; } 2>/dev/null || true
 			return 1
 		}
 		input="$(printf '%s' "$input" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 		if [ -z "$input" ]; then
-			exec 3<&- 2>/dev/null || true
+			{ exec 3<&-; } 2>/dev/null || true
 			return 1
 		fi
 		if normalize_server_url "$input"; then
 			SERVER="$SERVER_URL_NORM"
-			exec 3<&- 2>/dev/null || true
+			{ exec 3<&-; } 2>/dev/null || true
 			return 0
 		fi
 		printf '[警告] 地址格式无效: %s（应为 域名[:端口] 或完整 ws(s):// URL）\n' "$input" >&2
 		tries=$((tries - 1))
 	done
-	exec 3<&- 2>/dev/null || true
+	{ exec 3<&-; } 2>/dev/null || true
 	return 1
 }
 

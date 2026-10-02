@@ -949,7 +949,7 @@
 1. [**地址规范化 `normalize_server_url` / `ConvertTo-ServerUrl`**（纯逻辑函数，两端同规则逐条单测）：域名/IP[:端口] 默认构造 **wss://**（服务端 nginx 80 端口 301 到 https，ws:// 握手不跟随重定向——与 WS 故障修复节的现实一致）；完整 ws(s):// 原样保留并补 /ws（尾部斜杠归一，`ws://x/ws/`→`ws://x/ws`，两端都曾在这翻车）；端口 1-65535 范围校验；[IPv6] 括号形式支持；非法字符/中间空格/越界端口明确拒绝。]
 2. [**交互读 /dev/tty**（curl|bash 下 stdin 是脚本本身，`read` 会吃脚本文本）：sh 侧 `exec 3</dev/tty` + fd3 read；无效输入警告重试 3 次、空回车跳过；ps1 侧 `[Environment]::UserInteractive` + Read-Host 同构。--with-service 拿不到地址（含 --silent）→ 失败即停明确报错。]
 3. [**配置落点与幂等语义**：--with-service 照旧（systemd env / launchd plist / Windows 重注册）；非服务模式 + 显式地址：无既有服务→写用户级配置（~/.config/cockpit-agent/env 或 %APPDATA%\CockpitAgent\config.env）；**有既有服务→更新服务连接配置并重启**（systemd 写对应 EnvironmentFile；Windows 服务参数固化在 BinaryPathName，须重注册刷新，$needRegister 统一入口）。]
-4. [**走查揪出的三个 bug**：① 静默重跑显式 --server 原实现只重启服务不更新配置（显式传参被吞）；② verify_server_in_env 以当前用户 grep root:600 的 /etc/default → 误判失败（补 as_root 兜底读）；③ ps1 ConvertTo-ServerUrl 尾斜杠双补 /ws。均修复并复验。]
+4. [**走查揪出的四个 bug**：① 静默重跑显式 --server 原实现只重启服务不更新配置（显式传参被吞）；② verify_server_in_env 以当前用户 grep root:600 的 /etc/default → 误判失败（补 as_root 兜底读）；③ ps1 ConvertTo-ServerUrl 尾斜杠双补 /ws；④ **sh 侧 `exec 3</dev/tty 2>/dev/null` 的 `2>/dev/null` 持久生效**——stderr 从此进 /dev/null，交互提示与 xtrace 全部静默、read 死等（pty 走查挂起后抓 /proc fd 实锤 fd2→/dev/null）；修法=吞错一律用组内重定向 `{ exec 3</dev/tty; } 2>/dev/null`（组结束后 fd2 恢复）。均修复并复验。]
 
 验证边界如实注明：launchd 与 Windows 服务注册仍无实机（plist/服务参数逻辑沿用既有走读口径）；本机走查时有用户并行安装的系统级 cockpit-agent 服务（enabled+active），带 --server 的走查会触发其幂等重启（ExecStart 不变、同版本二进制）。
 

@@ -41,6 +41,8 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleSettings(w, r)
 	case path == "/agents":
 		s.handleAgentsList(w, r)
+	case path == "/agents/cleanup":
+		s.handleAgentsCleanup(w, r)
 	case path == "/drift/config":
 		s.handleDriftConfig(w, r)
 	case path == "/inventory/consistency":
@@ -407,18 +409,67 @@ func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 
 // handleAgentGet 获取单个 Agent 详情
 func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		agent, err := s.db.GetAgent(id)
+		if err != nil {
+			s.handleError(w, r, http.StatusNotFound, "Agent not found")
+			return
+		}
+		s.writeJSON(w, http.StatusOK, storageAgentToResponse(agent))
+
+	case http.MethodDelete:
+		// 先从内存 registry 断开活跃连接
+		if a, ok := s.registry.Get(id); ok {
+			a.Close()
+			s.registry.Unregister(id)
+		}
+		if err := s.db.DeleteAgent(id); err != nil {
+			s.handleError(w, r, http.StatusInternalServerError, "Failed to delete agent")
+			return
+		}
+		s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": id})
+
+	default:
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
+// handleAgentsCleanup 清理离线 Agent（RBAC：inventory:write）
+// POST /api/agents/cleanup — 删除所有离线 agent；
+// 先将 DB 中 "online" 但不在内存 registry 的 agent 标记为 offline，再统一清理。
+func (s *Server) handleAgentsCleanup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
 		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	agent, err := s.db.GetAgent(id)
+	// 1. 将 DB 中标记 online 但实际已断开的 agent 标记为 offline
+	dbAgents, err := s.db.ListAgents()
 	if err != nil {
-		s.handleError(w, r, http.StatusNotFound, "Agent not found")
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to list agents")
+		return
+	}
+	for _, a := range dbAgents {
+		if a.Status == "online" {
+			if _, active := s.registry.Get(a.ID); !active {
+				_ = s.db.UpdateAgentStatus(a.ID, "offline", a.LastSeen)
+			}
+		}
+	}
+
+	// 2. 清理所有离线 agent
+	removed, err := s.db.CleanupOfflineAgents(0)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to cleanup agents")
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, storageAgentToResponse(agent))
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "ok",
+		"removed": removed,
+		"count":   len(removed),
+	})
 }
 
 // handleAgentSecret 管理 Agent 密钥（RBAC：inventory:write）

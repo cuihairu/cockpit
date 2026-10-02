@@ -242,15 +242,18 @@ func (d *DB) UpdateAgentStatus(id string, status string, lastSeen time.Time) err
 		}).Error
 }
 
-// CleanupOfflineAgents 清理离线 Agent
+// CleanupOfflineAgents 清理离线 Agent。
+// timeout > 0：仅清理 last_seen 超过 timeout 的；
+// timeout == 0：清理所有 status=offline 的 agent。
 func (d *DB) CleanupOfflineAgents(timeout time.Duration) ([]string, error) {
-	cutoff := time.Now().Add(-timeout)
+	query := d.db.Where("status = ?", "offline")
+	if timeout > 0 {
+		cutoff := time.Now().Add(-timeout)
+		query = query.Where("last_seen < ?", cutoff)
+	}
 
 	var agents []*Agent
-	err := d.db.Where("status = ? AND last_seen < ?", "offline", cutoff).
-		Or("last_seen < ?", cutoff).
-		Find(&agents).Error
-	if err != nil {
+	if err := query.Find(&agents).Error; err != nil {
 		return nil, err
 	}
 
