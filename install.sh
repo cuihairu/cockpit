@@ -12,8 +12,12 @@
 #   curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | \
 #     bash -s -- --with-service --server wss://cockpit.cuihairu.site/ws
 #
+#   # 静默安装（零交互；不带 --server 则装完打印手动配置指引）:
+#   ./install.sh --silent --server=wss://cockpit.cuihairu.site/ws
+#
 #   # 本地执行:
 #   ./install.sh [--with-service] [--server URL] [选项]
+#   （不带 --server 且终端可交互时，会提示输入服务端地址）
 #
 # 幂等：重跑即升级（覆盖二进制；已注册服务则自动重启加载新二进制）。
 # 兼容 macOS 自带 bash 3.2（无关联数组/大小写展开等 4.0 特性）。
@@ -35,7 +39,9 @@ Cockpit Agent 一键安装（Linux / macOS）
 选项:
   --install-dir DIR   安装目录（默认 /usr/local/bin，无写权限时 ~/.local/bin）
   --with-service      注册开机自启服务（Linux systemd / macOS launchd）
-  --server URL        Server WebSocket 地址（注册服务时必需，路径指向 /ws）
+  --server URL        Server WebSocket 地址（注册服务时必需，路径指向 /ws）;
+                      支持 --server URL 与 --server=URL 两种写法
+  --silent            静默安装：跳过一切交互提示；不带 --server 时装完打印手动配置指引
   --id ID             Agent ID（可选，默认自动生成）
   --secret S          Agent 认证密钥（可选，推荐）
   --region R          地域（可选）
@@ -43,8 +49,12 @@ Cockpit Agent 一键安装（Linux / macOS）
   --labels L          标签，格式 key1=v1,key2=v2（可选）
   -h, --help          显示本帮助
 
+交互: 不带 --server 且终端可交互（curl | bash 亦会经 /dev/tty 提示）时，
+安装完成后提示输入服务端地址（域名/IP 或完整 wss:// 地址，回车跳过）。
+
 环境变量（curl | bash 管道形态无法传参时使用）:
   COCKPIT_WITH_SERVICE=1  等价 --with-service
+  COCKPIT_SILENT=1        等价 --silent
   COCKPIT_SERVER / COCKPIT_AGENT_ID / COCKPIT_SECRET / COCKPIT_REGION /
   COCKPIT_ZONE / COCKPIT_LABELS / COCKPIT_INSTALL_DIR
   COCKPIT_REPO（默认 cuihairu/cockpit）/ COCKPIT_RELEASE（默认 nightly）
@@ -56,6 +66,7 @@ EOF
 # ---------- 参数与环境变量 ----------
 INSTALL_DIR="${COCKPIT_INSTALL_DIR:-}"
 WITH_SERVICE="${COCKPIT_WITH_SERVICE:-0}"
+SILENT="${COCKPIT_SILENT:-0}"
 SERVER="${COCKPIT_SERVER:-}"
 AGENT_ID="${COCKPIT_AGENT_ID:-}"
 SECRET="${COCKPIT_SECRET:-}"
@@ -73,6 +84,12 @@ while [ $# -gt 0 ]; do
 		shift 2
 		;;
 	--with-service) WITH_SERVICE=1; shift ;;
+	--silent) SILENT=1; shift ;;
+	--server=*)
+		SERVER="${1#--server=}"
+		[ -n "$SERVER" ] || die "--server= 需要一个地址参数"
+		shift
+		;;
 	--server)
 		[ $# -ge 2 ] || die "--server 需要一个 URL 参数"
 		SERVER="$2"
@@ -224,6 +241,102 @@ case ":$PATH:" in
 	warn "$INSTALL_DIR 不在当前 PATH 中——请加入 PATH 后再直接使用 cockpit-agent 命令"
 	;;
 esac
+
+# ---------- 服务端地址：规范化 / 交互提示 / 校验 ----------
+normalize_server_url() {
+	# $1 = 用户输入（域名/IP[:端口] 或完整 ws(s):// URL）→ SERVER_URL_NORM
+	# 纯地址默认按 wss:// 构造（服务端前置 nginx 80 端口 301 到 https，
+	# ws:// 握手不跟随重定向会 bad handshake）；要走 ws:// 请输完整 URL
+	local s port
+	s="$(printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+	[ -n "$s" ] || return 1
+	case "$s" in
+	ws://* | wss://*)
+		case "$s" in
+		*"/ws") ;;
+		*"/ws/") s="${s%/}" ;;
+		*) s="${s%/}/ws" ;;
+		esac
+		SERVER_URL_NORM="$s"
+		return 0
+		;;
+	*)
+		if printf '%s' "$s" | grep -qE '^[A-Za-z0-9._-]+(:[0-9]{1,5})?$'; then
+			: # 域名 / IPv4[:端口]
+		elif printf '%s' "$s" | grep -qE '^\[[0-9A-Fa-f:]+\](:[0-9]{1,5})?$'; then
+			: # [IPv6][:端口]
+		else
+			return 1
+		fi
+		case "$s" in
+		*:*)
+			port="${s##*:}"
+			case "$port" in
+			'' | *[!0-9]*) ;;
+			*) [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || return 1 ;;
+			esac
+			;;
+		esac
+		SERVER_URL_NORM="wss://${s}/ws"
+		return 0
+		;;
+	esac
+}
+
+prompt_server_interactive() {
+	# 交互输入服务端地址。curl | bash 下 stdin 是脚本本身，必须读 /dev/tty；
+	# 输入有效 → SERVER 置规范化 URL 返回 0；跳过 / 非交互 / 重试耗尽 → 返回 1
+	[ "$SILENT" = "1" ] && return 1
+	local input tries=3
+	exec 3</dev/tty 2>/dev/null || return 1
+	while [ "$tries" -gt 0 ]; do
+		printf '请输入 Cockpit 服务端地址（域名或 IP，例: cockpit.cuihairu.site 或 10.0.0.5:9000；完整 wss:// 地址亦可；直接回车跳过）: ' >&2
+		IFS= read -r input <&3 || {
+			exec 3<&- 2>/dev/null || true
+			return 1
+		}
+		input="$(printf '%s' "$input" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+		if [ -z "$input" ]; then
+			exec 3<&- 2>/dev/null || true
+			return 1
+		fi
+		if normalize_server_url "$input"; then
+			SERVER="$SERVER_URL_NORM"
+			exec 3<&- 2>/dev/null || true
+			return 0
+		fi
+		printf '[警告] 地址格式无效: %s（应为 域名[:端口] 或完整 ws(s):// URL）\n' "$input" >&2
+		tries=$((tries - 1))
+	done
+	exec 3<&- 2>/dev/null || true
+	return 1
+}
+
+verify_server_in_env() {
+	# $1 = env 文件，$2 = 期望 SERVER_URL（整行精确匹配）
+	# 系统级 env 为 root:600，当前用户不可读时经免密 sudo 读
+	if [ -r "$1" ]; then
+		grep -qx "SERVER_URL=$2" "$1" 2>/dev/null
+	else
+		as_root grep -qx "SERVER_URL=$2" "$1" 2>/dev/null
+	fi
+}
+
+# 服务端地址解析：显式参数 > 交互提示；--with-service 拿不到地址则失败即停
+if [ -n "$SERVER" ]; then
+	normalize_server_url "$SERVER" ||
+		die "无效的服务端地址: $SERVER（应为 域名[:端口] 或完整 ws(s):// URL）"
+	SERVER="$SERVER_URL_NORM"
+	info "服务端地址: $SERVER"
+else
+	if prompt_server_interactive; then
+		info "服务端地址: $SERVER"
+	elif [ "$WITH_SERVICE" = "1" ]; then
+		die "注册服务需要服务端地址：传 --server=<域名或IP>，或以交互方式输入"
+	else
+		SERVER=""
+	fi
+fi
 
 # ---------- 服务注册（可选，--with-service） ----------
 SYSTEMD_UNIT_SYSTEM="/etc/systemd/system/${UNIT_NAME}"
@@ -460,25 +573,52 @@ if [ "$WITH_SERVICE" = "1" ]; then
 		;;
 	esac
 else
-	# 未要求注册服务：若此前注册过，则重启加载新二进制（重跑=升级）
+	# 未要求注册服务：显式传了 --server 则更新既有服务的连接配置，随后重启加载新二进制
+	# （重跑=升级/改配置，幂等）
 	if [ -f "$SYSTEMD_UNIT_SYSTEM" ] && as_root systemctl is-enabled cockpit-agent >/dev/null 2>&1; then
+		if [ -n "$SERVER" ]; then
+			write_env_file "$ENV_FILE_SYSTEM"
+			verify_server_in_env "$ENV_FILE_SYSTEM" "$SERVER" ||
+				die "配置写入校验失败: $ENV_FILE_SYSTEM 中未找到 SERVER_URL=$SERVER"
+			info "已更新服务连接配置: $ENV_FILE_SYSTEM（SERVER_URL=$SERVER）"
+		fi
 		if as_root systemctl restart cockpit-agent; then
 			info "已检测到既有系统服务，已重启加载新版本"
 		else
 			warn "既有系统服务重启失败——查看: journalctl -u cockpit-agent -n 20 --no-pager"
 		fi
 	elif [ -f "$SYSTEMD_UNIT_USER" ] && systemctl --user is-enabled cockpit-agent >/dev/null 2>&1; then
+		if [ -n "$SERVER" ]; then
+			write_env_file "$ENV_FILE_USER"
+			verify_server_in_env "$ENV_FILE_USER" "$SERVER" ||
+				die "配置写入校验失败: $ENV_FILE_USER 中未找到 SERVER_URL=$SERVER"
+			info "已更新服务连接配置: $ENV_FILE_USER（SERVER_URL=$SERVER）"
+		fi
 		if systemctl --user restart cockpit-agent; then
 			info "已检测到既有用户级服务，已重启加载新版本"
 		else
 			warn "既有用户级服务重启失败"
 		fi
 	elif [ -f "$LAUNCHD_PLIST_SYSTEM" ] && [ "$(id -u)" -eq 0 ] && command -v launchctl >/dev/null 2>&1; then
-		launchctl kickstart -k "system/$LABEL" >/dev/null 2>&1 &&
-			info "已检测到既有 launchd 服务，已重启加载新版本"
+		if [ -n "$SERVER" ]; then
+			register_launchd
+		else
+			launchctl kickstart -k "system/$LABEL" >/dev/null 2>&1 &&
+				info "已检测到既有 launchd 服务，已重启加载新版本"
+		fi
 	elif [ -f "$LAUNCHD_PLIST_USER" ] && command -v launchctl >/dev/null 2>&1; then
-		launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 &&
-			info "已检测到既有 launchd 服务，已重启加载新版本"
+		if [ -n "$SERVER" ]; then
+			register_launchd
+		else
+			launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 &&
+				info "已检测到既有 launchd 服务，已重启加载新版本"
+		fi
+	elif [ -n "$SERVER" ]; then
+		# 无任何既有服务：服务端地址写入用户级配置（装机时落盘）
+		write_env_file "$ENV_FILE_USER"
+		verify_server_in_env "$ENV_FILE_USER" "$SERVER" ||
+			die "配置写入校验失败: $ENV_FILE_USER 中未找到 SERVER_URL=$SERVER"
+		info "连接配置已写入: $ENV_FILE_USER（SERVER_URL=$SERVER）"
 	fi
 fi
 
@@ -486,6 +626,12 @@ info ""
 info "完成。下一步:"
 if [ "$WITH_SERVICE" != "1" ]; then
 	info "  注册开机自启服务: ./install.sh --with-service --server wss://cockpit.cuihairu.site/ws"
-	info "  或手动启动: cockpit-agent start -server wss://cockpit.cuihairu.site/ws"
+	if [ -n "$SERVER" ]; then
+		info "  或手动启动: cockpit-agent start -server $SERVER"
+	else
+		info "  未配置服务端地址——之后自己手动执行配置:"
+		info "    cockpit-agent start -server wss://<你的服务端>/ws（例: wss://cockpit.cuihairu.site/ws）"
+		info "    或重跑本脚本: ./install.sh --server=<域名或IP>（自动写入连接配置）"
+	fi
 fi
 info "  验证版本: cockpit-agent --version"

@@ -75,6 +75,7 @@ type Config struct {
 	Region    string                 `json:"region,omitempty"`
 	Zone      string                 `json:"zone,omitempty"`
 	Labels    map[string]interface{} `json:"labels,omitempty"`
+	Bias      int                    `json:"bias,omitempty"` // 同机器多 agent 偏移量，默认 0
 }
 
 // NewAgent 创建新 Agent
@@ -427,11 +428,28 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 func (a *Agent) register() error {
 	// 确定 Agent ID
 	if a.config.AgentID != "" {
+		// 手动指定：直接使用，bias 追加后缀
 		a.agentID = a.config.AgentID
+		if a.config.Bias > 0 {
+			a.agentID = fmt.Sprintf("%s-%d", a.agentID, a.config.Bias)
+		}
 	} else {
-		// 获取主机名
+		// 自动模式：基于 machine-id 生成稳定 ID，重启不变
 		hostname, _ := os.Hostname()
-		a.agentID = protocol.GenerateIDWithPrefix("agent-" + hostname)
+		mid := machineID()
+		if mid != "" {
+			// 取 machine-id 前 8 字符，可读且足够区分
+			if len(mid) > 8 {
+				mid = mid[:8]
+			}
+			a.agentID = fmt.Sprintf("agent-%s-%s", hostname, mid)
+		} else {
+			// fallback：无 machine-id 的平台用 hostname + random（每次重启变化）
+			a.agentID = protocol.GenerateIDWithPrefix("agent-" + hostname)
+		}
+		if a.config.Bias > 0 {
+			a.agentID = fmt.Sprintf("%s-%d", a.agentID, a.config.Bias)
+		}
 	}
 
 	// 确定位置

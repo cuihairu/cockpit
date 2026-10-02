@@ -19,6 +19,7 @@ type StartCmd struct {
 	Region string
 	Zone   string
 	Labels string
+	Bias   int
 }
 
 // StartUsage customizes shared flag descriptions.
@@ -29,15 +30,17 @@ type StartUsage struct {
 	Region string
 	Zone   string
 	Labels string
+	Bias   string
 }
 
 var defaultStartUsage = StartUsage{
 	Server: "Server WebSocket address (required)",
-	ID:     "Agent ID (optional, auto-generated when omitted)",
+	ID:     "Agent ID (optional, auto-generated from machine-id when omitted)",
 	Secret: "Agent authentication secret (optional but recommended)",
 	Region: "Region (optional)",
 	Zone:   "Zone (optional)",
 	Labels: "Labels, e.g. env=prod,services=[docker,k8s],gpu=true",
+	Bias:   "Agent ID bias for multiple agents on the same machine (default 0)",
 }
 
 // Bind registers shared agent start flags on the provided FlagSet.
@@ -53,6 +56,7 @@ func (c *StartCmd) BindWithUsage(fs *flag.FlagSet, usage StartUsage) {
 	fs.StringVar(&c.Region, "region", "", fallbackUsage(usage.Region, defaultStartUsage.Region))
 	fs.StringVar(&c.Zone, "zone", "", fallbackUsage(usage.Zone, defaultStartUsage.Zone))
 	fs.StringVar(&c.Labels, "labels", "", fallbackUsage(usage.Labels, defaultStartUsage.Labels))
+	fs.IntVar(&c.Bias, "bias", 0, fallbackUsage(usage.Bias, defaultStartUsage.Bias))
 }
 
 // Validate checks command arguments.
@@ -76,6 +80,7 @@ func (c *StartCmd) BuildConfig() (Config, error) {
 		Region:    c.Region,
 		Zone:      c.Zone,
 		Labels:    parseLabels(c.Labels),
+		Bias:      c.Bias,
 	}, nil
 }
 
