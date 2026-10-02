@@ -17,16 +17,31 @@ var defaultKeyNames = []string{
 	"id_dsa",
 }
 
+// defaultSSHDir 返回默认 SSH 密钥目录。
+// 优先 COCKPIT_SSH_KEYS 环境变量；其次实际登录用户（SUDO_USER）的 ~/.ssh/；
+// 最后 fallback 到当前用户的 ~/.ssh/。
+func defaultSSHDir() string {
+	// 环境变量优先
+	if dir := os.Getenv("COCKPIT_SSH_KEYS"); dir != "" {
+		return dir
+	}
+	// sudo 运行时 SUDO_USER 指向实际用户
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		if u, err := os.UserHomeDir(); err == nil {
+			// /home/{SUDO_USER}/.ssh
+			return filepath.Join(filepath.Dir(filepath.Dir(u)), sudoUser, ".ssh")
+		}
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".ssh")
+}
+
 // LoadDefaultSSHKeys 从 keyDir 加载默认 SSH 私钥。
 // 扫描 defaultKeyNames 列表，返回所有成功解析的 AuthMethod。
-// keyDir 为空时使用 ~/.ssh/。
+// keyDir 为空时使用 defaultSSHDir()。
 func LoadDefaultSSHKeys(keyDir string) ([]ssh.AuthMethod, error) {
 	if keyDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("get home dir: %w", err)
-		}
-		keyDir = filepath.Join(home, ".ssh")
+		keyDir = defaultSSHDir()
 	}
 
 	var methods []ssh.AuthMethod
@@ -61,11 +76,7 @@ func LoadSSHKeyFromFile(keyPath string) (ssh.AuthMethod, error) {
 // HasPrivateKeyFiles 检查 keyDir 下是否有可用的私钥文件。
 func HasPrivateKeyFiles(keyDir string) bool {
 	if keyDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return false
-		}
-		keyDir = filepath.Join(home, ".ssh")
+		keyDir = defaultSSHDir()
 	}
 	for _, name := range defaultKeyNames {
 		path := filepath.Join(keyDir, name)
@@ -83,11 +94,7 @@ func HasPrivateKeyFiles(keyDir string) bool {
 // ListSSHKeyNames 返回 keyDir 下可用的私钥文件名。
 func ListSSHKeyNames(keyDir string) []string {
 	if keyDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil
-		}
-		keyDir = filepath.Join(home, ".ssh")
+		keyDir = defaultSSHDir()
 	}
 
 	entries, err := os.ReadDir(keyDir)
