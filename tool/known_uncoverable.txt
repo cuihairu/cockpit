@@ -28,7 +28,7 @@
 
 # ---------- 1. 场景编排 main()（合计 2092 语句） ----------
 
-scripts/acceptance/guac/probe/main.go:539,1149	1. main() 场景编排（S1-S30 真机 guacd/sshd/VNC/容器栈 + .acceptance 证据）
+scripts/acceptance/guac/probe/main.go:539,1153	1. main() 场景编排（S1-S30 真机 guacd/sshd/VNC/容器栈 + .acceptance 证据）
 scripts/acceptance/guac/cdp/main.go:402,713	1. main() 场景编排（C1-C7 真机 headless-shell Chrome 驱动 Web 三协议远控）
 scripts/acceptance/logs/probe/main.go:397,713	1. main() 场景编排（T0-T4 真机三 agent/systemd/docker 突发源）
 scripts/acceptance/services/probe/main.go:307,644	1. main() 场景编排（T0-T5 真机 systemd 动词面/unit 文件编辑/journal 跳转）
@@ -40,7 +40,11 @@ scripts/acceptance/guac/probe/main.go:94,97	2. dockerExecCmd 默认闭包体（�
 scripts/acceptance/logs/probe/main.go:75,78	2. systemdRunCmd 默认闭包体（需真 sudo systemd-run）
 scripts/acceptance/logs/probe/main.go:79,82	2. journalCtlCmd 默认闭包体（需真 journalctl）
 
-# ---------- 3. 死防御（2 语句） ----------
+# ---------- 3. 死防御（9 语句） ----------
 
-scripts/acceptance/guac/probe/main.go:349,350	3. parseInstr len(Args)==0 防御（strings.Split 非空串恒 ≥1 段，不可达）
-internal/server/api_guacamole.go:236,237	3. collectGuacRecording 稳定后复 Stat 竞态防御（loop break 与复 Stat 之间无代码；仅外部并发 unlink 的微秒窗口可触发，单测不可确定性构造；复 Stat 取 info.Size() 供元数据，非冗余可删）
+scripts/acceptance/guac/probe/main.go:351,352	3. parseInstr len(Args)==0 防御（strings.Split 非空串恒 ≥1 段，不可达）
+internal/server/api_guacamole.go:240,241	3. collectGuacRecording 稳定后复 Stat 竞态防御（loop break 与复 Stat 之间无代码；仅外部并发 unlink 的微秒窗口可触发，单测不可确定性构造；复 Stat 取 info.Size() 供元数据，非冗余可删）
+internal/server/guac_relay.go:66,67	3. net.Listen 回环临时端口失败防御（127.0.0.1:0 由内核分配端口，仅 fd 耗尽才失败，进程内单测不可构造）
+internal/server/api_guacamole.go:377,390	3. startGuacRelay listen 失败分支（同 guac_relay.go:66,67 根因，中继起不来即 listen 失败）
+internal/server/api_guacamole.go:491,496	3. relayAddr SplitHostPort 失败防御（恒为 listener.Addr().String() 的 host:port 形态）
+internal/server/api.go:464,466	3. CleanupOfflineAgents 查询失败防御（同 handler 前置同表 ListAgents 已成功，两次同构 SELECT 之间无写操作；其内部单行删除失败亦被吞掉不冒泡）

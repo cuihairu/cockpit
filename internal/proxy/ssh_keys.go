@@ -13,6 +13,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// 覆盖率注入点（同 agent.go goos 范式）：生产实现对内存操作恒成功
+// （ed25519 密钥生成/PEM 序列化不会失败），错误分支仅供测试注入覆盖。
+var (
+	generateEd25519Key = ed25519.GenerateKey
+	marshalPrivateKey  = ssh.MarshalPrivateKey
+)
+
 // EnsureSSHKeys 确保 keyDir 下有可用的 SSH 密钥。
 // 如果不存在，自动生成 Ed25519 密钥对。返回使用的密钥路径。
 func EnsureSSHKeys(keyDir string) (string, error) {
@@ -33,13 +40,13 @@ func EnsureSSHKeys(keyDir string) (string, error) {
 		return "", fmt.Errorf("create ssh dir %s: %w", keyDir, err)
 	}
 
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	_, priv, err := generateEd25519Key(rand.Reader)
 	if err != nil {
 		return "", fmt.Errorf("generate ed25519 key: %w", err)
 	}
 
 	// 序列化私钥为 PEM
-	privDER, err := ssh.MarshalPrivateKey(priv, "cockpit-agent@auto")
+	privDER, err := marshalPrivateKey(priv, "cockpit-agent@auto")
 	if err != nil {
 		return "", fmt.Errorf("marshal private key: %w", err)
 	}
