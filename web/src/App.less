@@ -6,7 +6,9 @@
 // - 克制的色彩（深色为主，强调色只用于交互状态）
 // - 强排版层级（字重/字号拉开差距，不留「均匀」感）
 
-@primary-color: #e11d8f;
+// 主色走运行时 CSS 变量（SettingsContext 随主题色预设写入 <html>），
+// 兜底 #e11d8f = 默认预设「蔷薇红」，变量未就绪时观感与历史一致
+@primary-color: var(--cockpit-primary, #e11d8f);
 @success-color: #22c55e;
 @warning-color: #f59e0b;
 @error-color: #ef4444;

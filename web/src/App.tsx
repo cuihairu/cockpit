@@ -37,7 +37,9 @@ import { useSettingsContext } from './contexts/useSettingsContext'
 import { useUser } from './contexts/useUser'
 import { permAll } from '@/utils/perm'
 import { logger } from '@/utils/logger'
-import logo from '@/assets/logo.svg'
+import { BrandLogo } from '@/components/BrandLogo'
+import { ThemeColorSwatches } from '@/components/ThemeColorSwatches'
+import { resolveThemePreset } from '@/theme/themePresets'
 import './App.less'
 
 // Route-level code splitting
@@ -381,6 +383,7 @@ const MainLayout = () => {
       >
         <span className="header-doc-text">文档</span>
       </Button>
+      <ThemeColorSwatches />
       <NotificationDropdown />
       <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
         <Space style={{ cursor: 'pointer' }}>
@@ -411,7 +414,7 @@ const MainLayout = () => {
       theme={resolvedTheme}
       colorWeak={false}
       title={settings.siteName}
-      logo={logo}
+      logo={<BrandLogo size={26} color={resolveThemePreset(settings.themeColor).color} />}
       navTheme={resolvedTheme === 'dark' ? 'realDark' : 'light'}
       contentWidth="Fluid"
       location={{ pathname: location.pathname }}
@@ -504,14 +507,14 @@ const MainLayout = () => {
 }
 
 const AppShell = () => {
-  const { resolvedTheme } = useSettingsContext()
+  const { settings, resolvedTheme } = useSettingsContext()
 
   return (
     <ConfigProvider
       theme={{
         algorithm: resolvedTheme === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {
-          colorPrimary: '#e11d8f',
+          colorPrimary: resolveThemePreset(settings.themeColor).color,
           borderRadius: 4,
           fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
           fontSize: 13,

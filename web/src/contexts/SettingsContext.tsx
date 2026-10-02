@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { SettingsContext } from './settingsContextValue'
 import type { UISettings, UITheme } from './settingsTypes'
+import { DEFAULT_THEME_COLOR, resolveThemePreset } from '@/theme/themePresets'
 
 const SETTINGS_STORAGE_KEYS = ['cockpit.ui.settings', 'cockpit:settings']
 
@@ -9,6 +10,7 @@ const DEFAULT_SETTINGS: UISettings = {
   refreshInterval: 30,
   enableNotifications: true,
   theme: 'light',
+  themeColor: DEFAULT_THEME_COLOR,
   compactMode: false,
   showResourceCount: true,
 }
@@ -23,6 +25,7 @@ const normalizeSettings = (input: Partial<UISettings> | null | undefined): UISet
       : DEFAULT_SETTINGS.refreshInterval,
     enableNotifications: input?.enableNotifications ?? DEFAULT_SETTINGS.enableNotifications,
     theme: input?.theme === 'dark' || input?.theme === 'auto' ? input.theme : DEFAULT_SETTINGS.theme,
+    themeColor: resolveThemePreset(input?.themeColor).key,
     compactMode: input?.compactMode ?? DEFAULT_SETTINGS.compactMode,
     showResourceCount: input?.showResourceCount ?? DEFAULT_SETTINGS.showResourceCount,
   }
@@ -78,6 +81,12 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', resolvedTheme)
   }, [resolvedTheme])
+
+  // 主题色落到 <html style> CSS 变量：App.less 的 @primary-color 即
+  // var(--cockpit-primary)，手绘样式与 antd colorPrimary 同步换色
+  useEffect(() => {
+    document.documentElement.style.setProperty('--cockpit-primary', resolveThemePreset(settings.themeColor).color)
+  }, [settings.themeColor])
 
   const updateSettings = (patch: Partial<UISettings>) => {
     setSettings((current) => normalizeSettings({ ...current, ...patch }))

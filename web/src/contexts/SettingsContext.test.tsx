@@ -12,6 +12,7 @@ const Probe = ({ patch }: { patch?: Partial<UISettings> }) => {
       <span data-testid="site">{settings.siteName}</span>
       <span data-testid="interval">{settings.refreshInterval}</span>
       <span data-testid="theme">{resolvedTheme}</span>
+      <span data-testid="color">{settings.themeColor}</span>
       <button onClick={() => patch && updateSettings(patch)}>update</button>
     </div>
   )
@@ -55,6 +56,31 @@ describe('SettingsContext', () => {
     localStorage.setItem('cockpit.ui.settings', JSON.stringify({ theme: 'blue' }))
     render(<SettingsProvider><Probe /></SettingsProvider>)
     expect(screen.getByTestId('theme').textContent).toBe('light')
+  })
+
+  it('themeColor：默认 rose、非法回退 rose、合法值加载', () => {
+    // 无存量 → 默认蔷薇红
+    const { unmount } = render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('color').textContent).toBe('rose')
+    unmount()
+    // 非法 key 回退默认
+    localStorage.setItem('cockpit.ui.settings', JSON.stringify({ themeColor: 'hot-pink' }))
+    const { unmount: unmount2 } = render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('color').textContent).toBe('rose')
+    unmount2()
+    // 合法 preset 加载
+    localStorage.setItem('cockpit.ui.settings', JSON.stringify({ themeColor: 'blue' }))
+    render(<SettingsProvider><Probe /></SettingsProvider>)
+    expect(screen.getByTestId('color').textContent).toBe('blue')
+  })
+
+  it('themeColor 变更同步 CSS 变量 --cockpit-primary', () => {
+    render(<SettingsProvider><Probe patch={{ themeColor: 'purple' }} /></SettingsProvider>)
+    act(() => {
+      screen.getByText('update').click()
+    })
+    expect(screen.getByTestId('color').textContent).toBe('purple')
+    expect(document.documentElement.style.getPropertyValue('--cockpit-primary')).toBe('#722ed1')
   })
 
   it('updateSettings 规范化并持久化双键 + 广播事件', () => {

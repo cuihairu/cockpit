@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
-import { Button, Form, Input, InputNumber, Select, Switch, Tabs } from 'antd'
+import { Button, Form, Input, InputNumber, Radio, Select, Switch, Tabs } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
 import type { UISettings } from '@/contexts/settingsTypes'
+import { THEME_PRESETS } from '@/theme/themePresets'
 
 interface GeneralSettingsProps {
   loading: boolean
@@ -14,6 +15,7 @@ export interface GeneralSettingsValues {
   refreshInterval?: number | null
   enableNotifications?: boolean
   theme?: 'light' | 'dark' | 'auto'
+  themeColor?: string
   compactMode?: boolean
   showResourceCount?: boolean
 }
@@ -31,6 +33,7 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ loading, setti
     })
     displayForm.setFieldsValue({
       theme: settings.theme,
+      themeColor: settings.themeColor,
       compactMode: settings.compactMode,
       showResourceCount: settings.showResourceCount,
     })
@@ -78,6 +81,27 @@ export const GeneralSettings: React.FC<GeneralSettingsProps> = ({ loading, setti
               <Select.Option value="dark">深色</Select.Option>
               <Select.Option value="auto">跟随系统</Select.Option>
             </Select>
+          </Form.Item>
+          <Form.Item label="主题色" name="themeColor">
+            <Radio.Group>
+              {THEME_PRESETS.map((preset) => (
+                <Radio.Button key={preset.key} value={preset.key} style={{ paddingInline: 10 }}>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: 'inline-block',
+                      width: 12,
+                      height: 12,
+                      borderRadius: '50%',
+                      background: preset.color,
+                      marginInlineEnd: 6,
+                      verticalAlign: 'middle',
+                    }}
+                  />
+                  {preset.name}
+                </Radio.Button>
+              ))}
+            </Radio.Group>
           </Form.Item>
           <Form.Item label="紧凑模式" name="compactMode" valuePropName="checked">
             <Switch />

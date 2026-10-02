@@ -49,6 +49,7 @@ export const useSettings = () => {
         refreshInterval: values.refreshInterval ?? settings.refreshInterval,
         enableNotifications: values.enableNotifications ?? settings.enableNotifications,
         theme: values.theme ?? settings.theme,
+        themeColor: values.themeColor ?? settings.themeColor,
         compactMode: values.compactMode ?? settings.compactMode,
         showResourceCount: values.showResourceCount ?? settings.showResourceCount,
       })
