@@ -204,6 +204,14 @@ func (s *Syncer) syncComputeInstances(inv *Inventory) *ResourceResult {
 			continue
 		}
 
+		// 状态联动：关联 agent 在线则 running，否则 stopped
+		status := "stopped"
+		if inst.Agent != "" {
+			if agent, err := s.db.GetAgent(inst.Agent); err == nil && agent.Status == "online" {
+				status = "running"
+			}
+		}
+
 		storageInst := &storage.ComputeInstance{
 			ID:       id,
 			Name:     inst.Name,
@@ -211,6 +219,7 @@ func (s *Syncer) syncComputeInstances(inv *Inventory) *ResourceResult {
 			AgentID:  inst.Agent,
 			Region:   inst.Region,
 			Zone:     inst.Zone,
+			Status:   status,
 			CPUCores: inst.CPU,
 			MemoryMB: inst.Memory,
 			DiskGB:   inst.Disk,

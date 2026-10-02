@@ -11,6 +11,7 @@ type Agent struct {
 	ID           string       `gorm:"primaryKey" json:"id"`
 	Hostname     string       `gorm:"index" json:"hostname"`
 	IP           string       `json:"ip"`
+	LocalIPs     []string     `gorm:"serializer:json" json:"localIps,omitempty"`
 	Region       string       `gorm:"index" json:"region"`
 	Zone         string       `gorm:"index" json:"zone"`
 	Version      string       `json:"version"`
@@ -27,6 +28,9 @@ type Agent struct {
 
 	// 标签（支持复杂类型）
 	Labels map[string]interface{} `gorm:"serializer:json" json:"labels"`
+
+	// 元数据：agent 上报的自定义 key-value 存储
+	Metadata map[string]interface{} `gorm:"serializer:json" json:"metadata,omitempty"`
 
 	// 认证：SecretHash 存储 Agent 认证密钥的哈希值
 	SecretHash string `gorm:"column:secret_hash" json:"-"`

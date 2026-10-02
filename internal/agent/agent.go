@@ -76,6 +76,7 @@ type Config struct {
 	Zone      string                 `json:"zone,omitempty"`
 	Labels    map[string]interface{} `json:"labels,omitempty"`
 	Bias      int                    `json:"bias,omitempty"` // 同机器多 agent 偏移量，默认 0
+	Metadata  map[string]interface{} `json:"metadata,omitempty"` // 自定义元数据 key-value
 }
 
 // NewAgent 创建新 Agent
@@ -473,8 +474,10 @@ func (a *Agent) register() error {
 		"capabilities":   a.capabilities,
 		"hostname":       hostname,
 		"ip":             publicIP(),
+		"localIps":       localIPs(),
 		"virtualization": DetectVirtualization(),
 		"labels":         a.config.Labels,
+		"metadata":       a.config.Metadata,
 	}
 
 	// 发送注册消息

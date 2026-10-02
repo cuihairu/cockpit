@@ -18,8 +18,10 @@ type Agent struct {
 	Capabilities   []protocol.Capability
 	Hostname       string
 	IP             string
+	LocalIPs       []string
 	Virtualization *protocol.VirtualizationInfo
 	Labels         map[string]interface{}
+	Metadata       map[string]interface{}
 	Send           chan *protocol.Message
 	mu             sync.RWMutex
 	closed         atomic.Bool
@@ -48,8 +50,10 @@ func (a *Agent) Update(info *protocol.RegisterPayload) {
 	a.Capabilities = info.Capabilities
 	a.Hostname = info.Hostname
 	a.IP = info.IP
+	a.LocalIPs = info.LocalIPs
 	a.Virtualization = info.Virtualization
 	a.Labels = info.Labels
+	a.Metadata = info.Metadata
 	a.LastSeen = time.Now()
 }
 

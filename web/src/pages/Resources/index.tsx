@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Space, Tabs, Table } from 'antd'
+import { Button, Card, Space, Tabs, Table, Tooltip } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useSettingsContext } from '@/contexts/useSettingsContext'
@@ -83,9 +83,11 @@ const Resources = () => {
             <Button icon={<ReloadOutlined />} onClick={fetchAll} loading={loading}>
               刷新
             </Button>
-            <Button type="primary" icon={<PlusOutlined />}>
-              添加资源
-            </Button>
+            <Tooltip title="请通过 inventory.yaml 管理资源">
+              <Button type="primary" icon={<PlusOutlined />} disabled>
+                添加资源
+              </Button>
+            </Tooltip>
           </Space>
         }
       >

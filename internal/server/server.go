@@ -456,6 +456,7 @@ func toStorageAgent(agent *Agent) *storage.Agent {
 		ID:           agent.ID,
 		Hostname:     agent.Hostname,
 		IP:           agent.IP,
+		LocalIPs:     agent.LocalIPs,
 		Region:       agent.Location.Region,
 		Zone:         agent.Location.Zone,
 		Version:      "", // Agent 当前没有版本字段
@@ -463,6 +464,7 @@ func toStorageAgent(agent *Agent) *storage.Agent {
 		Status:       "online",
 		LastSeen:     agent.LastSeen,
 		Labels:       agent.Labels,
+		Metadata:     agent.Metadata,
 	}
 
 	// 添加虚拟化信息

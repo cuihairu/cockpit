@@ -702,11 +702,14 @@ func storageAgentToResponse(agent *storage.Agent) map[string]interface{} {
 		"id":           agent.ID,
 		"hostname":     agent.Hostname,
 		"ip":           agent.IP,
+		"localIps":     agent.LocalIPs,
 		"region":       agent.Region,
 		"zone":         agent.Zone,
 		"capabilities": capabilities,
 		"status":       agent.Status,
 		"lastSeen":     agent.LastSeen.Unix(),
+		"labels":       agent.Labels,
+		"metadata":     agent.Metadata,
 	}
 }
 

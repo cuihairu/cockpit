@@ -68,10 +68,13 @@ type RegisterPayload struct {
 	Capabilities []Capability `json:"capabilities"`
 	Hostname     string       `json:"hostname,omitempty"`
 	IP           string       `json:"ip,omitempty"`
+	LocalIPs     []string     `json:"localIps,omitempty"`
 	// 虚拟化信息
 	Virtualization *VirtualizationInfo `json:"virtualization,omitempty"`
 	// 标签（支持键值对、数组、字符串等）
 	Labels map[string]interface{} `json:"labels,omitempty"`
+	// 元数据：自定义 key-value 存储
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // VirtualizationInfo 虚拟化信息
