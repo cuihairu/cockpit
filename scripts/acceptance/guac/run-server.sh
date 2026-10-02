@@ -8,9 +8,12 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 GUAC_DIR="${REPO_ROOT}/.acceptance/guac"
-WORK_DIR="${GUAC_DIR}/instance"
-REC_DIR="${GUAC_DIR}/rec"
-PORT=19990
+# 实例可隔离：并行验收（另一个会话/另一轮对照实验）用独立端口与工作目录，
+# 否则双方互相截断 logs/、抢占 :19990，跑出「时过时不过」的假回归
+# （2026-10-02 relay 验收踩坑：并跑探针 + 重启实例伪装成 S9/S14 间歇失败）
+WORK_DIR="${GUAC_WORK_DIR:-${GUAC_DIR}/instance}"
+REC_DIR="${GUAC_REC_DIR:-${GUAC_DIR}/rec}"
+PORT="${GUAC_PORT:-19990}"
 
 ADMIN_USER="${ADMIN_USERNAME:-admin}"
 ADMIN_PASS="${ADMIN_PASSWORD:-e2e-strong-pass-1}"
@@ -38,7 +41,7 @@ go build -o "${WORK_DIR}/bin/" ./cmd/cockpit ./cmd/cockpit-agent
 
 echo "== 启动 server =="
 ADMIN_USERNAME="${ADMIN_USER}" ADMIN_PASSWORD="${ADMIN_PASS}" \
-GUACD_ADDR=127.0.0.1:4822 \
+GUACD_ADDR="${GUACD_ADDR:-127.0.0.1:4822}" \
 GUACD_RECORDING_PATH="${REC_DIR}" \
 "${WORK_DIR}/bin/cockpit" server -config "${WORK_DIR}/cockpit.yaml" \
     > "${WORK_DIR}/logs/server.log" 2>&1 &
