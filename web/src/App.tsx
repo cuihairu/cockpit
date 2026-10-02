@@ -502,7 +502,7 @@ const AppShell = () => {
       theme={{
         algorithm: resolvedTheme === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {
-          colorPrimary: '#3b82f6',
+          colorPrimary: '#e11d8f',
           borderRadius: 4,
           fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
           fontSize: 13,
