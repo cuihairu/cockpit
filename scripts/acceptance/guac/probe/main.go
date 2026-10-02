@@ -48,6 +48,8 @@ var (
 	evDir     = flag.String("ev", "", "证据目录（默认 .acceptance/guac/evidence）")
 	only      = flag.String("s", "", "只跑名字含该子串的场景（调试用）")
 	container = flag.String("container", "cockpit-acc-sshd", "sshd 目标容器名")
+
+	guacdCtr = flag.String("guacd-container", "cockpit-acc-guacd", "guacd 容器名（S16 停机兜底用）")
 )
 
 var (
@@ -1067,13 +1069,15 @@ func main() {
 	// ---- S16 guacd 停机兜底（guac 入口失败 + 内置终端照常）----
 	func() {
 		name := "S16 guacd 停机兜底（guac WS 失败、内置终端仍可用）"
-		// 停 guacd（验收自建容器，结束前恢复）
-		if out, err := exec.Command("docker", "stop", "cockpit-acc-guacd").CombinedOutput(); err != nil {
-			check(name, false, fmt.Sprintf("docker stop guacd 失败: %v %s", err, out))
+		// 停 guacd（验收自建容器，结束前恢复）。容器名可覆盖：并行/隔离实例
+		// 各有各的 guacd（S1-S15 打的 guacd 属于 -api 对应的那个 server），
+		// 停错容器本场景就失去意义（2026-10-02 relay 隔离验收踩坑）
+		if out, err := exec.Command("docker", "stop", *guacdCtr).CombinedOutput(); err != nil {
+			check(name, false, fmt.Sprintf("docker stop %s 失败: %v %s", *guacdCtr, err, out))
 			return
 		}
 		defer func() {
-			if out, err := exec.Command("docker", "start", "cockpit-acc-guacd").CombinedOutput(); err != nil {
+			if out, err := exec.Command("docker", "start", *guacdCtr).CombinedOutput(); err != nil {
 				ev("[FATAL] guacd 容器恢复失败（后续 CDP 阶段需手动 start）: %v %s", err, out)
 			} else {
 				ev("      guacd 容器已恢复（docker start）")
