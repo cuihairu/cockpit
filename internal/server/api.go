@@ -21,8 +21,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 解析路径
-	path := strings.TrimPrefix(r.URL.Path, "/api")
+	// 解析路径（归一化尾斜杠，/api/agents/ → /api/agents）
+	path := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api"), "/")
+	if path == "" {
+		path = "/"
+	}
 
 	// 路由分发
 	switch {
