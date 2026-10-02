@@ -104,9 +104,9 @@ const Acme = () => {
   const [issuingId, setIssuingId] = useState<number | null>(null)
   const [deployingId, setDeployingId] = useState<number | null>(null)
 
-  const { data: certs = [], isLoading } = useQuery({ queryKey: ['acme-certs'], queryFn: () => api.getAcmeCerts() })
-  const { data: scanCfg } = useQuery({ queryKey: ['acme-scan-config'], queryFn: () => api.getAcmeScanConfig() })
-  const { data: account } = useQuery({ queryKey: ['acme-account'], queryFn: () => api.getAcmeAccount() })
+  const { data: certs = [], isLoading } = useQuery({ queryKey: ['acme-certs'], queryFn: () => api.getAcmeCerts(), retry: false, meta: { silent: true } as never })
+  const { data: scanCfg } = useQuery({ queryKey: ['acme-scan-config'], queryFn: () => api.getAcmeScanConfig(), retry: false, meta: { silent: true } as never })
+  const { data: account } = useQuery({ queryKey: ['acme-account'], queryFn: () => api.getAcmeAccount(), retry: false, meta: { silent: true } as never })
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => api.getAgents() })
 
   // 部署目标候选：在线 agent；有 Nginx 的标注（主要用途是反代站点引用）
