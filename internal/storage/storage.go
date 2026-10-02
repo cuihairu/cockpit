@@ -197,6 +197,16 @@ func agentUpdateFields(a *Agent) map[string]interface{} {
 			u["labels"] = string(b)
 		}
 	}
+	if len(a.LocalIPs) > 0 {
+		if b, err := json.Marshal(a.LocalIPs); err == nil {
+			u["local_ips"] = string(b)
+		}
+	}
+	if len(a.Metadata) > 0 {
+		if b, err := json.Marshal(a.Metadata); err == nil {
+			u["metadata"] = string(b)
+		}
+	}
 	if a.SecretHash != "" {
 		u["secret_hash"] = a.SecretHash
 	}
