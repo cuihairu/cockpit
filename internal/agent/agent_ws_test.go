@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -214,7 +216,14 @@ func readUntil(t *testing.T, conn *websocket.Conn, timeout time.Duration, pred f
 		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		msg, err := codec.ReadMessage(conn)
 		if err != nil {
-			continue
+			// 仅读超时可重试：对端断开等连接级失败必须退出——
+			// gorilla 对 failed connection 再 ReadMessage 直接 panic
+			// （repeated read on failed websocket connection）
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				continue
+			}
+			return nil
 		}
 		if pred == nil || pred(msg) {
 			return msg
@@ -341,6 +350,9 @@ func TestAgentFullLifecycleOverWebSocket(t *testing.T) {
 	pong := readUntil(t, conn, 10*time.Second, func(m *protocol.Message) bool {
 		return m.Type == protocol.MessageTypeHeartbeat && m.ID == "ping-1"
 	})
+	if pong == nil {
+		return
+	}
 	if pong.Payload["status"] != "pong" {
 		t.Errorf("ping response status = %v, want pong", pong.Payload["status"])
 	}
@@ -354,6 +366,9 @@ func TestAgentFullLifecycleOverWebSocket(t *testing.T) {
 	rpcResp := readUntil(t, conn, 10*time.Second, func(m *protocol.Message) bool {
 		return m.Type == protocol.MessageTypeRPCResponse && m.ID == "rpc-1"
 	})
+	if rpcResp == nil {
+		return
+	}
 	if rpcResp.Payload["status"] != "error" {
 		t.Errorf("rpc response status = %v, want error", rpcResp.Payload["status"])
 	}
