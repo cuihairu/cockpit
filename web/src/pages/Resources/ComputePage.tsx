@@ -1,11 +1,11 @@
-import { Button, Card, Space, Table, Tooltip } from 'antd'
+import { Button, Card, Space, Table, Tag, Tooltip } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { useSettingsContext } from '@/contexts/useSettingsContext'
 import { useResources } from './useResources'
 import { computeColumns } from './columns'
+import ComputeDetail from './ComputeDetail'
+import type { ComputeInstance } from '@/types'
 
 const ComputePage = () => {
-  const { settings } = useSettingsContext()
   const { loading, computeInstances, fetchAll } = useResources()
 
   return (
@@ -32,6 +32,10 @@ const ComputePage = () => {
           loading={loading}
           pagination={{ pageSize: 20 }}
           size="small"
+          expandable={{
+            expandedRowRender: (record) => <ComputeDetail record={record} />,
+            rowExpandable: (record) => true,
+          }}
         />
       </Card>
     </div>
