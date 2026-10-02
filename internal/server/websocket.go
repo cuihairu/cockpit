@@ -35,6 +35,13 @@ func isOriginAllowed(r *http.Request) bool {
 		return true
 	}
 	origin := r.Header.Get("Origin")
+	// 空 Origin = 非浏览器客户端（cockpit-agent 等不出于浏览器，不发 Origin 头）。
+	// 白名单是防浏览器侧跨站 WS 的；把这类客户端一并拒绝会让生产
+	// （ALLOWED_ORIGINS 必配）下 agent 握手 403/bad handshake。浏览器永远带 Origin，
+	// 仍走下方白名单。
+	if origin == "" {
+		return true
+	}
 	for _, a := range strings.Split(allowed, ",") {
 		a = strings.TrimSpace(a)
 		if a == "*" || a == origin {

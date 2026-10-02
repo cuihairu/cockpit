@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"os"
@@ -161,6 +162,14 @@ func (a *Agent) connect() error {
 
 	dialer := *websocket.DefaultDialer // 值拷贝，严禁修改全局单例（并发 Dial 数据竞态）
 	dialer.HandshakeTimeout = 10 * time.Second
+
+	// WebSocket 依赖 HTTP/1.1 Upgrade 机制；当 wss:// 经 ALPN 协商到
+	// HTTP/2 时，反向代理（如 nginx）会剥离 Connection/Upgrade 头，
+	// 导致握手失败（400 Bad Request）。强制 TLS 只协商 HTTP/1.1。
+	if dialer.TLSClientConfig == nil {
+		dialer.TLSClientConfig = &tls.Config{}
+	}
+	dialer.TLSClientConfig.NextProtos = []string{"http/1.1"}
 
 	conn, _, err := dialer.Dial(a.serverURL, nil)
 	if err != nil {

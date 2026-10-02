@@ -117,8 +117,9 @@ func TestCovIsOriginAllowed(t *testing.T) {
 	if isOriginAllowed(req("http://c.com")) {
 		t.Error("unlisted origin should be rejected")
 	}
-	if isOriginAllowed(req("")) {
-		t.Error("empty origin should not match explicit entries")
+	if !isOriginAllowed(req("")) {
+		// 空 Origin = 非浏览器客户端（agent），不受浏览器白名单约束
+		t.Error("empty origin (non-browser client) should be accepted")
 	}
 }
 

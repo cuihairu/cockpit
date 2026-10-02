@@ -1,14 +1,13 @@
 module github.com/cuihairu/cockpit
 
-go 1.26.3
-
-require github.com/gorilla/websocket v1.5.3
+go 1.27
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/moby/moby/api v1.56.0
 	github.com/moby/moby/client v0.6.0
 	github.com/nakagami/grdp v0.9.11
