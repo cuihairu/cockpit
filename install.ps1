@@ -11,6 +11,9 @@
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1))) `
 #       -WithService -ServerUrl "wss://cockpit.cuihairu.site/ws"
 #
+#   # 静默安装（零交互；不带 -ServerUrl 则装完打印手动配置指引）:
+#   & ([scriptblock]::Create((irm <本脚本URL>))) -Silent -ServerUrl "cockpit.cuihairu.site"
+#
 #   # 管道形态传参不便时用环境变量:
 #   $env:COCKPIT_WITH_SERVICE='1'; $env:COCKPIT_SERVER='wss://...'; irm <url> | iex
 #
@@ -25,7 +28,8 @@ param(
     [string]$Zone = $env:COCKPIT_ZONE,
     [string]$Labels = $env:COCKPIT_LABELS,
     [string]$InstallDir = $env:COCKPIT_INSTALL_DIR,
-    [switch]$WithService = ($env:COCKPIT_WITH_SERVICE -eq '1')
+    [switch]$WithService = ($env:COCKPIT_WITH_SERVICE -eq '1'),
+    [switch]$Silent = ($env:COCKPIT_SILENT -eq '1')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,6 +65,38 @@ function Quote-CmdArg {
     param([string]$v)
     # Windows 服务命令行引号规则：内嵌 " 转义为 \"（其前的 \ 按 MSVCRT 规则成对加倍）
     return '"' + ($v -replace '(\\*)"', '$1$1\"') + '"'
+}
+
+function ConvertTo-ServerUrl {
+    # 服务端地址规范化：域名/IP[:端口] → wss://<addr>/ws（纯地址默认 wss——
+    # 服务端前置 nginx 80 端口 301 到 https，ws:// 握手不跟随重定向会失败）；
+    # 完整 ws(s):// 地址原样保留并补 /ws 路径。无效输入返回 $null
+    param([string]$Value)
+    $s = "$Value".Trim()
+    if (-not $s) { return $null }
+    if ($s -match '^(?i)wss?://') {
+        $s = $s.TrimEnd('/')
+        if ($s -notmatch '/ws$') {
+            $s = $s + '/ws'
+        }
+        return $s
+    }
+    # 域名 / IPv4[:端口]
+    if ($s -notmatch '^[A-Za-z0-9._-]+(:\d{1,5})?$' -and $s -notmatch '^\[[0-9A-Fa-f:]+\](:\d{1,5})?$') {
+        return $null
+    }
+    if ($s -match ':') {
+        $port = ($s -split ':')[-1]
+        if ($port -match '^\d+$' -and ([int]$port -lt 1 -or [int]$port -gt 65535)) { return $null }
+    }
+    return "wss://$s/ws"
+}
+
+function Test-ServerInConfig {
+    # 校验 config.env 中 SERVER_URL 整行精确等于期望值
+    param([string]$ConfigPath, [string]$Expected)
+    if (-not (Test-Path $ConfigPath)) { return $false }
+    return [bool](Select-String -Path $ConfigPath -Pattern ("^SERVER_URL=" + [regex]::Escape($Expected) + "$") -Quiet)
 }
 
 function Build-StartArgs {
@@ -151,10 +187,45 @@ try {
     }
     Write-Host "已安装: $ver -> $binPath" -ForegroundColor Green
 
+    # 服务端地址解析：显式参数 > 交互提示；注册服务拿不到地址则失败即停
+    if (-not [string]::IsNullOrEmpty($ServerUrl)) {
+        $normalized = ConvertTo-ServerUrl $ServerUrl
+        if (-not $normalized) {
+            throw "无效的服务端地址: $ServerUrl（应为 域名[:端口] 或完整 ws(s):// URL）"
+        }
+        $ServerUrl = $normalized
+        Write-Host "服务端地址: $ServerUrl" -ForegroundColor White
+    } else {
+        $interactive = (-not $Silent) -and [Environment]::UserInteractive
+        if ($interactive) {
+            $tries = 3
+            while ($tries -gt 0) {
+                $addrInput = Read-Host "请输入 Cockpit 服务端地址（域名或 IP，例: cockpit.cuihairu.site 或 10.0.0.5:9000；完整 wss:// 地址亦可；直接回车跳过）"
+                $addrInput = "$addrInput".Trim()
+                if (-not $addrInput) { break }
+                $normalized = ConvertTo-ServerUrl $addrInput
+                if ($normalized) {
+                    $ServerUrl = $normalized
+                    Write-Host "服务端地址: $ServerUrl" -ForegroundColor White
+                    break
+                }
+                Write-Host "[警告] 地址格式无效: $addrInput（应为 域名[:端口] 或完整 ws(s):// URL）" -ForegroundColor Yellow
+                $tries--
+            }
+        }
+        if ([string]::IsNullOrEmpty($ServerUrl) -and $WithService) {
+            throw "注册服务需要 -ServerUrl=<域名或IP>，或以交互方式输入"
+        }
+    }
+
+    # 显式传入服务端地址且既有服务 → 重注册刷新启动参数（Windows 服务参数固化在
+    # BinaryPathName，仅改配置文件不生效，须重注册）
+    $needRegister = $WithService -or ($svc -and -not [string]::IsNullOrEmpty($ServerUrl))
+
     # 服务注册（可选，需管理员）
-    if ($WithService) {
+    if ($needRegister) {
         if (-not $isAdmin) {
-            throw "注册 Windows 服务需要管理员权限——请以管理员身份运行 PowerShell 后重试"
+            throw "注册/更新 Windows 服务需要管理员权限——请以管理员身份运行 PowerShell 后重试"
         }
         if (-not $ServerUrl -and -not $svc) {
             throw "注册服务需要 -ServerUrl（或已注册过 $ServiceName 服务）"
@@ -200,7 +271,7 @@ LABELS=$Labels
             Write-Host "服务状态: $($svc.Status)——请检查事件查看器" -ForegroundColor Yellow
         }
     } elseif ($svc) {
-        # 未要求注册但服务已存在：重启加载新版本（重跑=升级）
+        # 未要求注册但服务已存在（且未显式传地址）：重启加载新版本（重跑=升级）
         if (-not $isAdmin) {
             Write-Host "检测到既有 $ServiceName 服务但当前非管理员——新版本将在下次服务重启时生效" -ForegroundColor Yellow
         } else {
@@ -208,14 +279,37 @@ LABELS=$Labels
             Start-Service -Name $ServiceName
             Write-Host "服务已重启: $ServiceName" -ForegroundColor Green
         }
+    } elseif (-not [string]::IsNullOrEmpty($ServerUrl)) {
+        # 未注册服务且服务端地址已知：写入用户级连接配置（装机时落盘）
+        $configDir = Join-Path $env:APPDATA 'CockpitAgent'
+        if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Path $configDir -Force | Out-Null }
+        $userConfig = Join-Path $configDir 'config.env'
+        @"
+SERVER_URL=$ServerUrl
+AGENT_ID=$AgentId
+SECRET=$Secret
+REGION=$Region
+ZONE=$Zone
+LABELS=$Labels
+"@ | Out-File -FilePath $userConfig -Encoding ASCII
+        if (-not (Test-ServerInConfig $userConfig $ServerUrl)) {
+            throw "配置写入校验失败: $userConfig 中未找到 SERVER_URL=$ServerUrl"
+        }
+        Write-Host "连接配置已写入: $userConfig（SERVER_URL=$ServerUrl）" -ForegroundColor Green
     }
 
     Write-Host ""
     Write-Host "完成。下一步:" -ForegroundColor Cyan
-    if (-not $WithService) {
+    if (-not $needRegister) {
         Write-Host "  注册 Windows 服务（管理员 PowerShell）:" -ForegroundColor White
         Write-Host "    & ([scriptblock]::Create((irm <本脚本URL>))) -WithService -ServerUrl `"wss://cockpit.cuihairu.site/ws`"" -ForegroundColor White
-        Write-Host "  或手动启动: cockpit-agent start -server wss://cockpit.cuihairu.site/ws" -ForegroundColor White
+        if (-not [string]::IsNullOrEmpty($ServerUrl)) {
+            Write-Host "  或手动启动: cockpit-agent start -server $ServerUrl" -ForegroundColor White
+        } else {
+            Write-Host "  未配置服务端地址——之后自己手动执行配置:" -ForegroundColor White
+            Write-Host "    cockpit-agent start -server wss://<你的服务端>/ws（例: wss://cockpit.cuihairu.site/ws）" -ForegroundColor White
+            Write-Host "    或重跑本脚本并带 -ServerUrl <域名或IP>（自动写入连接配置）" -ForegroundColor White
+        }
     }
     Write-Host "  验证版本: cockpit-agent --version" -ForegroundColor White
     Write-Host "  查看服务: Get-Service -Name $ServiceName" -ForegroundColor White

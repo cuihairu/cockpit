@@ -472,6 +472,7 @@ func (a *Agent) register() error {
 		"location":       a.location,
 		"capabilities":   a.capabilities,
 		"hostname":       hostname,
+		"ip":             publicIP(),
 		"virtualization": DetectVirtualization(),
 		"labels":         a.config.Labels,
 	}
