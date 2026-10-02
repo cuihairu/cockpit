@@ -1,5 +1,7 @@
 ARG NODE_VERSION=22-bookworm
-ARG GO_VERSION=1.26-bookworm
+# go.mod 要求 go >= 1.27——CI 的 docker.yml 不传 GO_VERSION，缺省值低于
+# go.mod 时 `go mod download` 直接失败（GOTOOLCHAIN=local 不自动升级）
+ARG GO_VERSION=1.27-bookworm
 # 镜像版本：CI（.github/workflows/docker.yml）传 tag/分支/sha，本地 build 缺省 dev。
 # 注入二进制的 main.version（cmd/cockpit/main.go 的 var，cockpit version 可见）
 ARG VERSION=dev

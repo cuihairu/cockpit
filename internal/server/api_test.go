@@ -525,9 +525,10 @@ func TestStorageAgentToResponse(t *testing.T) {
 	if caps[0].Type != "proxy" || caps[1].Type != "docker" {
 		t.Errorf("capabilities types = %v,%v", caps[0].Type, caps[1].Type)
 	}
-	loc, ok := resp["location"].(map[string]string)
-	if !ok || loc["region"] != "us-east" {
-		t.Errorf("location = %v", resp["location"])
+	// 2026-09-30 真机验收后 region/zone 平铺进响应（不再嵌套 location——
+	// 前端不读 location，扁平化修复时一并移除）
+	if resp["region"] != "us-east" || resp["zone"] != "us-east-1a" {
+		t.Errorf("region/zone = %v/%v", resp["region"], resp["zone"])
 	}
 }
 
