@@ -58,7 +58,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   // 纯密钥认证（publickey only）弹用户名表单，密码留空让 agent 用默认密钥
   const needsCredentials = protocol === 'ssh' && !username;
   const [authPending, setAuthPending] = useState(needsCredentials);
-  const [keyAuthUsername, setKeyAuthUsername] = useState<string | null>(null);
+  // 键认证分支记录的用户名只经 setter 更新（表单预填用），读取值当前未消费
+  const [, setKeyAuthUsername] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [credentials, setCredentials] = useState({ username: username || '', password: password || '' });
   // 保险箱：探测当前 SSH 目标的已存凭据（有 → 一键连接）；保存/删除需二次验证

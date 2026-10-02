@@ -1,8 +1,16 @@
 import { Descriptions, Tag } from 'antd'
 import type { ComputeInstance } from '@/types'
 
+// 后端 storage.ComputeInstance 实际返回 labels/createdAt/updatedAt
+// （json 标签在模型上），TS 类型尚未声明——此处局部收窄补齐。
+type ComputeRecord = ComputeInstance & {
+  labels?: Record<string, string>
+  createdAt?: string
+  updatedAt?: string
+}
+
 interface Props {
-  record: ComputeInstance
+  record: ComputeRecord
 }
 
 const ComputeDetail = ({ record }: Props) => {

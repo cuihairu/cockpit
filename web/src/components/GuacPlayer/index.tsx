@@ -49,7 +49,7 @@ function parseGuacInstructions(text: string): Array<{ opcode: string; args: stri
 // receiveInstruction 注入（SessionRecording 构造时已挂 oninstruction 收帧，
 // 帧索引/keyframe/seek/Display 全由官方实现承担），CLOSED 收尾对齐官方
 // notifyLoaded 语义。
-function makeBlobTunnel(blob: Blob): Guacamole.Tunnel {
+function makeBlobTunnel(blob: Blob): InstanceType<typeof Guacamole.Tunnel> {
   const tunnel = new Guacamole.Tunnel()
   tunnel.connect = () => {
     blob

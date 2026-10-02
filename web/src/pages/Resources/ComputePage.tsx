@@ -1,9 +1,8 @@
-import { Button, Card, Space, Table, Tag, Tooltip } from 'antd'
+import { Button, Card, Space, Table, Tooltip } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useResources } from './useResources'
 import { computeColumns } from './columns'
 import ComputeDetail from './ComputeDetail'
-import type { ComputeInstance } from '@/types'
 
 const ComputePage = () => {
   const { loading, computeInstances, fetchAll } = useResources()
@@ -34,7 +33,7 @@ const ComputePage = () => {
           size="small"
           expandable={{
             expandedRowRender: (record) => <ComputeDetail record={record} />,
-            rowExpandable: (record) => true,
+            rowExpandable: () => true,
           }}
         />
       </Card>
