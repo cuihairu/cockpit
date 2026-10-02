@@ -108,6 +108,36 @@ export ADMIN_PASSWORD='change-this-password'
 ./cockpit agent -server ws://127.0.0.1:9000/ws -region home -zone datacenter
 ```
 
+## 一键安装
+
+Agent 三平台各一行命令（从每日构建 nightly release **匿名直链**下载，自动检测 OS 与 CPU 架构，装完自动执行 `cockpit-agent --version` 验证；重跑即升级）：
+
+Linux / macOS：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | bash
+```
+
+Windows（PowerShell 5.1+ / pwsh）：
+
+```powershell
+irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
+```
+
+可选注册开机自启服务（systemd / launchd / Windows 服务），连接信息随 `--with-service` 一并传入：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | \
+  bash -s -- --with-service --server wss://cockpit.example.com/ws
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1))) `
+  -WithService -ServerUrl "wss://cockpit.example.com/ws"
+```
+
+支持矩阵：Linux amd64 / arm64 / armv7、macOS amd64 / arm64、Windows amd64 / arm64（全部每日构建产物）；架构不认识时脚本会明确报错——OpenWrt（MIPS / 软浮点）走每日构建 ipk（`opkg install cockpit-agent_*.ipk`，见 [deployments/README.md](deployments/README.md)）。手动部署、服务参数与故障排查见 [deployments/README.md](deployments/README.md)。
+
 ## 关键配置
 
 默认配置路径优先级：

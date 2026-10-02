@@ -125,6 +125,10 @@ jobs:
   # agent 拆包后依赖闭包零 sqlite，全部目标在 ubuntu 交叉编译 CGO=0
   # 全静态（OpenWrt job 同理），不再占用 windows/macos 原生 runner；
   # 顺带补齐 linux-arm64 与 darwin-amd64。Windows 出 zip（平台惯例）。
+  # tags 口径同 OpenWrt job：grdp（RDP 桌面客户端）仅 64 位 int 平台可编译，
+  # 32 位（linux-arm/armv7）留空落 rdp stub，agent 上报无 rdp-client capability。
+  # install.sh / install.ps1 一键安装脚本按 `cockpit-agent-<goos>-<goarch>-nightly.*`
+  # 命名拉取，新增目标须同步该命名与脚本支持矩阵。
   build-agent:
     name: Build Agent (${{ matrix.target }})
     needs: check-activity
@@ -136,22 +140,38 @@ jobs:
           - target: linux-amd64
             goos: linux
             goarch: amd64
+            tags: "-tags rdp"
             ext: ""
           - target: linux-arm64
             goos: linux
             goarch: arm64
+            tags: "-tags rdp"
+            ext: ""
+          - target: linux-arm
+            goos: linux
+            goarch: arm
+            goarm: "7"
+            tags: ""
             ext: ""
           - target: windows-amd64
             goos: windows
             goarch: amd64
+            tags: "-tags rdp"
+            ext: ".exe"
+          - target: windows-arm64
+            goos: windows
+            goarch: arm64
+            tags: "-tags rdp"
             ext: ".exe"
           - target: darwin-amd64
             goos: darwin
             goarch: amd64
+            tags: "-tags rdp"
             ext: ""
           - target: darwin-arm64
             goos: darwin
             goarch: arm64
+            tags: "-tags rdp"
             ext: ""
 
     steps:
@@ -168,9 +188,10 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
         run: |
           mkdir -p dist
-          go build -tags rdp -trimpath -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o "dist/cockpit-agent${{ matrix.ext }}" ./cmd/cockpit-agent
+          go build ${{ matrix.tags }} -trimpath -ldflags="-s -w -X main.version=$(date +%Y%m%d)" -o "dist/cockpit-agent${{ matrix.ext }}" ./cmd/cockpit-agent
 
       - name: Package agent (tar.gz / zip)
         run: |
@@ -338,8 +359,8 @@ jobs:
           | \`cockpit-linux-amd64-nightly.tar.gz\` | Linux | x86_64 |
           | \`cockpit-windows-amd64-nightly.tar.gz\` | Windows | x86_64 |
           | \`cockpit-darwin-arm64-nightly.tar.gz\` | macOS | Apple Silicon |
-          | \`cockpit-agent-*-nightly.tar.gz\` | Agent (纯静态) | linux amd64/arm64 · darwin amd64/arm64 |
-          | \`cockpit-agent-windows-amd64-nightly.zip\` | Windows Agent (纯静态) | x86_64 |
+          | \`cockpit-agent-*-nightly.tar.gz\` | Agent (纯静态) | linux amd64/arm64/armv7 · darwin amd64/arm64 |
+          | \`cockpit-agent-windows-*-nightly.zip\` | Windows Agent (纯静态) | x86_64 · ARM64 |
           | \`cockpit-agent_*.ipk / cockpit-agent-openwrt-*.tar.gz\` | OpenWrt Agent | mipsel/mips/aarch64_generic/arm_cortex-a7/x86_64 |
           | \`cockpit-web-nightly.tar.gz\` | Web UI | cross-platform |" \
             dist/cockpit-linux-amd64-nightly.tar.gz \

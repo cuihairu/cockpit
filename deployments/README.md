@@ -1,6 +1,6 @@
 # Cockpit 部署文件
 
-此目录提供 Linux systemd 和 Windows Service 的安装脚本、服务单元和环境变量模板。
+此目录提供 Server 的安装脚本、服务单元和环境变量模板；Agent 的一键安装脚本在仓库根目录（[install.sh](../install.sh) / [install.ps1](../install.ps1)，自动检测 OS 与架构、从 nightly 匿名直链下载、可选注册服务，见下文 Agent 各节）。
 
 ## 当前约定
 
@@ -67,18 +67,27 @@ docker compose up -d --build
 
 ## Linux Agent
 
-快速安装：
+一键安装（[install.sh](../install.sh)，自动检测 OS/架构，装完执行 `cockpit-agent --version` 验证）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/deployments/install-agent.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | bash
 ```
 
-编辑 Agent 连接信息：
+注册开机自启服务并写入连接信息（systemd 系统级；免密 sudo 或 root 运行）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | \
+  sudo bash -s -- --with-service --server wss://cockpit.example.com/ws
+```
+
+脚本会创建 `/usr/local/bin/cockpit-agent`、`cockpit` 系统用户、`/etc/default/cockpit-agent` 与 `/etc/systemd/system/cockpit-agent.service`；重跑即升级（覆盖二进制并重启既有服务）。
+
+编辑 Agent 连接信息（注册后仍可手工改，需重启生效）：
 
 ```bash
 sudo vi /etc/default/cockpit-agent
 sudo systemctl daemon-reload
-sudo systemctl enable --now cockpit-agent
+sudo systemctl restart cockpit-agent
 ```
 
 示例：
@@ -89,6 +98,7 @@ REGION=home
 ZONE=datacenter
 AGENT_ID=server01
 SECRET=optional-agent-secret
+LABELS=env=prod
 ```
 
 常用命令：
@@ -126,16 +136,21 @@ Stop-Service -Name CockpitServer
 
 ## Windows Agent
 
-以管理员身份运行 PowerShell：
+一键安装（[install.ps1](../install.ps1)，装到当前用户目录并加入用户 PATH，无需管理员）：
 
 ```powershell
-.\install-agent.ps1 `
-  -ServerUrl "wss://cockpit.example.com/ws" `
-  -AgentId "server01" `
-  -Region "home" `
-  -Zone "datacenter" `
-  -Secret "optional-agent-secret"
+irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
 ```
+
+注册 Windows 服务（需管理员 PowerShell；服务参数固化启动配置，重跑带参会重新注册）：
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1))) `
+  -WithService -ServerUrl "wss://cockpit.example.com/ws" `
+  -AgentId "server01" -Region "home" -Zone "datacenter" -Secret "optional-agent-secret"
+```
+
+重跑即升级（覆盖二进制并重启既有服务）。
 
 管理命令：
 
