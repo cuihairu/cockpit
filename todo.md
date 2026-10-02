@@ -923,6 +923,20 @@
 
 验收：徽章行 8 枚保留（3 CI + 3 平台 + 2 架构）；`web/public/logo.svg` 存在；文档站四页链接与 operations/deploy-docker 链接齐全。
 
+## WS 上线故障修复：agent 连 wss 403（2026-10-02）
+
+实测故障：`cockpit-agent start -server ws://cockpit.cuihairu.site/ws` 报 bad handshake。三层根因逐层实锤（nginx access.log + journalctl + 源码对照）：
+
+1. [**(a) ws:// → 301**：nginx 80 端口 redirect，WS 握手不跟随重定向。修法=客户端一律 wss://（README/安装脚本示例统一改 wss，见「README/文档整改」节）。]
+2. [**(b) h2 → 400**：`listen 443 ssl http2` 下 curl 协商出 HTTP/2，Upgrade/Connection 属 connection-specific 头被 h2 剥掉 → 后端 gorilla 报 `'websocket' token not found in 'Upgrade' header` 400。gorilla 客户端只走 http/1.1（ALPN），实际不受影响；线上 `/ws` location 的 `proxy_http_version 1.1 + Upgrade/Connection` 三件套经查**已在**（certbot 改写过 443 块但 /ws 完好），nginx 侧无需改动。]
+3. [**(c) http/1.1 → 403（真根因，server bug）**：`isOriginAllowed` 在 `ALLOWED_ORIGINS` 非空时把空 Origin 一律拒之门外，而 cockpit-agent 是非浏览器客户端、不发 Origin 头 → 生产白名单必配的环境里 agent 握手必 403（journalctl 铁证：`request origin not allowed by Upgrader.CheckOrigin`）。修复：`internal/server/websocket.go` 空 Origin 放行（浏览器 WS 必带 Origin，白名单防跨站语义不变）；`cov_ws_flow_test.go` 对应断言翻转。]
+
+**Why**: Origin 白名单是防浏览器侧跨站 WS 的，误伤非浏览器客户端；agent 403 后 gorilla 客户端只报笼统的 bad handshake，三层（301/400/403）混在同一个表象里，必须分层取证。
+
+**How to apply**: WS 类线上故障先 `journalctl -u cockpit` 看 upgrade 失败原句 + nginx access.log 看协议版本与状态码，再对照 upgrader/CheckOrigin/nginx location 三层，别被首层表象（301）带偏。
+
+部署与走查：`CGO_ENABLED=1` 构建（同 deploy-dev.yml 参数）→ scp 至 dev（ali/106.14.216.177），备份 `cockpit.bak.20261002134042` 后替换 `/opt/cockpit/cockpit` 并 restart；本机跑用户同款命令 `cockpit-agent start -server wss://cockpit.cuihairu.site/ws`：客户端 `Registered as agent: agent-coding-...`、服务端同秒 `Agent registered: ...`，双向确认。本地先复现验证（临时 server 设 `ALLOWED_ORIGINS` 生产态 + 无 Origin agent → 注册成功）。
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
