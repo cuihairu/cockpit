@@ -74,7 +74,14 @@ const acMock = vi.hoisted(() => ({
 }))
 
 const createRemoteTicket = vi.hoisted(() => vi.fn())
-vi.mock('@/services/remote', () => ({ createRemoteTicket }))
+const vaultMocks = vi.hoisted(() => ({
+  listVaultCredentials: vi.fn().mockResolvedValue([]),
+  saveVaultCredential: vi.fn().mockResolvedValue(undefined),
+  deleteVaultCredential: vi.fn().mockResolvedValue(undefined),
+  verifyVault: vi.fn().mockResolvedValue({ token: 'vt-1', expiresAt: '' }),
+  hasVaultToken: vi.fn(() => false),
+}))
+vi.mock('@/services/remote', () => ({ createRemoteTicket, ...vaultMocks }))
 
 vi.mock('@/hooks/useConnectionTimeout', () => ({
   useConnectionTimeout: ({ onTimeout }: { onTimeout: () => void }) => ({
@@ -602,6 +609,68 @@ describe('GuacamoleModal', () => {
     expect(screen.getByText('分辨率')).toBeInTheDocument()
     // 桌面协议不接剪贴板反向（维持既有仅正向行为）
     expect(screen.queryByRole('button', { name: '粘贴到远程' })).toBeNull()
+  })
+
+  // ==== 凭据保险箱 ====
+
+  const savedCred = {
+    id: 'c1', agentId: 'ag1', host: '10.0.0.9', port: 22, protocol: 'ssh' as const,
+    username: 'cui', hasPassword: true, hasPrivateKey: false, updatedAt: '',
+  }
+
+  it('保险箱有已存凭据：默认一键连接态（不出手输表单），点连接走 use_saved 零凭据', async () => {
+    vaultMocks.listVaultCredentials.mockResolvedValueOnce([savedCred])
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    const btn = await screen.findByRole('button', { name: /使用已保存凭据连接（cui）/ })
+    // saved 态不渲染手输表单
+    expect(screen.queryByPlaceholderText('root')).toBeNull()
+    fireEvent.click(btn)
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+    // 零凭据 + useSaved：服务端从保险箱注入
+    expect(createRemoteTicket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'ag1', host: '10.0.0.9', port: 22, protocol: 'ssh',
+        username: undefined, password: undefined, privateKey: undefined, useSaved: true,
+      }),
+    )
+  })
+
+  it('已存凭据态可切「使用新凭据」回到手输表单', async () => {
+    vaultMocks.listVaultCredentials.mockResolvedValueOnce([savedCred])
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    await screen.findByRole('button', { name: /使用已保存凭据连接/ })
+    fireEvent.click(screen.getByRole('button', { name: '使用新凭据' }))
+    expect(screen.getByPlaceholderText('root')).toBeInTheDocument()
+  })
+
+  it('无已存凭据：手输表单照常 + 保存勾选项', () => {
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    expect(screen.getByPlaceholderText('root')).toBeInTheDocument()
+    expect(screen.getByText(/保存凭据到服务器/)).toBeInTheDocument()
+  })
+
+  it('勾选保存提交：先过二次验证再保存并连接（已有 vault token 时直连）', async () => {
+    vaultMocks.hasVaultToken.mockReturnValueOnce(true)
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.change(screen.getByPlaceholderText('(可选) 口令认证'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByText(/保存凭据到服务器/))
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+    expect(vaultMocks.saveVaultCredential).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'ag1', host: '10.0.0.9', port: 22, username: 'ops', password: 'pw' }),
+    )
+  })
+
+  it('勾选保存但未过二次验证：先弹验证框，不取票据', async () => {
+    vaultMocks.hasVaultToken.mockReturnValueOnce(false)
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.change(screen.getByPlaceholderText('(可选) 口令认证'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByText(/保存凭据到服务器/))
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    expect(await screen.findByText('验证以保存凭据')).toBeInTheDocument()
+    expect(createRemoteTicket).not.toHaveBeenCalled()
   })
 })
 

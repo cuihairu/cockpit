@@ -390,6 +390,7 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 		Domain     string `json:"domain,omitempty"`
 		Width      int    `json:"width,omitempty"`
 		Height     int    `json:"height,omitempty"`
+		UseSaved   bool   `json:"use_saved,omitempty"` // 用保险箱已存凭据填充缺失项（egress 校验照旧先行）
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -463,6 +464,46 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 保险箱注入（use_saved）：egress 校验已先行通过，凭据只填充请求里
+	// 缺失的字段——现场显式传入的值优先。解密结果不进日志/审计。
+	authSource := ""
+	if req.UseSaved {
+		cred, err := s.db.GetRemoteCredential(userInfo.UserID, req.AgentID, req.Host, req.Protocol, req.Port)
+		if err != nil {
+			s.auditRemoteFailure(
+				userInfo.UserID,
+				userInfo.Username,
+				clientIP,
+				userAgent,
+				&audit.RemoteSessionDetails{
+					Protocol: req.Protocol,
+					AgentID:  req.AgentID,
+					Host:     req.Host,
+					Port:     req.Port,
+					Egress:   egressMatch.summary(),
+					Reason:   "no saved credential for this target",
+				},
+			)
+			http.Error(w, "No saved credential for this target", http.StatusBadRequest)
+			return
+		}
+		if req.Username == "" {
+			req.Username = cred.Username
+		}
+		if req.Password == "" {
+			req.Password = cred.Password
+		}
+		if req.PrivateKey == "" {
+			req.PrivateKey = cred.PrivateKey
+		}
+		if req.Domain == "" {
+			req.Domain = cred.Domain
+		}
+		authSource = "saved"
+	} else if req.Password != "" || req.PrivateKey != "" {
+		authSource = "user"
+	}
+
 	// 构建票据参数
 	params := map[string]string{
 		"agent_id": req.AgentID,
@@ -518,12 +559,13 @@ func (s *Server) handleTicketCreate(w http.ResponseWriter, r *http.Request) {
 		clientIP,
 		userAgent,
 		&audit.RemoteSessionDetails{
-			Protocol: req.Protocol,
-			AgentID:  req.AgentID,
-			Host:     req.Host,
-			Port:     req.Port,
-			Session:  ticket.ID,
-			Egress:   egressMatch.summary(),
+			Protocol:   req.Protocol,
+			AgentID:    req.AgentID,
+			Host:       req.Host,
+			Port:       req.Port,
+			Session:    ticket.ID,
+			Egress:     egressMatch.summary(),
+			AuthSource: authSource,
 		},
 	)
 

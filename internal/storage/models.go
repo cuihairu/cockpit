@@ -257,3 +257,25 @@ type BackupRun struct {
 	StartedAt    int64  `json:"startedAt"`
 	FinishedAt   int64  `json:"finishedAt"` // 0 = 尚未结束
 }
+
+// RemoteCredential 远控凭据保险箱：每个登录用户对每个 (agent, host, port,
+// protocol) 目标至多一组凭据（阿里云 Workbench 密码箱模式）。Password/
+// PrivateKey 仅以 AES-GCM 密文落库（storage.Encrypt，密钥 TOTP_ENCRYPTION_KEY），
+// 列表 API 只出元数据，明文仅在连接注入时解密使用（handleTicketCreate 的
+// use_saved 路径），从不回传浏览器。
+type RemoteCredential struct {
+	// 五列联合唯一：同用户同目标只有一组，重复保存视为更新
+	ID       string `gorm:"primaryKey" json:"id"`
+	UserID   string `gorm:"uniqueIndex:idx_remote_cred_target" json:"userId"`
+	AgentID  string `gorm:"uniqueIndex:idx_remote_cred_target" json:"agentId"`
+	Host     string `gorm:"uniqueIndex:idx_remote_cred_target" json:"host"`
+	Port     int    `gorm:"uniqueIndex:idx_remote_cred_target" json:"port"`
+	Protocol string `gorm:"size:16;uniqueIndex:idx_remote_cred_target" json:"protocol"` // ssh / rdp / vnc
+
+	Username      string    `json:"username"`
+	Domain        string    `json:"domain,omitempty"`
+	PasswordEnc   string    `json:"-"` // 密文，json 永不序列化
+	PrivateKeyEnc string    `json:"-"` // 密文，json 永不序列化
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}

@@ -26,6 +26,9 @@ const (
 	// ActionRemoteStart / ActionRemoteEnd 远控会话开始/结束
 	ActionRemoteStart = "remote_start"
 	ActionRemoteEnd   = "remote_end"
+	// ActionVaultVerify 远控凭据保险箱二次验证（阿里云密码箱模式：管理凭据
+	// 前重验身份，签发短期多次使用的 vault token）
+	ActionVaultVerify = "vault_verify"
 	// Compose Stack 部署（见 docs/guide/stack-deploy-design.md）
 	ActionStackCreate  = "stack_create"
 	ActionStackUpdate  = "stack_update"
@@ -64,6 +67,9 @@ const ResourceBackup = "backup"
 
 // ResourceRemoteSession 远控会话资源类型
 const ResourceRemoteSession = "remote_session"
+
+// ResourceRemoteCredential 远控凭据保险箱资源类型（凭据的保存/删除/列表）
+const ResourceRemoteCredential = "remote_credential"
 
 // ResourceProbe 拨测配置资源类型
 const ResourceProbe = "probe"
@@ -300,14 +306,15 @@ func (l *Logger) LogTOTPFailed(userID, ip, userAgent string) error {
 //
 // 敏感字段（password/private key）由调用方保证不写入。
 type RemoteSessionDetails struct {
-	Protocol string `json:"protocol"`
-	AgentID  string `json:"agent_id"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Session  string `json:"session_id"`
-	Egress   string `json:"egress,omitempty"`   // 命中的出口策略摘要
-	Duration string `json:"duration,omitempty"` // 仅 end 事件
-	Reason   string `json:"reason,omitempty"`   // 仅 end 事件
+	Protocol   string `json:"protocol"`
+	AgentID    string `json:"agent_id"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Session    string `json:"session_id"`
+	Egress     string `json:"egress,omitempty"`    // 命中的出口策略摘要
+	Duration   string `json:"duration,omitempty"`  // 仅 end 事件
+	Reason     string `json:"reason,omitempty"`    // 仅 end 事件
+	AuthSource string `json:"auth_source,omitempty"` // 凭据来源：saved（保险箱）/ user（现场输入）；空 = 无凭据（如 VNC 匿名、agent 默认密钥）
 }
 
 // LogRemoteSession 记录远控会话审计日志

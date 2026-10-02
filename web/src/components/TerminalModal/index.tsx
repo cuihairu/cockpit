@@ -1,9 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, Button, Space, Form, Input, Alert } from 'antd';
+import { Modal, Button, Space, Form, Input, Checkbox, Alert, message } from 'antd';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { createRemoteTicket, type RemoteProtocol } from '@/services/remote';
+import {
+  createRemoteTicket,
+  listVaultCredentials,
+  saveVaultCredential,
+  deleteVaultCredential,
+  hasVaultToken,
+  type RemoteProtocol,
+  type VaultCredentialMeta,
+} from '@/services/remote';
+import VaultVerifyModal from '../VaultVerifyModal';
 import '@xterm/xterm/css/xterm.css';
 
 const CONNECTION_TIMEOUT = 30000; // 30秒超时
@@ -52,6 +61,13 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   const [keyAuthUsername, setKeyAuthUsername] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [credentials, setCredentials] = useState({ username: username || '', password: password || '' });
+  // 保险箱：探测当前 SSH 目标的已存凭据（有 → 一键连接）；保存/删除需二次验证
+  const [savedCred, setSavedCred] = useState<VaultCredentialMeta | null>(null);
+  const [credMode, setCredMode] = useState<'saved' | 'manual'>('manual');
+  const [saveCredChecked, setSaveCredChecked] = useState(false);
+  const [vaultVerifyVisible, setVaultVerifyVisible] = useState(false);
+  const pendingVaultAction = useRef<'save-connect' | 'delete' | null>(null);
+  const useSavedRef = useRef(false);
 
   // 用 ref 保存连接参数，避免 useEffect 依赖变化导致重建
   const paramsRef = useRef({ agentId, host, port, protocol, username, password });
@@ -66,14 +82,19 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     let ticket: string;
 
     try {
-      // 空凭据不入参：保持无认证协议（telnet 等）的调用形状不变
+      // 空凭据不入参：保持无认证协议（telnet 等）的调用形状不变；
+      // useSaved 时零凭据——服务端从保险箱注入
       const result = await createRemoteTicket({
         agentId: params.agentId,
         host: params.host,
         port: params.port,
         protocol: params.protocol,
-        ...(params.username ? { username: params.username } : {}),
-        ...(params.password ? { password: params.password } : {}),
+        ...(useSavedRef.current
+          ? { useSaved: true }
+          : {
+              ...(params.username ? { username: params.username } : {}),
+              ...(params.password ? { password: params.password } : {}),
+            }),
       });
       ticket = result.ticket;
     } catch {
@@ -225,12 +246,27 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       terminalInstanceRef.current.reset();
       setConnected(false);
     }
-    // 重新打开时重置认证状态（SSH 每次都需输入凭据）
+    // 重新打开时重置认证状态（SSH 每次都需输入凭据），并探测保险箱
     if (visible && protocol === 'ssh' && !username) {
       setAuthPending(true);
       setKeyAuthUsername(null);
+      setSaveCredChecked(false);
+      useSavedRef.current = false;
+      setSavedCred(null);
+      setCredMode('manual');
+      listVaultCredentials()
+        .then((list) => {
+          const hit = list.find(
+            (c) => c.agentId === agentId && c.host === host && c.port === port && c.protocol === 'ssh',
+          );
+          if (hit) {
+            setSavedCred(hit);
+            setCredMode('saved');
+          }
+        })
+        .catch(() => {/* 保险箱不可用不影响手输连接 */});
     }
-  }, [visible, protocol, username]);
+  }, [visible, protocol, username, agentId, host, port]);
 
   const handleReconnect = () => {
     if (terminalInstanceRef.current) {
@@ -240,17 +276,86 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     }
   };
 
+  // ==== 保险箱动作 ====
+
+  const proceedWithAuth = () => {
+    // 密钥认证时记录用户名（密码留空）
+    if (!passwordSupported && keySupported) {
+      setKeyAuthUsername(credentials.username);
+    }
+    setAuthPending(false);
+  };
+
+  // 手动表单提交且勾了保存：先落保险箱（需二次验证），失败不阻断连接
+  const saveAndConnect = async () => {
+    try {
+      await saveVaultCredential({
+        agentId,
+        host,
+        port,
+        protocol: 'ssh',
+        username: credentials.username,
+        password: credentials.password,
+      });
+    } catch {
+      message.warning('凭据保存失败（不影响本次连接）');
+    }
+    proceedWithAuth();
+  };
+
   const handleAuthSubmit = () => {
     if (!credentials.username.trim()) {
       setAuthError('请输入用户名');
       return;
     }
     setAuthError(null);
-    // 密钥认证时记录用户名（密码留空）
-    if (!passwordSupported && keySupported) {
-      setKeyAuthUsername(credentials.username);
+    if (saveCredChecked && credentials.password) {
+      if (!hasVaultToken()) {
+        pendingVaultAction.current = 'save-connect';
+        setVaultVerifyVisible(true);
+        return;
+      }
+      void saveAndConnect();
+      return;
     }
+    proceedWithAuth();
+  };
+
+  const connectWithSaved = () => {
+    useSavedRef.current = true;
     setAuthPending(false);
+  };
+
+  const doDeleteSaved = async () => {
+    if (!savedCred) return;
+    try {
+      await deleteVaultCredential(savedCred.id);
+      message.success('已删除保存的凭据');
+      setSavedCred(null);
+      setCredMode('manual');
+    } catch {
+      message.error('删除失败，请重试');
+    }
+  };
+
+  const handleDeleteSavedClick = () => {
+    if (!hasVaultToken()) {
+      pendingVaultAction.current = 'delete';
+      setVaultVerifyVisible(true);
+      return;
+    }
+    void doDeleteSaved();
+  };
+
+  const handleVaultVerified = () => {
+    setVaultVerifyVisible(false);
+    const action = pendingVaultAction.current;
+    pendingVaultAction.current = null;
+    if (action === 'save-connect') {
+      void saveAndConnect();
+    } else if (action === 'delete') {
+      void doDeleteSaved();
+    }
   };
 
   return (
@@ -301,6 +406,25 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
             </Space>
           </Form>
         </div>
+      ) : authPending && savedCred && credMode === 'saved' ? (
+        <div style={{ padding: 24, background: '#1e1e1e', color: '#d4d4d4' }}>
+          <Alert
+            type="success"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={`已保存凭据：${savedCred.username}`}
+            description="连接时由服务端自动注入，浏览器不经手明文。"
+          />
+          <Space>
+            <Button danger onClick={handleDeleteSavedClick}>
+              删除已存
+            </Button>
+            <Button onClick={() => setCredMode('manual')}>手动输入</Button>
+            <Button type="primary" onClick={connectWithSaved}>
+              使用已保存凭据连接（{savedCred.username}）
+            </Button>
+          </Space>
+        </div>
       ) : authPending ? (
         <div style={{ padding: 24, background: '#1e1e1e', color: '#d4d4d4' }}>
           <Alert
@@ -325,6 +449,14 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
                 onChange={(e) => setCredentials((c) => ({ ...c, password: e.target.value }))}
                 placeholder="登录口令"
               />
+            </Form.Item>
+            <Form.Item style={{ marginBottom: 12 }}>
+              <Checkbox
+                checked={saveCredChecked}
+                onChange={(e) => setSaveCredChecked(e.target.checked)}
+              >
+                保存凭据到服务器（下次一键连接；保存前需再次验证身份）
+              </Checkbox>
             </Form.Item>
             {authError && <Alert type="error" showIcon message={authError} style={{ marginBottom: 16 }} />}
             <Space>
@@ -366,6 +498,12 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
           </div>
         </div>
       )}
+      <VaultVerifyModal
+        visible={vaultVerifyVisible}
+        title={pendingVaultAction.current === 'delete' ? '验证以删除已存凭据' : '验证以保存凭据'}
+        onVerified={handleVaultVerified}
+        onCancel={() => setVaultVerifyVisible(false)}
+      />
     </Modal>
   );
 };

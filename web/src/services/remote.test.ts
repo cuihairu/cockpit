@@ -116,3 +116,64 @@ describe('remote 拦截器', () => {
     await expect(onResErr(new Error('net'))).rejects.toThrow('net')
   })
 })
+
+describe('remote 凭据保险箱', () => {
+  beforeEach(() => {
+    for (const m of [mockInstance.get, mockInstance.post, mockInstance.put, mockInstance.delete]) {
+      m.mockClear()
+      m.mockResolvedValue({})
+    }
+  })
+
+  it('verifyVault 记录 token；save/delete 带 X-Vault-Token；list 映射元数据', async () => {
+    const { verifyVault, hasVaultToken, saveVaultCredential, deleteVaultCredential, listVaultCredentials } =
+      await import('./remote')
+
+    // vi.resetModules（拦截器测试）后模块态已重置——先确认为空
+    expect(hasVaultToken()).toBe(false)
+
+    mockInstance.post.mockResolvedValue({ token: 'vt-9', expires_at: '2026-01-01T00:00:00Z' })
+    const r = await verifyVault({ password: 'pw' })
+    expect(r).toEqual({ token: 'vt-9', expiresAt: '2026-01-01T00:00:00Z' })
+    expect(mockInstance.post).toHaveBeenCalledWith('/vault/verify', { password: 'pw', totp_code: undefined })
+    expect(hasVaultToken()).toBe(true)
+
+    await saveVaultCredential({ agentId: 'ag', host: 'h', port: 22, protocol: 'ssh', username: 'u', password: 'p' })
+    expect(mockInstance.put).toHaveBeenCalledWith(
+      '/vault/credentials',
+      {
+        agent_id: 'ag', host: 'h', port: 22, protocol: 'ssh',
+        username: 'u', password: 'p', private_key: undefined, domain: undefined,
+      },
+      { headers: { 'X-Vault-Token': 'vt-9' } },
+    )
+
+    mockInstance.get.mockResolvedValue({ data: [{ id: 'c1' }] })
+    await expect(listVaultCredentials()).resolves.toEqual([{ id: 'c1' }])
+
+    await deleteVaultCredential('c1')
+    expect(mockInstance.delete).toHaveBeenCalledWith('/vault/credentials/c1', {
+      headers: { 'X-Vault-Token': 'vt-9' },
+    })
+  })
+
+  it('createRemoteTicket useSaved → use_saved: true', async () => {
+    const { createRemoteTicket: create } = await import('./remote')
+    mockInstance.post.mockResolvedValue({ ticket: 't2', expires_at: '' })
+    await create({ agentId: 'ag', host: 'h', port: 22, protocol: 'ssh', useSaved: true })
+    expect(mockInstance.post).toHaveBeenCalledWith('/tickets', expect.objectContaining({ use_saved: true }))
+  })
+
+  it('vault 401 不触发登录跳转（只代表二次验证缺失）', async () => {
+    const { response } = await captureInterceptors()
+    const [, onResErr] = response.use.mock.calls[0] as [
+      unknown,
+      (e: unknown) => Promise<never>,
+    ]
+    locationStub.href = ''
+    await expect(
+      onResErr({ response: { status: 401 }, config: { url: '/vault/credentials' } }),
+    ).rejects.toMatchObject({ response: { status: 401 } })
+    expect(locationStub.href).toBe('')
+  })
+})

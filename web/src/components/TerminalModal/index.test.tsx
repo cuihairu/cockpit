@@ -22,7 +22,14 @@ vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn(function () { return fitMoc
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: vi.fn(function () { return {} }) }))
 
 const createRemoteTicket = vi.hoisted(() => vi.fn())
-vi.mock('@/services/remote', () => ({ createRemoteTicket }))
+const vaultMocks = vi.hoisted(() => ({
+  listVaultCredentials: vi.fn().mockResolvedValue([]),
+  saveVaultCredential: vi.fn().mockResolvedValue(undefined),
+  deleteVaultCredential: vi.fn().mockResolvedValue(undefined),
+  verifyVault: vi.fn().mockResolvedValue({ token: 'vt-1', expiresAt: '' }),
+  hasVaultToken: vi.fn(() => false),
+}))
+vi.mock('@/services/remote', () => ({ createRemoteTicket, ...vaultMocks }))
 
 class FakeWebSocket {
   static CONNECTING = 0
@@ -77,6 +84,44 @@ describe('TerminalModal', () => {
     username: 'testuser',
     password: 'testpass',
   }
+
+  // ==== 凭据保险箱 ====
+
+  const savedCred = {
+    id: 'c1', agentId: 'ag1', host: '10.0.0.1', port: 22, protocol: 'ssh' as const,
+    username: 'ops', hasPassword: true, hasPrivateKey: false, updatedAt: '',
+  }
+
+  it('保险箱有已存凭据：出「使用已保存凭据连接」面板，点击走 use_saved 零凭据', async () => {
+    vaultMocks.listVaultCredentials.mockResolvedValueOnce([savedCred])
+    // 不传 username → 走凭据表单/保险箱分支
+    const { username: _u, password: _p, ...noCredProps } = props
+    render(<TerminalModal {...noCredProps} />)
+    const btn = await screen.findByRole('button', { name: /使用已保存凭据连接（ops）/ })
+    fireEvent.click(btn)
+    await waitFor(() =>
+      expect(createRemoteTicket).toHaveBeenCalledWith(
+        expect.objectContaining({ agentId: 'ag1', host: '10.0.0.1', port: 22, protocol: 'ssh', useSaved: true }),
+      ),
+    )
+  })
+
+  it('已存凭据态可切「手动输入」，勾选保存提交时先落保险箱再连接', async () => {
+    vaultMocks.listVaultCredentials.mockResolvedValueOnce([savedCred])
+    vaultMocks.hasVaultToken.mockReturnValue(true)
+    const { username: _u2, password: _p2, ...noCredProps2 } = props
+    render(<TerminalModal {...noCredProps2} />)
+    await screen.findByRole('button', { name: /使用已保存凭据连接/ })
+    fireEvent.click(screen.getByRole('button', { name: '手动输入' }))
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.change(screen.getByPlaceholderText('登录口令'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByText(/保存凭据到服务器/))
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(vaultMocks.saveVaultCredential).toHaveBeenCalled())
+    expect(vaultMocks.saveVaultCredential).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'ag1', host: '10.0.0.1', port: 22, username: 'ops', password: 'pw' }),
+    )
+  })
 
   it('打开即建终端、输出欢迎语并凭票据连 WS', async () => {
     render(<TerminalModal {...props} />)

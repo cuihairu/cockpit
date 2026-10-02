@@ -264,6 +264,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 注册远程连接 API
 	s.registerRemoteAPI(mux)
 
+	// 注册远控凭据保险箱 API（见 api_vault.go）
+	s.registerVaultAPI(mux)
+
 	// 注册桌面连接 API
 	s.registerDesktopAPI(mux)
 

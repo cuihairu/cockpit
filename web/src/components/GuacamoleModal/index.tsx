@@ -1,10 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Modal, Form, Input, message, Alert, Button, Space } from 'antd'
+import { Modal, Form, Input, Checkbox, message, Alert, Button, Space } from 'antd'
 import { SoundOutlined, AudioMutedOutlined } from '@ant-design/icons'
 import RemoteToolbar, { type ConnectionState } from '../RemoteToolbar'
 import Guacamole from 'guacamole-common-js'
 import { useConnectionTimeout } from '@/hooks/useConnectionTimeout'
-import { createRemoteTicket, type RemoteProtocol } from '@/services/remote'
+import {
+  createRemoteTicket,
+  listVaultCredentials,
+  saveVaultCredential,
+  deleteVaultCredential,
+  hasVaultToken,
+  type RemoteProtocol,
+  type VaultCredentialMeta,
+} from '@/services/remote'
+import VaultVerifyModal from '../VaultVerifyModal'
 import { getRecentDesktopConfig, saveDesktopConfig } from '@/services/desktop'
 
 // Guacamole 桌面 Modal（docs/remote-desktop-guacamole-design.md 阶段1 第 3 块）
@@ -40,6 +49,14 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
   title,
 }) => {
   const [showCredentials, setShowCredentials] = useState(true)
+  // 保险箱状态：savedCred = 当前目标的已存凭据（null = 没存过）；
+  // credMode = saved（一键连接）/ manual（展开表单）；
+  // pendingVault = 二次验证完成后要续做的动作（保存并连接 / 删除已存）
+  const [savedCred, setSavedCred] = useState<VaultCredentialMeta | null>(null)
+  const [credMode, setCredMode] = useState<'saved' | 'manual'>('manual')
+  const [vaultVerifyVisible, setVaultVerifyVisible] = useState(false)
+  const pendingVaultAction = useRef<'save-connect' | 'delete' | null>(null)
+  const pendingFormValues = useRef<Record<string, string> | null>(null)
   const [state, setState] = useState<GuacState>('disconnected')
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [resolution, setResolution] = useState('1280x800')
@@ -77,7 +94,8 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
     enabled: state === 'connecting',
   })
 
-  // 打开时自动填充上次使用的凭据（不含密码，同 DesktopModal）
+  // 打开时自动填充上次使用的凭据（不含密码，同 DesktopModal），并探测
+  // 保险箱里有没有这组目标的已存凭据（有 → 默认一键连接态）
   useEffect(() => {
     if (visible) {
       const saved = getRecentDesktopConfig(agentId, host, port)
@@ -87,22 +105,40 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
           domain: saved.domain,
         })
       }
+      setSavedCred(null)
+      setCredMode('manual')
+      listVaultCredentials()
+        .then((list) => {
+          const hit = list.find(
+            (c) => c.agentId === agentId && c.host === host && c.port === port && c.protocol === protocol,
+          )
+          if (hit) {
+            setSavedCred(hit)
+            setCredMode('saved')
+          }
+        })
+        .catch(() => {/* 保险箱不可用不影响手输连接 */})
     }
-  }, [visible, agentId, host, port, form])
+  }, [visible, agentId, host, port, protocol, form])
 
   const connect = useCallback(
-    async (values: {
-      username?: string
-      password?: string
-      domain?: string
-      privateKey?: string
-    }) => {
+    async (
+      values: {
+        username?: string
+        password?: string
+        domain?: string
+        privateKey?: string
+        useSaved?: boolean
+      },
+      opts?: { saveToVault?: boolean },
+    ) => {
       setError(null)
       setState('connecting')
       setShowCredentials(false)
       startTimeout()
       try {
-        // 凭据只进 ticket（服务端随后放进 guacd 的 connect 指令），不进 URL
+        // 凭据只进 ticket（服务端随后放进 guacd 的 connect 指令），不进 URL；
+        // useSaved 时浏览器零凭据——服务端从保险箱注入
         const { ticket } = await createRemoteTicket({
           agentId,
           host,
@@ -114,7 +150,31 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
           privateKey: values.privateKey,
           width: Number(resolution.split('x')[0]) || 1280,
           height: Number(resolution.split('x')[1]) || 800,
+          useSaved: values.useSaved,
         })
+        // 连接发起成功后按需入保险箱（保存失败不阻断连接，只提示）
+        if (opts?.saveToVault) {
+          try {
+            await saveVaultCredential({
+              agentId,
+              host,
+              port,
+              protocol: protocol as RemoteProtocol,
+              username: values.username,
+              password: values.password,
+              privateKey: values.privateKey,
+              domain: values.domain,
+            })
+            const list = await listVaultCredentials()
+            const hit = list.find(
+              (c) => c.agentId === agentId && c.host === host && c.port === port && c.protocol === protocol,
+            )
+            setSavedCred(hit ?? null)
+            setCredMode(hit ? 'saved' : 'manual')
+          } catch {
+            message.warning('连接已发起，但凭据保存到保险箱失败')
+          }
+        }
         saveDesktopConfig({
           name: `${host}:${port}`,
           agentId,
@@ -199,6 +259,79 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
     setIsFullscreen(false)
     onClose()
   }, [cleanup, onClose])
+
+  // ==== 保险箱动作 ====
+
+  // 一键连接：use_saved，浏览器零凭据
+  const connectWithSaved = useCallback(() => {
+    void connect({ useSaved: true })
+  }, [connect])
+
+  const doDeleteSaved = useCallback(async () => {
+    if (!savedCred) return
+    try {
+      await deleteVaultCredential(savedCred.id)
+      message.success('已删除保存的凭据')
+      setSavedCred(null)
+      setCredMode('manual')
+    } catch {
+      message.error('删除失败，请重试')
+    }
+  }, [savedCred])
+
+  // 表单提交：勾了「保存」但还没过二次验证 → 先弹验证，续做动作暂存
+  const handleFormFinish = useCallback(
+    (values: {
+      saveCred?: boolean
+      username?: string
+      password?: string
+      domain?: string
+      privateKey?: string
+    }) => {
+      const run = (saveCred: boolean) => {
+        const { saveCred: _omit, ...credValues } = values
+        void connect(credValues, { saveToVault: saveCred })
+      }
+      if (values.saveCred && !hasVaultToken()) {
+        pendingVaultAction.current = 'save-connect'
+        pendingFormValues.current = values as unknown as Record<string, string>
+        setVaultVerifyVisible(true)
+        return
+      }
+      run(!!values.saveCred)
+    },
+    [connect],
+  )
+
+  // 二次验证通过后续做暂存动作
+  const handleVaultVerified = useCallback(() => {
+    setVaultVerifyVisible(false)
+    const action = pendingVaultAction.current
+    const values = pendingFormValues.current
+    pendingVaultAction.current = null
+    pendingFormValues.current = null
+    if (action === 'save-connect' && values) {
+      const { saveCred, ...credValues } = values as unknown as {
+        saveCred?: boolean
+        username?: string
+        password?: string
+        domain?: string
+        privateKey?: string
+      }
+      void connect(credValues, { saveToVault: saveCred === true })
+    } else if (action === 'delete') {
+      void doDeleteSaved()
+    }
+  }, [connect, doDeleteSaved])
+
+  const handleDeleteSavedClick = useCallback(() => {
+    if (!hasVaultToken()) {
+      pendingVaultAction.current = 'delete'
+      setVaultVerifyVisible(true)
+      return
+    }
+    void doDeleteSaved()
+  }, [doDeleteSaved])
 
   const handleToggleFullscreen = useCallback(() => {
     if (isFullscreen) {
@@ -339,12 +472,33 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
           showIcon
           style={{ marginBottom: 16 }}
           message="经 Guacamole 网关连接"
-          description="口令仅经加密通道转发到 guacd 的 connect 指令，不落盘、不进日志。"
+          description="口令仅经加密通道转发到 guacd 的 connect 指令，不落盘、不进日志；勾选保存后以 AES-GCM 加密存于服务端保险箱。"
         />
+        {savedCred && credMode === 'saved' && (
+          <div style={{ marginBottom: 16 }}>
+            <Alert
+              type="success"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={`已保存凭据：${savedCred.username}`}
+              description="连接时由服务端自动注入，浏览器不经手明文。"
+            />
+            <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button danger onClick={handleDeleteSavedClick}>
+                删除已存
+              </Button>
+              <Button onClick={() => setCredMode('manual')}>使用新凭据</Button>
+              <Button type="primary" onClick={connectWithSaved}>
+                使用已保存凭据连接（{savedCred.username}）
+              </Button>
+            </Space>
+          </div>
+        )}
+        {(!savedCred || credMode === 'manual') && (
         <Form
           form={form}
           layout="vertical"
-          onFinish={(values) => void connect(values)}
+          onFinish={handleFormFinish}
         >
           {protocol === 'rdp' ? (
             <>
@@ -394,6 +548,9 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
           {error && (
             <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />
           )}
+          <Form.Item name="saveCred" valuePropName="checked" style={{ marginBottom: 12 }}>
+            <Checkbox>保存凭据到服务器（下次一键连接；保存前需再次验证身份）</Checkbox>
+          </Form.Item>
           <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button onClick={handleClose}>取消</Button>
             <Button type="primary" htmlType="submit">
@@ -401,6 +558,13 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
             </Button>
           </Space>
         </Form>
+        )}
+        <VaultVerifyModal
+          visible={vaultVerifyVisible}
+          title={pendingVaultAction.current === 'delete' ? '验证以删除已存凭据' : '验证以保存凭据'}
+          onVerified={handleVaultVerified}
+          onCancel={() => setVaultVerifyVisible(false)}
+        />
       </Modal>
     )
   }

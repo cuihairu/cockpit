@@ -120,6 +120,7 @@ func (d *DB) migrate() error {
 		&AcmeCert{},
 		&DomainBinding{},
 		&Role{},
+		&RemoteCredential{},
 	); err != nil {
 		return err
 	}
