@@ -91,30 +91,33 @@ export const computeColumns: ColumnsType<ComputeInstance> = [
     render: (_, record) => (
       <Space>
         {record.type === 'vm' || record.type === 'container' ? (
-          <Tooltip title={record.status === 'running' ? '停止' : '启动'}>
+          <Tooltip title="暂未实现">
             <Button
               type="text"
               icon={record.status === 'running' ? <PoweroffOutlined /> : <PlayCircleOutlined />}
               size="small"
+              disabled
             />
           </Tooltip>
         ) : (
-          <Tooltip title="终端">
-            <Button type="text" icon={<CloudServerOutlined />} size="small" />
+          <Tooltip title="暂未实现">
+            <Button type="text" icon={<CloudServerOutlined />} size="small" disabled />
           </Tooltip>
         )}
-        <Button type="text" icon={<EditOutlined />} size="small" />
-        <Button type="text" danger icon={<DeleteOutlined />} size="small" />
       </Space>
     ),
   },
 ]
 
-// 通用资源行操作（编辑/删除）
+// 通用资源行操作（暂未实现，禁用）
 const commonActions = (
   <Space>
-    <Button type="text" icon={<EditOutlined />} size="small" />
-    <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+    <Tooltip title="暂未实现">
+      <Button type="text" icon={<EditOutlined />} size="small" disabled />
+    </Tooltip>
+    <Tooltip title="暂未实现">
+      <Button type="text" danger icon={<DeleteOutlined />} size="small" disabled />
+    </Tooltip>
   </Space>
 )
 
