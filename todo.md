@@ -966,6 +966,19 @@
 
 **How to apply**: 凭据/配置注入类 feature 一律先问「显式值存在时行为是什么」并按显式>兜底写门控 + 单测；guacd 链路回归用 `scripts/acceptance/guac/` 三件套（setup-env → run-server → probe）本地全链验证，探针 FAIL 先看是不是会话没起来（sidechannel cat 不到文件=输入没进去），再分认证/渲染归因。
 
+## Guacamole 目标经 agent 转发：guacd 不再直拨 hostname（2026-10-02）
+
+用户否决反向隧道方案（`cockpit-reverse-ssh.service`，架构违例——当初设计就是 agent 当流量转发器，不应另起网络层隧道；且该 unit 从未落盘、本机无残留，无需拆除）。核实代码确认用户判断正确：agent 转发只在内置终端路线存在（`proxy/ssh_session.go` agent 当 SSH 客户端），guacamole 路线是 guacd 直拨 `hostname`（设计文档亦如此写）——server 在 ali、目标在 coding 内网时 guacd 侧根本不可达。
+
+1. [**实现**（`34d606c`）：server 为每条 Guacamole 会话起 127.0.0.1 回环中继 listener，guacd 拨中继，字节流经既有 agent WS 通道（`proxy_new/proxy_data/proxy_close`，与端口转发/内置终端同一管线）到 agent，agent 裸 TCP 拨目标（复用 `proxy/handler.go` 非 SSH 分支，agent 零改动）。`hostname` 语义变为「agent 侧可达地址」——连 coding 本机就是 `127.0.0.1:22`（agent 自视角回环）。接缝：`guac_relay.go`（中继+注册表+`guac:` 前缀路由，与 logs:/terminal/vnc 前缀同构）+ `api_guacamole.go`（connect 指令改填中继地址，会话结束 `relay.Close()`）+ 单测 `cov_guac_relay_test.go`（端到端往返/真实分发路径/agent 关闭与拨号失败/`Close` 幂等）。]
+2. [**真回归一例并修复**（`0767b8b`）：RDP S14 间歇失败 + S9 抖动，基线对照（同探针打无 relay 的 HEAD）16/16 全绿实锤 relay 引入。根因是 `proxy_data` 复用 32KB 读缓冲未拷贝——`SendMessage` 只是入队（写泵异步序列化），下轮 Read 即覆写，RDP 握手亚毫秒连发读到垃圾字节、TLS 流损坏，xrdp 在等 ClientHello 时吃 EOF 而掐链（X.224 协商成功后 ~1s 被拆是其指纹）。agent 侧 `readFromTarget` 与 `mgr` 转发处一并补 `append([]byte(nil), ...)` 拷贝。教训：凡「入队后异步消费」的消息载荷一律拷贝，注释已钉在两处。]
+3. [**验收**：探针 S4（127.0.0.1:22 + cui 私钥）即「agent 拨自己回环」形态——与连 coding 本机同构，已在 relay 上通过。本地三协议探针 relay 构建 **16/16 两轮**（含 RDP/VNC 图形流、录制、审计、出口策略）。]
+4. [**三起环境杂音（均非 relay 缺陷，已定位）**：① 中间某轮 S13 VNC 零帧——Xvnc 把宿主拨入源 IP（docker 网关 172.17.0.1）拉黑（`Connections: blacklisted`），多轮探针+手工 banner 抓包累积的不完整握手触发其防爆破阈值；重建容器（`docker run` 全新 /tmp，不用 restart，X0-lock 残留会起不来）即恢复。② 某轮 7/16 大面积 `bad handshake`——上一轮探针 S16 `docker stop/start guacd` 后容器仍在 `health: starting`，探针打在 guacd 就绪前；等就绪再跑。③ 手工 `head -c` 抓 5900 RFB 横幅本身计入黑名单——排障期勿对 VNC 做裸 TCP 探测。]
+
+**Why**: 中继拓扑约束——中继绑 server 回环，guacd 必须与 server 同机（与录制目录同路径双挂同一前提）；agent 侧 Dial 超时 10s，目标不可达时 guacd connect 快速失败而非挂超时。
+
+**How to apply**: 跨网段目标先问「谁拨号」——凡 guacd 直拨语义走不通的一律经 agent 通道；`proxy_data` 载荷跨 goroutine 传递必须拷贝；验收容器黑名单/重启中状态先查容器日志再怀疑代码；跑探针前确认二进制 mtime 新于相关 commit（曾用预修复二进制复现已修缺陷半小时）。
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
