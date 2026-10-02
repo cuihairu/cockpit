@@ -975,6 +975,9 @@
 3. [**验收**：探针 S4（127.0.0.1:22 + cui 私钥）即「agent 拨自己回环」形态——与连 coding 本机同构，已在 relay 上通过。本地三协议探针 relay 构建 **16/16 两轮**（含 RDP/VNC 图形流、录制、审计、出口策略）。]
 4. [**三起环境杂音（均非 relay 缺陷，已定位）**：① 中间某轮 S13 VNC 零帧——Xvnc 把宿主拨入源 IP（docker 网关 172.17.0.1）拉黑（`Connections: blacklisted`），多轮探针+手工 banner 抓包累积的不完整握手触发其防爆破阈值；重建容器（`docker run` 全新 /tmp，不用 restart，X0-lock 残留会起不来）即恢复。② 某轮 7/16 大面积 `bad handshake`——上一轮探针 S16 `docker stop/start guacd` 后容器仍在 `health: starting`，探针打在 guacd 就绪前；等就绪再跑。③ 手工 `head -c` 抓 5900 RFB 横幅本身计入黑名单——排障期勿对 VNC 做裸 TCP 探测。]
 
+5. [**生产真机走查 PASS**（2026-10-02 20:50）：浏览器→nginx→ali(:9000)→guacd(同机回环)→中继→agent(coding)→`127.0.0.1:22` 全链走通——探针以生产 admin 登录建票（`agent-coding-edb1f8ab`，host=`127.0.0.1:22`，`~/.ssh/cui` 私钥）→ Guacamole SSH shell 执行 `echo AUTH_CUI_OK` 本机回读命中。ali journal 佐证：`Guacamole session created: … -> 127.0.0.1:22 (ssh)`、`Guacamole relay: tearing down …(session closed)`，无 dial failed；链路地址对得上拓扑——网关↔guacd `127.0.0.1:49934->127.0.0.1:4822`、guacd↔中继 `127.0.0.1:39837->127.0.0.1:60960`（中继临时端口，非 22 = guacd 未直拨目标），录制 `.guac` 落盘。前置：`/etc/cockpit/config.yaml` `remote_control.allow_arbitrary_target: true`。探针打 https 需 `wsBase` 补 https→wss（主仓 probe 只替换 `http://`，本次走本地副本修，主仓未动）。]
+6. [**测试甄别**（`592f2fa`）：`TestGuacamoleTunnelFullFlow` 是 relay 唯一真红——connect 断言未跟进改写，已改为 hostname=127.0.0.1 + port 数值且不得等于 3389（钉死「guacd 不直拨真实目标」）。其余红在 HEAD 干净克隆同样复现，与 relay 无关：`TestSetupProviders_*`（f7fab94 加 ssh provider，`providers_test.go` 期望集没加 `ssh`）、`TestStorageAgentToResponse`（location=nil）、`TestCovRegisterConnClearedBeforeSnapshot`（timing assumption）；`SendTimeout` 两例是 `Agent.Send` 256→4096 在途改动未同步测试所致（在途未提交，不干预）。]
+
 **Why**: 中继拓扑约束——中继绑 server 回环，guacd 必须与 server 同机（与录制目录同路径双挂同一前提）；agent 侧 Dial 超时 10s，目标不可达时 guacd connect 快速失败而非挂超时。
 
 **How to apply**: 跨网段目标先问「谁拨号」——凡 guacd 直拨语义走不通的一律经 agent 通道；`proxy_data` 载荷跨 goroutine 传递必须拷贝；验收容器黑名单/重启中状态先查容器日志再怀疑代码；跑探针前确认二进制 mtime 新于相关 commit（曾用预修复二进制复现已修缺陷半小时）。
