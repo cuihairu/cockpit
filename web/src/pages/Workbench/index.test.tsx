@@ -146,13 +146,14 @@ describe('Workbench', () => {
     apiMock.getAgents.mockReset()
   })
 
-  it('无 agent：卡片回退标题、内嵌面板显示 Empty 并提示先选服务器', async () => {
+  it('无 agent：卡片回退标题、协议入口随服务面为空而不渲染、内嵌面板 Empty', async () => {
     renderPage([])
     expect(await screen.findByText('工作台')).toBeInTheDocument()
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /SSH/ }))
-    })
-    expect(msgWarning).toHaveBeenCalledWith('请先选择一台服务器')
+    // 无 agent ⟹ 服务面空 ⟹ SSH/RDP/VNC 按钮一个都不渲染（协议入口只展示
+    // 真正开放的服务），仅剩概览/文件/日志三个常驻 Tab
+    expect(screen.queryByRole('button', { name: /SSH/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /RDP/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /VNC/ })).not.toBeInTheDocument()
     // files/logs Tab 内嵌面板走 Empty 分支（Tabs 懒挂载，激活后才渲染）
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /文\s*件/ }))
@@ -184,7 +185,7 @@ describe('Workbench', () => {
     expect(screen.getByTestId('overview')).toHaveTextContent('ag-2')
   })
 
-  it('SSH/VNC 有服务时分流 Guacamole Modal（三协议统一栈）；RDP 无服务告警', async () => {
+  it('SSH/VNC 有服务时分流 Guacamole Modal（三协议统一栈）；无服务协议入口不渲染', async () => {
     renderPage()
     await screen.findByText('web-01')
     await act(async () => {
@@ -199,10 +200,10 @@ describe('Workbench', () => {
       'guac:ssh:SSH - web-01',
       'guac:vnc:VNC - web-01',
     ]))
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /RDP/ }))
-    })
-    expect(msgWarning).toHaveBeenCalledWith('未检测到可用的 RDP 服务')
+    // ag-1 服务面只有 ssh/vnc：RDP 按钮被协议入口过滤掉，根本不可点，
+    // 更不会开 guac modal（「未检测到可用 RDP 服务」的点后告警已由
+    // visibleProtocolTabs 前置过滤取代，openConnection 内同名告警只留作防御）
+    expect(screen.queryByRole('button', { name: /RDP/ })).not.toBeInTheDocument()
     expect(opened.titles.filter((t) => t.startsWith('guac:rdp:'))).toEqual([])
   })
 

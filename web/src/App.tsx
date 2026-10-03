@@ -7,6 +7,7 @@ import { Button, Dropdown, Avatar, Space, Input, ConfigProvider } from 'antd'
 import {
   DashboardOutlined,
   ApiOutlined,
+  DesktopOutlined,
   ClusterOutlined,
   HddOutlined,
   DatabaseOutlined,
@@ -63,6 +64,7 @@ const Network = lazy(() => import('./pages/Network'))
 const Disk = lazy(() => import('./pages/Disk'))
 const Nas = lazy(() => import('./pages/Nas'))
 const Drift = lazy(() => import('./pages/Drift'))
+const Agents = lazy(() => import('./pages/Agents'))
 const DNS = lazy(() => import('./pages/DNS'))
 const Domains = lazy(() => import('./pages/Domains'))
 const Acme = lazy(() => import('./pages/Acme'))
@@ -156,6 +158,12 @@ const routeConfig: PermRouteItem = {
       path: '/workbench',
       name: '工作台',
       icon: <ApiOutlined />,
+      perm: 'inventory:read',
+    },
+    {
+      path: '/agents',
+      name: '主机',
+      icon: <DesktopOutlined />,
       perm: 'inventory:read',
     },
     {
@@ -477,7 +485,7 @@ const MainLayout = () => {
             <Route path="/resources/storages" element={<StoragesPage />} />
             <Route path="/workbench" element={<Workbench />} />
             <Route path="/logsearch" element={<LogSearch />} />
-            <Route path="/agents" element={<Navigate to="/workbench" replace />} />
+            <Route path="/agents" element={<Agents />} />
             <Route path="/docker" element={<Docker />} />
             <Route path="/stacks" element={<Stacks />} />
             <Route path="/backups" element={<Backups />} />

@@ -6,7 +6,7 @@ import type { Agent } from '@/types'
 // AgentSidebar：服务器列表——搜索/刷新/选中/在线离线标识
 
 const agent = (overrides: Partial<Agent> = {}): Agent => ({
-  id: 'ag1', hostname: 'web-01', ip: '10.0.0.1', status: 'online', lastSeen: '',
+  id: 'ag1', hostname: 'web-01', ip: '10.0.0.1', status: 'online', lastSeen: 0,
   region: 'cn-east', zone: 'a', capabilities: [],
   ...overrides,
 })
@@ -62,7 +62,7 @@ describe('AgentSidebar', () => {
         onSelect={vi.fn()}
       />,
     )
-    fireEvent.change(screen.getByPlaceholderText('搜索主机名、IP、Agent ID'), {
+    fireEvent.change(screen.getByPlaceholderText('搜索主机名、IP、Agent ID、标签'), {
       target: { value: 'web' },
     })
     expect(onQueryChange).toHaveBeenCalledWith('web')

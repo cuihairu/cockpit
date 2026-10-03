@@ -1,5 +1,5 @@
 import { Card, Input, List, Space, Tag, Typography } from 'antd'
-import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { ReloadOutlined, SearchOutlined, TagsOutlined } from '@ant-design/icons'
 import type { Agent } from '@/types'
 
 type Props = {
@@ -10,6 +10,11 @@ type Props = {
   onQueryChange: (value: string) => void
   onRefresh: () => void
   onSelect: (agentId: string) => void
+  /** 全部标签名（去重），作筛选 chips */
+  availableTags?: string[]
+  activeTag?: string | null
+  onTagFilter?: (name: string | null) => void
+  onManageTags?: () => void
 }
 
 const AgentSidebar = ({
@@ -20,23 +25,45 @@ const AgentSidebar = ({
   onQueryChange,
   onRefresh,
   onSelect,
+  availableTags = [],
+  activeTag,
+  onTagFilter,
+  onManageTags,
 }: Props) => {
   return (
     <Card
       title="服务器"
       extra={
-        <ReloadOutlined onClick={onRefresh} style={{ cursor: 'pointer' }} />
+        <Space size="middle">
+          {onManageTags && (
+            <TagsOutlined onClick={onManageTags} style={{ cursor: 'pointer' }} title="标签管理" />
+          )}
+          <ReloadOutlined onClick={onRefresh} style={{ cursor: 'pointer' }} />
+        </Space>
       }
       style={{ width: '100%' }}
     >
       <Input
         allowClear
         prefix={<SearchOutlined />}
-        placeholder="搜索主机名、IP、Agent ID"
+        placeholder="搜索主机名、IP、Agent ID、标签"
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         style={{ marginBottom: 12 }}
       />
+      {availableTags.length > 0 && (
+        <Space size={[4, 4]} wrap style={{ marginBottom: 12 }}>
+          {availableTags.map((name) => (
+            <Tag.CheckableTag
+              key={name}
+              checked={activeTag === name}
+              onChange={() => onTagFilter?.(activeTag === name ? null : name)}
+            >
+              {name}
+            </Tag.CheckableTag>
+          ))}
+        </Space>
+      )}
       <List
         loading={loading}
         dataSource={agents}
@@ -63,6 +90,15 @@ const AgentSidebar = ({
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {agent.region || '-'} / {agent.zone || '-'}
                 </Typography.Text>
+                {agent.tags && agent.tags.length > 0 && (
+                  <Space size={[2, 2]} wrap>
+                    {agent.tags.map((t) => (
+                      <Tag key={t.id} color={t.color || 'default'}>
+                        {t.name}
+                      </Tag>
+                    ))}
+                  </Space>
+                )}
               </Space>
             </List.Item>
           )

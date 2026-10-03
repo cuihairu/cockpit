@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios'
 import type { UISettings } from '@/contexts/settingsTypes'
 import type {
   Agent,
+  AgentTagRef,
   AuditLogStats,
   StatusResponse,
   AuditLogsPage,
@@ -315,6 +316,32 @@ class ApiService {
 
   async getAgent(id: string): Promise<Agent> {
     return this.client.get<unknown, Agent>(`/agents/${id}`)
+  }
+
+  // ========== 服务器标签 ==========
+  async listAgentTags(): Promise<Array<AgentTagRef & { agentCount: number }>> {
+    return this.client.get('/agent-tags')
+  }
+
+  async createAgentTag(name: string, color: string): Promise<AgentTagRef> {
+    return this.client.post('/agent-tags', { name, color })
+  }
+
+  async updateAgentTag(id: string, name: string, color: string): Promise<void> {
+    return this.client.put(`/agent-tags/${id}`, { name, color })
+  }
+
+  async deleteAgentTag(id: string): Promise<void> {
+    return this.client.delete(`/agent-tags/${id}`)
+  }
+
+  async setAgentTags(agentId: string, tagIds: string[]): Promise<void> {
+    return this.client.put(`/agents/${agentId}/tags`, { tagIds })
+  }
+
+  // 清理离线 agent（可选只清 ids 中的离线项）
+  async cleanupAgents(ids?: string[]): Promise<{ removed: number }> {
+    return this.client.post('/agents/cleanup', ids ? { ids } : {})
   }
 
   // ========== Docker（通过 Agent RPC 代理） ==========

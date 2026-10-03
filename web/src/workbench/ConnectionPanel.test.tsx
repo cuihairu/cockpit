@@ -111,7 +111,7 @@ describe('OverviewPanel', () => {
 
   it('渲染 agent 概览与能力 tags', () => {
     const agent: Agent = {
-      id: 'ag1', hostname: 'web-01', ip: '10.0.0.1', status: 'online', lastSeen: '',
+      id: 'ag1', hostname: 'web-01', ip: '10.0.0.1', status: 'online', lastSeen: 0,
       region: 'cn', zone: 'z',
       capabilities: [{ type: 'shell' }, { type: 'metrics' }] as Agent['capabilities'],
     }
@@ -125,7 +125,7 @@ describe('OverviewPanel', () => {
 
   it('空能力不渲染 tags；离线显示离线', () => {
     const agent: Agent = {
-      id: 'ag2', hostname: '', ip: '', status: 'offline', lastSeen: '',
+      id: 'ag2', hostname: '', ip: '', status: 'offline', lastSeen: 0,
       region: '', zone: '', capabilities: [],
     }
     render(<OverviewPanel agent={agent} />)
@@ -137,7 +137,8 @@ describe('OverviewPanel', () => {
     const agent = {
       id: 'ag3', hostname: 'bare', ip: '10.0.0.3', status: 'online', lastSeen: '',
       region: 'cn', zone: 'z',
-    } as Agent
+      // 故意缺 capabilities/lastSeen（走 || [] 兜底用例），双重断言绕过结构检查
+    } as unknown as Agent
     render(<OverviewPanel agent={agent} />)
     expect(screen.getByText('bare')).toBeInTheDocument()
     expect(screen.getByText('在线')).toBeInTheDocument()

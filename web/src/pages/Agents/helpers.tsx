@@ -45,9 +45,22 @@ export interface RemoteService {
   running: boolean
 }
 
-// 从 Agent 的 capabilities 中提取远程服务
+// 从 Agent 提取可用的远程服务：优先服务端持久化的 services 字段，
+// 回退能力元数据（口径与 workbench/services.ts 一致）
 export const getRemoteServices = (agent: Agent | null): RemoteService[] => {
-  if (!agent || !agent.capabilities) return []
+  if (!agent) return []
+  if (agent.services && agent.services.length > 0) {
+    return agent.services
+      .filter((svc) => svc.running && svc.port && ['ssh', 'rdp', 'vnc', 'telnet'].includes(svc.protocol))
+      .map((svc) => ({
+        protocol: svc.protocol as RemoteService['protocol'],
+        host: svc.host || '127.0.0.1',
+        port: svc.port,
+        name: svc.name || `${svc.protocol.toUpperCase()} Server`,
+        running: true,
+      }))
+  }
+  if (!agent.capabilities) return []
   const remoteCap = agent.capabilities.find((cap) => cap.type === 'remote-services')
   if (!remoteCap || !remoteCap.metadata) return []
 

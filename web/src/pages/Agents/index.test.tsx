@@ -373,9 +373,10 @@ describe('Agents', () => {
     renderPage()
     await screen.findByText('just-now')
 
-    // 空 hostname/ip/zone/lastSeen 各渲染占位 '-'
+    // 空字段占位 '-':主机名/IP/位置/系统/版本/启动时间/开放服务/标签/最后连接
+    //（13 列中除 ID/类型/能力/状态/操作外全部走占位）
     const emptyRow = rowOf('ag-e')
-    expect(within(emptyRow).getAllByText('-')).toHaveLength(4)
+    expect(within(emptyRow).getAllByText('-')).toHaveLength(9)
     // 未知 status 回退 offline 配置文案
     expect(within(emptyRow).getByText('离线')).toBeInTheDocument()
     // capabilities 为 undefined：能力列无 Tag；virtType/virtRole 缺省类型列走「未知」

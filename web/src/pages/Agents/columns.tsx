@@ -8,6 +8,18 @@ interface ColumnOptions {
   onShowDetail: (agent: Agent) => void
 }
 
+const formatUptime = (startedAt: number | undefined): string => {
+  if (!startedAt) return '-'
+  const sec = Math.max(0, Math.floor(Date.now() / 1000 - startedAt))
+  const d = Math.floor(sec / 86400)
+  const h = Math.floor((sec % 86400) / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  if (d > 0) return `${d}天${h}小时`
+  if (h > 0) return `${h}小时${m}分`
+  if (m > 0) return `${m}分钟`
+  return `${sec}秒`
+}
+
 // 构建 Agent 表格列定义
 export const buildAgentColumns = ({ onShowDetail }: ColumnOptions): ColumnsType<Agent> => [
   {
@@ -50,6 +62,72 @@ export const buildAgentColumns = ({ onShowDetail }: ColumnOptions): ColumnsType<
         </span>
       </Space>
     ),
+  },
+  {
+    title: '系统 / 架构',
+    key: 'system',
+    width: 160,
+    sorter: (a, b) => (a.osName || '').localeCompare(b.osName || ''),
+    render: (_, record) => (
+      <Space direction="vertical" size="small">
+        <span>{record.osName || '-'}{record.osVersion ? ` ${record.osVersion}` : ''}</span>
+        <span style={{ fontSize: 12, color: '#999' }}>{record.arch || '-'}</span>
+      </Space>
+    ),
+  },
+  {
+    title: 'Agent 版本',
+    dataIndex: 'version',
+    key: 'version',
+    width: 120,
+    sorter: (a, b) => (a.version || '').localeCompare(b.version || ''),
+    render: (version: string) => version || '-',
+  },
+  {
+    title: '启动时间 / 在线时长',
+    key: 'uptime',
+    width: 170,
+    sorter: (a, b) => (a.startedAt || 0) - (b.startedAt || 0),
+    render: (_, record) => (
+      <Space direction="vertical" size="small">
+        <span>{record.startedAt ? formatUptime(record.startedAt) : '-'}</span>
+        <span style={{ fontSize: 12, color: '#999' }}>
+          {record.startedAt ? new Date(record.startedAt * 1000).toLocaleString() : '-'}
+        </span>
+      </Space>
+    ),
+  },
+  {
+    title: '开放服务',
+    key: 'services',
+    width: 150,
+    render: (_, record) => {
+      const services = (record.services || []).filter((s) => s.running)
+      if (services.length === 0) return <span style={{ color: '#999' }}>无</span>
+      return (
+        <Space size="small" wrap>
+          {[...new Set(services.map((s) => s.protocol))].map((p) => (
+            <Tag key={p} color="blue">{p.toUpperCase()}</Tag>
+          ))}
+        </Space>
+      )
+    },
+  },
+  {
+    title: '标签',
+    key: 'tags',
+    width: 160,
+    render: (_, record) => {
+      const tags = record.tags || []
+      if (tags.length === 0) return <span style={{ color: '#999' }}>无</span>
+      return (
+        <Space size="small" wrap>
+          {tags.map((t) => (
+            <Tag key={t.id} color={t.color || 'default'}>{t.name}</Tag>
+          ))}
+        </Space>
+      )
+    },
   },
   {
     title: '类型',

@@ -13,6 +13,7 @@ import { api } from '@/services/api'
 import FileBrowser from '@/components/FileBrowser'
 import TerminalModal from '@/components/TerminalModal'
 import GuacamoleModal from '@/components/GuacamoleModal'
+import TagManageModal from '@/components/TagManageModal'
 import AgentSidebar from '@/workbench/AgentSidebar'
 import ConnectionPanel from '@/workbench/ConnectionPanel'
 import { PermGuard } from '@/components/PermGuard'
@@ -33,8 +34,10 @@ const protocolTabs: Array<{ key: WorkbenchTab; label: string; icon: React.ReactN
 const Workbench = () => {
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [query, setQuery] = useState('')
+  const [activeTag, setActiveTag] = useState<string | null>(null)
   const [tab, setTab] = useState<WorkbenchTab>('overview')
   const [terminalConfig, setTerminalConfig] = useState<SessionConfig | null>(null)
+  const [tagManageOpen, setTagManageOpen] = useState(false)
   // RDP/VNC/SSH 走 Guacamole 网关（guacd + guacamole-common-js，见
   // docs/remote-access-integration-design.md D3）；telnet 走 TerminalModal（xterm.js），
   // SSH 的「内置终端（经 Agent）」兜底入口同走 TerminalModal
@@ -49,22 +52,41 @@ const Workbench = () => {
     void loadAgents()
   }
 
+  // 搜索（名称/ID/IP/地域/标签）× 标签筛选，AND 语义
+  const availableTags = useMemo(() => {
+    const set = new Set<string>()
+    agents.forEach((a) => a.tags?.forEach((t) => set.add(t.name)))
+    return Array.from(set).sort()
+  }, [agents])
+
   const filteredAgents = useMemo(() => {
     const keyword = query.trim().toLowerCase()
-    if (!keyword) return agents
     return agents.filter((agent) => {
+      if (activeTag && !(agent.tags || []).some((t) => t.name === activeTag)) return false
+      if (!keyword) return true
       return (
         agent.id.toLowerCase().includes(keyword) ||
         (agent.hostname || '').toLowerCase().includes(keyword) ||
         (agent.ip || '').toLowerCase().includes(keyword) ||
-        (agent.region || '').toLowerCase().includes(keyword)
+        (agent.region || '').toLowerCase().includes(keyword) ||
+        (agent.tags || []).some((t) => t.name.toLowerCase().includes(keyword))
       )
     })
-  }, [agents, query])
+  }, [agents, query, activeTag])
 
   const effectiveSelectedAgentId = selectedAgentId || filteredAgents[0]?.id || ''
   const selectedAgent = filteredAgents.find((agent) => agent.id === effectiveSelectedAgentId) || null
   const remoteServices = useMemo(() => getRemoteServices(selectedAgent), [selectedAgent])
+
+  // 只展示这台机器真正开放的协议按钮——关掉 SSH/RDP/VNC 后按钮随心跳周期消失
+  const visibleProtocolTabs = useMemo(
+    () =>
+      protocolTabs.filter((item) => {
+        if (item.key === 'overview' || item.key === 'files' || item.key === 'logs') return true
+        return remoteServices.some((svc) => svc.protocol === item.key)
+      }),
+    [remoteServices],
+  )
 
   const openConnection = (protocol: WorkbenchTab) => {
     setTab(protocol)
@@ -131,6 +153,10 @@ const Workbench = () => {
             onQueryChange={setQuery}
             onRefresh={refreshAgents}
             onSelect={setSelectedAgentId}
+            availableTags={availableTags}
+            activeTag={activeTag}
+            onTagFilter={setActiveTag}
+            onManageTags={() => setTagManageOpen(true)}
           />
         </Col>
 
@@ -138,7 +164,7 @@ const Workbench = () => {
           <Card title={selectedAgent ? selectedAgent.hostname || selectedAgent.id : '工作台'} style={{ width: '100%' }}>
             <Space style={{ marginBottom: 16 }} wrap>
               <PermGuard perm="terminal:write">
-                {protocolTabs.map((item) => (
+                {visibleProtocolTabs.map((item) => (
                   <Button
                     key={item.key}
                     icon={item.icon}
@@ -178,46 +204,56 @@ const Workbench = () => {
                     <Empty description="暂无可用 Agent" />
                   ),
                 },
-                {
-                  key: 'ssh',
-                  label: 'SSH',
-                  children: (
-                    <ConnectionPanel
-                      protocol="ssh"
-                      service={remoteServices.find((item) => item.protocol === 'ssh')}
-                      onConnect={() => openConnection('ssh')}
-                      onFallback={openAgentTerminal}
-                      fallbackLabel="内置终端（经 Agent）"
-                    />
-                  ),
-                },
-                {
-                  key: 'rdp',
-                  label: 'RDP',
-                  children: (
-                    <ConnectionPanel
-                      protocol="rdp"
-                      service={remoteServices.find((item) => item.protocol === 'rdp')}
-                      onConnect={() => openConnection('rdp')}
-                    />
-                  ),
-                },
-                {
-                  key: 'vnc',
-                  label: 'VNC',
-                  children: (
-                    <ConnectionPanel
-                      protocol="vnc"
-                      service={remoteServices.find((item) => item.protocol === 'vnc')}
-                      onConnect={() => openConnection('vnc')}
-                    />
-                  ),
-                },
+                ...(remoteServices.some((item) => item.protocol === 'ssh')
+                  ? [{
+                      key: 'ssh',
+                      label: 'SSH',
+                      children: (
+                        <ConnectionPanel
+                          protocol="ssh"
+                          service={remoteServices.find((item) => item.protocol === 'ssh')}
+                          onConnect={() => openConnection('ssh')}
+                          onFallback={openAgentTerminal}
+                          fallbackLabel="内置终端（经 Agent）"
+                        />
+                      ),
+                    }]
+                  : []),
+                ...(remoteServices.some((item) => item.protocol === 'rdp')
+                  ? [{
+                      key: 'rdp',
+                      label: 'RDP',
+                      children: (
+                        <ConnectionPanel
+                          protocol="rdp"
+                          service={remoteServices.find((item) => item.protocol === 'rdp')}
+                          onConnect={() => openConnection('rdp')}
+                        />
+                      ),
+                    }]
+                  : []),
+                ...(remoteServices.some((item) => item.protocol === 'vnc')
+                  ? [{
+                      key: 'vnc',
+                      label: 'VNC',
+                      children: (
+                        <ConnectionPanel
+                          protocol="vnc"
+                          service={remoteServices.find((item) => item.protocol === 'vnc')}
+                          onConnect={() => openConnection('vnc')}
+                        />
+                      ),
+                    }]
+                  : []),
               ]}
             />
           </Card>
         </Col>
       </Row>
+
+      {tagManageOpen && (
+        <TagManageModal visible={tagManageOpen} onClose={() => setTagManageOpen(false)} onChanged={refreshAgents} />
+      )}
 
       {terminalConfig && (
         <TerminalModal
