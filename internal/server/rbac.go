@@ -52,6 +52,7 @@ var resourceRules = []resourceRule{
 	{"/api/acme", "acme", ""},
 	{"/api/resources/", "inventory", ""},
 	{"/api/alerts", "alerts", ""},
+	{"/api/agent-tags", "inventory", ""}, // 标签挂服务器，与 /agents/{id}/tags 同归 inventory
 	{"/api/agents", "inventory", ""},
 }
 

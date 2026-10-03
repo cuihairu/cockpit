@@ -61,6 +61,17 @@ func TestRBACMatrix(t *testing.T) {
 		{"viewer agent files write", "viewer", "POST", "/api/agents/a1/files/write", 403},
 		{"viewer agent secret", "viewer", "POST", "/api/agents/a1/secret", 403},
 		{"viewer agent detail", "viewer", "GET", "/api/agents/a1", 200},
+		// 标签面：/api/agent-tags 与 /api/agents/{id}/tags 同归 inventory
+		// （补规则前 /api/agent-tags 不匹配任何 resourceRule，governed=false
+		// 整体放行——viewer 也能建删标签，权限点核对补上）
+		{"viewer list tags", "viewer", "GET", "/api/agent-tags", 200},
+		{"viewer create tag", "viewer", "POST", "/api/agent-tags", 403},
+		{"viewer delete tag", "viewer", "DELETE", "/api/agent-tags/t1", 403},
+		{"operator create tag", "operator", "POST", "/api/agent-tags", 200},
+		{"operator rename tag", "operator", "PUT", "/api/agent-tags/t1", 200},
+		{"viewer read agent tags", "viewer", "GET", "/api/agents/a1/tags", 200},
+		{"viewer set agent tags", "viewer", "PUT", "/api/agents/a1/tags", 403},
+		{"operator set agent tags", "operator", "PUT", "/api/agents/a1/tags", 200},
 		{"viewer me", "viewer", "GET", "/api/me", 200},
 		{"viewer status", "viewer", "GET", "/api/status", 200},
 		// operator：模块 read+write 全放（含 acme 签发）、管理域全拒

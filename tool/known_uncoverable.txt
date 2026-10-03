@@ -47,16 +47,10 @@ internal/server/api_guacamole.go:240,241	3. collectGuacRecording 稳定后复 St
 internal/server/guac_relay.go:66,67	3. net.Listen 回环临时端口失败防御（127.0.0.1:0 由内核分配端口，仅 fd 耗尽才失败，进程内单测不可构造）
 internal/server/api_guacamole.go:377,390	3. startGuacRelay listen 失败分支（同 guac_relay.go:66,67 根因，中继起不来即 listen 失败）
 internal/server/api_guacamole.go:491,496	3. relayAddr SplitHostPort 失败防御（恒为 listener.Addr().String() 的 host:port 形态）
-internal/server/api.go:464,466	3. CleanupOfflineAgents 查询失败防御（同 handler 前置同表 ListAgents 已成功，两次同构 SELECT 之间无写操作；其内部单行删除失败亦被吞掉不冒泡）
 
 # ---------- 4. 新增 Agent 服务面/启动时刻字段的测试回退路径（4 语句） ----------
 
 internal/agent/agent.go:122,123	3. startedAtOrNow 零值兜底分支（仅未走 NewAgent 的测试构造体触发；正常路径 startedAt 在 NewAgent 初始化时已设）
 internal/agent/agent.go:158,158	3. servicesRefreshLoop 取消上下文退出分支（需完整 Agent 生命周期触发 ctx.Done()，单测无真实后台循环难以确定性构造）
 
-# ---------- 5. 新增 Agent 心跳/标签/系统信息功能暂无测试覆盖（区间登记） ----------
 
-internal/auth/password_reset.go:131,133	3. password_reset.go token 清理回退分支（仅并发验证竞态触发，单测不可确定性复现）
-internal/server/agent.go:66,101	5. Agent 心跳更新与服务面转换新增逻辑（bc1098c 引入，暂无单测覆盖心跳上报路径）
-internal/server/api.go:56,501	5. API 标签管理与系统信息聚合新增路由（bc1098c/a3fd2fb 引入，暂无单测覆盖标签 CRUD 与系统快照）
-internal/server/api_tags.go:100,164	5. 标签 CRUD 与 Agent 绑定新增处理器（bc1098c 引入，暂无单测覆盖标签管理全链路）

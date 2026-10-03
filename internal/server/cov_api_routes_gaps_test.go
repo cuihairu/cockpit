@@ -217,3 +217,116 @@ func TestReadLoopOfflineStatusDBError(t *testing.T) {
 	}
 	t.Fatal("agent still registered after client close")
 }
+
+// TestServeAPITagRoutes 覆盖 serveAPI 的 /api/agent-tags 与
+// /agents/{id}/tags 两条分发（case 与 tags 后缀拦截）
+func TestServeAPITagRoutes(t *testing.T) {
+	s := covNewServer(t)
+
+	rec := covRec()
+	s.serveAPI(rec, covReq(http.MethodGet, "/api/agent-tags", nil))
+	covWantCode(t, "agent-tags via serveAPI", rec, http.StatusOK)
+
+	rec = covRec()
+	s.serveAPI(rec, covReq(http.MethodPut, "/api/agent-tags/nope",
+		strings.NewReader(`{"name":"x"}`)))
+	covWantCode(t, "tag put missing", rec, http.StatusNotFound)
+
+	// /agents/{id}/tags：GET 走 assign 分发（a1 不在册也是空列表 200）
+	rec = covRec()
+	s.serveAPI(rec, covReq(http.MethodGet, "/api/agents/a1/tags", nil))
+	covWantCode(t, "agent tags via serveAPI", rec, http.StatusOK)
+}
+
+// TestAgentsListTagSnapshotEnrichment 覆盖 handleAgentsList 的组装环：
+// 每机标签注入（tagList append）+ 系统信息快照注入
+func TestAgentsListTagSnapshotEnrichment(t *testing.T) {
+	s := covNewServer(t)
+	if err := s.db.UpsertAgent(&storage.Agent{ID: "ag-t", Hostname: "h-t"}); err != nil {
+		t.Fatal(err)
+	}
+	tag, err := s.db.CreateTag("prod", "blue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.SetAgentTags("ag-t", []string{tag.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.UpdateSystemInfoSnapshot(&storage.SystemInfoSnapshot{
+		AgentID: "ag-t", OSName: "linux", OSVersion: "6.6", Arch: "amd64",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := covRec()
+	s.handleAgentsList(rec, covReq(http.MethodGet, "/api/agents", nil))
+	covWantCode(t, "agents list enriched", rec, http.StatusOK)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"tags":[{"color":"blue"`) || !strings.Contains(body, `"name":"prod"`) {
+		t.Errorf("tags not injected: %s", body)
+	}
+	if !strings.Contains(body, `"osName":"linux"`) || !strings.Contains(body, `"arch":"amd64"`) {
+		t.Errorf("system info not injected: %s", body)
+	}
+}
+
+// TestAgentsListEnrichmentErrors 标签/快照两段加载失败 → 各自 500
+// （从表被删：ListAgents 查主表仍成功，精确落进对应错误分支）
+func TestAgentsListEnrichmentErrors(t *testing.T) {
+	// 标签加载失败
+	s := covNewServer(t)
+	if err := s.db.UpsertAgent(&storage.Agent{ID: "ag-e", Hostname: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Session().Exec("DROP TABLE agent_tag_assignments").Error; err != nil {
+		t.Fatal(err)
+	}
+	rec := covRec()
+	s.handleAgentsList(rec, covReq(http.MethodGet, "/api/agents", nil))
+	covWantCode(t, "tags load error", rec, http.StatusInternalServerError)
+	if !strings.Contains(rec.Body.String(), "Failed to load tags") {
+		t.Errorf("body = %s", rec.Body.String())
+	}
+
+	// 快照加载失败
+	s2 := covNewServer(t)
+	if err := s2.db.UpsertAgent(&storage.Agent{ID: "ag-e2", Hostname: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s2.db.Session().Exec("DROP TABLE system_info_snapshots").Error; err != nil {
+		t.Fatal(err)
+	}
+	rec = covRec()
+	s2.handleAgentsList(rec, covReq(http.MethodGet, "/api/agents", nil))
+	covWantCode(t, "snapshots load error", rec, http.StatusInternalServerError)
+	if !strings.Contains(rec.Body.String(), "Failed to load system info") {
+		t.Errorf("body = %s", rec.Body.String())
+	}
+}
+
+// TestAgentsCleanupClearTagsError 离线清理在摘标签一步失败 → handler 500
+// （CleanupOfflineAgents 的 ClearAgentTags 错误不被吞，直接冒泡到 499 行）
+func TestAgentsCleanupClearTagsError(t *testing.T) {
+	s := covNewServer(t)
+	if err := s.db.UpsertAgent(&storage.Agent{ID: "off-1", Hostname: "h", Status: "offline"}); err != nil {
+		t.Fatal(err)
+	}
+	tag, err := s.db.CreateTag("prod", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.SetAgentTags("off-1", []string{tag.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Session().Exec(`CREATE TRIGGER assign_boom BEFORE DELETE ON agent_tag_assignments
+		BEGIN SELECT RAISE(ABORT, 'assign delete boom'); END`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	rec := covRec()
+	s.handleAgentsCleanup(rec, covReq(http.MethodPost, "/api/agents/cleanup", nil))
+	covWantCode(t, "cleanup clear tags error", rec, http.StatusInternalServerError)
+	if !strings.Contains(rec.Body.String(), "Failed to cleanup agents") {
+		t.Errorf("body = %s", rec.Body.String())
+	}
+}

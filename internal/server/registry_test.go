@@ -284,6 +284,7 @@ func TestNewAgent(t *testing.T) {
 
 func TestAgentUpdate(t *testing.T) {
 	agent := NewAgent("agent-1", nil)
+	startedAt := time.Unix(1700000200, 0)
 	agent.Update(&protocol.RegisterPayload{
 		Hostname: "web-server",
 		IP:       "10.0.0.1",
@@ -291,6 +292,11 @@ func TestAgentUpdate(t *testing.T) {
 		Capabilities: []protocol.Capability{
 			{Type: "proxy"},
 			{Type: "docker"},
+		},
+		// 注册帧回带启动时刻与服务面（bc1098c）：非零/非 nil 分支就地刷新
+		StartedAt: startedAt.Unix(),
+		Services: []protocol.RemoteServicePayload{
+			{Protocol: "tcp", Host: "10.0.0.1", Port: 22, Name: "ssh", Running: true},
 		},
 	})
 
@@ -303,6 +309,21 @@ func TestAgentUpdate(t *testing.T) {
 	loc := agent.GetLocation()
 	if loc.Region != "us-east" {
 		t.Errorf("Region = %v", loc.Region)
+	}
+	if !agent.StartedAt.Equal(startedAt) {
+		t.Errorf("StartedAt = %v, want %v", agent.StartedAt, startedAt)
+	}
+	if len(agent.Services) != 1 || agent.Services[0].Port != 22 {
+		t.Errorf("Services = %+v", agent.Services)
+	}
+
+	// 零值/nil 分支：不回带字段时保持既有 presence 不动
+	agent.Update(&protocol.RegisterPayload{Hostname: "web-server-2"})
+	if !agent.StartedAt.Equal(startedAt) {
+		t.Errorf("StartedAt clobbered by zero payload: %v", agent.StartedAt)
+	}
+	if len(agent.Services) != 1 {
+		t.Errorf("Services clobbered by nil payload: %+v", agent.Services)
 	}
 }
 

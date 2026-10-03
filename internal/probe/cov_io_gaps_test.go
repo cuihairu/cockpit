@@ -48,3 +48,31 @@ func TestCovRunAllChecksCounts(t *testing.T) {
 		}
 	}
 }
+
+// TestCovCheckCertificatesUpdateError 证书状态回写失败仅记日志，
+// 不打断本轮探测循环（BEFORE UPDATE trigger 注入确定性失败）
+func TestCovCheckCertificatesUpdateError(t *testing.T) {
+	r, db := newTestRunner(t)
+
+	savePort := probeCertPort
+	probeCertPort = covStartTLS(t, time.Now().Add(90*24*time.Hour))
+	t.Cleanup(func() { probeCertPort = savePort })
+	if err := db.UpsertCertificate(&storage.Certificate{
+		ID: "cov-cert-boom", DomainName: "127.0.0.1", Status: "valid",
+		ExpiresAt: time.Now().UTC().Add(90 * 24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("UpsertCertificate: %v", err)
+	}
+	if err := db.Session().Exec(`CREATE TRIGGER cert_boom BEFORE UPDATE ON certificates
+		BEGIN SELECT RAISE(ABORT, 'cert status boom'); END`).Error; err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	results := r.checkCertificates()
+	if len(results) != 1 {
+		t.Fatalf("results = %+v", results)
+	}
+	if results[0].Status != "valid" {
+		t.Errorf("status = %q, want valid (probe itself must succeed)", results[0].Status)
+	}
+}
