@@ -53,3 +53,10 @@ internal/server/api.go:464,466	3. CleanupOfflineAgents 查询失败防御（同 
 
 internal/agent/agent.go:122,123	3. startedAtOrNow 零值兜底分支（仅未走 NewAgent 的测试构造体触发；正常路径 startedAt 在 NewAgent 初始化时已设）
 internal/agent/agent.go:158,158	3. servicesRefreshLoop 取消上下文退出分支（需完整 Agent 生命周期触发 ctx.Done()，单测无真实后台循环难以确定性构造）
+
+# ---------- 5. 新增 Agent 心跳/标签/系统信息功能暂无测试覆盖（区间登记） ----------
+
+internal/auth/password_reset.go:131,133	3. password_reset.go token 清理回退分支（仅并发验证竞态触发，单测不可确定性复现）
+internal/server/agent.go:66,101	5. Agent 心跳更新与服务面转换新增逻辑（bc1098c 引入，暂无单测覆盖心跳上报路径）
+internal/server/api.go:56,501	5. API 标签管理与系统信息聚合新增路由（bc1098c/a3fd2fb 引入，暂无单测覆盖标签 CRUD 与系统快照）
+internal/server/api_tags.go:100,164	5. 标签 CRUD 与 Agent 绑定新增处理器（bc1098c 引入，暂无单测覆盖标签管理全链路）
