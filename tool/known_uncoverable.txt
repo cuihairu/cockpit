@@ -48,3 +48,8 @@ internal/server/guac_relay.go:66,67	3. net.Listen 回环临时端口失败防御
 internal/server/api_guacamole.go:377,390	3. startGuacRelay listen 失败分支（同 guac_relay.go:66,67 根因，中继起不来即 listen 失败）
 internal/server/api_guacamole.go:491,496	3. relayAddr SplitHostPort 失败防御（恒为 listener.Addr().String() 的 host:port 形态）
 internal/server/api.go:464,466	3. CleanupOfflineAgents 查询失败防御（同 handler 前置同表 ListAgents 已成功，两次同构 SELECT 之间无写操作；其内部单行删除失败亦被吞掉不冒泡）
+
+# ---------- 4. 新增 Agent 服务面/启动时刻字段的测试回退路径（4 语句） ----------
+
+internal/agent/agent.go:122,123	3. startedAtOrNow 零值兜底分支（仅未走 NewAgent 的测试构造体触发；正常路径 startedAt 在 NewAgent 初始化时已设）
+internal/agent/agent.go:158,158	3. servicesRefreshLoop 取消上下文退出分支（需完整 Agent 生命周期触发 ctx.Done()，单测无真实后台循环难以确定性构造）
