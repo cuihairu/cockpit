@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { message } from 'antd'
 import DNS from './index'
+import { parseImportFile } from './ImportModal'
 import type { Agent } from '@/types'
 
 // DNS：未配置引导按 provider 分流、记录管理（zone/类型过滤/CF 代理列/新建
@@ -18,6 +19,8 @@ const apiMock = vi.hoisted(() => ({
   createDNSRecord: vi.fn(),
   updateDNSRecord: vi.fn(),
   deleteDNSRecord: vi.fn(),
+  exportDNSRecords: vi.fn(),
+  importDNSRecords: vi.fn(),
   getDDNSConfigs: vi.fn(),
   getAgents: vi.fn(),
   getDDNSScanConfig: vi.fn(),
@@ -90,6 +93,15 @@ const openSelect = (ph: string) => {
 const recRow = (cell: string) =>
   Array.from(document.querySelectorAll<HTMLTableRowElement>('.ant-card tr.ant-table-row'))
     .find((tr) => tr.textContent?.includes(cell)) as HTMLTableRowElement
+
+// 工具栏「导入」：可访问名带 icon 前缀（upload导入），footer 又有「导入 N 条」
+// ——按纯文本（去 nbsp）精确匹配定位
+const openImportModal = () => {
+  const el = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+    .find((b) => (b.textContent ?? '').replace(/\u00a0/g, '') === '导入')
+  if (!el) throw new Error('toolbar 导入 button not found')
+  fireEvent.click(el)
+}
 
 const chooseZone = async (label: string) => {
   // zone Select 是页面第一个 Select；选中后 placeholder 消失，按容器定位
@@ -227,6 +239,135 @@ describe('DNS', () => {
     await waitFor(() => expect(apiMock.getDNSRecords).toHaveBeenCalledWith('z1', 'AAAA', 1))
     fireEvent.click(screen.getByRole('button', { name: /刷新$/ }))
     await waitFor(() => expect(apiMock.getDNSRecords.mock.calls.filter((c) => c[1] === 'AAAA').length).toBeGreaterThanOrEqual(2))
+  })
+
+  it('批量导出：未选 zone 禁用，选中后下载并提示条数', async () => {
+    // jsdom 无 createObjectURL（Acme 下载同款 stub）
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:mock'), configurable: true })
+    apiMock.exportDNSRecords.mockResolvedValue({
+      zone_id: 'z1', provider: 'cloudflare', count: 2,
+      records: [
+        { type: 'A', name: 'www', content: '1.2.3.4', ttl: 300, proxied: false },
+        { type: 'TXT', name: '_acme', content: 'v=spf1', ttl: 1, proxied: false },
+      ],
+    })
+    renderPage()
+    expect(screen.getByRole('button', { name: /导\s*出/ })).toBeDisabled()
+    await chooseZone('example.com')
+    fireEvent.click(screen.getByRole('button', { name: /导\s*出/ }))
+    await waitFor(() => expect(apiMock.exportDNSRecords).toHaveBeenCalledWith('z1'))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已导出 2 条记录'))
+  })
+
+  it('批量导出：失败透出兜底文案', async () => {
+    apiMock.exportDNSRecords.mockRejectedValue(new Error('cf down'))
+    renderPage()
+    await chooseZone('example.com')
+    fireEvent.click(screen.getByRole('button', { name: /导\s*出/ }))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('导出失败'))
+  })
+
+  it('批量导入：解析预览 → 确认导入 → 结果摘要含 failed 明细 → 完成重置', async () => {
+    // 首次导入失败可重试；二次成功带 failed 明细；三次 failed 空走默认色 Tag
+    apiMock.importDNSRecords
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce({
+        total: 3, created: 1, updated: 1, skipped: 0,
+        failed: [{ index: 2, name: 'b.example.com', error: 'record exists' }],
+      })
+      .mockResolvedValueOnce({ total: 1, created: 1, updated: 0, skipped: 0, failed: [] })
+    renderPage()
+    await chooseZone('example.com')
+    openImportModal()
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('批量导入记录 · example.com'))
+    const upload = (text: string, name = 'zone-records.json') => {
+      const file = new File([], name)
+      Object.defineProperty(file, 'text', { value: () => Promise.resolve(text) })
+      const input = document.querySelector('.ant-modal input[type=file]') as HTMLInputElement
+      Object.defineProperty(input, 'files', { value: [file], configurable: true })
+      return act(async () => {
+        fireEvent.change(input)
+      })
+    }
+    const entries = [
+      { type: 'A', name: 'www', content: '1.2.3.4', ttl: 300, proxied: false },
+      { type: 'A', name: 'www', content: '5.6.7.8', ttl: 300, proxied: false },
+      { type: 'A', name: 'b.example.com', content: '9.9.9.9', ttl: 300, proxied: false },
+    ]
+    await upload(JSON.stringify({ zone_id: 'z1', provider: 'cloudflare', count: 3, records: entries }))
+    expect(await screen.findByText('已解析 3 条记录（zone-records.json）')).toBeInTheDocument()
+    // 首次导入上游失败：兜底文案，等 loading/禁用窗口过去后可重试
+    fireEvent.click(screen.getByRole('button', { name: /导\s*入\s*3\s*条/ }))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('导入失败'))
+    // 高负载下 mutation 错误态回落渲染可能超默认 1s（vitest.config flake 先例），放宽
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: /导\s*入\s*3\s*条/ })).toBeEnabled(),
+      { timeout: 15000 },
+    )
+    fireEvent.click(screen.getByRole('button', { name: /导\s*入\s*3\s*条/ }))
+    await waitFor(() => expect(apiMock.importDNSRecords).toHaveBeenCalledTimes(2))
+    // 四分类结果摘要 + failed 明细
+    expect(await screen.findByText(/#2 b\.example\.com: record exists/)).toBeInTheDocument()
+    expect(screen.getByText('新建 1')).toBeInTheDocument()
+    expect(screen.getByText('更新 1')).toBeInTheDocument()
+    expect(screen.getByText('失败 1')).toBeInTheDocument()
+    // 完成 → 关闭并重置；重开无解析残留
+    fireEvent.click(screen.getByRole('button', { name: /完\s*成/ }))
+    openImportModal()
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('批量导入记录 · example.com'))
+    expect(screen.queryByText(/已解析/)).not.toBeInTheDocument()
+    // failed 空：失败 Tag 走默认色分支
+    await upload('{"records":[{"type":"A","name":"x","content":"1.1.1.1","ttl":300}]}')
+    expect(await screen.findByText('已解析 1 条记录（zone-records.json）')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /导\s*入\s*1\s*条/ }))
+    expect(await screen.findByText('失败 0')).toBeInTheDocument()
+  })
+
+  it('批量导入：非导出形态与坏 JSON 拒绝，不达导入接口', async () => {
+    renderPage()
+    await chooseZone('example.com')
+    openImportModal()
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('批量导入记录 · example.com'))
+    const upload = (text: string, name = 'bad.json') => {
+      const file = new File([], name)
+      Object.defineProperty(file, 'text', { value: () => Promise.resolve(text) })
+      const input = document.querySelector('.ant-modal input[type=file]') as HTMLInputElement
+      Object.defineProperty(input, 'files', { value: [file], configurable: true })
+      return act(async () => {
+        fireEvent.change(input)
+      })
+    }
+    // 缺 records 数组
+    await upload('{"foo": 1}')
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('文件缺少 records 数组（应使用「导出」产物或同构 JSON）'))
+    // 坏 JSON
+    await upload('not-json{')
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('不是合法的 JSON 文件'))
+    // records 数组为空
+    await upload('{"records":[]}')
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('records 数组为空'))
+    // 确认按钮保持禁用（未解析成功）
+    expect(screen.getByRole('button', { name: '导入 0 条' })).toBeDisabled()
+    expect(apiMock.importDNSRecords).not.toHaveBeenCalled()
+    // 右上 X 与 footer「关闭」都走 onClose+reset：重开后无解析残留
+    fireEvent.click(document.querySelector('.ant-modal-close')!)
+    openImportModal()
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('批量导入记录 · example.com'))
+    expect(screen.queryByText(/已解析/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /关\s*闭/ }))
+    openImportModal()
+    await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('批量导入记录 · example.com'))
+    expect(screen.queryByText(/已解析/)).not.toBeInTheDocument()
+  })
+
+  it('parseImportFile：后缀/大小/空内容守卫（纯函数直测）', async () => {
+    const mk = (name: string, size: number, text: string) =>
+      ({ name, size, text: () => Promise.resolve(text) })
+    await expect(parseImportFile(mk('a.txt', 8, '{}'))).rejects.toThrow('仅支持 .json 文件')
+    await expect(parseImportFile(mk('a.json', 2 * 1024 * 1024, '{}'))).rejects.toThrow('文件超过 1MB 上限')
+    await expect(parseImportFile(mk('a.json', 4, ' \n '))).rejects.toThrow('文件内容为空')
+    // 对象条目保留（逐条内容校验由 server 兜底）
+    await expect(parseImportFile(mk('ok.json', 4, '{"records":[{}]}'))).resolves.toHaveLength(1)
   })
 
   it('新建记录：必填校验、proxied 类型联动与提交参数', async () => {
@@ -378,9 +519,11 @@ describe('DNS', () => {
     renderPage()
     await chooseZone('example.com')
     expect(screen.queryByRole('button', { name: /新建记录/ })).not.toBeInTheDocument()
-    // 台账登记/移除同样受 dns:write 管辖
+    // 台账登记/移除/批量导入同样受 dns:write 管辖（导出是读操作不隐藏）
     expect(screen.queryByRole('button', { name: /登记台账/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /移除登记/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /导\s*入/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /导\s*出/ })).toBeInTheDocument()
     expect(recRow('www').querySelectorAll('button').length).toBe(0)
     fireEvent.click(screen.getByRole('tab', { name: 'DDNS' }))
     expect(await screen.findByText('home.example.com')).toBeInTheDocument()

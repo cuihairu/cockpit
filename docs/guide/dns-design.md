@@ -1,9 +1,9 @@
-# DNS 管理设计（M1：Cloudflare 集成；M2：DNSPod / 阿里云；M3：Domain 台账写联动）
+# DNS 管理设计（M1：Cloudflare 集成；M2：DNSPod / 阿里云；M3：Domain 台账写联动；M4：批量导入/导出）
 
 > 2026-09-15 立项。对应 todo「DNS 管理：Cloudflare API 集成，域名资源
 > 联动记录增删改」。M2 立项 2026-09-19：DNSPod / 阿里云 provider。
 > M3 立项 2026-09-27：Domain 台账写联动（D5 明写「留 M2」的写联动，
-> 实际排到 M3）。
+> 实际排到 M3）。M4 立项 2026-10-03：记录批量导入/导出。
 
 ## 痛点
 
@@ -40,9 +40,10 @@ Web /dns ──REST──▶ server api_dns ──HTTPS──▶ api.cloudflare.
 
 ## 不做（后续版本）
 
-- DNSPod / 阿里云 DNS 等其他 provider（接口已留）；
-- 与 Domain 资源的写联动（自动登记/删除 Domain 行）；
-- 批量导入/导出记录、DNS 变更历史；
+- ~~DNSPod / 阿里云 DNS 等其他 provider~~（M2 已交付）；
+- ~~与 Domain 资源的写联动~~（M3 已交付）；
+- ~~批量导入/导出记录~~（M4 已交付）；
+- DNS 变更历史；
 - 经 Agent 的分布式解析检查（各地 resolver 生效探测）。
 
 ## M1 清单
@@ -186,6 +187,49 @@ TestDNS 口径 profile 核对）。与设计的两处实现差异：① 登记�
 **真机验收（剩余）**：真实 Cloudflare/DNSPod/阿里云账号下登记→台账出现
 →改记录→台账跟随→删记录→台账消失→移除登记→整 zone 清干净的全链路；
 以及面板外删 zone 后 orphans 提示与清理。
+
+## M4：批量导入/导出（2026-10-03 设计）
+
+### 痛点与范围
+
+zone 迁移（换 provider / 换账号）、灾备留存、批量初始化子域名都是
+「逐条手点」不可承受的操作。M4 补上便携的记录级导出与幂等导入：
+导出产物是纯 JSON（RecordInput 形态），可人工审阅、可跨 provider
+迁移；导入按「匹配键」做 create/update/skip 三分类，重导幂等。
+
+### 决策
+
+| # | 决策 | 内容 | 理由 / 备注 |
+|---|------|------|------------|
+| D21 | API 形态与保留字 | `GET /api/dns/zones/{zid}/records/export`、`POST /api/dns/zones/{zid}/records/import`；`export`/`import` 是 records 子路径的保留字，方法不符 405 | 三家 provider 的记录 ID 均为十六进制/数字串，与保留字无撞名面；rbac.go 零改动——`/api/dns` 前缀推导天然覆盖（export GET = dns:read、import POST = dns:write），测试断言钉死 |
+| D22 | 导出 | 翻全量聚合（page 1..total_pages，与单页列表同一 client 归一），响应 `{zone_id, provider, count, records}`；records 为**便携 RecordInput 形态**（type/name/content/ttl/proxied，无 provider id/locked） | 导出文件可直接作导入输入（zone 归属由 URL 决定，文件里的 zone_id/provider/count 仅溯源信息）；GET 不经审计中间件（M1 起浏览不记），取内容审计先例（recordings cast）手动记 `dns_export`，details 只含 count |
+| D23 | 导入匹配键与写判定 | 匹配键 = name 归一（去空白、去尾点、小写）+ type 大写 + content 去空白精确；命中且无差异 → skipped，命中有差异 → UpdateRecord（updated），未命中 → CreateRecord（created）。差异判定：**显式 TTL（>=60）须精确相等，auto（0/1）表示「provider 决定」不触发更新**；proxied 仅 cloudflare 比较（其余 provider 该字段恒 false，D15）。同请求内重复条目：create/update 成功后写回匹配索引，重复即 skip | auto 不触发更新让 CF 导出（ttl:1）迁到 DNSPod（读回默认 600）不会反复「更新」；proxied 的 provider 感知同 D15 口径 |
+| D24 | 容错与上限 | 上限 500 条（超出 400）；**先整体校验**（逐条 ValidateInput，任一非法 400，错误带下标、最多列 5 条）再触上游；单条上游失败**不中断**，记入 `failed:[{index,name,error}]`；响应 `{total,created,updated,skipped,failed}`；审计 `dns_import`（resourceID={zid}/batch，details 只含计数不含记录内容） | 整体校验防半途而废（501 条里第 490 条非法不该先写 489 条）；单条失败继续对齐「导入是批量操作，一条坏不该废整批」 |
+| D25 | 联动与权限复用 | created/updated 路径走 `linkDNSRecordDomain`（M3 D18-D20 语义原样：仅 A/AAAA/CNAME、失败只记日志不回滚）；RBAC/错误处理/503 引导全部复用既有基础设施 | 批量导入在台账侧等价于 N 次单条 CRUD，不引入第二套联动逻辑 |
+
+### 不做（M4 确认）
+
+- **删除/replace 模式**：导入只增改不删——批量删除的破坏面大（误传旧文件
+  即清空 zone），需要删的走单条删除或 provider 控制台；「面板外删了记录
+  想同步」用导出对比人工处置；
+- 异步任务化：500 条上限内同步完成（上游串行写，最坏几十秒），不起
+  任务轮询；
+- DNS 变更历史（版本对比/回滚）——需要落库存快照，另行立项。
+
+### M4 清单
+
+- [x] server：api_dns.go 路由保留字分发 + export/import 两 handler +
+      `fetchAllDNSRecords` 翻页聚合（与 import 现状比对共用）
+- [x] audit：`dns_export`/`dns_import` 动作（details 只含计数）
+- [x] web：api.ts 两方法 + types；DNS 页工具栏「导出」（Blob 下载
+      `<zone>-records.json`）与「导入」Modal（本地读取 .json → 解析
+      预览 → 确认 → 四分类结果摘要 + failed 明细）
+- [x] AuditLogs：ACTION_MAP/RESOURCE_MAP 补 7 个 dns_* 动作标签与
+      dns_record 资源标签（操作类型过滤下拉同步获得）
+- [x] 测试：server——export 多页聚合/上游 502/未配置 503/方法 405、
+      import 全四分类/校验 400/超限 400/坏 JSON/失败不中断/非 CF
+      proxied 分支/审计与台账联动断言；RBAC requiredPerms 钉死断言；
+      web——DNS 页导出下载/导入全流/坏文件拒绝/AuditLogs 标签
 
 ## 参考
 

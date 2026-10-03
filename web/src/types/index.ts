@@ -1203,6 +1203,31 @@ export interface DNSRecordsPage {
   total_pages: number
 }
 
+// 批量导出结果（dns-design M4 D22：便携 RecordInput 形态，无 provider
+// id/locked；文件可直接作导入输入，zone 归属由请求 URL 决定）
+export interface DNSExport {
+  zone_id: string
+  provider: string
+  count: number
+  records: DNSRecordInput[]
+}
+
+// 导入单条失败明细（M4 D24：带下标，单条失败不中断整批）
+export interface DNSImportFailedItem {
+  index: number
+  name: string
+  error: string
+}
+
+// 批量导入结果（created/updated/skipped/failed 四分类）
+export interface DNSImportResult {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  failed: DNSImportFailedItem[]
+}
+
 // ========== DDNS（动态域名解析，见 ddns-design.md） ==========
 
 // 一条 DDNS 配置（server 落库；巡检时让绑定 agent 探测公网 IP 并写 Cloudflare）

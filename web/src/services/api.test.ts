@@ -46,7 +46,7 @@ describe('ApiService 全方法驱动（URL/method/参数序列化不抛错）', 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}')))
   })
 
-  it('172 个端点方法全部可调用', async () => {
+  it('174 个端点方法全部可调用', async () => {
     const ctrl = new AbortController()
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).login('x', 'x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).logout()
@@ -145,6 +145,8 @@ describe('ApiService 全方法驱动（URL/method/参数序列化不抛错）', 
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).createDNSRecord('x', {})
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).updateDNSRecord('x', 'x', {})
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).deleteDNSRecord('x', 'x')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).exportDNSRecords('x')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).importDNSRecords('x', [])
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getBackupConfigs()
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).createBackupConfig({})
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).updateBackupConfig('x', {})
@@ -232,7 +234,7 @@ describe('ApiService 全方法驱动（URL/method/参数序列化不抛错）', 
     // 全部方法都被驱动过（每个至少一次 client 调用）
     const total = mockInstance.get.mock.calls.length + mockInstance.post.mock.calls.length
       + mockInstance.put.mock.calls.length + mockInstance.delete.mock.calls.length
-    expect(total).toBeGreaterThanOrEqual(173)
+    expect(total).toBeGreaterThanOrEqual(175)
   })
 })
 
@@ -485,6 +487,16 @@ describe('ApiService 默认参数与可选分支', () => {
     mockInstance.delete.mockResolvedValueOnce({ unregistered: true, records_removed: 2 })
     expect(await api.unregisterDNSZoneCMDB('z 1')).toEqual({ unregistered: true, records_removed: 2 })
     expect(mockInstance.delete).toHaveBeenCalledWith('/dns/zones/z%201/cmdb')
+  })
+
+  it('批量导出/导入：路径编码与 body 形状', async () => {
+    mockInstance.get.mockResolvedValueOnce({ zone_id: 'z 1', provider: 'cloudflare', count: 0, records: [] })
+    expect(await api.exportDNSRecords('z 1')).toEqual({ zone_id: 'z 1', provider: 'cloudflare', count: 0, records: [] })
+    expect(mockInstance.get).toHaveBeenCalledWith('/dns/zones/z%201/records/export')
+    const input = { type: 'A', name: 'www', content: '1.2.3.4', ttl: 1, proxied: false }
+    mockInstance.post.mockResolvedValueOnce({ total: 1, created: 1, updated: 0, skipped: 0, failed: [] })
+    await api.importDNSRecords('z 1', [input])
+    expect(mockInstance.post).toHaveBeenCalledWith('/dns/zones/z%201/records/import', { records: [input] })
   })
 
   it('data 包装端点有 data 原样返回，缺 data 兜底空数组', async () => {

@@ -18,13 +18,21 @@ import {
   Typography,
   message,
 } from 'antd'
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import {
+  DeleteOutlined,
+  DownloadOutlined,
+  EditOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  UploadOutlined,
+} from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { DNSRecord, DNSRecordInput, DNSZone } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
 import { PermGuard } from '@/components/PermGuard'
 import DDNSPanel from './DDNSPanel'
+import ImportModal from './ImportModal'
 
 // DNS 管理：Tab1 记录管理（按 dns.provider 分派 cloudflare/dnspod/alidns，
 // server 直连对应 API，不落库，见 docs/guide/dns-design.md）+ Tab2 DDNS
@@ -73,6 +81,7 @@ const RecordsPanel = ({ provider }: { provider: string }) => {
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined)
   const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [editing, setEditing] = useState<DNSRecord | null>(null)
   const [form] = Form.useForm<RecordFormValues>()
   const queryClient = useQueryClient()
@@ -148,6 +157,22 @@ const RecordsPanel = ({ provider }: { provider: string }) => {
       queryClient.invalidateQueries({ queryKey: ['dns-zones'] })
     },
     onError: (err) => message.error(getApiErrorMessage(err, '移除失败')),
+  })
+
+  // 批量导出（M4 D22）：Blob 下载 <zone>-records.json（Acme 下载同款手法）
+  const exportMutation = useMutation({
+    mutationFn: () => api.exportDNSRecords(zoneId),
+    onSuccess: (data) => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${zone?.name ?? zoneId}-records.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      message.success(`已导出 ${data.count} 条记录`)
+    },
+    onError: (err) => message.error(getApiErrorMessage(err, '导出失败')),
   })
 
   const openCreate = () => {
@@ -281,6 +306,19 @@ const RecordsPanel = ({ provider }: { provider: string }) => {
           >
             刷新
           </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            disabled={!zoneId}
+            loading={exportMutation.isPending}
+            onClick={() => exportMutation.mutate()}
+          >
+            导出
+          </Button>
+          <PermGuard perm="dns:write">
+            <Button icon={<UploadOutlined />} disabled={!zoneId} onClick={() => setImportOpen(true)}>
+              导入
+            </Button>
+          </PermGuard>
           <PermGuard perm="dns:write">
             <Button type="primary" icon={<PlusOutlined />} disabled={!zoneId} onClick={openCreate}>
               新建记录
@@ -388,6 +426,13 @@ const RecordsPanel = ({ provider }: { provider: string }) => {
           )}
         </Form>
       </Modal>
+
+      <ImportModal
+        zoneId={zoneId}
+        zoneName={zone?.name}
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+      />
     </Space>
   )
 }

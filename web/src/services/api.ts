@@ -51,6 +51,8 @@ import type {
   DNSRecord,
   DNSRecordInput,
   DNSRecordsPage,
+  DNSExport,
+  DNSImportResult,
   NotificationStatus,
   NotificationSendResult,
   BackupConfig,
@@ -822,6 +824,23 @@ class ApiService {
   async deleteDNSRecord(zoneID: string, recordID: string): Promise<void> {
     await this.client.delete(
       `/dns/zones/${encodeURIComponent(zoneID)}/records/${encodeURIComponent(recordID)}`,
+    )
+  }
+
+  // 批量导出（M4 D22）：翻全量聚合为便携 RecordInput 形态；文件名由
+  // 调用方用 zone 名生成（响应不含 zone 名，避免额外查询）
+  async exportDNSRecords(zoneID: string): Promise<DNSExport> {
+    return this.client.get<unknown, DNSExport>(
+      `/dns/zones/${encodeURIComponent(zoneID)}/records/export`,
+    )
+  }
+
+  // 批量导入（M4 D23/D24）：匹配键 name+type+content，命中无差异跳过、
+  // 有差异更新、未命中创建；单条失败不中断（failed 带下标明细）
+  async importDNSRecords(zoneID: string, records: DNSRecordInput[]): Promise<DNSImportResult> {
+    return this.client.post<unknown, DNSImportResult>(
+      `/dns/zones/${encodeURIComponent(zoneID)}/records/import`,
+      { records },
     )
   }
 
