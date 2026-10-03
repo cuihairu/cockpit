@@ -342,9 +342,9 @@ class ApiService {
     return this.client.put(`/agents/${agentId}/tags`, { tagIds })
   }
 
-  // 一键清理离线 agent：thresholdHours 三档（24/72/168 小时，按 last_seen
-  // 截断），缺省 = 清理全部 offline（存量语义）
-  async cleanupAgents(body?: { thresholdHours?: number }): Promise<AgentCleanupResult> {
+  // 一键清理离线 agent：thresholdMinutes 分钟粒度自由填（按 last_seen 截断），
+  // 缺省/空体 = 清理全部 offline（默认全清）
+  async cleanupAgents(body?: { thresholdMinutes?: number }): Promise<AgentCleanupResult> {
     return this.client.post('/agents/cleanup', body ?? {})
   }
 

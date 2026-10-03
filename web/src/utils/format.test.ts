@@ -3,8 +3,10 @@ import {
   formatBytes,
   formatDuration,
   formatOfflineDuration,
+  formatOfflineThreshold,
   formatPercent,
   formatUptime,
+  parseOfflineThreshold,
 } from './format'
 
 describe('format', () => {
@@ -46,5 +48,33 @@ describe('format', () => {
     expect(formatOfflineDuration(now + 60)).toBe('1 分钟')
     expect(formatOfflineDuration(undefined)).toBe('')
     expect(formatOfflineDuration(0)).toBe('')
+  })
+
+  it('parseOfflineThreshold 自由口径：留空全清、英文/中文单位换算分钟、裸数字无效', () => {
+    // 留空/纯空白 = 全部离线
+    expect(parseOfflineThreshold('')).toEqual({ kind: 'all' })
+    expect(parseOfflineThreshold('   ')).toEqual({ kind: 'all' })
+    // 英文单位（大小写不敏感、允许空格）
+    expect(parseOfflineThreshold('30m')).toEqual({ kind: 'minutes', minutes: 30 })
+    expect(parseOfflineThreshold('2H')).toEqual({ kind: 'minutes', minutes: 120 })
+    expect(parseOfflineThreshold('7d')).toEqual({ kind: 'minutes', minutes: 10080 })
+    expect(parseOfflineThreshold('90 m')).toEqual({ kind: 'minutes', minutes: 90 })
+    // 中文单位
+    expect(parseOfflineThreshold('30分钟')).toEqual({ kind: 'minutes', minutes: 30 })
+    expect(parseOfflineThreshold('2小时')).toEqual({ kind: 'minutes', minutes: 120 })
+    expect(parseOfflineThreshold('7天')).toEqual({ kind: 'minutes', minutes: 10080 })
+    // 裸数字（歧义：分/时不明）、带未知单位、小数/负数 → invalid
+    expect(parseOfflineThreshold('2')).toEqual({ kind: 'invalid' })
+    expect(parseOfflineThreshold('2w')).toEqual({ kind: 'invalid' })
+    expect(parseOfflineThreshold('1.5h')).toEqual({ kind: 'invalid' })
+    expect(parseOfflineThreshold('-3h')).toEqual({ kind: 'invalid' })
+  })
+
+  it('formatOfflineThreshold 口径文案：0 全清、整除天/小时优先、其余分钟', () => {
+    expect(formatOfflineThreshold(0)).toBe('全部离线')
+    expect(formatOfflineThreshold(10080)).toBe('7 天')
+    expect(formatOfflineThreshold(120)).toBe('2 小时')
+    expect(formatOfflineThreshold(90)).toBe('90 分钟')
+    expect(formatOfflineThreshold(45)).toBe('45 分钟')
   })
 })

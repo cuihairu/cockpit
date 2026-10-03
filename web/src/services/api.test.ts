@@ -253,9 +253,9 @@ describe('ApiService 关键路径断言', () => {
     expect(mockInstance.post).toHaveBeenCalledWith('/auth/login', { username: 'admin', password: 'secret' })
   })
 
-  it('cleanupAgents 阈值档位 POST /agents/cleanup；缺省空体', async () => {
-    await api.cleanupAgents({ thresholdHours: 24 })
-    expect(mockInstance.post).toHaveBeenCalledWith('/agents/cleanup', { thresholdHours: 24 })
+  it('cleanupAgents 阈值（分钟粒度）POST /agents/cleanup；缺省空体 = 全清', async () => {
+    await api.cleanupAgents({ thresholdMinutes: 120 })
+    expect(mockInstance.post).toHaveBeenCalledWith('/agents/cleanup', { thresholdMinutes: 120 })
     await api.cleanupAgents()
     expect(mockInstance.post).toHaveBeenCalledWith('/agents/cleanup', {})
   })

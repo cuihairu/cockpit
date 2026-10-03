@@ -304,9 +304,9 @@ func TestAgentsListEnrichmentErrors(t *testing.T) {
 	}
 }
 
-// TestAgentsCleanupThresholdAPI 阈值三档：thresholdHours 按 last_seen 截断
-// 清理（覆盖 status 残留 online 的死行），空体 = 存量全清语义；
-// 坏 JSON / 越档值 → 400
+// TestAgentsCleanupThresholdAPI 阈值自由填：thresholdMinutes 按 last_seen
+// 截断清理（分钟粒度，覆盖 status 残留 online 的死行）；空体 = 全清；
+// 负数 / 坏 JSON → 400
 func TestAgentsCleanupThresholdAPI(t *testing.T) {
 	s := covNewServer(t)
 	seed := []struct {
@@ -329,17 +329,17 @@ func TestAgentsCleanupThresholdAPI(t *testing.T) {
 		}
 	}
 
-	// 72h 档：old-off 与 dead-on（last_seen 早于截断点）清掉，fresh-off 保留
+	// 3 天（4320 分钟）：old-off 与 dead-on（last_seen 早于截断点）清掉，fresh-off 保留
 	rec := covRec()
 	s.handleAgentsCleanup(rec, covReq(http.MethodPost, "/api/agents/cleanup",
-		strings.NewReader(`{"thresholdHours":72}`)))
-	covWantCode(t, "cleanup 72h", rec, http.StatusOK)
+		strings.NewReader(`{"thresholdMinutes":4320}`)))
+	covWantCode(t, "cleanup 3d", rec, http.StatusOK)
 	body := rec.Body.String()
 	if !strings.Contains(body, `"old-off"`) || !strings.Contains(body, `"dead-on"`) {
-		t.Errorf("72h cleanup should remove old-off & dead-on: %s", body)
+		t.Errorf("3d cleanup should remove old-off & dead-on: %s", body)
 	}
 	if strings.Contains(body, `"fresh-off"`) {
-		t.Errorf("72h cleanup must keep fresh-off: %s", body)
+		t.Errorf("3d cleanup must keep fresh-off: %s", body)
 	}
 	if !strings.Contains(body, `"count":2`) {
 		t.Errorf("count = %s", body)
@@ -348,17 +348,38 @@ func TestAgentsCleanupThresholdAPI(t *testing.T) {
 		t.Errorf("fresh-off should survive: %v", err)
 	}
 
-	// 越档值 → 400（前端三档枚举外直接拒）
+	// 分钟粒度（90 分钟 < fresh-off 的 2 小时）：小时档表达不了的截断点
 	rec = covRec()
 	s.handleAgentsCleanup(rec, covReq(http.MethodPost, "/api/agents/cleanup",
-		strings.NewReader(`{"thresholdHours":5}`)))
-	covWantCode(t, "bad threshold", rec, http.StatusBadRequest)
+		strings.NewReader(`{"thresholdMinutes":90}`)))
+	covWantCode(t, "cleanup 90m", rec, http.StatusOK)
+	if body := rec.Body.String(); !strings.Contains(body, `"fresh-off"`) {
+		t.Errorf("90m cleanup should remove fresh-off (2h old): %s", body)
+	}
+
+	// 负数 → 400
+	rec = covRec()
+	s.handleAgentsCleanup(rec, covReq(http.MethodPost, "/api/agents/cleanup",
+		strings.NewReader(`{"thresholdMinutes":-5}`)))
+	covWantCode(t, "negative threshold", rec, http.StatusBadRequest)
 
 	// 坏 JSON → 400
 	rec = covRec()
 	s.handleAgentsCleanup(rec, covReq(http.MethodPost, "/api/agents/cleanup",
 		strings.NewReader(`{oops`)))
 	covWantCode(t, "bad json", rec, http.StatusBadRequest)
+
+	// 空体 = 默认全清（不限阈值，凡 offline 都清）
+	if err := s.db.UpsertAgent(&storage.Agent{ID: "late-off", Hostname: "h", Status: "offline"}); err != nil {
+		t.Fatal(err)
+	}
+	rec = covRec()
+	s.handleAgentsCleanup(rec, covReq(http.MethodPost, "/api/agents/cleanup",
+		strings.NewReader(`{}`)))
+	covWantCode(t, "cleanup empty body", rec, http.StatusOK)
+	if body := rec.Body.String(); !strings.Contains(body, `"late-off"`) || !strings.Contains(body, `"count":1`) {
+		t.Errorf("empty body should clean all offline: %s", body)
+	}
 }
 
 // TestAgentsCleanupClearTagsError 离线清理在摘标签一步失败 → handler 500

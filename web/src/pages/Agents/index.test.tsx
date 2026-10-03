@@ -206,17 +206,17 @@ describe('Agents', () => {
     await waitFor(() => expect(apiMock.getAgents.mock.calls.length).toBeGreaterThan(before))
   })
 
-  it('一键清理离线：卡片头部入口，确认后清理并刷新列表', async () => {
+  it('一键清理离线 agent：卡片头部入口，阈值自由填 3d 后清理并刷新列表', async () => {
     renderPage()
     await screen.findByText('web-01')
     const before = apiMock.getAgents.mock.calls.length
 
     fireEvent.click(screen.getByRole('button', { name: /清理离线/ }))
     expect(screen.getByText('一键清理离线 Agent')).toBeInTheDocument()
-    // 默认 3 天档；确认清理
+    fireEvent.change(screen.getByPlaceholderText(/留空 = 全部离线/), { target: { value: '3d' } })
     fireEvent.click(screen.getByRole('button', { name: /确认清理/ }))
     await waitFor(() =>
-      expect(apiMock.cleanupAgents).toHaveBeenCalledWith({ thresholdHours: 72 }))
+      expect(apiMock.cleanupAgents).toHaveBeenCalledWith({ thresholdMinutes: 4320 }))
     // 清理回报后刷新列表
     await waitFor(() => expect(apiMock.getAgents.mock.calls.length).toBeGreaterThan(before))
   })

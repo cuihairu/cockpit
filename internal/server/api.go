@@ -473,29 +473,27 @@ func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request, id strin
 }
 
 // handleAgentsCleanup 清理离线 Agent（RBAC：inventory:write）
-// POST /api/agents/cleanup — body 可带 thresholdHours 三档（24/72/168 小时，
-// 按 last_seen 截断，覆盖 status 残留 online 的死行）；缺省/空体 = 清理所有
-// offline（存量语义）。先将 DB 中 "online" 但不在内存 registry 的 agent
-// 标记为 offline，再统一清理。
+// POST /api/agents/cleanup — body 可带 thresholdMinutes（分钟数，按 last_seen
+// 截断，覆盖 status 残留 online 的死行）；缺省/空体/0 = 清理所有 offline
+//（默认全清）。阈值由前端自由填（N 分钟/小时/天），服务端只认分钟数。
+// 先将 DB 中 "online" 但不在内存 registry 的 agent 标记为 offline，再统一清理。
 func (s *Server) handleAgentsCleanup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	// 可选 body：{"thresholdHours": 24|72|168}；空体/缺字段 = 0（存量语义）。
-	// 档位与前端三档枚举对齐，其他值直接 400 防误清。
+	// 可选 body：{"thresholdMinutes": N}；空体/缺字段 = 0（全部 offline）。
+	// 负数无意义，直接 400 防误清。
 	var body struct {
-		ThresholdHours int `json:"thresholdHours"`
+		ThresholdMinutes int `json:"thresholdMinutes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	switch body.ThresholdHours {
-	case 0, 24, 72, 168:
-	default:
-		s.handleError(w, r, http.StatusBadRequest, "thresholdHours must be one of 24/72/168")
+	if body.ThresholdMinutes < 0 {
+		s.handleError(w, r, http.StatusBadRequest, "thresholdMinutes must be >= 0")
 		return
 	}
 
@@ -513,8 +511,8 @@ func (s *Server) handleAgentsCleanup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. 按档位清理（0 = 全部 offline）
-	removed, err := s.db.CleanupOfflineAgents(time.Duration(body.ThresholdHours) * time.Hour)
+	// 2. 按阈值清理（0 = 全部 offline）
+	removed, err := s.db.CleanupOfflineAgents(time.Duration(body.ThresholdMinutes) * time.Minute)
 	if err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to cleanup agents")
 		return

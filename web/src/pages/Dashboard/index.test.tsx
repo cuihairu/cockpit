@@ -176,18 +176,18 @@ describe('Dashboard', () => {
     expect(rowOf('live-01').className).not.toContain('agent-row-offline')
   })
 
-  it('一键清理离线：确认后按档位调用并刷新列表', async () => {
+  it('一键清理离线 agent：阈值自由填 2h，确认后按分钟阈值调用并刷新列表', async () => {
     apiMock.cleanupAgents.mockResolvedValue({ status: 'ok', removed: ['a', 'b'], count: 2 })
     renderPage()
     await screen.findByText('web-01')
 
     fireEvent.click(screen.getByRole('button', { name: /清理离线/ }))
     expect(screen.getByText('一键清理离线 Agent')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('radio', { name: /离线超过 24 小时/ }))
+    fireEvent.change(screen.getByPlaceholderText(/留空 = 全部离线/), { target: { value: '2h' } })
     fireEvent.click(screen.getByRole('button', { name: /确认清理/ }))
 
     await waitFor(() =>
-      expect(apiMock.cleanupAgents).toHaveBeenCalledWith({ thresholdHours: 24 }))
+      expect(apiMock.cleanupAgents).toHaveBeenCalledWith({ thresholdMinutes: 120 }))
     await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已清理 2 台离线 Agent'))
     // 清理完成后拉回最新列表
     await waitFor(() => expect(apiMock.getAgents.mock.calls.length).toBeGreaterThanOrEqual(2))
