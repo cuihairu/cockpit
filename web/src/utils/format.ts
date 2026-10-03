@@ -32,3 +32,18 @@ export function formatUptime(seconds: number): string {
 export function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`
 }
+
+// Unix 秒（Agent.lastSeen）→ 离线时长（1 分钟 / 3 小时 / 2 天）。
+// 刚离线按 1 分钟起计（不出「0 分钟」）；lastSee 缺失/为 0 返回空串，
+// 由调用方决定是否拼接到「离线」标签后。
+export function formatOfflineDuration(lastSeen: number | undefined): string {
+  // Number() 归一：容忍字符串形态的时间戳（'0' 字符串是 truthy，不能走 !lastSeen）
+  const ts = Number(lastSeen)
+  if (!ts) return ''
+  const seconds = Math.max(0, Date.now() / 1000 - ts)
+  const minutes = Math.max(1, Math.floor(seconds / 60))
+  if (minutes < 60) return `${minutes} 分钟`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时`
+  return `${Math.floor(hours / 24)} 天`
+}

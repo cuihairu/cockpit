@@ -55,6 +55,13 @@ export interface Agent {
   tags?: AgentTagRef[]
 }
 
+// 一键清理离线 Agent 的结果（POST /agents/cleanup）
+export interface AgentCleanupResult {
+  status: string
+  removed: string[]
+  count: number
+}
+
 // 能力定义
 export interface Capability {
   type: string

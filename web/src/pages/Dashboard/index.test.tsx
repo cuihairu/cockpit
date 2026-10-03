@@ -1,12 +1,23 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { message } from 'antd'
 import Dashboard from './index'
 
 // Dashboard：统计卡（showResourceCount 裁剪）+ 健康度分档 + Agent 摘要表
+// （离线置底弱化 + 一键清理离线入口）
 
-const apiMock = vi.hoisted(() => ({ getStatus: vi.fn(), getAgents: vi.fn() }))
+const apiMock = vi.hoisted(() => ({
+  getStatus: vi.fn(),
+  getAgents: vi.fn(),
+  cleanupAgents: vi.fn(),
+}))
 vi.mock('@/services/api', () => ({ api: apiMock }))
+
+// AgentTable 的清理入口按 inventory:write 裁剪（PermGuard → usePerm）
+vi.mock('@/hooks/usePerm', () => ({ usePerm: () => true }))
+
+const msgSuccess = vi.spyOn(message, 'success')
 
 const settingsRef = vi.hoisted(() => ({ current: { refreshInterval: 30, showResourceCount: true } }))
 vi.mock('@/contexts/useSettingsContext', () => ({
@@ -133,6 +144,46 @@ describe('Dashboard', () => {
     renderPage()
     expect(await screen.findByText('bare-01')).toBeInTheDocument()
     expect(within(rowOf('bare-01')).getByText('-/-')).toBeInTheDocument()
+  })
+
+  it('离线置底弱化 + 离线时长标签；在线行不受影响', async () => {
+    const ago = (hours: number) => Math.floor(Date.now() / 1000 - hours * 3600)
+    apiMock.getAgents.mockResolvedValue([
+      { id: 'off-old', hostname: 'stale-01', ip: '10.0.0.3', status: 'offline', lastSeen: ago(5), capabilities: [] },
+      { id: 'on-1', hostname: 'live-01', ip: '10.0.0.4', status: 'online', lastSeen: ago(0.01), capabilities: [] },
+      { id: 'off-fresh', hostname: 'stale-02', ip: '10.0.0.5', status: 'offline', lastSeen: ago(3), capabilities: [] },
+    ])
+    renderPage()
+    expect(await screen.findByText('live-01')).toBeInTheDocument()
+
+    // 在线优先置底：live-01 首行，离线两行靠后（last_seen 新的在前）
+    const rows = Array.from(document.querySelectorAll('tr.ant-table-row'))
+    expect(rows.findIndex((tr) => tr.textContent?.includes('live-01'))).toBe(0)
+    expect(rows.findIndex((tr) => tr.textContent?.includes('stale-02'))).toBe(1)
+    expect(rows.findIndex((tr) => tr.textContent?.includes('stale-01'))).toBe(2)
+
+    // 离线行：时长标签 + 弱化行类；在线行不带弱化类
+    expect(within(rowOf('stale-01')).getByText('离线 5 小时')).toBeInTheDocument()
+    expect(within(rowOf('stale-02')).getByText('离线 3 小时')).toBeInTheDocument()
+    expect(rowOf('stale-01').className).toContain('agent-row-offline')
+    expect(rowOf('live-01').className).not.toContain('agent-row-offline')
+  })
+
+  it('一键清理离线：确认后按档位调用并刷新列表', async () => {
+    apiMock.cleanupAgents.mockResolvedValue({ status: 'ok', removed: ['a', 'b'], count: 2 })
+    renderPage()
+    await screen.findByText('web-01')
+
+    fireEvent.click(screen.getByRole('button', { name: /清理离线/ }))
+    expect(screen.getByText('一键清理离线 Agent')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /离线超过 24 小时/ }))
+    fireEvent.click(screen.getByRole('button', { name: /确认清理/ }))
+
+    await waitFor(() =>
+      expect(apiMock.cleanupAgents).toHaveBeenCalledWith({ thresholdHours: 24 }))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已清理 2 台离线 Agent'))
+    // 清理完成后拉回最新列表
+    await waitFor(() => expect(apiMock.getAgents.mock.calls.length).toBeGreaterThanOrEqual(2))
   })
 
   it('刷新按钮触发 refetch', async () => {

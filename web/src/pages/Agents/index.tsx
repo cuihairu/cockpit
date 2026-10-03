@@ -5,6 +5,8 @@ import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { Agent } from '@/types'
 import { api } from '@/services/api'
+import { PermGuard } from '@/components/PermGuard'
+import CleanupOfflineButton from '@/components/CleanupOfflineButton'
 import TerminalModal from '@/components/TerminalModal'
 import GuacamoleModal from '@/components/GuacamoleModal'
 import type { RemoteProtocol } from '@/services/remote'
@@ -80,6 +82,9 @@ const Agents = () => {
         title="Agent 管理"
         extra={
           <Space>
+            <PermGuard perm="inventory:write">
+              <CleanupOfflineButton onCleaned={refreshAgents} />
+            </PermGuard>
             <Button icon={<ReloadOutlined />} onClick={refreshAgents} loading={loading}>
               刷新
             </Button>

@@ -253,6 +253,13 @@ describe('ApiService 关键路径断言', () => {
     expect(mockInstance.post).toHaveBeenCalledWith('/auth/login', { username: 'admin', password: 'secret' })
   })
 
+  it('cleanupAgents 阈值档位 POST /agents/cleanup；缺省空体', async () => {
+    await api.cleanupAgents({ thresholdHours: 24 })
+    expect(mockInstance.post).toHaveBeenCalledWith('/agents/cleanup', { thresholdHours: 24 })
+    await api.cleanupAgents()
+    expect(mockInstance.post).toHaveBeenCalledWith('/agents/cleanup', {})
+  })
+
   it('健康探针三方法：路径/方法/body 形状（agentId 与 probeId 均编码）', async () => {
     await api.getAgentHealth('ag 1')
     expect(mockInstance.get).toHaveBeenCalledWith('/agents/ag%201/health')

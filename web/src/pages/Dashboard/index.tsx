@@ -19,7 +19,7 @@ const Dashboard = () => {
     refetchInterval: settings.refreshInterval * 1000,
   })
 
-  const { data: agents } = useQuery({
+  const { data: agents, refetch: refetchAgents } = useQuery({
     queryKey: ['agents'],
     queryFn: () => api.getAgents(),
   })
@@ -49,7 +49,12 @@ const Dashboard = () => {
 
       <StatCards stats={stats} showAll={settings.showResourceCount} />
       <HealthBar onlineRate={onlineRate} />
-      <AgentTable agents={agents || []} />
+      <AgentTable
+        agents={agents || []}
+        onCleaned={() => {
+          void refetchAgents()
+        }}
+      />
     </div>
   )
 }

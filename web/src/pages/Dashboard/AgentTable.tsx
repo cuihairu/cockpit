@@ -1,7 +1,11 @@
+import { useMemo } from 'react'
 import { Card, Space, Table, Tag } from 'antd'
 import { CloudServerOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { Agent } from '@/types'
+import { formatOfflineDuration } from '@/utils/format'
+import { PermGuard } from '@/components/PermGuard'
+import CleanupOfflineButton from '@/components/CleanupOfflineButton'
 
 const columns: ColumnsType<Agent> = [
   {
@@ -29,11 +33,11 @@ const columns: ColumnsType<Agent> = [
     title: '状态',
     dataIndex: 'status',
     key: 'status',
-    render: (status: string) => (
-      <Tag color={status === 'online' ? 'success' : 'default'}>
-        {status === 'online' ? '在线' : '离线'}
-      </Tag>
-    ),
+    render: (_status, record) => {
+      if (record.status === 'online') return <Tag color="success">在线</Tag>
+      const duration = formatOfflineDuration(record.lastSeen)
+      return <Tag>{duration ? `离线 ${duration}` : '离线'}</Tag>
+    },
   },
   {
     title: '能力',
@@ -52,18 +56,42 @@ const columns: ColumnsType<Agent> = [
   },
 ]
 
-// Agent 概览表（前 5 条，完整管理在 /agents）
-const AgentTable = ({ agents }: { agents: Agent[] }) => (
-  <Card title="Agent 列表" variant="borderless" extra={<a href="/agents">查看全部</a>}>
-    <Table
-      dataSource={agents}
-      columns={columns}
-      rowKey="id"
-      pagination={{ pageSize: 5 }}
-      size="small"
-      scroll={{ x: 640 }}
-    />
-  </Card>
-)
+// Agent 概览表（完整管理在 /agents）。在线优先置底离线（弱化），离线行
+// 标注离线时长；清理入口按 RBAC inventory:write 裁剪。
+const AgentTable = ({ agents, onCleaned }: { agents: Agent[]; onCleaned?: () => void }) => {
+  const sorted = useMemo(
+    () =>
+      [...agents].sort((a, b) => {
+        const rank = (x: Agent) => (x.status === 'online' ? 0 : 1)
+        return rank(a) - rank(b) || (b.lastSeen || 0) - (a.lastSeen || 0)
+      }),
+    [agents],
+  )
+
+  return (
+    <Card
+      title="Agent 列表"
+      variant="borderless"
+      extra={
+        <Space>
+          <PermGuard perm="inventory:write">
+            <CleanupOfflineButton onCleaned={onCleaned} />
+          </PermGuard>
+          <a href="/agents">查看全部</a>
+        </Space>
+      }
+    >
+      <Table
+        dataSource={sorted}
+        columns={columns}
+        rowKey="id"
+        pagination={{ pageSize: 5 }}
+        size="small"
+        scroll={{ x: 640 }}
+        rowClassName={(record) => (record.status === 'online' ? '' : 'agent-row-offline')}
+      />
+    </Card>
+  )
+}
 
 export default AgentTable

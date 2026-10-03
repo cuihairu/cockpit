@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios'
 import type { UISettings } from '@/contexts/settingsTypes'
 import type {
   Agent,
+  AgentCleanupResult,
   AgentTagRef,
   AuditLogStats,
   StatusResponse,
@@ -341,9 +342,10 @@ class ApiService {
     return this.client.put(`/agents/${agentId}/tags`, { tagIds })
   }
 
-  // 清理离线 agent（可选只清 ids 中的离线项）
-  async cleanupAgents(ids?: string[]): Promise<{ removed: number }> {
-    return this.client.post('/agents/cleanup', ids ? { ids } : {})
+  // 一键清理离线 agent：thresholdHours 三档（24/72/168 小时，按 last_seen
+  // 截断），缺省 = 清理全部 offline（存量语义）
+  async cleanupAgents(body?: { thresholdHours?: number }): Promise<AgentCleanupResult> {
+    return this.client.post('/agents/cleanup', body ?? {})
   }
 
   // ========== Docker（通过 Agent RPC 代理） ==========

@@ -304,6 +304,63 @@ func TestAgentsListEnrichmentErrors(t *testing.T) {
 	}
 }
 
+// TestAgentsCleanupThresholdAPI 阈值三档：thresholdHours 按 last_seen 截断
+// 清理（覆盖 status 残留 online 的死行），空体 = 存量全清语义；
+// 坏 JSON / 越档值 → 400
+func TestAgentsCleanupThresholdAPI(t *testing.T) {
+	s := covNewServer(t)
+	seed := []struct {
+		id       string
+		status   string
+		lastSeen time.Time
+	}{
+		{"old-off", "offline", time.Now().Add(-4 * 24 * time.Hour)},
+		{"dead-on", "online", time.Now().Add(-7 * 24 * time.Hour)},
+		{"fresh-off", "offline", time.Now().Add(-2 * time.Hour)},
+	}
+	for _, x := range seed {
+		if err := s.db.UpsertAgent(&storage.Agent{ID: x.id, Hostname: "h", Status: x.status}); err != nil {
+			t.Fatal(err)
+		}
+		// BeforeCreate 强制 last_seen=now，落库后回拨到目标时刻
+		if err := s.db.Session().Model(&storage.Agent{}).Where("id = ?", x.id).
+			Update("last_seen", x.lastSeen).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 72h 档：old-off 与 dead-on（last_seen 早于截断点）清掉，fresh-off 保留
+	rec := covRec()
+	s.handleAgentsCleanup(rec, covReq(http.MethodPost, "/api/agents/cleanup",
+		strings.NewReader(`{"thresholdHours":72}`)))
+	covWantCode(t, "cleanup 72h", rec, http.StatusOK)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"old-off"`) || !strings.Contains(body, `"dead-on"`) {
+		t.Errorf("72h cleanup should remove old-off & dead-on: %s", body)
+	}
+	if strings.Contains(body, `"fresh-off"`) {
+		t.Errorf("72h cleanup must keep fresh-off: %s", body)
+	}
+	if !strings.Contains(body, `"count":2`) {
+		t.Errorf("count = %s", body)
+	}
+	if _, err := s.db.GetAgent("fresh-off"); err != nil {
+		t.Errorf("fresh-off should survive: %v", err)
+	}
+
+	// 越档值 → 400（前端三档枚举外直接拒）
+	rec = covRec()
+	s.handleAgentsCleanup(rec, covReq(http.MethodPost, "/api/agents/cleanup",
+		strings.NewReader(`{"thresholdHours":5}`)))
+	covWantCode(t, "bad threshold", rec, http.StatusBadRequest)
+
+	// 坏 JSON → 400
+	rec = covRec()
+	s.handleAgentsCleanup(rec, covReq(http.MethodPost, "/api/agents/cleanup",
+		strings.NewReader(`{oops`)))
+	covWantCode(t, "bad json", rec, http.StatusBadRequest)
+}
+
 // TestAgentsCleanupClearTagsError 离线清理在摘标签一步失败 → handler 500
 // （CleanupOfflineAgents 的 ClearAgentTags 错误不被吞，直接冒泡到 499 行）
 func TestAgentsCleanupClearTagsError(t *testing.T) {

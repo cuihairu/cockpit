@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { formatBytes, formatDuration, formatPercent, formatUptime } from './format'
+import {
+  formatBytes,
+  formatDuration,
+  formatOfflineDuration,
+  formatPercent,
+  formatUptime,
+} from './format'
 
 describe('format', () => {
   it('formatBytes 量级与小数位（B 整数、KB/MB 一位、GB/TB 两位）', () => {
@@ -27,5 +33,18 @@ describe('format', () => {
   it('formatPercent 保留一位小数', () => {
     expect(formatPercent(12.34)).toBe('12.3%')
     expect(formatPercent(0)).toBe('0.0%')
+  })
+
+  it('formatOfflineDuration 档位（分钟/小时/天）与空值短路', () => {
+    const now = Date.now() / 1000
+    expect(formatOfflineDuration(now)).toBe('1 分钟')
+    expect(formatOfflineDuration(now - 30 * 60)).toBe('30 分钟')
+    expect(formatOfflineDuration(now - 2 * 3600)).toBe('2 小时')
+    expect(formatOfflineDuration(now - 25 * 3600)).toBe('1 天')
+    expect(formatOfflineDuration(now - 3 * 86400)).toBe('3 天')
+    // 未来值（时钟漂移）与缺失值
+    expect(formatOfflineDuration(now + 60)).toBe('1 分钟')
+    expect(formatOfflineDuration(undefined)).toBe('')
+    expect(formatOfflineDuration(0)).toBe('')
   })
 })

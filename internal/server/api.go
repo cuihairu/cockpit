@@ -3,8 +3,10 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/storage"
@@ -471,11 +473,29 @@ func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request, id strin
 }
 
 // handleAgentsCleanup 清理离线 Agent（RBAC：inventory:write）
-// POST /api/agents/cleanup — 删除所有离线 agent；
-// 先将 DB 中 "online" 但不在内存 registry 的 agent 标记为 offline，再统一清理。
+// POST /api/agents/cleanup — body 可带 thresholdHours 三档（24/72/168 小时，
+// 按 last_seen 截断，覆盖 status 残留 online 的死行）；缺省/空体 = 清理所有
+// offline（存量语义）。先将 DB 中 "online" 但不在内存 registry 的 agent
+// 标记为 offline，再统一清理。
 func (s *Server) handleAgentsCleanup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// 可选 body：{"thresholdHours": 24|72|168}；空体/缺字段 = 0（存量语义）。
+	// 档位与前端三档枚举对齐，其他值直接 400 防误清。
+	var body struct {
+		ThresholdHours int `json:"thresholdHours"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	switch body.ThresholdHours {
+	case 0, 24, 72, 168:
+	default:
+		s.handleError(w, r, http.StatusBadRequest, "thresholdHours must be one of 24/72/168")
 		return
 	}
 
@@ -493,8 +513,8 @@ func (s *Server) handleAgentsCleanup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. 清理所有离线 agent
-	removed, err := s.db.CleanupOfflineAgents(0)
+	// 2. 按档位清理（0 = 全部 offline）
+	removed, err := s.db.CleanupOfflineAgents(time.Duration(body.ThresholdHours) * time.Hour)
 	if err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to cleanup agents")
 		return
