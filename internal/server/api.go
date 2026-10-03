@@ -52,6 +52,8 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleSmartConfig(w, r)
 	case path == "/nas/config":
 		s.handleNASConfig(w, r)
+	case path == "/agent-tags" || strings.HasPrefix(path, "/agent-tags/"):
+		s.handleAgentTagsAPI(w, r)
 	case path == "/recordings":
 		s.handleRecordings(w, r)
 	case strings.HasPrefix(path, "/recordings/"):
@@ -75,6 +77,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleLogsSearch(w, r)
 	case strings.HasPrefix(path, "/agents/"):
 		agentID := strings.TrimPrefix(path, "/agents/")
+		// agent 标签 GET/PUT /agents/{id}/tags（见 api_tags.go）
+		if strings.HasSuffix(agentID, "/tags") {
+			s.handleAgentTagAssignAPI(w, r, agentID)
+			return
+		}
 		// 远程文件管理 /agents/{id}/files/...（见 api_files.go）
 		if strings.Contains(agentID, "/files/") {
 			s.handleAgentFilesAPI(w, r, agentID)
@@ -399,9 +406,37 @@ func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 批量附标签与系统快照（系统/架构列），避免 N+1 查询
+	agentIDs := make([]string, 0, len(agents))
+	for _, a := range agents {
+		agentIDs = append(agentIDs, a.ID)
+	}
+	tagsByAgent, err := s.db.TagsForAgents(agentIDs)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to load tags")
+		return
+	}
+	snapshots, err := s.db.ListSystemInfoSnapshotsByAgent(agentIDs)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to load system info")
+		return
+	}
+
 	result := make([]map[string]interface{}, 0, len(agents))
 	for _, agent := range agents {
-		result = append(result, storageAgentToResponse(agent))
+		item := storageAgentToResponse(agent)
+		tags := tagsByAgent[agent.ID]
+		tagList := make([]map[string]string, 0, len(tags))
+		for _, t := range tags {
+			tagList = append(tagList, map[string]string{"id": t.ID, "name": t.Name, "color": t.Color})
+		}
+		item["tags"] = tagList
+		if snap, ok := snapshots[agent.ID]; ok {
+			item["osName"] = snap.OSName
+			item["osVersion"] = snap.OSVersion
+			item["arch"] = snap.Arch
+		}
+		result = append(result, item)
 	}
 
 	s.writeJSON(w, http.StatusOK, result)
@@ -710,6 +745,11 @@ func storageAgentToResponse(agent *storage.Agent) map[string]interface{} {
 		"lastSeen":     agent.LastSeen.Unix(),
 		"labels":       agent.Labels,
 		"metadata":     agent.Metadata,
+		"version":      agent.Version,
+		"startedAt":    agent.StartedAt.Unix(),
+		"virtType":     agent.VirtType,
+		"virtRole":     agent.VirtRole,
+		"services":     agent.Services,
 	}
 }
 

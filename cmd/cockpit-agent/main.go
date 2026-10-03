@@ -59,7 +59,7 @@ func printVersion(w io.Writer) {
 // handleStart `cockpit-agent start [-server ws://...]`
 func handleStart(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
-	startCmd := &agent.StartCmd{}
+	startCmd := &agent.StartCmd{Version: version}
 	startCmd.BindWithUsage(fs, agent.StartUsage{
 		Server:  "Server WebSocket 地址 (必需)",
 		ID:      "Agent ID (可选，默认基于 machine-id 自动生成，重启不变)",

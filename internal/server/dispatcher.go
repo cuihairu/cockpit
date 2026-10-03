@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
+	"github.com/cuihairu/cockpit/internal/storage"
 )
 
 // handleMessage Agent -> Server 消息分发
@@ -34,8 +35,27 @@ func (s *Server) handleHeartbeat(agent *Agent, msg *protocol.Message) {
 	agent.Heartbeat()
 
 	// 类型化解码心跳负载；忽略错误（agent 可能发空 payload）
-	if hb, err := protocol.DecodeHeartbeat(msg); err == nil && hb.SystemInfo != nil {
-		s.handleSystemInfo(agent.ID, hb.SystemInfo)
+	if hb, err := protocol.DecodeHeartbeat(msg); err == nil {
+		if hb.SystemInfo != nil {
+			s.handleSystemInfo(agent.ID, hb.SystemInfo)
+		}
+		// 启动时刻 + 服务面：内存侧刷新 + 落库（心跳是唯一 30s 级刷新通道）
+		if hb.StartedAt > 0 || hb.Services != nil {
+			var startedAt time.Time
+			if hb.StartedAt > 0 {
+				startedAt = time.Unix(hb.StartedAt, 0)
+			}
+			var services []storage.AgentService
+			if hb.Services != nil {
+				services = AgentServicesFromPayload(hb.Services)
+			}
+			agent.UpdatePresence(startedAt, services)
+			if s.db != nil {
+				if err := s.db.UpdateAgentPresence(agent.ID, startedAt, services); err != nil {
+					log.Printf("Agent %s presence update failed: %v", agent.ID, err)
+				}
+			}
+		}
 	}
 
 	// 发送 ACK

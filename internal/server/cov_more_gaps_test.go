@@ -214,7 +214,7 @@ func covStuckStackAgent(t *testing.T, s *Server, agentID string) {
 	if err := s.registry.Register(agent); err != nil {
 		t.Fatalf("register agent: %v", err)
 	}
-	for i := 0; i < 256; i++ {
+	for i := 0; i < 4096; i++ {
 		agent.Send <- protocol.NewMessage(protocol.MessageTypeRPCRequest, map[string]interface{}{})
 	}
 	t.Cleanup(func() { s.registry.Unregister(agentID) })

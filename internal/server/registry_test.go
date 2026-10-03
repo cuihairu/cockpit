@@ -413,8 +413,8 @@ func TestAgentSendMessage(t *testing.T) {
 
 func TestAgentSendMessageChannelFull(t *testing.T) {
 	agent := NewAgent("a1", nil)
-	// Fill the channel (buffer is 256)
-	for i := 0; i < 256; i++ {
+	// Fill the channel (buffer is 4096)
+	for i := 0; i < 4096; i++ {
 		agent.Send <- protocol.NewMessage("fill", nil)
 	}
 

@@ -462,10 +462,12 @@ func toStorageAgent(agent *Agent) *storage.Agent {
 		LocalIPs:     agent.LocalIPs,
 		Region:       agent.Location.Region,
 		Zone:         agent.Location.Zone,
-		Version:      "", // Agent 当前没有版本字段
+		Version:      agent.Version,
 		Capabilities: capabilities,
 		Status:       "online",
 		LastSeen:     agent.LastSeen,
+		StartedAt:    agent.StartedAt,
+		Services:     agent.Services,
 		Labels:       agent.Labels,
 		Metadata:     agent.Metadata,
 	}

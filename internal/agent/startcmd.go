@@ -21,6 +21,9 @@ type StartCmd struct {
 	Labels  string
 	Bias    int
 	SSHKeys string
+	// Version 二进制版本，由 cmd/cockpit-agent 注入（无 CLI flag）：
+	// 随注册上报，Server 侧主机列表展示版本列
+	Version string
 }
 
 // StartUsage customizes shared flag descriptions.
@@ -86,6 +89,7 @@ func (c *StartCmd) BuildConfig() (Config, error) {
 		Labels:    parseLabels(c.Labels),
 		Bias:      c.Bias,
 		SSHKeys:   c.SSHKeys,
+		Version:   c.Version,
 	}, nil
 }
 

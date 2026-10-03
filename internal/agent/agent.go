@@ -36,6 +36,15 @@ type Agent struct {
 	location     protocol.Location
 	capabilities []protocol.Capability
 
+	// startedAt 进程启动时刻。随心跳上报，Server 据此算本次运行时长
+	startedAt time.Time
+
+	// services 本机开放服务面缓存（SSH/RDP/VNC…）。后台定时重探测，
+	// 心跳回带；关掉服务最多一个周期内同步到 Server
+	servicesMu   sync.RWMutex
+	services     []protocol.RemoteServicePayload
+	servicesOnce sync.Once
+
 	// 状态
 	mu           sync.RWMutex
 	writeMu      sync.Mutex
@@ -55,6 +64,10 @@ var (
 	heartbeatInterval   = 30 * time.Second
 	reconnectDelay      = 5 * time.Second
 	reconnectRetryDelay = 10 * time.Second
+	// servicesRefreshInterval 服务面重探测周期。探测含 SSH 认证方式握手
+	// （最坏 3s），不宜频繁；新开/关掉 SSH/RDP/VNC 最迟一个周期内同步。
+	// 心跳（30s）只回带缓存，不在关键路径上探测。
+	servicesRefreshInterval = 5 * time.Minute
 )
 
 // goos 运行平台快照，默认 runtime.GOOS，生产行为与直接读 runtime.GOOS
@@ -78,6 +91,9 @@ type Config struct {
 	Bias      int                    `json:"bias,omitempty"`      // 同机器多 agent 偏移量，默认 0
 	Metadata  map[string]interface{} `json:"metadata,omitempty"` // 自定义元数据 key-value
 	SSHKeys   string                 `json:"ssh_keys,omitempty"` // SSH 密钥目录，默认 ~/.ssh/
+	// Version 二进制版本（由 cmd/cockpit-agent 的 version 注入），
+	// 随注册上报，Server 侧主机列表展示
+	Version string `json:"version,omitempty"`
 }
 
 // NewAgent 创建新 Agent
@@ -93,9 +109,56 @@ func NewAgent(cfg Config) *Agent {
 		desktopHandler: rdp.NewHandler(),
 		outbound:       make(chan *protocol.Message, 1024),
 		capabilities:   []protocol.Capability{},
+		startedAt:      time.Now(),
 		ctx:            ctx,
 		cancel:         cancel,
 		config:         &cfg,
+	}
+}
+
+// startedAtOrNow 进程启动时刻（零值兜底为此刻，供未走 NewAgent 的测试构造体用）
+func (a *Agent) startedAtOrNow() time.Time {
+	if a.startedAt.IsZero() {
+		return time.Now()
+	}
+	return a.startedAt
+}
+
+// cachedServices 服务面缓存快照
+func (a *Agent) cachedServices() []protocol.RemoteServicePayload {
+	a.servicesMu.RLock()
+	defer a.servicesMu.RUnlock()
+	out := make([]protocol.RemoteServicePayload, len(a.services))
+	copy(out, a.services)
+	return out
+}
+
+// setServices 写入服务面缓存
+func (a *Agent) setServices(services []protocol.RemoteServicePayload) {
+	a.servicesMu.Lock()
+	a.services = services
+	a.servicesMu.Unlock()
+}
+
+// refreshServices 重探测本机服务面并更新缓存。探测有秒级耗时（SSH 认证
+// 方式握手），故后台循环里跑，不阻塞心跳。
+func (a *Agent) refreshServices() {
+	services := detector.NewRemoteServiceDetector().DetectServices()
+	a.setServices(services)
+	log.Printf("Remote services refreshed: %d protocol(s) open", len(services))
+}
+
+// servicesRefreshLoop 定时重探测服务面
+func (a *Agent) servicesRefreshLoop() {
+	ticker := time.NewTicker(servicesRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			a.refreshServices()
+		case <-a.ctx.Done():
+			return
+		}
 	}
 }
 
@@ -121,6 +184,10 @@ func (a *Agent) Start() error {
 	// 1.5 按能力注册 RPC Provider
 	a.setupProviders()
 
+	// 1.6 服务面初值：注册报文里先带一份基线（探测含 SSH 握手，
+	// 放在 connect 之前完成，注册即带真实结果），后台循环持续刷新
+	a.servicesOnce.Do(a.refreshServices)
+
 	// 2. 连接 Server
 	if err := a.connect(); err != nil {
 		// SIGTERM 落在连接/注册窗口时 Stop 已 cancel ctx：此时的失败
@@ -143,6 +210,7 @@ func (a *Agent) Start() error {
 	// 4. 启动统一发送循环和心跳
 	go a.writeLoop()
 	go a.heartbeatLoop()
+	go a.servicesRefreshLoop()
 
 	// 5. 启动消息循环
 	go a.messageLoop()
@@ -487,6 +555,12 @@ func (a *Agent) register() error {
 		"virtualization": DetectVirtualization(),
 		"labels":         a.config.Labels,
 		"metadata":       a.config.Metadata,
+		// 版本 / 进程启动时刻 / 服务面：主机列表的元信息列与协议入口
+		// 数据源（此前只在 capabilities 里带一份启动时快照，运行期开服务
+		// 不会反映）
+		"version":   a.config.Version,
+		"startedAt": a.startedAtOrNow().Unix(),
+		"services":  a.cachedServices(),
 	}
 
 	// 发送注册消息
@@ -573,8 +647,11 @@ func (a *Agent) sendHeartbeat() {
 	}
 
 	payload := map[string]any{
-		"agentId": a.agentID,
-		"status":  "online",
+		"agentId":   a.agentID,
+		"status":    "online",
+		"startedAt": a.startedAtOrNow().Unix(),
+		// 服务面回带缓存（后台每 5 分钟重探测，这里不发探测请求）
+		"services": a.cachedServices(),
 	}
 
 	// 采集系统信息（不阻塞，快速采样）

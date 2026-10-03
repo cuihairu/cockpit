@@ -121,6 +121,8 @@ func (d *DB) migrate() error {
 		&DomainBinding{},
 		&Role{},
 		&RemoteCredential{},
+		&AgentTag{},
+		&AgentTagAssignment{},
 	); err != nil {
 		return err
 	}
@@ -187,6 +189,17 @@ func agentUpdateFields(a *Agent) map[string]interface{} {
 	if !a.LastSeen.IsZero() {
 		u["last_seen"] = a.LastSeen
 	}
+	if !a.StartedAt.IsZero() {
+		u["started_at"] = a.StartedAt
+	}
+	// 服务面允许「全关」这一有意义的空集：agent 重探测发现 ssh/rdp/vnc
+	// 都没了会带空切片上报，此时必须把库里的旧项清掉（len>0 才写会让
+	// 已关闭的服务在列表里一直挂着）
+	if a.Services != nil {
+		if b, err := json.Marshal(a.Services); err == nil {
+			u["services"] = string(b)
+		}
+	}
 	if a.VirtType != "" {
 		u["virt_type"] = a.VirtType
 	}
@@ -238,8 +251,11 @@ func (d *DB) ListAgentsByRegion(region string) ([]*Agent, error) {
 	return agents, err
 }
 
-// DeleteAgent 删除 Agent
+// DeleteAgent 删除 Agent（顺带清标签关联，避免关联行悬空）
 func (d *DB) DeleteAgent(id string) error {
+	if err := d.ClearAgentTags(id); err != nil {
+		return err
+	}
 	return d.db.Delete(&Agent{}, "id = ?", id).Error
 }
 
@@ -251,6 +267,77 @@ func (d *DB) UpdateAgentStatus(id string, status string, lastSeen time.Time) err
 			"status":    status,
 			"last_seen": lastSeen,
 		}).Error
+}
+
+// UpdateAgentPresence 刷新 agent 的启动时刻与服务面（心跳路径）。
+// startedAt 为零值时跳过（老 agent 不带该字段）；services 为 nil 时跳过，
+// 空切片则清空（服务全关掉是有意义的状态）。
+func (d *DB) UpdateAgentPresence(id string, startedAt time.Time, services []AgentService) error {
+	updates := map[string]interface{}{}
+	if !startedAt.IsZero() {
+		updates["started_at"] = startedAt
+	}
+	if services != nil {
+		if b, err := json.Marshal(services); err == nil {
+			updates["services"] = string(b)
+		}
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	return d.db.Model(&Agent{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// ListSystemInfoSnapshotsByAgent 批量取系统信息快照（Agent 列表页要系统/架构列，
+// 避免每台机器一次查询）
+func (d *DB) ListSystemInfoSnapshotsByAgent(agentIDs []string) (map[string]*SystemInfoSnapshot, error) {
+	result := make(map[string]*SystemInfoSnapshot, len(agentIDs))
+	if len(agentIDs) == 0 {
+		return result, nil
+	}
+	var snapshots []*SystemInfoSnapshot
+	if err := d.db.Where("agent_id IN ?", agentIDs).Find(&snapshots).Error; err != nil {
+		return nil, err
+	}
+	for _, s := range snapshots {
+		result[s.AgentID] = s
+	}
+	return result, nil
+}
+
+// DeleteAgents 批量删除 agent 记录，同时清掉其标签关联与投喂资源。
+// 返回实际删除的 ID。用于「离线 agent 一键清理」。
+func (d *DB) DeleteAgents(ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	var removed []string
+	err := d.db.Transaction(func(tx *gorm.DB) error {
+		for _, id := range ids {
+			var agent Agent
+			if err := tx.First(&agent, "id = ?", id).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				return err
+			}
+			// 标签关联先摘：AgentTagAssignment 无外键约束，留悬空行会让
+			// 标签的服务器计数虚高（DeleteAgent 单条路径同样调用）
+			if err := tx.Where("agent_id = ?", id).Delete(&AgentTagAssignment{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Delete(&agent).Error; err != nil {
+				return err
+			}
+			removed = append(removed, id)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return removed, nil
 }
 
 // CleanupOfflineAgents 清理离线 Agent。
@@ -271,6 +358,9 @@ func (d *DB) CleanupOfflineAgents(timeout time.Duration) ([]string, error) {
 
 	var removed []string
 	for _, agent := range agents {
+		if err := d.ClearAgentTags(agent.ID); err != nil {
+			return nil, err
+		}
 		if err := d.db.Delete(agent).Error; err == nil {
 			removed = append(removed, agent.ID)
 		}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
+	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/gorilla/websocket"
 )
 
@@ -29,6 +30,12 @@ type Agent struct {
 	// send-on-closed-channel panic（旧实现靠 recover 兜底，仍算数据竞争）
 	sendMu   sync.Mutex
 	LastSeen time.Time
+	// Version 二进制版本（注册上报）
+	Version string
+	// StartedAt 进程启动时刻（注册上报，心跳持续刷新）
+	StartedAt time.Time
+	// Services 本机开放服务面（注册基线 + 心跳刷新）
+	Services []storage.AgentService
 }
 
 // NewAgent 创建新的 Agent 实例
@@ -36,7 +43,7 @@ func NewAgent(id string, conn *websocket.Conn) *Agent {
 	return &Agent{
 		ID:       id,
 		Conn:     conn,
-		Send:     make(chan *protocol.Message, 256),
+		Send:     make(chan *protocol.Message, 4096),
 		LastSeen: time.Now(),
 	}
 }
@@ -54,7 +61,44 @@ func (a *Agent) Update(info *protocol.RegisterPayload) {
 	a.Virtualization = info.Virtualization
 	a.Labels = info.Labels
 	a.Metadata = info.Metadata
+	a.Version = info.Version
+	if info.StartedAt > 0 {
+		a.StartedAt = time.Unix(info.StartedAt, 0)
+	}
+	if info.Services != nil {
+		a.Services = AgentServicesFromPayload(info.Services)
+	}
 	a.LastSeen = time.Now()
+}
+
+// UpdatePresence 心跳路径刷新启动时刻与服务面（agent 重探测后最多一个周期同步）
+func (a *Agent) UpdatePresence(startedAt time.Time, services []storage.AgentService) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !startedAt.IsZero() {
+		a.StartedAt = startedAt
+	}
+	if services != nil {
+		a.Services = services
+	}
+}
+
+// AgentServicesFromPayload 协议层服务面上报项 → 存储层模型。
+// DetectedAt 协议里是 Unix 秒，落库用 time.Time。
+func AgentServicesFromPayload(in []protocol.RemoteServicePayload) []storage.AgentService {
+	out := make([]storage.AgentService, 0, len(in))
+	for _, s := range in {
+		out = append(out, storage.AgentService{
+			Protocol:    s.Protocol,
+			Host:        s.Host,
+			Port:        s.Port,
+			Name:        s.Name,
+			Running:     s.Running,
+			AuthMethods: s.AuthMethods,
+			DetectedAt:  time.Unix(s.DetectedAt, 0),
+		})
+	}
+	return out
 }
 
 // GetLocation 获取位置信息

@@ -19,8 +19,14 @@ type Agent struct {
 	Status       string       `gorm:"index;default:offline" json:"status"` // online, offline
 	LastSeen     time.Time    `json:"lastSeen"`
 	FirstSeen    time.Time    `json:"firstSeen"`
-	CreatedAt    time.Time    `json:"createdAt"`
-	UpdatedAt    time.Time    `json:"updatedAt"`
+	// StartedAt agent 进程本次启动时刻（agent 心跳上报）。与系统 uptime
+	// 不同：进程重启即刷新，列表的「在线时长」按它算
+	StartedAt time.Time `gorm:"index" json:"startedAt"`
+	// Services 本机开放的服务面（SSH/RDP/VNC/telnet + 端口），
+	// 由 agent 探测后随心跳上报刷新。客户端只给真正开放的协议入口
+	Services []AgentService `gorm:"serializer:json" json:"services"`
+	CreatedAt time.Time      `json:"createdAt"`
+	UpdatedAt time.Time      `json:"updatedAt"`
 
 	// 虚拟化信息
 	VirtType string `gorm:"index" json:"virtType"` // kvm, vmware, docker, none
@@ -39,7 +45,7 @@ type Agent struct {
 	ComputeInstances []ComputeInstance `gorm:"foreignKey:AgentID" json:"-"`
 	Domains          []Domain          `gorm:"foreignKey:AgentID" json:"-"`
 	Certificates     []Certificate     `gorm:"foreignKey:AgentID" json:"-"`
-	Services         []Service         `gorm:"foreignKey:AgentID" json:"-"`
+	ServiceCatalog   []Service         `gorm:"foreignKey:AgentID" json:"-"`
 	Gateways         []Gateway         `gorm:"foreignKey:AgentID" json:"-"`
 	Storages         []Storage         `gorm:"foreignKey:AgentID" json:"-"`
 }
@@ -55,6 +61,20 @@ type Capability struct {
 	Endpoint string                 `json:"endpoint,omitempty"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 	Config   map[string]interface{} `json:"config,omitempty"`
+}
+
+// AgentService agent 上报的本机开放服务面（SSH/RDP/VNC/telnet…）。
+// 与 agent 自报的 Labels（自由 key-value）不同：这是平台认定的
+// 「可连接入口」，客户端据此决定展示哪些协议按钮。
+type AgentService struct {
+	Protocol    string   `json:"protocol"`
+	Host        string   `json:"host"`
+	Port        int      `json:"port"`
+	Name        string   `json:"name,omitempty"`
+	Running     bool     `json:"running"`
+	AuthMethods []string `json:"authMethods,omitempty"`
+	// DetectedAt 本次探测时刻
+	DetectedAt time.Time `json:"detectedAt"`
 }
 
 // ComputeInstance 计算实例

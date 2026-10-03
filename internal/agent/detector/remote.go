@@ -47,7 +47,7 @@ func (d *RemoteServiceDetector) Priority() int {
 }
 
 func (d *RemoteServiceDetector) Detect() (*protocol.Capability, error) {
-	services := d.ScanRemoteServices()
+	services := d.DetectServices()
 
 	if len(services) == 0 {
 		return nil, nil
@@ -62,13 +62,10 @@ func (d *RemoteServiceDetector) Detect() (*protocol.Capability, error) {
 			"name":    svc.Name,
 			"running": svc.Running,
 		}
-		// SSH 探测支持的认证方式
-		if svc.Protocol == protocol.RemoteProtocolSSH {
-			if methods, err := probeSSHAuthMethods(svc.Host, svc.Port); err == nil {
-				entry["authMethods"] = methods
-			}
+		if len(svc.AuthMethods) > 0 {
+			entry["authMethods"] = svc.AuthMethods
 		}
-		metadata[string(svc.Protocol)] = entry
+		metadata[svc.Protocol] = entry
 	}
 
 	return &protocol.Capability{
@@ -77,6 +74,36 @@ func (d *RemoteServiceDetector) Detect() (*protocol.Capability, error) {
 		Version:  "1.0",
 		Metadata: metadata,
 	}, nil
+}
+
+// DetectServices 探测本机开放的远控服务面（SSH/RDP/VNC/telnet/FTP），
+// 含 SSH 支持的认证方式。Detect 与运行期刷新（agent 心跳上报的 services
+// 字段）共用这一入口，保证「注册时上报」与「重探测结果」口径一致。
+//
+// 耗时：每协议一个 500ms 连接探测 + SSH 认证方式探测（最多 3s），
+// 故只在启动与后台刷新循环里跑，不进心跳关键路径。
+func (d *RemoteServiceDetector) DetectServices() []protocol.RemoteServicePayload {
+	scanned := d.ScanRemoteServices()
+	detectedAt := time.Now().Unix()
+
+	services := make([]protocol.RemoteServicePayload, 0, len(scanned))
+	for _, svc := range scanned {
+		item := protocol.RemoteServicePayload{
+			Protocol:   string(svc.Protocol),
+			Host:       svc.Host,
+			Port:       svc.Port,
+			Name:       svc.Name,
+			Running:    svc.Running,
+			DetectedAt: detectedAt,
+		}
+		if svc.Protocol == protocol.RemoteProtocolSSH {
+			if methods, err := probeSSHAuthMethods(svc.Host, svc.Port); err == nil {
+				item.AuthMethods = methods
+			}
+		}
+		services = append(services, item)
+	}
+	return services
 }
 
 // ScanRemoteServices 扫描远程服务

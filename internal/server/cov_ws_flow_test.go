@@ -492,7 +492,7 @@ func TestCovAgentCloseAndSendMessage(t *testing.T) {
 
 	// 发送通道满
 	full := NewAgent("agent-full", nil)
-	for i := 0; i < 256; i++ {
+	for i := 0; i < 4096; i++ {
 		full.Send <- protocol.NewMessage(protocol.MessageTypePing, nil)
 	}
 	if err := full.SendMessage(protocol.NewMessage(protocol.MessageTypePing, nil)); err == nil {

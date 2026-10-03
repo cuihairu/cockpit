@@ -60,6 +60,21 @@ type Capability struct {
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
+// RemoteServicePayload 远控服务面上报项：agent 探测到的本机开放服务
+// （SSH/RDP/VNC/telnet…）。服务端据此持久化「这台机器真开了什么」，
+// 客户端只展示真正可用的协议入口——不再无条件铺 SSH/RDP/VNC 三个按钮。
+type RemoteServicePayload struct {
+	Protocol    string   `json:"protocol"`
+	Host        string   `json:"host"`
+	Port        int      `json:"port"`
+	Name        string   `json:"name,omitempty"`
+	Running     bool     `json:"running"`
+	AuthMethods []string `json:"authMethods,omitempty"`
+	// DetectedAt 本次探测时刻（Unix 秒）。服务面随心跳刷新，
+	// 时间戳让客户端能判断「多久前探到的」。
+	DetectedAt int64 `json:"detectedAt,omitempty"`
+}
+
 // RegisterPayload 注册消息负载
 type RegisterPayload struct {
 	AgentID      string       `json:"agentId"`
@@ -75,6 +90,14 @@ type RegisterPayload struct {
 	Labels map[string]interface{} `json:"labels,omitempty"`
 	// 元数据：自定义 key-value 存储
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
+	// Version Agent 二进制版本（cmd/cockpit-agent 的 version 注入值）
+	Version string `json:"version,omitempty"`
+	// StartedAt agent 进程启动时刻（Unix 秒）。与系统 uptime 不同：
+	// 服务端据此算「本次运行时长」，agent 重启即刷新
+	StartedAt int64 `json:"startedAt,omitempty"`
+	// Services 本机开放的服务面（探测结果，注册时先给一份基线）
+	Services []RemoteServicePayload `json:"services,omitempty"`
 }
 
 // VirtualizationInfo 虚拟化信息
@@ -90,6 +113,13 @@ type HeartbeatPayload struct {
 	Status     string                 `json:"status"`
 	Metrics    map[string]interface{} `json:"metrics,omitempty"`
 	SystemInfo *SystemInfoPayload     `json:"systemInfo,omitempty"` // 系统资源信息
+
+	// StartedAt agent 进程启动时刻（Unix 秒），随每次心跳回带：
+	// 服务端刷新启动时间与运行时长，重启后自然归零
+	StartedAt int64 `json:"startedAt,omitempty"`
+	// Services 服务面刷新（默认约 5 分钟一次重探测）：
+	// 新开/关掉 SSH/RDP/VNC 最多一个周期内同步到服务端
+	Services []RemoteServicePayload `json:"services,omitempty"`
 }
 
 // SystemInfoPayload 系统信息负载
