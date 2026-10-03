@@ -487,6 +487,57 @@ Guacamole 路线下这个成本**几乎为零**：guacd 写 `.guac` 文件，我
 生态不能回放——但 asciinema `.cast` 是开放格式可脱离 Cockpit 回放，两者
 互补（终端开放格式、桌面 Guacamole 格式）。
 
+## 凭据保管语义：凭据保险箱（credential vault）
+
+> 2026-10-02 用户实测提出：每次连接都要手输密码/私钥，要求参照阿里云密码箱
+> 做「保险箱」，并明确对齐两点——**服务端加密保管每台机器的凭据** +
+> **查看/管理凭据需再次验证身份**。已落地（`0d2f9da`）：Guacamole 弹窗与
+> 内置终端两个入口同款接入；管理入口收在连接弹窗内，不另做独立管理页。
+
+### 两条路径：默认不落盘 vs 显式保存
+
+- **默认路径（不变）**：口令/私钥只进 `ticket.Params` → guacd `connect`
+  指令 / agent SSH 拨号，不写库、不进审计——D4 与 `remote_audit.go`
+  「不写 password」的既有纪律照旧成立；
+- **保存路径（显式动作）**：连接弹窗勾选「保存凭据到服务器」→ 提交前先过
+  二次验证 → 明文仅在提交瞬间经手，`storage.Encrypt`（AES-256-GCM，密钥由
+  `TOTP_ENCRYPTION_KEY` 派生，`internal/storage/crypto.go` 与 TOTP 同设施）
+  加密后落 `remote_credentials` 表；`password_enc`/`private_key_enc` 的 json
+  tag 为 `-`，密文字段永不序列化——明文只进不出，列表接口仅回
+  username/domain/has_password/has_private_key 元数据；
+- **隔离与覆盖**：按登录用户隔离，`idx_remote_cred_target`
+  （user_id+agent_id+host+port+protocol）五列联合唯一——同目标重复保存视为
+  更新，与 `services/desktop.ts` localStorage 记用户名的同目标覆盖语义对齐。
+
+### 连接注入：浏览器侧零凭据不变
+
+- **用已存凭据连接**：前端只发 `use_saved: true`，不携带任何凭据字段——
+  服务端按（用户、agent、host、port、protocol）查库解密，填充请求里缺失的
+  username/password/private_key/domain（显式传入的值优先）；查无已存凭据
+  → 400 `no saved credential for this target`；
+- **出口策略照旧先行**：`matchRemoteEgress` 在 use_saved 解析之前执行
+  （`api_remote.go` 注释「egress 校验照旧先行」）——保险箱不构成绕过
+  `remote_control.allowed_targets` 的旁路；
+- **审计**：`RemoteSessionDetails.AuthSource` 记 `saved` / `user`（空 =
+  无凭据，如 VNC 匿名、agent 默认密钥），详情仍不写密码。
+
+### 管理操作二次验证（对齐阿里云密码箱）
+
+- `POST /api/remote/vault/verify`：登录密码（bcrypt 比对）或 TOTP 动态码
+  （`ValidateTOTPCode`，TOTP 开启时二者皆可）→ 签发 **10 分钟多次使用**
+  vault token（服务端内存 map，过期条目在下次签发时懒清理）；
+- 列表/保存/删除（`/api/remote/vault/credentials`）挂 `X-Vault-Token`
+  校验，缺失/过期 401 提示重新验证；token 只存前端内存（module 变量，
+  不进 localStorage），关页面即失效；
+- **便利性分层**：用已存凭据**连接**仅凭登录态（保险箱的便利点所在），
+  **删除已存凭据**必过二次验证（破坏性管理动作，交互上「先验证、可取消」）。
+
+### 文案口径
+
+「口令默认不落盘」指默认路径；勾选保存后的表述是「AES-GCM 加密存储于服务端，
+浏览器不再经手明文」。两句分别对应上面两条路径，不可互相替读；「不进日志」
+指 guacd 与审计侧（D4），落库的是用户显式要求保存的密文。
+
 ## 不做（后续版本）
 
 - **音频**（见风险章节，阶段二）；
@@ -508,7 +559,9 @@ Guacamole 路线下这个成本**几乎为零**：guacd 写 `.guac` 文件，我
   ——两者不互相绑架；
 - **替换 agent 侧 RDP（grdp）**：阶段一 Guacamole 路线**新增**到 server 侧，
   agent 侧 grdp 保留为「无 guacd 部署时的降级路径」或按阶段一验收结果
-  决定废弃。两套并存期不宜过长，阶段一验收后定夺。
+  决定废弃。两套并存期不宜过长，阶段一验收后定夺；
+- **保险箱独立管理页**：列表/删除/二次验证收在连接弹窗内（见「凭据保管
+  语义」节），Settings 下的独立管理页按需再议。
 
 ## 里程碑
 
