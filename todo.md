@@ -982,6 +982,13 @@
 
 **How to apply**: 跨网段目标先问「谁拨号」——凡 guacd 直拨语义走不通的一律经 agent 通道；`proxy_data` 载荷跨 goroutine 传递必须拷贝；验收容器黑名单/重启中状态先查容器日志再怀疑代码；跑探针前确认二进制 mtime 新于相关 commit（曾用预修复二进制复现已修缺陷半小时）。
 
+## 巡检：废弃截图脚本 web/screenshot-themes.cjs 清理（2026-10-03）
+
+主题皮肤走查期间残留的 `web/screenshot-themes.cjs`（未跟踪、从未跑成的早期截图尝试：用 URL query `?themeSkin=` 传皮肤，但 SettingsContext 只认 localStorage，方案本就不生效；其产物目录 `web/.acceptance/themes/evidence/` 从未生成——实际走查截图走的是 /tmp 下注入 localStorage 的流程）移出仓库。
+
+1. [**删除前三重引用确认**：① 全仓 `grep -rn "screenshot-themes"`（排除 node_modules/.git）零命中；② `web/package.json` scripts 六项（dev/build/preview/lint/test/test:coverage）无引用；③ `git log --all -- web/screenshot-themes.cjs` 为空——从未被 git 跟踪，删除不涉历史改写、无需 `git rm`。]
+2. [**处置**：工作树零残留，脚本现存 `/tmp/opencode/screenshot-themes.cjs.bak`（临时目录重启即失，无需保留策略）。]
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
