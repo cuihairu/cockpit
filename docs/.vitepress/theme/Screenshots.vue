@@ -7,7 +7,7 @@ import { withBase } from 'vitepress'
 // 路径须经 withBase 以兼容 GitHub Pages 子路径部署（base: /cockpit/）。
 const shots = [
   { src: '/screenshots/dashboard.png', alt: '总览：资源统计卡、健康度与 Agent 列表（离线置底弱化并标注离线时长）' },
-  { src: '/screenshots/agents-cleanup.png', alt: 'Agent 管理：一键清理离线（24 小时 / 3 天 / 7 天三档阈值二次确认）' },
+  { src: '/screenshots/agents-cleanup.png', alt: 'Agent 管理：清理离线 agent（阈值自由填 30m / 2h / 7d，留空 = 全部离线）' },
   { src: '/screenshots/dns.png', alt: 'DNS 记录管理：按 zone 增删改查与批量导入 / 导出' },
   { src: '/screenshots/audit.png', alt: '审计日志：动作 / 资源 / 结果多维检索' },
   { src: '/screenshots/workbench.png', alt: '工作台：容器编排与快速操作入口' },
