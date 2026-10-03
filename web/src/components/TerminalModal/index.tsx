@@ -58,8 +58,6 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   // 纯密钥认证（publickey only）弹用户名表单，密码留空让 agent 用默认密钥
   const needsCredentials = protocol === 'ssh' && !username;
   const [authPending, setAuthPending] = useState(needsCredentials);
-  // 键认证分支记录的用户名只经 setter 更新（表单预填用），读取值当前未消费
-  const [, setKeyAuthUsername] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [credentials, setCredentials] = useState({ username: username || '', password: password || '' });
   // 保险箱：探测当前 SSH 目标的已存凭据（有 → 一键连接）；保存/删除需二次验证
@@ -250,7 +248,6 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
     // 重新打开时重置认证状态（SSH 每次都需输入凭据），并探测保险箱
     if (visible && protocol === 'ssh' && !username) {
       setAuthPending(true);
-      setKeyAuthUsername(null);
       setSaveCredChecked(false);
       useSavedRef.current = false;
       setSavedCred(null);
@@ -280,10 +277,6 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   // ==== 保险箱动作 ====
 
   const proceedWithAuth = () => {
-    // 密钥认证时记录用户名（密码留空）
-    if (!passwordSupported && keySupported) {
-      setKeyAuthUsername(credentials.username);
-    }
     setAuthPending(false);
   };
 
@@ -381,7 +374,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
             <Button onClick={onClose}>关闭</Button>
           </Space>
         </div>
-      ) : protocol === 'ssh' && keySupported && !passwordSupported ? (
+      ) : protocol === 'ssh' && keySupported && !passwordSupported && authPending ? (
         <div style={{ padding: 24, background: '#1e1e1e', color: '#d4d4d4' }}>
           <Alert
             type="info"
@@ -390,7 +383,14 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
             message="SSH 密钥认证"
             description={`该服务器仅支持密钥认证，将使用 Agent 默认密钥连接。请输入用户名。`}
           />
-          <Form layout="vertical" onFinish={(e) => { e.preventDefault?.(); setKeyAuthUsername(credentials.username || 'root'); }}>
+          <Form
+            layout="vertical"
+            onFinish={() => {
+              // 用户名并入 credentials（paramsRef 随之同步），空缺省 root
+              setCredentials((c) => ({ ...c, username: c.username || 'root' }));
+              setAuthPending(false);
+            }}
+          >
             <Form.Item label="用户名" required>
               <Input
                 autoFocus
@@ -400,7 +400,13 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
               />
             </Form.Item>
             <Space>
-              <Button type="primary" onClick={() => { setKeyAuthUsername(credentials.username || 'root'); setAuthPending(false); }}>
+              <Button
+                type="primary"
+                onClick={() => {
+                  setCredentials((c) => ({ ...c, username: c.username || 'root' }));
+                  setAuthPending(false);
+                }}
+              >
                 连接
               </Button>
               <Button onClick={onClose}>取消</Button>

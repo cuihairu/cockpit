@@ -8,7 +8,6 @@
 pages/Proxy/index.tsx:131 selectedAgent 防御早退：操作入口仅在选中 agent 后渲染，空 agent 不可达
 pages/Proxy/index.tsx:167 同上（applyProxySite 前置防御）
 pages/Proxy/index.tsx:178 同上（删除前防御）
-pages/Services/index.tsx:121 selectedAgent 防御早退（runAction，按钮仅在选中后渲染；原 120，b1e2413 挂 HealthPanel 后 +1 漂移）
 pages/Services/index.tsx:126 同上（保存 unit 前防御；原 125 漂移）
 pages/Services/index.tsx:134 同上（daemon-reload 前防御；原 133 漂移）
 pages/Services/index.tsx:150 同上（打开 unit 文件前防御；原 149 漂移）
@@ -17,11 +16,12 @@ pages/Cron/index.tsx:172 selectedAgent 防御早退（saveJob）
 pages/Cron/index.tsx:199 同上（toggleEnabled）
 pages/Cron/index.tsx:210 同上（deleteJob）
 pages/Docker/index.tsx:44 cleanDockerLog 空串早退：调用侧对空日志已短路，防御分支不可达
-components/GuacPlayer/index.tsx:26 displayRef null 早退：弹窗未挂载不触发 effect，防御
+components/GuacPlayer/index.tsx:77 displayRef null 早退：弹窗未挂载不触发 effect，防御（原 26，duck tunnel 接入后漂移）
 components/MetricsChart/index.tsx:50 containerRef null 早退：echarts init 前置防御，React 保证挂载后 effect 才跑
 components/VNCModal/index.tsx:75 vncContainerRef null 早退：RFB 挂载点在凭据阶段预挂载，ref 恒有值，前置防御不可达（原 67→71→75，vncStateRef 插入 + useEffect 改写后两次漂移）
-components/GuacamoleModal/index.tsx:226 clientRef null 早退（sendClipboardToRemote）：两个入口（终端 paste / 工具栏按钮）都只在 state==='connected' 时存在，cleanup 先于断开移除，client 恒有值
-components/GuacamoleModal/index.tsx:274 displayRef null 早退（SSH 尺寸同步/粘贴 effect）：display 容器与 state==='connected' 同渲染，effect 跑时 ref 必已赋值
+components/GuacamoleModal/index.tsx:407 displayRef null 早退（SSH 尺寸同步/粘贴 effect）：display 容器与 state==='connected' 同渲染，effect 跑时 ref 必已赋值（原 274 漂移）
+components/GuacamoleModal/index.tsx:359 sendClipboardToRemote clientRef null 早退：两个粘贴入口（终端 paste / 工具栏按钮）都只在 state==='connected' 时存在，cleanup 先于断开移除 client，恒有值（原 226 漂移）
+components/GuacamoleModal/index.tsx:271 doDeleteSaved savedCred 判空早退：删除入口仅在已存凭据面板渲染，savedCred 恒非空，防御
 pages/Workbench/index.tsx:103 openAgentTerminal selectedAgent 防御早退：兜底按钮在 SSH Tab 内，Tab 仅在选中 agent 后可切
 pages/Workbench/index.tsx:104 同上（message.warning 文案行）
 pages/Workbench/index.tsx:105 同上（return）
@@ -44,16 +44,6 @@ pages/Network/index.tsx:736 join Modal okButtonProps 表达式行：用例已断
 # ---- 生命周期/时序在 jsdom 下不可注入或与真实语义互斥 ----
 components/DesktopModal/index.tsx:126 超时回调 if 条件行：回调体（disconnect/错误提示/回表单）已由 30s 超时用例断言，v8 对命中分支条件行漏计（原 122，stateRef 改 useEffect 后漂移）
 components/VNCModal/index.tsx:60 超时回调 if 条件行：同 DesktopModal 126，cleanup/置断开/错误提示已由 30s 超时用例断言
-components/TerminalModal/index.tsx:83 连接超时 if 条件行：close 调用 + 超时提示已由 CONNECTING 30s 用例断言，v8 条件行漏计
-components/TerminalModal/index.tsx:104 fitAddonRef 判空：赋值位于同 effect 后文，首次触发时必为 null，赋值先于可达路径
-components/TerminalModal/index.tsx:211 !visible 清理入口：主 effect（[connectWebSocket, visible, authPending]）cleanup 先行 dispose 并置 null，本 effect（[visible]）后跑时 terminalInstanceRef.current 恒 null，判空恒 false
-components/TerminalModal/index.tsx:213 同 211 死代码清理体（wsRef 判空）
-components/TerminalModal/index.tsx:214 同 211（close 调用）
-components/TerminalModal/index.tsx:215 同 211（置 null）
-components/TerminalModal/index.tsx:217 同 211（terminal reset）
-components/TerminalModal/index.tsx:218 同 211（setConnected(false)）
-components/TerminalModal/index.tsx:223 卸载时 terminalInstanceRef 判空防御：同 211 家族
-components/TerminalModal/index.tsx:257 表单 onFinish 内联回调（preventDefault + 提交）：提交行为已实证，JSX 内联箭头 v8 漏计
 pages/Docker/index.tsx:237 requestAnimationFrame 回调内滚动防御：jsdom rAF 触发时序不稳定，滚动语义属浏览器行为
 
 # ---- 无 UI 入口 / 数据演进防御（当前数据形态下不可达）----
@@ -63,10 +53,6 @@ pages/Proxy/index.tsx:149 同上（return）
 pages/Docker/index.tsx:189 动作 switch default 抛错：action 来自固定按钮集合，未知值不可达
 pages/Stacks/StackDetail.tsx:191 taskActionLabel 未知 action 兜底：后端 action 枚举封闭，四类已知动作已全测；同款兜底语义已由历史 Tab 用例实证
 pages/Cron/index.tsx:41 空表达式早退：表单 required 前置，简写/五段式主路径已实证
-components/GuacamoleModal/index.tsx:115 resolution || 1280 兜底：分辨率经下拉白名单（恒为 WxH 格式），split 后必为数字
-components/GuacamoleModal/index.tsx:116 同上（height || 800）
-components/GuacamoleModal/index.tsx:125 同上（凭据表单侧 width）
-components/GuacamoleModal/index.tsx:126 同上（凭据表单侧 height）
 pages/Acme/index.tsx:186 下载文件名三元 issuer 分支：download() 仅被 cert/key 两个按钮调用，issuer 无 UI 入口（预留）
 
 # ---- v8 伪缺口：行为已由用例双向实证，lcov 计数为 0（JSX 内联/回调链/三元怪癖）----
@@ -88,26 +74,7 @@ pages/Recordings/index.tsx:91 guac blob 加载失败 catch：错误文案断言�
 pages/Recordings/index.tsx:100 回放 Modal title 内联模板：标题断言已有
 pages/Recordings/index.tsx:188 倍速 effect 条件：2x 切换重拉用例已实证该路径执行
 pages/Recordings/index.tsx:197 effect 依赖数组行：非执行语句，v8 挂计
-components/GuacamoleModal/index.tsx:446 错误横幅 JSX 短路渲染：错误态已由 state 断言覆盖
-components/GuacamoleModal/index.tsx:470 disconnected && !showCredentials 复合条件：各单态渲染断言均有，复合分支 v8 漏计
-components/GuacPlayer/index.tsx:82 Slider tooltip formatter：悬停才触发的内联纯函数，jsdom 不可悬停；格式化逻辑已由等价断言覆盖
 components/MetricsChart/index.tsx:85 tooltip formatter：params 四向（name/seriesName/value 缺省）均已断言，echarts 内联回调漏计
-components/TerminalModal/index.tsx:223 同 211 清理家族（reset 前判空）
-App.tsx:298 路由树递归展开 routes ?? [] 兜底：静态路由树叶子 children 恒存在，数据演进防御
-App.tsx:324 user?.permissions 空值侧：user 未加载场景已由「顶栏用户名兜底 Admin」用例覆盖，v8 漏计
-App.tsx:439 菜单项内联 onClick（preventDefault + navigate）：菜单导航跳转断言已有
-App.tsx:456 面包屑 itemRender 首项分支：面包屑渲染断言已有，内联回调漏计
-App.tsx:457 同上（navigate('/') 调用）
-App.tsx:458 同上（面包屑文案渲染）
-pages/Cron/index.tsx:372 用户筛选 onChange v ?? '' 兜底：选择不可清空，null 分支防御
-pages/Cron/index.tsx:376 filterOption 内联 option?.value 兜底：下拉过滤已实证，防御侧漏计
-pages/Cron/index.tsx:543 cron 校验 validator 内联：表达式校验主路径已实证
-pages/Drift/DiffModal.tsx:188 基线时间 JSX 内联三元：data null 侧在弹窗打开后不可达，渲染断言已有
-pages/Network/index.tsx:196 agentIdentity 身份三元：identity 有值（chip 渲染）与 metadata 空（兜底 undefined）双向用例均有
-pages/SetupTOTP/index.tsx:53 refetchTOTP().then 回调（setCurrentStep）：页面 step 流转渲染断言已实证，void promise 链漏计
-pages/SetupTOTP/index.tsx:54 同上（data 判定）
-pages/SetupTOTP/index.tsx:55 同上（进入 step1）
-pages/SetupTOTP/index.tsx:56 同上（回调收尾）
 components/FileBrowser/index.tsx:534 该按钮仅特定目录态渲染：对应态不可达该渲染分支（既定判定，行为由其余态断言覆盖）
 
 # ---- Services/HealthPanel（b1e2413 健康探针面板，2026-09-29 收口）----
@@ -130,7 +97,54 @@ pages/Services/HealthPanel.tsx:219 lastHeal HEAL_META 取值行：最近自愈 T
 pages/Services/HealthPanel.tsx:284 updatedAt 条件行：配置更新于文案断言实证
 pages/Services/HealthPanel.tsx:287 updatedBy 拼接行：by admin 断言实证
 pages/Services/HealthPanel.tsx:288 白名单摘要行：自愈目标白名单断言实证
-pages/Services/HealthPanel.tsx:363 target placeholder 三元 tcp 分支：类型切换用例已执行该分支（仅断言 target 清空，未断言 placeholder 文案本身），v8 全量合并口径对 JSX 内联三元漏计
 #   [JSX 内联箭头] 单文件口径亦为 0（v8 对 JSX 属性内联箭头不计数），行为有专门用例：
 pages/Services/HealthPanel.tsx:306 取消按钮内联 onClick（setEditing(false)）：取消用例断言 drawer wrapper 落 hidden class
-pages/Services/HealthPanel.tsx:309 保存按钮内联 onClick（void save()）：保存三用例断言 API 调用与文案
+
+# ---- 2026-10-03 全量收口：App/GuacPlayer/GuacamoleModal/TerminalModal 漂移重登记 ----
+# App.tsx（原 290/316/430/447-449 随 RBAC 菜单与面包屑重构漂移）
+App.tsx:298 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 290 漂移）
+App.tsx:324 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 316 漂移）
+App.tsx:439 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 430 漂移）
+App.tsx:456 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 447→455→456 两次漂移）
+App.tsx:457 同上（return first 三元；原 448→456→457）
+App.tsx:458 同上（首项 link 内联 onClick navigate('/')；原 449→457→458）
+
+# components/GuacPlayer/index.tsx（解析器/连接体已由 duck tunnel 用例覆盖，剩两点）
+components/GuacPlayer/index.tsx:39 parseGuacInstructions elements.length > 0 假侧：内层循环进入时至少 push 一个元素或抛错，恒真死侧
+components/GuacPlayer/index.tsx:135 Slider tooltip formatter (v ?? 0)：悬停才触发的内联纯函数，jsdom 不可悬停；格式化逻辑已由等价断言覆盖（原 82 漂移）
+
+# components/GuacamoleModal/index.tsx（保险箱/剪贴板主路径已由新用例覆盖，剩死侧与漏计）
+components/GuacamoleModal/index.tsx:151 ticket width Number(...) || 1280 兜底：分辨率经下拉白名单（恒 WxH 格式），split 后必为数字（原 115 漂移）
+components/GuacamoleModal/index.tsx:152 同上（height || 800；原 116）
+components/GuacamoleModal/index.tsx:185 saveDesktopConfig width || 1280 兜底：同 151（原 125 漂移）
+components/GuacamoleModal/index.tsx:186 同上（height || 800；原 126）
+components/GuacamoleModal/index.tsx:322 handleVaultVerified else-if action==='delete' 假侧：pendingVaultAction 取值封闭（save-connect/delete），之外不可达
+components/GuacamoleModal/index.tsx:610 工具栏错误文案 JSX 短路（error && ...）：错误态已由状态机用例覆盖，JSX 短路 v8 漏计（原 446 漂移）
+components/GuacamoleModal/index.tsx:634 disconnected && !showCredentials 复合条件：各单态渲染断言均有，复合分支 v8 漏计（原 470 漂移）
+
+# components/TerminalModal/index.tsx（!visible 清理家族 + 判空防御 + 封闭取值死侧）
+components/TerminalModal/index.tsx:132 ws.onmessage resize 分支 fitAddonRef 判空 null 侧：WS 消息仅在终端建成后到达，ref 必已赋值，防御
+components/TerminalModal/index.tsx:239 !visible 清理入口：主 effect（[connectWebSocket, visible, authPending]）cleanup 先行 dispose 并置 null，本 effect（[visible]）后跑时 terminalInstanceRef.current 恒 null，判空恒 false
+components/TerminalModal/index.tsx:241 同 239 死代码清理体（wsRef 判空）
+components/TerminalModal/index.tsx:242 同 239（close 调用）
+components/TerminalModal/index.tsx:243 同 239（置 null）
+components/TerminalModal/index.tsx:245 同 239（terminal reset）
+components/TerminalModal/index.tsx:246 同 239（setConnected(false)）
+components/TerminalModal/index.tsx:270 handleReconnect terminalInstanceRef 判空：重连按钮仅终端视图渲染，ref 恒有值，防御
+components/TerminalModal/index.tsx:324 doDeleteSaved savedCred 判空早退：删除入口仅已存凭据面板渲染，savedCred 恒非空（原 328，proceedWithAuth 死分支删除后漂移）
+components/TerminalModal/index.tsx:350 handleVaultVerified action 封闭取值外不可达：pendingVaultAction 仅 save-connect/delete 两值（原 354 漂移）
+components/TerminalModal/index.tsx:371 受限认证面板 authMethods?.join || '未知' 兜底：该面板仅在 authMethods 已提供（无 password/publickey）时渲染，恒已定义（原 375 漂移）
+
+# pages/Cron/index.tsx - 防御性/内联分支
+pages/Cron/index.tsx:372 用户筛选 onChange v ?? '' 兜底：选择不可清空，null 分支防御
+pages/Cron/index.tsx:376 filterOption 内联 option?.value 兜底：下拉过滤已实证，防御侧漏计
+pages/Cron/index.tsx:543 cron 校验 validator 内联：表达式校验主路径已实证
+
+# pages/Drift/DiffModal.tsx - JSX 内联三元
+pages/Drift/DiffModal.tsx:188 基线时间 JSX 内联三元：data null 侧在弹窗打开后不可达，渲染断言已有
+
+# pages/SetupTOTP/index.tsx - promise 链漏计
+pages/SetupTOTP/index.tsx:53 refetchTOTP().then 回调（setCurrentStep）：页面 step 流转渲染断言实证，void promise 链漏计
+pages/SetupTOTP/index.tsx:54 同上（data 判定）
+pages/SetupTOTP/index.tsx:55 同上（进入 step1）
+pages/SetupTOTP/index.tsx:56 同上（回调收尾）

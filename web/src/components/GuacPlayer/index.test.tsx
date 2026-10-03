@@ -35,9 +35,13 @@ vi.mock('guacamole-common-js', () => ({
     SessionRecording: vi.fn(function () {
       return recMock
     }),
-    Tunnel: vi.fn(function () {
-      return tunnelMock
-    }),
+    // State.CLOSED 常量被 duck tunnel 的收尾/异常路径读取，必须挂在构造器上
+    Tunnel: Object.assign(
+      vi.fn(function () {
+        return tunnelMock
+      }),
+      { State: { CLOSED: 4 } },
+    ),
   },
 }))
 
@@ -165,5 +169,42 @@ describe('GuacPlayer', () => {
     fireEvent.mouseDown(container.querySelector('.ant-slider-rail') as HTMLElement, { clientX: 60, clientY: 10 })
     await screen.findByText((_, el) => el?.tagName === 'SPAN' && el.textContent === '5s / 5s')
     expect(recMock.seek).toHaveBeenCalled()
+  })
+
+  // ==== duck tunnel 指令注入（makeBlobTunnel 的 connect 体）====
+  // recMock.connect 是空桩、不会回落调 tunnel.connect，blob 指令流解析器
+  // （parseGuacInstructions）与 CLOSED 收尾因此从未执行——渲染后手动驱动
+  // tunnel.connect（已被 makeBlobTunnel 覆写为真实现）覆盖解析器全分支形态
+  const driveTunnel = async (text: string) => {
+    const { unmount } = render(<GuacPlayer blob={new Blob([text])} />)
+    await waitFor(() => expect(recMock.getDisplay).toHaveBeenCalled())
+    tunnelMock.receiveInstruction.mockClear()
+    tunnelMock.setState.mockClear()
+    await act(async () => {
+      ;(tunnelMock.connect as () => void)()
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    unmount()
+  }
+
+  it('duck tunnel：有效指令流全解析（前导分号跳过/指令收集/EOF 与分号双收口）', async () => {
+    // ';4.size;;1.x'：前导 ';' 跳过；两条指令间双分号走内层 ';' 退出侧
+    await driveTunnel(';4.size;;1.x')
+    expect(tunnelMock.receiveInstruction).toHaveBeenNthCalledWith(1, 'size', [])
+    expect(tunnelMock.receiveInstruction).toHaveBeenNthCalledWith(2, 'x', [])
+    expect(tunnelMock.setState).toHaveBeenCalledWith(4)
+
+    // '4.size'：结尾无分号，内层 while 走 i >= len 退出（与 ';' 退出互补）
+    await driveTunnel('4.size')
+    expect(tunnelMock.receiveInstruction).toHaveBeenCalledWith('size', [])
+    expect(tunnelMock.setState).toHaveBeenCalledWith(4)
+  })
+
+  it('duck tunnel：畸形流三形态（缺分隔点/长度非数字/长度越界）抛错后均收口 CLOSED', async () => {
+    for (const bad of ['abc;', 'abc.size;', '99.size;']) {
+      await driveTunnel(bad)
+      expect(tunnelMock.receiveInstruction).not.toHaveBeenCalled()
+      expect(tunnelMock.setState).toHaveBeenCalledWith(4)
+    }
   })
 })

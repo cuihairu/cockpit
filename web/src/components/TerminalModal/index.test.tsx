@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { message as antdMessage } from 'antd'
 import TerminalModal from './index'
 
 // TerminalModal：xterm + WebSocket 远程终端——票据/消息分支/输入转发/清理
@@ -30,6 +31,12 @@ const vaultMocks = vi.hoisted(() => ({
   hasVaultToken: vi.fn(() => false),
 }))
 vi.mock('@/services/remote', () => ({ createRemoteTicket, ...vaultMocks }))
+
+// 终端弹窗的 message 提示经 spy 断言：antd message 渲染有 3s 逗留，
+// DOM 查询跨用例易串扰；clearAllMocks 会一并清掉调用记录
+const msgSuccess = vi.spyOn(antdMessage, 'success')
+const msgWarning = vi.spyOn(antdMessage, 'warning')
+const msgError = vi.spyOn(antdMessage, 'error')
 
 class FakeWebSocket {
   static CONNECTING = 0
@@ -385,5 +392,156 @@ describe('TerminalModal', () => {
     })
     expect(fitMock.fit).toHaveBeenCalled()
     expect(FakeWebSocket.instances[0]?.sent ?? []).toHaveLength(0)
+  })
+
+  // ==== SSH 认证方式形态（authMethods 三态驱动面板三分支）====
+
+  it('仅密钥认证（publickey only）：密钥面板出用户名表单，按钮与表单提交双通道建终端', async () => {
+    const { username: _u, password: _p, ...noCred } = props
+    const first = render(<TerminalModal {...noCred} authMethods={['publickey']} />)
+    expect(screen.getByText('SSH 密钥认证')).toBeInTheDocument()
+    expect(
+      screen.getByText('该服务器仅支持密钥认证，将使用 Agent 默认密钥连接。请输入用户名。'),
+    ).toBeInTheDocument()
+    // 通道一：连接按钮——用户名并入票据（paramsRef 随 credentials 同步）
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'bob' } })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(terminalMock.open).toHaveBeenCalled())
+    expect(createRemoteTicket).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'ag1', host: '10.0.0.1', port: 22, protocol: 'ssh', username: 'bob' }),
+    )
+    first.unmount()
+
+    // 通道二：表单 onFinish（回车提交）——空用户名走 root 兜底
+    terminalMock.open.mockClear()
+    createRemoteTicket.mockClear()
+    render(<TerminalModal {...noCred} authMethods={['publickey']} />)
+    fireEvent.submit(screen.getByPlaceholderText('root').closest('form')!)
+    await waitFor(() => expect(terminalMock.open).toHaveBeenCalled())
+    expect(createRemoteTicket).toHaveBeenCalledWith(
+      expect.objectContaining({ protocol: 'ssh', username: 'root' }),
+    )
+
+    // 通道三：连接按钮空用户名——按钮内联 onClick 的 || 'root' 兜底侧
+    terminalMock.open.mockClear()
+    createRemoteTicket.mockClear()
+    const third = render(<TerminalModal {...noCred} authMethods={['publickey']} />)
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(terminalMock.open).toHaveBeenCalled())
+    expect(createRemoteTicket).toHaveBeenCalledWith(
+      expect.objectContaining({ protocol: 'ssh', username: 'root' }),
+    )
+    third.unmount()
+  })
+
+  it('受限认证方式（无密码无密钥）：警示面板与关闭按钮', () => {
+    const { username: _u, password: _p, ...noCred } = props
+    render(<TerminalModal {...noCred} authMethods={['keyboard-interactive']} />)
+    expect(screen.getByText('SSH 服务器认证方式受限')).toBeInTheDocument()
+    expect(screen.getByText(/该 SSH 服务器支持的认证方式：keyboard-interactive/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /关\s*闭/ }))
+    expect(props.onClose).toHaveBeenCalled()
+  })
+
+  it('勾选保存但无 vault token：先二次验证，通过后保存凭据并建终端', async () => {
+    vaultMocks.hasVaultToken.mockReturnValue(false)
+    const { username: _u, password: _p, ...noCred } = props
+    render(<TerminalModal {...noCred} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.change(screen.getByPlaceholderText('登录口令'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByText(/保存凭据到服务器/))
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    // 无 token：暂存动作并弹验证框，不保存不建终端
+    expect(await screen.findByText('验证以保存凭据')).toBeInTheDocument()
+    expect(vaultMocks.saveVaultCredential).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByPlaceholderText('登录密码'), { target: { value: 'admin-pw' } })
+    fireEvent.click(screen.getByRole('button', { name: /验\s*证/ }))
+    // 验证通过 → handleVaultVerified 续做 save-connect → proceedWithAuth
+    await waitFor(() =>
+      expect(vaultMocks.saveVaultCredential).toHaveBeenCalledWith(
+        expect.objectContaining({ agentId: 'ag1', host: '10.0.0.1', port: 22, username: 'ops', password: 'pw' }),
+      ),
+    )
+    await waitFor(() => expect(terminalMock.open).toHaveBeenCalled())
+  })
+
+  it('保存保险箱失败：仅警告不阻断连接', async () => {
+    vaultMocks.hasVaultToken.mockReturnValue(true)
+    vaultMocks.saveVaultCredential.mockRejectedValueOnce(new Error('down'))
+    const { username: _u, password: _p, ...noCred } = props
+    render(<TerminalModal {...noCred} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.change(screen.getByPlaceholderText('登录口令'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByText(/保存凭据到服务器/))
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('凭据保存失败（不影响本次连接）'))
+    await waitFor(() => expect(terminalMock.open).toHaveBeenCalled())
+  })
+
+  it('删除已存凭据：先验证（可取消再重开），通过后删除并回手输表单', async () => {
+    vaultMocks.hasVaultToken.mockReturnValue(false)
+    vaultMocks.listVaultCredentials.mockResolvedValueOnce([savedCred])
+    const { username: _u, password: _p, ...noCred } = props
+    render(<TerminalModal {...noCred} />)
+    fireEvent.click(await screen.findByRole('button', { name: '删除已存' }))
+    expect(await screen.findByText('验证以删除已存凭据')).toBeInTheDocument()
+    // 已存面板态无凭据表单，「取消」按钮唯一。antd Modal 离场动画在 jsdom
+    // 不推进（transitionend 缺失），消失断言不可达——改以行为断言：取消不
+    // 验证、不删除
+    fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }))
+    expect(vaultMocks.verifyVault).not.toHaveBeenCalled()
+    expect(vaultMocks.deleteVaultCredential).not.toHaveBeenCalled()
+    // 重开验证并提交通过 → doDeleteSaved 成功 → 切回手输表单
+    fireEvent.click(screen.getByRole('button', { name: '删除已存' }))
+    await screen.findByText('验证以删除已存凭据')
+    fireEvent.change(screen.getByPlaceholderText('登录密码'), { target: { value: 'admin-pw' } })
+    fireEvent.click(screen.getByRole('button', { name: /验\s*证/ }))
+    await waitFor(() => expect(vaultMocks.deleteVaultCredential).toHaveBeenCalledWith('c1'))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已删除保存的凭据'))
+    await waitFor(() => expect(screen.getByPlaceholderText('root')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: '删除已存' })).not.toBeInTheDocument()
+  })
+
+  it('已有 vault token：删除直连不弹验证；失败仅提示且面板保留', async () => {
+    vaultMocks.hasVaultToken.mockReturnValue(true)
+    vaultMocks.listVaultCredentials.mockResolvedValueOnce([savedCred])
+    vaultMocks.deleteVaultCredential.mockRejectedValueOnce(new Error('down'))
+    const { username: _u, password: _p, ...noCred } = props
+    render(<TerminalModal {...noCred} />)
+    fireEvent.click(await screen.findByRole('button', { name: '删除已存' }))
+    await waitFor(() => expect(vaultMocks.deleteVaultCredential).toHaveBeenCalledWith('c1'))
+    expect(screen.queryByText('验证以删除已存凭据')).not.toBeInTheDocument()
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('删除失败，请重试'))
+    expect(await screen.findByRole('button', { name: '删除已存' })).toBeInTheDocument()
+  })
+
+  it('凭据表单经 onFinish 提交（与按钮 onClick 双通道）', async () => {
+    const { username: _u, password: _p, ...noCred } = props
+    render(<TerminalModal {...noCred} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByPlaceholderText('登录口令'), { target: { value: 'pw' } })
+    fireEvent.submit(screen.getByPlaceholderText('root').closest('form')!)
+    await waitFor(() => expect(terminalMock.open).toHaveBeenCalled())
+  })
+
+  it('超时回调触发时连接已非 CONNECTING（关而未开）：不重复关 WS 不误报', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<TerminalModal {...props} />)
+      // 推进 0ms：票据 promise 落定、WS 建立（不触发 onopen，超时定时器在册）
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      const ws = FakeWebSocket.instances[0]
+      ws.close() // 服务端提前断开：readyState 置 CLOSED，定时器未清除
+      terminalMock.writeln.mockClear()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000)
+      })
+      expect(ws.close).toHaveBeenCalledTimes(1) // 只有手动那次，超时分支未追加
+      expect(terminalMock.writeln).not.toHaveBeenCalledWith(expect.stringContaining('连接超时'))
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

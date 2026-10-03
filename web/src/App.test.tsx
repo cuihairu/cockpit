@@ -30,6 +30,15 @@ vi.mock('./pages/Login', () => ({
 const pageStub = (name: string) => ({ default: () => <div data-testid={`page-${name}`}>{name}</div> })
 vi.mock('./pages/Dashboard', () => pageStub('Dashboard'))
 vi.mock('./pages/Resources', () => pageStub('Resources'))
+// 资源页拆分（3e6adea/ad27dac）后 /resources/{compute,domains,...} 落独立
+// 子页而非 ./pages/Resources——六个子页同样必须打桩，否则真实组件加载会
+// 打到未 mock 的 axios（jsdom Network Error），断言超时
+vi.mock('./pages/Resources/ComputePage', () => pageStub('Resources-Compute'))
+vi.mock('./pages/Resources/ServicesPage', () => pageStub('Resources-Services'))
+vi.mock('./pages/Resources/DomainsPage', () => pageStub('Resources-Domains'))
+vi.mock('./pages/Resources/CertsPage', () => pageStub('Resources-Certs'))
+vi.mock('./pages/Resources/GatewaysPage', () => pageStub('Resources-Gateways'))
+vi.mock('./pages/Resources/StoragesPage', () => pageStub('Resources-Storages'))
 vi.mock('./pages/Workbench', () => pageStub('Workbench'))
 vi.mock('./pages/LogSearch', () => pageStub('LogSearch'))
 vi.mock('./pages/Docker', () => pageStub('Docker'))
@@ -163,7 +172,7 @@ describe('App', () => {
 
   it('/resources/compute 落资源页', async () => {
     await renderAt('/resources/compute')
-    expect(await screen.findByTestId('page-Resources')).toBeInTheDocument()
+    expect(await screen.findByTestId('page-Resources-Compute')).toBeInTheDocument()
   })
 
   it('菜单渲染回归：权限就绪后侧栏导航项存在且数量正确（防「菜单全空也能过」）', async () => {

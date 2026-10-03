@@ -157,6 +157,28 @@ describe('remote 凭据保险箱', () => {
     })
   })
 
+  // 二次验证前的 vault 调用不带 X-Vault-Token（vaultHeaders 空值侧），
+  // 且 list 响应缺 data 时兜底空数组（?? [] 分支）
+  it('未二次验证时 vault 头为空对象；list 缺 data 兜底空数组', async () => {
+    vi.resetModules()
+    const { saveVaultCredential: save, listVaultCredentials: list, hasVaultToken } =
+      await import('./remote')
+    expect(hasVaultToken()).toBe(false)
+
+    mockInstance.put.mockResolvedValue({})
+    await save({ agentId: 'ag', host: 'h', port: 22, protocol: 'ssh', username: 'u' })
+    expect(mockInstance.put).toHaveBeenCalledWith(
+      '/vault/credentials',
+      expect.objectContaining({ agent_id: 'ag' }),
+      { headers: {} },
+    )
+
+    mockInstance.get.mockResolvedValue({ data: null })
+    await expect(list()).resolves.toEqual([])
+    mockInstance.get.mockResolvedValue({})
+    await expect(list()).resolves.toEqual([])
+  })
+
   it('createRemoteTicket useSaved → use_saved: true', async () => {
     const { createRemoteTicket: create } = await import('./remote')
     mockInstance.post.mockResolvedValue({ ticket: 't2', expires_at: '' })

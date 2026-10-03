@@ -672,6 +672,89 @@ describe('GuacamoleModal', () => {
     expect(await screen.findByText('验证以保存凭据')).toBeInTheDocument()
     expect(createRemoteTicket).not.toHaveBeenCalled()
   })
+
+  it('二次验证通过后续做保存并连接；回查逐段不匹配后命中切换已存态', async () => {
+    vaultMocks.hasVaultToken.mockReturnValue(false)
+    // 挂载探测无命中 → 手输表单；保存后回查前 4 条分别踩 find 的每个
+    // && 不匹配边（agent/host/port/protocol），末条全命中（hit 分支）
+    vaultMocks.listVaultCredentials
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { ...savedCred, agentId: 'other' },
+        { ...savedCred, host: '1.1.1.1' },
+        { ...savedCred, port: 2222 },
+        { ...savedCred, protocol: 'rdp' as const },
+        savedCred,
+      ])
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.change(screen.getByPlaceholderText('(可选) 口令认证'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByText(/保存凭据到服务器/))
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    expect(await screen.findByText('验证以保存凭据')).toBeInTheDocument()
+    expect(vaultMocks.saveVaultCredential).not.toHaveBeenCalled()
+    // 提交二次验证 → handleVaultVerified 续做暂存的 save-connect
+    fireEvent.change(screen.getByPlaceholderText('登录密码'), { target: { value: 'admin-pw' } })
+    fireEvent.click(screen.getByRole('button', { name: /验\s*证/ }))
+    await waitFor(() =>
+      expect(vaultMocks.verifyVault).toHaveBeenCalledWith({ password: 'admin-pw', totpCode: undefined }),
+    )
+    await waitFor(() =>
+      expect(vaultMocks.saveVaultCredential).toHaveBeenCalledWith(
+        expect.objectContaining({ agentId: 'ag1', host: '10.0.0.9', port: 22, protocol: 'ssh', username: 'ops', password: 'pw' }),
+      ),
+    )
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+    expect(vaultMocks.listVaultCredentials).toHaveBeenCalledTimes(2)
+  })
+
+  it('保存到保险箱失败：仅警告不阻断连接', async () => {
+    vaultMocks.hasVaultToken.mockReturnValue(true)
+    vaultMocks.saveVaultCredential.mockRejectedValueOnce(new Error('vault down'))
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.change(screen.getByPlaceholderText('(可选) 口令认证'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByText(/保存凭据到服务器/))
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() =>
+      expect(msgMessageWarning).toHaveBeenCalledWith('连接已发起，但凭据保存到保险箱失败'),
+    )
+    await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
+  })
+
+  it('删除已存凭据：先二次验证（可取消），通过后删除并回手输表单', async () => {
+    vaultMocks.hasVaultToken.mockReturnValue(false)
+    vaultMocks.listVaultCredentials.mockResolvedValueOnce([savedCred])
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.click(await screen.findByRole('button', { name: '删除已存' }))
+    expect(await screen.findByText('验证以删除已存凭据')).toBeInTheDocument()
+    // 验证弹窗内「取消」（已存面板态无手输表单，取消按钮唯一）。antd Modal
+    // 离场动画在 jsdom 不推进，消失断言不可达——改以行为断言：取消不验证不删除
+    fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }))
+    expect(vaultMocks.verifyVault).not.toHaveBeenCalled()
+    expect(vaultMocks.deleteVaultCredential).not.toHaveBeenCalled()
+    // 再次删除 → 重新弹验证 → 提交通过 → doDeleteSaved 成功
+    fireEvent.click(screen.getByRole('button', { name: '删除已存' }))
+    await screen.findByText('验证以删除已存凭据')
+    fireEvent.change(screen.getByPlaceholderText('登录密码'), { target: { value: 'admin-pw' } })
+    fireEvent.click(screen.getByRole('button', { name: /验\s*证/ }))
+    await waitFor(() => expect(vaultMocks.deleteVaultCredential).toHaveBeenCalledWith('c1'))
+    // 删除成功 → 已存面板切回手输表单
+    await waitFor(() => expect(screen.getByPlaceholderText('root')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: '删除已存' })).not.toBeInTheDocument()
+  })
+
+  it('已有 vault token：删除直连不弹验证；删除失败仅提示且面板保留', async () => {
+    vaultMocks.hasVaultToken.mockReturnValue(true)
+    vaultMocks.listVaultCredentials.mockResolvedValueOnce([savedCred])
+    vaultMocks.deleteVaultCredential.mockRejectedValueOnce(new Error('down'))
+    render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.click(await screen.findByRole('button', { name: '删除已存' }))
+    await waitFor(() => expect(vaultMocks.deleteVaultCredential).toHaveBeenCalledWith('c1'))
+    expect(screen.queryByText('验证以删除已存凭据')).not.toBeInTheDocument()
+    await waitFor(() => expect(msgMessageError).toHaveBeenCalledWith('删除失败，请重试'))
+    expect(await screen.findByRole('button', { name: '删除已存' })).toBeInTheDocument()
+  })
 })
 
 // 触发窗口内所有仍挂载的 ResizeObserver 桩回调（jsdom 无 ResizeObserver，
