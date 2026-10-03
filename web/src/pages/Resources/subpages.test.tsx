@@ -1,14 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import Resources, { activeKeyFallback } from './index'
+import Resources from './index'
 import ComputeDetail from './ComputeDetail'
 import type { ComputeInstance, Domain, Gateway, Service, Storage } from '@/types'
-import { computeColumns } from './columns'
-import { domainColumns } from './columns'
-import { serviceColumns } from './columns'
-import { gatewayColumns } from './columns'
-import { storageColumns } from './columns'
 
 // 资源页六子页：每类独立懒加载页的渲染、列渲染、空值兜底与展开行
 // 参照 index.test.tsx 的 apiMock/settings/ProbeHeartbeatCell mock 模式
@@ -83,7 +78,7 @@ const storageRows = [
 type ApiKey = keyof typeof apiMock
 
 // dataOverride 可替换单个 API 的 resolved 值（renderPage 内设置默认值，故经参数传入）
-const renderPage = (resourceType: 'compute' | 'domains' | 'services' | 'gateways' | 'storages', dataOverride?: Partial<Record<ApiKey, unknown>>) => {
+const renderPage = (dataOverride?: Partial<Record<ApiKey, unknown>>) => {
   const defaults: Record<ApiKey, unknown> = {
     getComputeInstances: { data: computeRows },
     getDomains: { data: domainRows },
@@ -128,12 +123,12 @@ describe('Resources subpages', () => {
   // === ComputePage: 六子页 ===
   describe('ComputePage', () => {
     it('渲染计算实例列表', async () => {
-      renderPage('compute')
+      renderPage()
       expect(await screen.findByText(/计算实例/)).toBeInTheDocument()
     })
 
     it('配置列/操作列类型分支：满字段、部分字段、全缺省与 baremetal', async () => {
-      renderPage('compute')
+      renderPage()
       const r1 = await rowOf('full-vm')
       expect(within(r1).getByText('4 核')).toBeInTheDocument()
       expect(within(r1).getByText('8 GB')).toBeInTheDocument()
@@ -157,7 +152,7 @@ describe('Resources subpages', () => {
     })
 
     it('刷新按钮触发 fetchAll（refetch 通道）', async () => {
-      renderPage('compute')
+      renderPage()
       await rowOf('full-vm')
       apiMock.getComputeInstances.mockClear()
       fireEvent.click(screen.getByRole('button', { name: /刷\s*新/ }))
@@ -168,7 +163,7 @@ describe('Resources subpages', () => {
   // === DomainsPage ===
   describe('DomainsPage', () => {
     it('域名 tab：链接、自动续费与探活接线', async () => {
-      renderPage('domains')
+      renderPage()
       await switchTab('域名')
       expect(await screen.findByText('example.com')).toBeInTheDocument()
       const link = screen.getByText('example.com').closest('a')
@@ -179,7 +174,7 @@ describe('Resources subpages', () => {
     })
 
     it('证书 tab：签发者、有效状态、过期时间格式化与自动续费否侧', async () => {
-      renderPage('domains')
+      renderPage()
       await switchTab('证书')
       expect(await screen.findByText('a.com')).toBeInTheDocument()
       expect(screen.getByText("Let's Encrypt")).toBeInTheDocument()
@@ -194,7 +189,7 @@ describe('Resources subpages', () => {
   // === ServicesPage ===
   describe('ServicesPage', () => {
     it('服务 tab：URL 链接、响应时间空值兜底', async () => {
-      renderPage('services')
+      renderPage()
       await switchTab('服务')
       expect(await screen.findByText('api')).toBeInTheDocument()
       expect(screen.getByText('https://api.x.com')).toBeInTheDocument()
@@ -206,7 +201,7 @@ describe('Resources subpages', () => {
   // === GatewaysPage ===
   describe('GatewaysPage', () => {
     it('网关 tab：地址/上游与空状态兜底', async () => {
-      renderPage('gateways')
+      renderPage()
       await switchTab('网关')
       expect(await screen.findByText('gw')).toBeInTheDocument()
       expect(within(await rowOf('gw')).getByText('1.2.3.4')).toBeInTheDocument()
@@ -218,7 +213,7 @@ describe('Resources subpages', () => {
   // === StoragesPage ===
   describe('StoragesPage', () => {
     it('存储 tab：容量拼接、单侧缺省兜底与无容量兜底', async () => {
-      renderPage('storages')
+      renderPage()
       await switchTab('存储')
       expect(await screen.findByText('data')).toBeInTheDocument()
       expect(within(await rowOf('data')).getByText('40 / 100 GB')).toBeInTheDocument()
@@ -230,7 +225,7 @@ describe('Resources subpages', () => {
     })
 
     it('六个 API 返回 data 缺失：全部兜底空数组，页面空态不崩', async () => {
-      renderPage('storages', {
+      renderPage({
         getComputeInstances: { data: null },
         getDomains: {}, // data 为 undefined，同走 || [] 兜底
         getCertificates: { data: null },
@@ -246,7 +241,7 @@ describe('Resources subpages', () => {
     })
 
     it('刷新按钮：六查询重新拉取', async () => {
-      renderPage('storages')
+      renderPage()
       await switchTab('存储')
       expect(await screen.findByText('data')).toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: /刷\s*新/ }))

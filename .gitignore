@@ -87,7 +87,10 @@ dist/
 
 # Web build output (served via STATIC_DIR at runtime)
 web/dist/
+# 覆盖率产物（lcov 报告）：coverage_check 本地比对用，不入库
 web/coverage/
+web/coverage-final/
+web/coverage-main/
 
 # 真机验收暂存区（一次性产物：二进制/数据库/token/secrets/日志，验收完即清；
 # 可复用工具与夹具在 scripts/acceptance/）
