@@ -269,12 +269,12 @@ pages/Workbench/index.tsx:254
 pages/Workbench/index.tsx:255
 
 # services/api.ts - 标签/心跳新增 API 端点，拦截器主路径已测，新端点暂无专项测试
-services/api.ts:325
-services/api.ts:329
-services/api.ts:333
-services/api.ts:337
-services/api.ts:341
-services/api.ts:346
+# （cleanupAgents 插入使行号 +1 漂移：2026-10-03 校准）
+services/api.ts:326
+services/api.ts:330
+services/api.ts:334
+services/api.ts:338
+services/api.ts:342
 
 # workbench/AgentSidebar.tsx - AgentSidebar 新增标签/心跳列，渲染主路径已测，条件渲染分支暂无直测
 workbench/AgentSidebar.tsx:38

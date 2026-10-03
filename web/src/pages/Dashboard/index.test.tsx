@@ -152,17 +152,24 @@ describe('Dashboard', () => {
       { id: 'off-old', hostname: 'stale-01', ip: '10.0.0.3', status: 'offline', lastSeen: ago(5), capabilities: [] },
       { id: 'on-1', hostname: 'live-01', ip: '10.0.0.4', status: 'online', lastSeen: ago(0.01), capabilities: [] },
       { id: 'off-fresh', hostname: 'stale-02', ip: '10.0.0.5', status: 'offline', lastSeen: ago(3), capabilities: [] },
+      // 无 lastSeen（排序比较器 a/b 两侧 || 0 兜底分支）：最旧，垫在离线组末尾；
+      // 造两台保证互比时两侧回退臂都命中（稳定排序下保持 fixture 顺序）
+      { id: 'off-nolast', hostname: 'stale-03', ip: '10.0.0.6', status: 'offline', capabilities: [] },
+      { id: 'off-nolast2', hostname: 'stale-04', ip: '10.0.0.7', status: 'offline', capabilities: [] },
     ])
     renderPage()
     expect(await screen.findByText('live-01')).toBeInTheDocument()
 
-    // 在线优先置底：live-01 首行，离线两行靠后（last_seen 新的在前）
+    // 在线优先置底：live-01 首行，离线行靠后（last_seen 新的在前，缺失垫底）
     const rows = Array.from(document.querySelectorAll('tr.ant-table-row'))
     expect(rows.findIndex((tr) => tr.textContent?.includes('live-01'))).toBe(0)
     expect(rows.findIndex((tr) => tr.textContent?.includes('stale-02'))).toBe(1)
     expect(rows.findIndex((tr) => tr.textContent?.includes('stale-01'))).toBe(2)
+    expect(rows.findIndex((tr) => tr.textContent?.includes('stale-03'))).toBe(3)
+    expect(rows.findIndex((tr) => tr.textContent?.includes('stale-04'))).toBe(4)
 
-    // 离线行：时长标签 + 弱化行类；在线行不带弱化类
+    // 离线行：时长标签 + 弱化行类；在线行不带弱化类；无 lastSeen 回退纯「离线」
+    expect(within(rowOf('stale-03')).getByText('离线')).toBeInTheDocument()
     expect(within(rowOf('stale-01')).getByText('离线 5 小时')).toBeInTheDocument()
     expect(within(rowOf('stale-02')).getByText('离线 3 小时')).toBeInTheDocument()
     expect(rowOf('stale-01').className).toContain('agent-row-offline')
