@@ -40,8 +40,8 @@ const logs = [
   },
 ]
 
-const renderPage = () => {
-  apiMock.getAuditLogs.mockResolvedValue({ data: logs, pagination: { total: 42 } })
+const renderPage = (logsOverride?: typeof logs) => {
+  apiMock.getAuditLogs.mockResolvedValue({ data: logsOverride ?? logs, pagination: { total: 42 } })
   apiMock.getAuditStats.mockResolvedValue(stats)
   apiMock.exportAuditLogs.mockResolvedValue(new Blob(['csv']))
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -102,6 +102,32 @@ describe('AuditLogs', () => {
     expect(screen.getAllByText('成功').length).toBe(2)
     expect(screen.getAllByText('失败').length).toBe(2)
     expect(screen.getByText('共 42 条')).toBeInTheDocument()
+  })
+
+  it('DNS 动作映射：dns_import/dns_export 标签、资源列与筛选下拉', async () => {
+    renderPage([
+      { id: 11, created_at: '2026-01-05T12:00:00Z', username: 'admin', action: 'dns_import', resource: 'dns_record', status: 'success', ip: '10.0.0.5', details: '' },
+      { id: 12, created_at: '2026-01-06T12:00:00Z', username: 'ops', action: 'dns_export', resource: 'dns_record', status: 'success', ip: '10.0.0.6', details: '' },
+    ])
+    expect(await screen.findByText('批量导入 DNS')).toBeInTheDocument()
+    expect(screen.getByText('批量导出 DNS')).toBeInTheDocument()
+    // 资源列映射 dns_record → DNS 记录
+    expect(within(rowOf('10.0.0.5')).getByText('DNS 记录')).toBeInTheDocument()
+    // 操作类型下拉与 ACTION_MAP 共源：选「批量导出 DNS」下发 dns_export。
+    // 17 项超出默认窗口，虚拟滚动只渲染前 10 项——先把列表滚到底再找
+    fireEvent.mouseDown(screen.getByText('操作类型'))
+    const opt = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll('.ant-select-item-option')).find(
+        (o) => o.textContent === '批量导出 DNS')
+      if (!el) {
+        const holder = document.querySelector('.rc-virtual-list-holder')
+        if (holder) fireEvent.scroll(holder, { target: { scrollTop: 1000 } })
+        throw new Error('option not found')
+      }
+      return el as HTMLElement
+    })
+    fireEvent.click(opt)
+    await waitFor(() => expect(apiMock.getAuditLogs).toHaveBeenLastCalledWith({ action: 'dns_export' }, 1, 20))
   })
 
   it('统计查询失败：卡片不渲染并记日志', async () => {

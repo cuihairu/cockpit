@@ -31,7 +31,7 @@ pages/Workbench/index.tsx:110 同上（return）
 pages/Recordings/index.tsx:83 recording null 早退：回放入口由行内按钮发起，recording 必已选中
 pages/Recordings/index.tsx:166 recording/termDivRef null 早退：弹窗内容未挂载时不建终端，防御
 pages/Backups/index.tsx:376 restoreTarget null 早退：恢复按钮仅在选中目标后可点
-pages/AuditLogs/index.tsx:59 parseAuditDetails 空串早退：详情为空的行不进解析调用，防御
+pages/AuditLogs/index.tsx:68 parseAuditDetails 空串早退：详情为空的行不进解析调用，防御
 workbench/LogsPanel.tsx:207 frames.pop() ?? '' 兜底：split 结果至少一个元素，pop 永不返回 undefined
 
 # ---- v8 分支 remap 漏计（行为已由用例执行，边计数丢失）与防御性兜底 ----

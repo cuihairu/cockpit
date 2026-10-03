@@ -40,6 +40,14 @@ const ACTION_MAP: Record<string, { text: string; color: string }> = {
   import: { text: '导入', color: 'cyan' },
   start: { text: '启动', color: 'green' },
   stop: { text: '停止', color: 'orange' },
+  // DNS 管理动作（dns-design M1/M3/M4；此前未命中显示原始 action 文本）
+  dns_create: { text: '创建 DNS 记录', color: 'green' },
+  dns_update: { text: '更新 DNS 记录', color: 'orange' },
+  dns_delete: { text: '删除 DNS 记录', color: 'red' },
+  dns_cmdb_register: { text: '登记域名台账', color: 'blue' },
+  dns_cmdb_unregister: { text: '移除域名台账', color: 'default' },
+  dns_import: { text: '批量导入 DNS', color: 'cyan' },
+  dns_export: { text: '批量导出 DNS', color: 'purple' },
 }
 
 const RESOURCE_MAP: Record<string, string> = {
@@ -53,6 +61,7 @@ const RESOURCE_MAP: Record<string, string> = {
   storage: '存储',
   settings: '设置',
   remote_session: '远控会话',
+  dns_record: 'DNS 记录',
 }
 
 function parseAuditDetails(details: string): Record<string, unknown> | null {
