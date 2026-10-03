@@ -1,6 +1,19 @@
 import '@testing-library/jest-dom/vitest'
-import { afterEach } from 'vitest'
+import { afterAll, afterEach } from 'vitest'
 import { cleanup, configure } from '@testing-library/react'
+
+// 排干 React scheduler 残留任务：必须与 React 同一原语（setImmediate，
+// check 相位 FIFO）——setTimeout(0) 落在下一循环的 timers 相位，可能先于
+// pending 的 setImmediate 执行（afterEach 内 cleanup 触发的调度就排在
+// React 队尾），残留工作漏到 jsdom teardown 之后触发
+// ReferenceError: window is not defined（CI 2026-10-03 实测复现）。
+// 两轮：第一轮执行 cleanup 时已排队的调度，第二轮兜住第一轮回调中新排入的。
+const drainScheduler = () =>
+  new Promise<void>((resolve) => {
+    const si = (globalThis as { setImmediate?: (cb: () => void) => void }).setImmediate
+    if (si) si(() => resolve())
+    else setTimeout(() => resolve(), 0)
+  })
 
 // antd 表单校验消息经 async-validator + 过渡动画后才进 DOM，
 // 默认 1s 异步超时在高并发下不够，统一放宽到 15s。
@@ -91,7 +104,13 @@ afterEach(() => {
 afterEach(async () => {
   cleanup()
   document.body.innerHTML = ''
-  // React 19 scheduler 的 setImmediate 在 jsdom teardown 后仍可能触发一次
-  // 调度（window is not defined）；让出一轮宏任务让 pending 工作先落定。
-  await new Promise((r) => setTimeout(r, 0))
+  await drainScheduler()
+  await drainScheduler()
+})
+
+// 文件收尾（环境 teardown 前最后一站）：per-test 排干之后到 teardown 之间
+// 仍可能有异步回调新排入调度，这里再兜两轮
+afterAll(async () => {
+  await drainScheduler()
+  await drainScheduler()
 })
