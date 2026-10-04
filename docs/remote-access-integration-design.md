@@ -1,7 +1,7 @@
 # 远控三协议第三方集成设计：VNC / SSH / RDP 统一 Guacamole 栈
 
 > 2026-09-25 立项。方向对齐另一仓库：VNC / SSH / RDP 三协议的远控统一集成
-> 第三方方案，不再各自维护自研协议链路。RDP / VNC 已在
+> 第三方方案，不再各自维护自行开发协议链路。RDP / VNC 已在
 > [remote-desktop-guacamole-design](./remote-desktop-guacamole-design.md)
 > 落地（Guacamole 路线）；本文补齐 **SSH 接入同一栈**，并给出三协议的
 > 选型总览。旧设计「不做：SSH/telnet 走 Guacamole」一条自本文起**废止**
@@ -13,13 +13,13 @@
 | --- | --- | --- | --- | --- |
 | RDP | GuacamoleModal | `/api/remote/guacamole` → guacd | guacd（FreeRDP）+ guacamole-common-js | ✅ 已集成 |
 | VNC | GuacamoleModal | 同上（protocol=vnc） | guacd（libvncclient）+ guacamole-common-js | ✅ 已集成 |
-| SSH | TerminalModal（xterm.js） | `/api/remote/terminal` → agent | agent 内 `x/crypto/ssh`（Go 库，非远控专用栈） | ⚠️ 自研链路 |
+| SSH | TerminalModal（xterm.js） | `/api/remote/terminal` → agent | agent 内 `x/crypto/ssh`（Go 库，非远控专用栈） | ⚠️ 自行开发链路 |
 | Telnet | TerminalModal | 同上 | agent raw TCP | 维持 |
 | （兜底） | VNCModal（noVNC）/ DesktopModal（grdp） | agent 通道 | noVNC / grdp | 无引用，按 2026-09-24 拍板保留并存期 |
 
-缺口只有一项：**SSH 未走第三方远控栈**。VNC/RDP 的痛点论述（自研协议
+缺口只有一项：**SSH 未走第三方远控栈**。VNC/RDP 的痛点论述（自行开发协议
 链路的维护成本、渲染/输入/剪贴板自担）见旧设计文档「痛点」章节，SSH
-同理——且 SSH 是三协议中唯一还留在自研链路上的。
+同理——且 SSH 是三协议中唯一还留在自行开发链路上的。
 
 ## 选型
 
@@ -43,7 +43,7 @@
 | **noVNC**（现 VNCModal） | 仅 VNC（RFB） | 只覆盖 VNC，RDP/SSH 无着落；与 RDP 栈无法共享渲染/输入/录制代码。保留为兜底，不再扩展。 |
 | **x/crypto/ssh + xterm.js**（现状 agent 通道） | 仅 SSH | 这是「Go 库 + 终端模拟器」的自组链路而非远控方案：host key（TOFU）、保活、录制、协议演进全部自担。作为 agent 侧兜底保留，不作为主入口。 |
 | **WebSSH / sshwifty / ttyd** 等独立终端网关 | 仅 SSH | 多部署一个服务、多一套账号体系；票据/审计/出口策略要二次打通。guacd 已在部署内。 |
-| **server 直连 crypto/ssh 自研网关** | 仅 SSH | 等于把 agent 通道平移到 server，仍要自研录制与协议维护；与「集成第三方方案」方向相反。 |
+| **server 直连 crypto/ssh 自行开发网关** | 仅 SSH | 等于把 agent 通道平移到 server，仍要自行开发录制与协议维护；与「集成第三方方案」方向相反。 |
 | **Teleport** | SSH/K8s/DB | 企业级全家桶（自带用户库/证书体系/Proxy），个人 homelab 场景过重。 |
 | **Apache Guacamole 完整版**（含 Java web 层） | RDP/VNC/SSH/Telnet | 旧设计 D1 已否决：Java 层与 Cockpit 的 Go 后端职责重叠（认证/会话/审计都在 Go 侧）。只取 guacd + common-js。 |
 | **Myrtille / SparkView** | RDP 为主 | 商业许可或活跃度不足，协议覆盖不全。 |

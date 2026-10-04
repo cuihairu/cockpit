@@ -17,13 +17,9 @@
 
 ## 核心特性
 
-- **资源收敛**：Inventory YAML 同步为统一资源视图，拨测心跳与到期告警
-- **NAT 友好**：Agent 主动连出注册，节点无需暴露入站端口
-- **远程操作**：终端 / VNC / 桌面经短期 ticket 转发，支持会话录制
-- **统一执行**：全机 Job 台账，对任意在线 agent 一键执行命令，状态 / 退出码 / 输出回写可追溯
-- **容器与应用**：Docker 全量管理 + Stacks 按 compose 部署
-- **运维面**：反向代理站点、ACME 证书、DNS/DDNS、备份恢复、服务/Cron/SMART/NAS/组网观测
-- **漂移与告警**：配置漂移检测，多渠道通知（Herald / ntfy / webhook / Telegram）
+面板把资源、执行、远控三条线收在一处。资源侧从 Inventory YAML 同步出统一资源视图，拨测心跳、到期告警、配置漂移检测都挂这份数据，告警发 Herald / ntfy / webhook / Telegram 四个渠道。执行侧有一本全机 Job 台账，对任意在线 agent 下发命令，状态、退出码、输出回写可查；Docker 容器全量管理，应用按 compose 文件以 Stacks 部署。远控侧终端、VNC、桌面走短期 ticket 转发并支持会话录制；反向代理站点、ACME 证书、DNS/DDNS、备份恢复、服务/Cron/SMART/NAS/组网观测也在同一面板操作。
+
+Agent 经 WebSocket 主动连出注册，NAT 后的节点不用暴露任何入站端口。
 
 ## 快速开始
 
@@ -139,6 +135,10 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 - [协议与 API 边界](https://cuihairu.github.io/cockpit/guide/protocol)
 - [Docker 部署](https://cuihairu.github.io/cockpit/operations/deploy-docker)
 - Agent 手工部署与服务单元样例：[deployments/README.md](deployments/README.md)
+
+## 底座
+
+本仓库基于开源组件构建，自己写的是控制面接线与各 provider 层：Server 与 Agent 用 Go，存储经 GORM 落 SQLite，实时通道跑在 gorilla/websocket 上；Web 端是 React 19 + Ant Design，终端渲染用 xterm.js；桌面与 VNC/SSH 远控接 Apache Guacamole（guacd 服务端 + guacamole-common-js 1.5.0 客户端），内置终端的 SSH 走 golang.org/x/crypto/ssh；证书签发用 go-acme/lego（DNS-01），移动端是 Flutter，文档站是 VitePress，Windows 安装器由 Inno Setup 打包。
 
 ## 许可证
 

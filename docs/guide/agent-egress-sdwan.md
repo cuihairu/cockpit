@@ -87,7 +87,7 @@ API 和存储结构允许 `proxyType=udp`，但 Server 监听和 Agent 连接当
 
 ### 第一阶段：Agent Egress Gateway
 
-优先实现“某个 Agent 可作为某些主机或网段的远控出口”，不要一开始自研完整 SD-WAN。
+优先实现“某个 Agent 可作为某些主机或网段的远控出口”，不要一开始自行开发完整 SD-WAN。
 
 建议配置模型：
 
@@ -139,7 +139,7 @@ VNC 可继续沿用现有二进制透传路径，重点补齐 ACL、错误反馈
 
 ### 第四阶段：真 SD-WAN 集成
 
-如果目标是真正透明三层组网，建议集成成熟方案，而不是在 Cockpit 内自研完整数据平面。
+如果目标是真正透明三层组网，建议集成成熟方案，而不是在 Cockpit 内自行开发完整数据平面。
 
 可选方向：
 
@@ -163,7 +163,7 @@ Cockpit 更适合作为控制面和运维入口，数据平面交给成熟隧道
 
 ## 设计原则
 
-- KISS：先做 Agent Egress Gateway，解决远控和运维访问，不直接自研 L3 数据平面。
+- KISS：先做 Agent Egress Gateway，解决远控和运维访问，不直接自行开发 L3 数据平面。
 - YAGNI：只有明确需要透明组网时，再引入 WireGuard/Headscale 等数据平面。
 - DRY：远控、VNC、端口代理应共享同一套目标校验和审计逻辑。
 - SOLID：Server 负责策略、ticket、审计和编排；Agent 负责连接目标和协议执行；不要让 Agent 直接承担全局策略判断。

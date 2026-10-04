@@ -44,7 +44,7 @@ server ← agent 双向转发），**录制挂在 server 侧的转发管道上**
 | D8 | finalize 幂等 | recorder 内部 `sync.Once`；`closeTerminalSession` 与 `HandleTerminalClose` 两处都调 Close（后者路径经 keepalive ping 失败兜底会晚 ≤30s 到达，两处直调即时回填） | 会话有两个结束入口，Once 防双写回填 |
 | D9 | REST | `GET /api/recordings`（倒序列表）`GET /api/recordings/{id}/cast`（文件流，即回放数据源，兼下载）`DELETE /api/recordings/{id}`（文件+记录同删） | 回放与下载同一端点取全量内容，统一记审计 |
 | D10 | 审计 | `recording_read`（取 cast 内容）与 `recording_delete` 记审计；列表浏览不记 | 录制内容含历史输出（可能有敏感信息），谁取走了内容应可追溯；列表是索引不算内容 |
-| D11 | 回放器 | Web 自研轻量：fetch .cast → 逐行解析 → 按时间差调度 `term.write()`，倍速 1/2/4/8x + 拖动跳放 | 不引 asciinema-player 依赖；项目已有 @xterm/xterm |
+| D11 | 回放器 | Web 自行开发轻量：fetch .cast → 逐行解析 → 按时间差调度 `term.write()`，倍速 1/2/4/8x + 拖动跳放 | 不引 asciinema-player 依赖；项目已有 @xterm/xterm |
 | D12 | 尺寸 | cast header 固定 80x24；回放 xterm 按容器自适应不锁列宽 | server 侧不追踪 resize（session 未存 rows/cols）；asciinema v2 header 亦为单一尺寸，错位可接受 |
 | D13 | Web 入口 | 新页面 `/recordings`「会话录制」，菜单列于「审计日志」旁 | 录制是审计的延伸，入口放一起 |
 
@@ -123,7 +123,7 @@ server 备份 M2 模式）。落地差异两处：① D18 设计认为「sid 是
 `[dt,"o",data]` 行、Close 幂等回填一次、nil receiver 安全、文件权限 0600）、
 startRecording 元数据登记与管道落盘、开关语义（默认开/"false" 关，保留天数
 合法/0/非法回默认）、过期清理（文件+记录同删、0=永久）、API（列表/取内容
-Content-Type/404/405/删除/审计 view+delete 落库）。回放器自研：按事件时间差
+Content-Type/404/405/删除/审计 view+delete 落库）。回放器自行开发：按事件时间差
 setTimeout 调度 term.write，1/2/4/8x 倍速切换即重放，进度展示。
 
 ## 参考

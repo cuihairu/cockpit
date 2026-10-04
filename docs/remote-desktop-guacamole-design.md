@@ -1,16 +1,16 @@
 # 远程桌面设计：Apache Guacamole 集成（guacd + guacamole-common-js）
 
-> 2026-09-23 用户拍板立项。此前远控桌面走自研路线（grdp 纯 Go RDP 客户端 +
-> 自研 canvas 渲染/扫描码输入/剪贴板），本设计定案**集成 Apache Guacamole**
+> 2026-09-23 用户拍板立项。此前远控桌面走自行开发路线（grdp 纯 Go RDP 客户端 +
+> 自行开发 canvas 渲染/扫描码输入/剪贴板），本设计定案**集成 Apache Guacamole**
 > 替换之。本文档只做方案设计，实现另行确认。
 
-## 痛点：为什么现在要换掉自研路线
+## 痛点：为什么现在要换掉自行开发路线
 
 Cockpit 远控桌面现状是「三套协议三套栈」，且**没有一套是可靠的**：
 
-- **RDP**（自研 grdp 路线）：`internal/agent/rdp/session.go` 用纯 Go 的
+- **RDP**（自行开发 grdp 路线）：`internal/agent/rdp/session.go` 用纯 Go 的
   `github.com/nakagami/grdp` 终结 RDP 协议，位图回调 → `screen_update` 脏矩形
-  → web 自研 `useCanvasRenderer` 帧缓冲合成。问题不在「能不能跑通」，而在
+  → web 自行开发 `useCanvasRenderer` 帧缓冲合成。问题不在「能不能跑通」，而在
   **协议覆盖广度**：grdp 对 NLA/CredSSP、TLS/RDP security 协商、RemoteFX/GFX
   图形管道的支持远弱于 FreeRDP/xfreerdp 这类工业级实现。真实 Windows Server
   （尤其强制 NLA 的机器）连通性存疑，而 RDP 恰恰是「连不通就是零价值」的协议
@@ -22,7 +22,7 @@ Cockpit 远控桌面现状是「三套协议三套栈」，且**没有一套是�
   agent 侧 `crypto/ssh` 终结协议 + PTY）。**SSH 是字符终端不是图形桌面**，
   走 xterm.js 是对的，不该被桌面方案绑架。
 
-自研路线还有隐性成本：渲染（帧缓冲合成、脏矩形、ResizeObserver 合帧）、
+自行开发路线还有隐性成本：渲染（帧缓冲合成、脏矩形、ResizeObserver 合帧）、
 输入（DOM 事件 → 扫描码 → RDP 虚拟键）、剪贴板（浏览器 Clipboard API ↔
 RDP cliprdr）、分辨率协商——**每一项都是协议细节的重复造轮子**，且每加一个
 协议（如将来要 SPICE）就要再抄一遍。
@@ -55,7 +55,7 @@ Guacamole 自己的 connection history）。这与本项目一贯的「单一事
   `Guacamole.Tunnel`（传输）、`Guacamole.Display`（canvas 渲染）、
   `Guacamole.Keyboard`/`Guacamole.Mouse`（输入）、`Guacamole.Client`（会话
   状态机）。它**也不含用户/连接管理**——参数（protocol/host/port/凭据）
-  是调用方给的。这层替我们干掉自研渲染/输入/剪贴板三座大山。
+  是调用方给的。这层替我们干掉自行开发渲染/输入/剪贴板三座大山。
 - **guacamole-web**：Java servlet + JDBC，负责「谁可以连哪台机器」。
   **这层 Cockpit 已经有了**：RBAC 权限点（`terminal:write` 等）+
   `matchRemoteEgress` 出口策略 + 动态 inventory（agent 上报的
@@ -206,9 +206,9 @@ guacd 是独立 C 守护进程，官方镜像 `apache/guacamole`（含 guacd）�
 | 方案 | 覆盖协议 | 许可证 | 关键取舍 |
 |------|---------|--------|---------|
 | **noVNC** | **仅 VNC**（RFB） | MPL 2.0 | 轻量、浏览器内跑 RFB，Cockpit 已用。但**只覆盖 VNC**，RDP 还得另找一套；与 RDP 栈无法共享渲染/输入/剪贴板代码。若确定只做 VNC 它够用，但阶段 1 明确要求 RDP。 |
-| **RustDesk Web** | RustDesk 自有协议（不是 RDP/VNC） | **AGPL 3.0** | 性能好（自研编解码）、开箱即用。**排除理由是许可证传染**：AGPL 要求分发衍生作品时整个作品开源，Cockpit 是 Apache 2.0，集成 AGPL 组件会使整个组合件受 AGPL 约束，与项目许可证选择冲突。且 RustDesk 协议是自有协议，**连不了标准 RDP/VNC 服务器**——它要两端都装 RustDesk，与「连用户已有 Windows 远程桌面」的需求不符。 |
-| **xterm.js** | 字符终端（SSH/telnet） | Apache 2.0 | 已用于 SSH（`TerminalModal`），**但这不是桌面方案**。xterm.js 是终端模拟器，渲染的是字符网格不是像素；RDP/VNC 的图形流无处安放。**SSH 单走 xterm.js 是对的**，不该被桌面方案绑架——Guacamole 也支持 SSH，但我们已自研打通（agent 侧 `crypto/ssh` + PTY），替换收益低于迁移成本。 |
-| **自研（grdp + canvas）** | RDP（部分） | MIT（grdp） | 现状。**否**：协议覆盖弱于 FreeRDP（NLA/CredSSP/TLS 协商/RemoteFX/GFX），真实 Windows 连通性存疑；渲染/输入/剪贴板三块全要自己维护；每加一个协议重抄一遍。沉没成本不构成继续投入的理由。 |
+| **RustDesk Web** | RustDesk 自有协议（不是 RDP/VNC） | **AGPL 3.0** | 性能好（自行开发编解码）、开箱即用。**排除理由是许可证传染**：AGPL 要求分发衍生作品时整个作品开源，Cockpit 是 Apache 2.0，集成 AGPL 组件会使整个组合件受 AGPL 约束，与项目许可证选择冲突。且 RustDesk 协议是自有协议，**连不了标准 RDP/VNC 服务器**——它要两端都装 RustDesk，与「连用户已有 Windows 远程桌面」的需求不符。 |
+| **xterm.js** | 字符终端（SSH/telnet） | Apache 2.0 | 已用于 SSH（`TerminalModal`），**但这不是桌面方案**。xterm.js 是终端模拟器，渲染的是字符网格不是像素；RDP/VNC 的图形流无处安放。**SSH 单走 xterm.js 是对的**，不该被桌面方案绑架——Guacamole 也支持 SSH，但我们已自行开发打通（agent 侧 `crypto/ssh` + PTY），替换收益低于迁移成本。 |
+| **自行开发（grdp + canvas）** | RDP（部分） | MIT（grdp） | 现状。**否**：协议覆盖弱于 FreeRDP（NLA/CredSSP/TLS 协商/RemoteFX/GFX），真实 Windows 连通性存疑；渲染/输入/剪贴板三块全要自己维护；每加一个协议重抄一遍。沉没成本不构成继续投入的理由。 |
 | **Guacamole（guacd + common-js）** | **RDP / VNC / SSH / Telnet** | Apache 2.0 | **取**：协议引擎是 FreeRDP/VNC 客户端库（工业级覆盖），渲染/输入/剪贴板由 common-js 承担，与 Cockpit 同许可证零传染；guacd 无状态、无用户概念，与「业务在 Go 后端」的边界干净。代价是多一个 guacd 进程 + Guacamole 协议隧道网关要自己写（但网关正是 Cockpit 已在坐的位置）。 |
 
 **为什么不用 Teleport**（顺带记）：Teleport 是身份为中心的访问平台，
@@ -466,7 +466,7 @@ guacd 原生支持把会话录成 **`.guac` 格式**（Guacamole session recordi
 M1 落地：`recording.go` + `TerminalRecording` 表 + `/recordings` 回放页），
 但**桌面侧（RDP/VNC）录制明确列为「不做」**（见 recording-design.md
 D1/不做节：「VNC/RDP 像素流录制（WebM/图片序列，体积大回放重）」）。
-当时否掉的原因是**自研录制成本高**——像素流录制要自己写格式、自己写
+当时否掉的原因是**自行开发录制成本高**——像素流录制要自己写格式、自己写
 回放器、体积大。
 
 Guacamole 路线下这个成本**几乎为零**：guacd 写 `.guac` 文件，我们只需：
@@ -552,7 +552,7 @@ Guacamole 路线下这个成本**几乎为零**：guacd 写 `.guac` 文件，我
   [remote-access-integration-design](./remote-access-integration-design.md)；
   体验差异（guacd 服务端渲染图块 vs xterm.js 字符网格）经「内置终端（经
   Agent）」兜底入口消化，agent 通道不删。**telnet 维持不做**——无加密、
-  遗留调试用，继续走 xterm.js）：原理由——SSH 已自研打通
+  遗留调试用，继续走 xterm.js）：原理由——SSH 已自行开发打通
   （`internal/proxy/ssh_session.go`，agent 侧 `crypto/ssh` + PTY + TOFU
   host key），xterm.js 体验优于 Guacamole 的终端仿真；telnet 同理。
   **桌面协议（RDP/VNC）走 Guacamole，字符终端（SSH/telnet）走 xterm.js**

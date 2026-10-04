@@ -8,15 +8,13 @@ Cockpit 是一个面向个人混合基础设施的控制台。当前实现重点
 
 ## 当前能力
 
-- **控制面基础**：Server 提供 Web UI、HTTP API、Agent WebSocket 接入、TOTP 两步验证、RBAC 用户/角色、审计日志与 SQLite 持久化；Agent 主动连出注册，上报心跳、系统指标与能力标签，NAT 后节点无需暴露入站端口。
-- **资源视图**：`cockpit sync` 把 Inventory YAML 同步为运行时资源视图（计算实例、域名、证书、服务、网关、存储），资源行带拨测心跳条与到期告警。
-- **远程操作**：终端 / VNC / 桌面经短期 ticket 转发，支持会话录制归档；agent 文件浏览与传输；journalctl / Docker 日志尾随与跨机联邦检索。
-- **容器与应用**：Docker 容器/镜像/网络/卷管理；Stacks 按 compose 部署应用（模板库、部署历史、restart/pull 动作）。
-- **备份恢复**：agent 侧定时打包、保留策略、双阶段安全恢复、rclone 异地推送与补传；server 侧面板数据库定时备份（`VACUUM INTO` + 异地推送）。
-- **Web 与证书**：反向代理站点管理（nginx / Traefik 双后端，语法自检、失败回滚）；ACME 证书签发与自动续期（Cloudflare / DNSPod / 阿里云 DNS-01），签发产物自动部署到 agent 指定路径。
-- **域名与 DNS**：多厂商 DNS 记录管理（Cloudflare / DNSPod / 阿里云，A/AAAA/CNAME/TXT/MX/CAA/SRV）、DDNS 动态域名、域名与证书到期台账。
-- **主机运维**：服务管理（systemd / Windows SCM / macOS launchd 三后端）、Cron 定时任务、SMART 磁盘健康巡检、NAS 观测（DSM / TrueNAS / OMV、mdadm / ZFS）、组网观测与管理（WireGuard / ZeroTier / Tailscale / frp 运行态、云端纳管、本机加入/离开网络与 daemon 服务管理）。
-- **漂移与告警**：配置漂移检测与 CMDB 对照；告警通知多渠道（Herald / ntfy / webhook / Telegram）。
+控制面底子是完整的：Server 有 Web UI、HTTP API、Agent WebSocket 接入、TOTP 两步验证、RBAC 用户与角色、审计日志，数据落 SQLite；Agent 主动连出注册，上报心跳、系统指标与能力标签，NAT 后的节点不开入站端口。`cockpit sync` 把 Inventory YAML 同步成运行时资源视图——计算实例、域名、证书、服务、网关、存储六类资源行都带拨测心跳条与到期告警。
+
+远程操作方面，终端 / VNC / 桌面走短期 ticket 转发，会话录制归档可回放；agent 上能浏览与传输文件；日志既能在单机 tail（journalctl / Docker），也能跨机联邦检索。应用与容器由 Docker 全量管理（容器、镜像、网络、卷），Stacks 按 compose 部署，带模板库与部署历史，restart/pull 就近操作。
+
+备份做在两侧：agent 侧定时打包、保留策略、双阶段安全恢复，产物经 rclone 推异地并可补传；server 侧用 `VACUUM INTO` 定时备份面板数据库，同样支持异地推送。Web 侧管反向代理站点（nginx / Traefik 双后端，语法自检、失败回滚），证书走 ACME 签发与自动续期（Cloudflare / DNSPod / 阿里云 DNS-01），签发产物自动部署到 agent 指定路径；DNS 记录管理覆盖三家厂商的 A/AAAA/CNAME/MX/TXT/NS/SRV/CAA 八类记录，另有 DDNS 动态域名与域名/证书到期台账。
+
+主机运维覆盖服务管理（systemd / Windows SCM / macOS launchd 三后端）、Cron 定时任务、SMART 磁盘巡检、NAS 观测（DSM / TrueNAS / OMV，本地 mdadm / ZFS），以及组网观测与管理（WireGuard / ZeroTier / Tailscale / frp 运行态、云端纳管、本机加入/离开网络与 daemon 服务启停）。配置漂移检测做面板下发与磁盘现状的比对，CMDB 一致性做声明与实报的对照；告警经 Herald / ntfy / webhook / Telegram 四个渠道发出。
 
 ## 适用场景
 

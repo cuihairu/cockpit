@@ -12,7 +12,7 @@ Cockpit 已具备三个可复用基础，证书「签发 + 存储 + 续期」是
 
 ## 决策
 
-- **D1 库选型 lego v4**（`github.com/go-acme/lego/v4`，MIT，v4.35.2 活跃维护）：纯库嵌入（`lego.NewClient` + `Certificate.Obtain`），DNS-01 全流程封装（TXT 下发、传播等待、授权轮询、取证书链），100+ DNS provider 开箱即用，账户注册/EAB 支持。否决备选：`x/crypto/acme/autocert`——绑定 `http.Server` 的 TLS 配置场景，DNS-01 需自行编排（等于半个自研）；`certmagic`——定位是托管 web server 的 TLS 全生命周期（缓存/OCSP/SNI 路由），对「签发+存储+展示」的控制台场景过重；`acmez`——太底层，lego 正是建在这类原语上的封装。
+- **D1 库选型 lego v4**（`github.com/go-acme/lego/v4`，MIT，v4.35.2 活跃维护）：纯库嵌入（`lego.NewClient` + `Certificate.Obtain`），DNS-01 全流程封装（TXT 下发、传播等待、授权轮询、取证书链），100+ DNS provider 开箱即用，账户注册/EAB 支持。否决备选：`x/crypto/acme/autocert`——绑定 `http.Server` 的 TLS 配置场景，DNS-01 需自行编排（等于半个自行开发）；`certmagic`——定位是托管 web server 的 TLS 全生命周期（缓存/OCSP/SNI 路由），对「签发+存储+展示」的控制台场景过重；`acmez`——太底层，lego 正是建在这类原语上的封装。
 
 - **D2 只做 DNS-01 challenge**：HTTP-01 / TLS-ALPN-01 要求 80/443 从公网可达——家庭宽带入站端口常被封（本项目的核心场景），且只有 DNS-01 支持泛域名（`*.example.com`）。DNS-01 只需 Zone.DNS Edit 权限，与 DNS 管理/DDNS **同一份 token** 即可，无需额外授权。
 

@@ -135,7 +135,7 @@ docker compose --profile guacd up -d
 | --- | --- |
 | `/ws` | Agent 长连接 |
 | `/api/remote/guacamole` | Guacamole 隧道（RDP/VNC/SSH） |
-| `/api/remote/terminal`、`/api/remote/desktop`、`/api/remote/vnc` | 自研/兜底远控通道 |
+| `/api/remote/terminal`、`/api/remote/desktop`、`/api/remote/vnc` | 自行开发/兜底远控通道 |
 
 Nginx 片段：
 
