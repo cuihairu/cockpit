@@ -243,8 +243,16 @@ JWT 保护接口：
 - `POST /api/remote/tickets`
 - `GET|POST /api/remote/sessions`
 - `GET|DELETE /api/remote/sessions/{id}`
+- `POST /api/remote/vault/verify`（密码/TOTP 二次验证，签发 10 分钟 vault token）
+- `GET|PUT /api/remote/vault/credentials`（凭据元数据列表 / 加密落库保存，明文不出库；写操作需 `X-Vault-Token`）
+- `DELETE /api/remote/vault/credentials/{id}`（同上）
+- `GET|POST /api/jobs`（统一 Job 台账 / 创建即执行，仅 `agent.exec`，同步等待终态）
+- `GET /api/jobs/{id}`
 - `GET /api/admin/audit/logs`
 - `GET /api/admin/audit/stats`
+
+> 本节为代表性契约面，非全量端点清单：各功能域（如远控凭据保险箱、服务管理、
+> 备份、日志检索）的端点以对应设计文档的 API 段与 server 路由注册为准。
 
 TOTP 设置接口（同样需要 JWT，与上面的公开 `totp/verify` 区分）：
 

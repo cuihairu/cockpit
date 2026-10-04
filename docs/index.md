@@ -29,6 +29,9 @@ features:
   - icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/><path d="m8 8 2.5 2L8 12"/><path d="M13 12h4"/></svg>'
     title: 远程连接
     details: 终端、VNC 和桌面连接使用短期 ticket，经 Server 和 Agent 转发到目标服务
+  - icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M13 15h4"/></svg>'
+    title: 统一 Job 执行
+    details: 全机 Job 台账，对任意在线 agent 一键执行命令，状态、退出码与输出回写留痕
   - icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/><path d="M6 9h3"/><path d="M15 15h3"/></svg>'
     title: 清晰边界
     details: Server 负责控制面和持久化，Agent 负责节点侧采集、代理和执行

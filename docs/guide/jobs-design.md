@@ -5,6 +5,19 @@
 > 闭环：一条持久化的执行记录 + 一个可执行的内置类型（agent.exec），
 > Action/Workflow/Event 留待后续在 Job 之上生长。
 
+## 实现状态（2026-10-04 对账）
+
+- **已实现**（22bd7fd → 4a0660f 六笔）：本文「最小闭环」范围全链落地——
+  `storage.Job` 模型 + AutoMigrate；Job 类型 `agent.exec` 走 agent 侧 `job.exec`
+  RPC provider（命令 ≤16KB、超时 ≤300s 缺省 60s、输出 64KB 截断、超时按
+  进程组 SIGKILL）；`GET|POST /api/jobs` + `GET /api/jobs/{id}`（同步等待终态
+  回写）；终态单条审计 `job_run`（details 含 type/target/status/params）；
+  Jobs 页（全机台账 15s 轮询 + 创建即执行弹窗 + 终态详情）；权限点
+  `jobs:read`/`jobs:write`（PermGuard 控制创建入口）。
+- **未实现**（按本文「边界（明确不做）」节，立项时再设计，不写进当前能力）：
+  异步执行/取消（`cancelled` 与独立 `timeout` 终态）、Workflow/定时触发、
+  输出流式、Action/Event 抽象与 AI 接线（P5）。
+
 ## 现状与痛点
 
 | 痛点 | 现状 | 后果 |

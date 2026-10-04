@@ -20,6 +20,7 @@
 - **资源收敛**：Inventory YAML 同步为统一资源视图，拨测心跳与到期告警
 - **NAT 友好**：Agent 主动连出注册，节点无需暴露入站端口
 - **远程操作**：终端 / VNC / 桌面经短期 ticket 转发，支持会话录制
+- **统一执行**：全机 Job 台账，对任意在线 agent 一键执行命令，状态 / 退出码 / 输出回写可追溯
 - **容器与应用**：Docker 全量管理 + Stacks 按 compose 部署
 - **运维面**：反向代理站点、ACME 证书、DNS/DDNS、备份恢复、服务/Cron/SMART/NAS/组网观测
 - **漂移与告警**：配置漂移检测，多渠道通知（Herald / ntfy / webhook / Telegram）

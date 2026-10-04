@@ -183,6 +183,18 @@
 - [ ] Windows SCM：列表/启停/自启切换/restart 等待 30s 超时路径实测；无权限服务报错透传；reload 按钮确认隐藏
 - [ ] macOS launchd：列表/启停/自启切换；`kickstart` 失败回退 `bootstrap` 路径；无权限报错透传
 
+## 统一 Job 执行（agent.exec）
+
+设计：[jobs-design](./jobs-design.md)。前置：一台在线 Linux agent（命令经 `sh -c` 执行）。
+
+- [ ] 创建 Job（在线 agent，`uptime`）→ 弹窗回显 success、输出非空、退出码 0；台账新增一条（15s 轮询内可见）
+- [ ] 非零退出（`exit 3`）→ failed、退出码 3、error 无输出回退
+- [ ] 超时（`sleep 30`，timeout_s=1）→ failed、error 含 timed out；agent 侧进程组 SIGKILL，`ps` 复核无孤儿 sleep 残留
+- [ ] 输出截断：>64KB 大输出 → truncated 标记，业务字段不炸 RPC
+- [ ] 离线 agent：创建弹窗下拉禁用该机；直连 `POST /api/jobs` → 503，不落幽灵 Job 记录
+- [ ] 审计：CreateJob 与终态 `job_run`（resource=job、details 含 type/target/status/params）在审计日志页留痕
+- [ ] 权限：无 `jobs:write` 不见「执行命令」入口；无 `jobs:read` 进不了 Jobs 页
+
 ## 移动端（Flutter，iOS + Android）
 
 设计：[mobile-design](./mobile-design.md)。前置：Android 真机（或模拟器）安装 debug APK（CI `Mobile` workflow artifact 或本地 `flutter build apk --debug`）；server 可达（公网或同网段）。iOS 构建需 macOS + Xcode（本仓库 CI 不构建 iOS，见 D8）。
