@@ -96,7 +96,7 @@ retention 只删本地文件与记录（远端归档不清理——rclone copy �
       全路径/Close 异步不阻塞
 - [x] 文档收尾（本清单勾选）+ todo.md 同步
 
-✅ M2 完成（2026-09-19）：server 6 测试全绿（fake rclone argv 注入同
+M2 完成（2026-09-19）：server 6 测试全绿（fake rclone argv 注入同
 server 备份 M2 模式）。落地差异两处：① D18 设计认为「sid 是元数据主键
 天然无穿越面」，实施仍加了 UUID 严格正则（`^[0-9a-f]{8}-…`）前置 400——
 防御纵深零成本，非 UUID 形态根本到不了文件寻址；测试同时覆盖深穿越形态
@@ -119,7 +119,7 @@ server 备份 M2 模式）。落地差异两处：① D18 设计认为「sid 是
       HandleTerminalData 落盘链路
 - [x] 文档收尾（本清单勾选）+ todo.md 同步
 
-✅ M1 完成（2026-09-15）：server 5 测试全绿——cast 格式（header version=2 +
+M1 完成（2026-09-15）：server 5 测试全绿——cast 格式（header version=2 +
 `[dt,"o",data]` 行、Close 幂等回填一次、nil receiver 安全、文件权限 0600）、
 startRecording 元数据登记与管道落盘、开关语义（默认开/"false" 关，保留天数
 合法/0/非法回默认）、过期清理（文件+记录同删、0=永久）、API（列表/取内容

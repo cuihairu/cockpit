@@ -318,7 +318,7 @@ remoteDest 格式 → copy → 返回 `{synced: true}` 或错误。
 
 **真机验收（剩余）**：真实 S3/B2 远端、rclone 网盘限速场景、GB 级文件完整链。
 
-✅ **M2 完成（2026-09-19）**。两处落地差异补记：
+**M2 完成（2026-09-19）**。两处落地差异补记：
 
 1. **rclone 存在性探测时机（D23）**：capability metadata 的 `rclone` 字段在
    agent 启动检测阶段经 `exec.LookPath` 探测并随注册上报，重连复用缓存不重新
@@ -388,7 +388,7 @@ restore 不涉及 hook（解包到独立目录，无一致性问题）。
       server 透传与校验
 - [x] 文档收尾（本清单勾选）+ todo.md 同步
 
-✅ **M3 完成（2026-09-19）**。两处落地差异补记：
+**M3 完成（2026-09-19）**。两处落地差异补记：
 
 1. **PreHook 承载在 RunBackup 局部变量**而非 backupTask 字段：GetTask 响应
    无需回显 hook 命令（server 不轮询它，失败原因已在 Error 里），少一个

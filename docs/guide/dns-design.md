@@ -57,7 +57,7 @@ Web /dns ──REST──▶ server api_dns ──HTTPS──▶ api.cloudflare.
       400/502 路径）、审计落库
 - [x] 文档收尾（本清单勾选）+ todo.md 同步
 
-✅ M1 完成（2026-09-15）：dns 包 13 测试 + server 4 测试 + config 1 测试全绿。
+M1 完成（2026-09-15）：dns 包 13 测试 + server 4 测试 + config 1 测试全绿。
 实现与 D6 的一处落地差异：审计 resourceID 用 `zoneID/记录名`（创建/更新）
 或 `zoneID/记录ID`（删除，此时记录名已不可得），不额外调 zones 接口换
 zone 名——个人场景低频操作，ID 同样可追溯。入参归一化在 client 发出前
@@ -109,7 +109,7 @@ web 页面全部复用。写联动（Domain 表回写）、批量导入、分布
       错误码）、签名纯函数表驱动、server provider 分流与 503 文案、审计不回归
 - [x] 文档收尾（本清单勾选）+ todo.md 同步
 
-✅ M2 完成（2026-09-19）：dns 包 dnspod/alidns/sign 三文件 + server 分流 +
+M2 完成（2026-09-19）：dns 包 dnspod/alidns/sign 三文件 + server 分流 +
 web 引导卡，dns 包 21 测试 + server 3 测试全绿。实现与设计的两处落地差异：
 ① DNSPod `Domain.List` 单页拉 400 条不翻页（D14 说的是 records 分页归一，
 zones 与 M1 Cloudflare 同款单页策略）；② 阿里云 `DescribeDomainRecords`
@@ -176,7 +176,7 @@ provider 自动识别与反向对账语义。
       INSERT·DELETE）；web 层 DNS 页 6 个联动用例
 - [x] 文档收尾（本清单勾选）+ todo.md 同步
 
-✅ M3 完成（2026-09-27）：api_dns_cmdb.go 全函数 100% 语句覆盖（经
+M3 完成（2026-09-27）：api_dns_cmdb.go 全函数 100% 语句覆盖（经
 TestDNS 口径 profile 核对）。与设计的两处实现差异：① 登记前用
 `ListZones` 验 zone 存在（provider 是唯一事实源，面板不凭空登记），故
 未知 zid 是 404 而不是直接落库；② 台账跟随读路径用

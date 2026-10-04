@@ -124,7 +124,7 @@ todo 原文「推送式采集与跨机检索、结构化解析」。设计期先
 
 | 路线 | 形态 | 量级 | 结论 |
 |------|------|------|------|
-| (a) 联邦扇出检索 | server 并行向在线 agent 转发**既有** `logs.query`，按主机分组返回 | 小：1 个 server 端点 + 1 个 web 页，agent 零改动、零存储 | ✅ 选为 M3 本体 |
+| (a) 联邦扇出检索 | server 并行向在线 agent 转发**既有** `logs.query`，按主机分组返回 | 小：1 个 server 端点 + 1 个 web 页，agent 零改动、零存储 | 选为 M3 本体 |
 | (b) 推送式采集 + 服务端索引 | agent 常驻 tail → 推送 → server SQLite 落库 → 全文检索 | 独立量级：采集会话、断线补采、背压丢弃、保留清理、查询分页 | 维持不做，触发条件见「不做」清单 |
 
 选 (a) 的理由：
@@ -191,7 +191,7 @@ grep 超长 / tail 越界 / agents 形态）、目标筛选与 skipped 归因（
 - [x] web：跨机检索页（表单 / 分组卡片 / 高亮）
 - [x] 测试 + 文档收尾（本清单勾选）+ todo.md 同步
 
-✅ M3 完成（2026-09-19）：server 6 测试（校验 10 形态 + 405 / 扇出聚合与排序 /
+M3 完成（2026-09-19）：server 6 测试（校验 10 形态 + 405 / 扇出聚合与排序 /
 no-logs 跳过双形态 / 单机失败降级 / 全目标不可用 200 / 在途闸门 429）全绿；
 web tsc 零新增错误 + build 过。实现注记：单目标超时即 CallAgent 既有 30s 上限
 （未另设 35s）；agent 断开即从注册表注销，offline 与 not-found 归因合并为
@@ -216,7 +216,7 @@ offline；结果按 agentId 排序保证输出稳定（registry.List 基于 map 
       server 转发与错误透传
 - [x] 文档收尾（本清单勾选）+ todo.md 同步
 
-✅ M1 完成（2026-09-15）：agent 7 测试 + server 4 测试全绿；grep 命中词前端高亮与
+M1 完成（2026-09-15）：agent 7 测试 + server 4 测试全绿；grep 命中词前端高亮与
 agent contains 过滤同语义（大小写敏感）；Workbench「日志」Tab 与「文件」Tab 同模式内嵌，
 无 logs capability 主机呈现类型禁用 + 提示条。
 

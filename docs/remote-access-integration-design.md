@@ -11,9 +11,9 @@
 
 | 协议 | 前端入口 | 通道 | 协议终结方（第三方库） | 状态 |
 | --- | --- | --- | --- | --- |
-| RDP | GuacamoleModal | `/api/remote/guacamole` → guacd | guacd（FreeRDP）+ guacamole-common-js | ✅ 已集成 |
-| VNC | GuacamoleModal | 同上（protocol=vnc） | guacd（libvncclient）+ guacamole-common-js | ✅ 已集成 |
-| SSH | TerminalModal（xterm.js） | `/api/remote/terminal` → agent | agent 内 `x/crypto/ssh`（Go 库，非远控专用栈） | ⚠️ 自行开发链路 |
+| RDP | GuacamoleModal | `/api/remote/guacamole` → guacd | guacd（FreeRDP）+ guacamole-common-js | 已集成 |
+| VNC | GuacamoleModal | 同上（protocol=vnc） | guacd（libvncclient）+ guacamole-common-js | 已集成 |
+| SSH | TerminalModal（xterm.js） | `/api/remote/terminal` → agent | agent 内 `x/crypto/ssh`（Go 库，非远控专用栈） | 自行开发链路 |
 | Telnet | TerminalModal | 同上 | agent raw TCP | 维持 |
 | （兜底） | VNCModal（noVNC）/ DesktopModal（grdp） | agent 通道 | noVNC / grdp | 无引用，按 2026-09-24 拍板保留并存期 |
 
@@ -29,7 +29,7 @@
 | --- | --- | --- | --- |
 | RDP | guacd 的 rdp 插件 | FreeRDP | `/api/remote/guacamole`（protocol=rdp） |
 | VNC | guacd 的 vnc 插件 | libvncclient | `/api/remote/guacamole`（protocol=vnc） |
-| SSH | guacd 的 ssh 插件 | libssh2 | `/api/remote/guacamole`（protocol=ssh）🆕 |
+| SSH | guacd 的 ssh 插件 | libssh2 | `/api/remote/guacamole`（protocol=ssh，新增） |
 | 浏览器渲染/输入 | guacamole-common-js | canvas / keyboard / clipboard | GuacamoleModal（三协议复用同一组件） |
 
 **一句话理由**：guacd 一个守护进程覆盖三协议（外加 telnet 可选），浏览器
@@ -124,8 +124,8 @@
 
 guacd 的 ssh 终端是**服务端渲染的图块流**（guacamole 指令编码的位图），
 不是 xterm.js 的字符网格：带宽占用更高、字体渲染由 guacd 决定。统一栈
-（同一组件、同一录制、同一部署）的收益大于该差异；对终端体验有极致
-要求的场景用「内置终端（经 Agent）」兜底入口。此差异是 D3/D4 并存的
+（同一组件、同一录制、同一部署）的收益大于该差异；对终端渲染要求高
+的场景用「内置终端（经 Agent）」兜底入口。此差异是 D3/D4 并存的
 根本原因，不是过渡态。
 
 ### D8：SSH 尺寸跟窗口走、剪贴板只对终端开反向

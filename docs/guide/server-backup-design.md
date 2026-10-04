@@ -87,7 +87,7 @@ serverBackupLoop 到期 / POST /run
       超时（fake rclone 脚本同 agent 模式）
 - [x] 文档收尾（本清单勾选）+ todo.md 同步
 
-✅ M2 完成（2026-09-19）：server 7 新测试全绿 + notification 无回归 +
+M2 完成（2026-09-19）：server 7 新测试全绿 + notification 无回归 +
 web tsc 零新增错误（9 存量）+ build 过。实现与设计的落地差异：D15 超时
 除 `exec.CommandContext` 外补了 `cmd.WaitDelay = 1s`——测试暴露
 `CombinedOutput` 的 stdout 管道写端会被 rclone 的子进程（fake 脚本的
@@ -107,7 +107,7 @@ agent M3 D29 的进程组整杀平台分文件（server 侧无自由命令 hook 
       清理、间隔语义
 - [x] 文档收尾（本清单勾选）+ todo.md 同步
 
-✅ M1 完成（2026-09-15）：server 6 测试全绿——VACUUM INTO 产物用真实 GORM
+M1 完成（2026-09-15）：server 6 测试全绿——VACUUM INTO 产物用真实 GORM
 重开能读到备前写入的数据（完整性硬验证）且权限 0600；文件名严格模式拒绝
 `../` 穿越与畸形名；配置语义（默认 24h/7d、0=关闭或永久、越界/非法回默认）；
 retention 清理过期删永久留；API 全路径（配置 GET/PUT 含越界 400、立即备份、
