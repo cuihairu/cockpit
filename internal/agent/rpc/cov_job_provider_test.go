@@ -131,6 +131,21 @@ func TestJobUnknownAction(t *testing.T) {
 	}
 }
 
+// trimExecErr 纯函数：>512 截断保尾 + 短串原样 + 首尾空白清理
+func TestJobTrimExecErr(t *testing.T) {
+	long := strings.Repeat("x", 600)
+	got := trimExecErr(long)
+	if len(got) != 512+3 || !strings.HasSuffix(got, "...") {
+		t.Fatalf("trimmed len = %d, want %d with ... suffix", len(got), 512+3)
+	}
+	if trimExecErr("short") != "short" {
+		t.Fatalf("short string altered")
+	}
+	if trimExecErr("  pad  ") != "pad" {
+		t.Fatalf("trim whitespace failed")
+	}
+}
+
 // —— 测内小工具（避免与主包重名冲突）——
 
 func intField(m map[string]interface{}, key string) int {

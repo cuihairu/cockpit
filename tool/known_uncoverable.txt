@@ -59,7 +59,7 @@ internal/agent/agent.go:158,158	3. servicesRefreshLoop 取消上下文退出分�
 
 cmd/cockpit-agent/main.go:68,69	redirectServiceStart 命中 SCM 上下文后的 return 0（linux stub 恒 false；真 Windows 由 nightly 走查覆盖）
 
-# ---------- 6. Job 模型最小闭环（docs/guide/jobs-design.md）：防御分支与测试惯例（12 语句） ----------
+# ---------- 6. Job 模型最小闭环（docs/guide/jobs-design.md）：防御分支与测试惯例（10 语句） ----------
 
 internal/server/api_jobs.go:92,92	3. handleJobsList 查询失败 500（SQLite 已迁移表上 SELECT 不可致错，单测不可构造）
 internal/server/api_jobs.go:172,172	4. 带登录态的用户分支（handler 单测无 auth middleware，Actor 恒 unknown；真名分支由登录流程整链覆盖）
@@ -69,6 +69,4 @@ internal/server/api_jobs.go:210,210	3. 终态 UpdateJob 失败 500（job 已执�
 internal/server/api_jobs.go:243,243	3. dispatchJob CallAgent 错误（离线已在 handleJobCreate 先经 registry 判空 503，此处不可达）
 internal/server/api_jobs.go:247,247	3. DecodeRPCResponse 失败（RPC 响应恒为协议消息形态，无畸形面）
 internal/server/api_jobs.go:284,284	3. intField `case int`（JSON 数字解码恒 float64，int 直调进不来）
-internal/agent/rpc/job_provider.go:129,129	3. trimExecErr 截断分支（仅 spawn 失败路径报错；sh/cmd 恒存在无法造启动失败）
-internal/agent/rpc/job_provider_unix.go:21,21	3. Cancel 的 nil-Process 守卫（CommandContext 仅在进程成功启动后才调 Cancel）
 internal/storage/job.go:64,64	3. ListJobs 查询失败（SQLite 已迁移表 SELECT 不可致错）
