@@ -44,3 +44,23 @@ func TestCovTelegramSendSuccess(t *testing.T) {
 		t.Errorf("payload = %s", gotBody)
 	}
 }
+
+// 非 2xx 状态码视为发送失败（渠道侧错误原样带状态码返回）
+func TestCovTelegramSendNon2xx(t *testing.T) {
+	ch := &telegramChannel{
+		cfg: &config.TelegramConfig{BotToken: "cov-token", ChatID: "42"},
+		client: &http.Client{Transport: covRTFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Status:     "500 Internal Server Error",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{}`)),
+			}, nil
+		})},
+	}
+
+	err := ch.Send(context.Background(), &Notification{Title: "t", Message: "m"})
+	if err == nil || !strings.Contains(err.Error(), "unexpected status code 500") {
+		t.Fatalf("Send err = %v, want unexpected status code 500", err)
+	}
+}
