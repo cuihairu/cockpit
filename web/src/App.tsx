@@ -21,6 +21,7 @@ import {
   CloudUploadOutlined,
   DeploymentUnitOutlined,
   ClockCircleOutlined,
+  PlayCircleOutlined,
   ThunderboltOutlined,
   SafetyCertificateOutlined,
   GlobalOutlined,
@@ -59,6 +60,7 @@ const Stacks = lazy(() => import('./pages/Stacks'))
 const Backups = lazy(() => import('./pages/Backups'))
 const Proxy = lazy(() => import('./pages/Proxy'))
 const Cron = lazy(() => import('./pages/Cron'))
+const Jobs = lazy(() => import('./pages/Jobs'))
 const Services = lazy(() => import('./pages/Services'))
 const Network = lazy(() => import('./pages/Network'))
 const Disk = lazy(() => import('./pages/Disk'))
@@ -201,6 +203,12 @@ const routeConfig: PermRouteItem = {
       name: '定时任务',
       icon: <ClockCircleOutlined />,
       perm: 'cron:read',
+    },
+    {
+      path: '/jobs',
+      name: 'Job 执行',
+      icon: <PlayCircleOutlined />,
+      perm: 'jobs:read',
     },
     {
       path: '/services',
@@ -491,6 +499,7 @@ const MainLayout = () => {
             <Route path="/backups" element={<Backups />} />
             <Route path="/proxy" element={<Proxy />} />
             <Route path="/cron" element={<Cron />} />
+            <Route path="/jobs" element={<Jobs />} />
             <Route path="/services" element={<Services />} />
             <Route path="/network" element={<Network />} />
             <Route path="/disk" element={<Disk />} />
