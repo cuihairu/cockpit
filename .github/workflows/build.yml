@@ -65,6 +65,14 @@ jobs:
             go build -tags rdp -ldflags="-s -w" -o dist/cockpit-agent ./cmd/cockpit-agent
           fi
 
+      - name: Test agent package (windows service dispatch)
+        # windows-only 测试（service 分发/SCM 绑定）只在本腿编译运行；
+        # 真机安装走查（安装→服务→图标→卸载）在 nightly 的
+        # Build Agent Installer job
+        if: runner.os == 'Windows'
+        shell: bash
+        run: go test -short ./cmd/cockpit-agent/
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:

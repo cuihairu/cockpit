@@ -62,54 +62,11 @@ func printServiceUsage(w io.Writer) {
 	fmt.Fprintln(w, "  run       服务入口（SCM 调用，勿手动执行）")
 }
 
-// svcBind 把 start 同款参数绑到 StartCmd（service install 透传连接参数）
-func svcBind(args []string) (*agent.StartCmd, *flag.FlagSet, error) {
-	cmd := &agent.StartCmd{Version: version}
-	fs := flag.NewFlagSet("service", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	cmd.BindWithUsage(fs, agent.StartUsage{
-		Server:  "Server WebSocket 地址 (必需)",
-		ID:      "Agent ID (可选，默认基于 machine-id 自动生成，重启不变)",
-		Secret:  "Agent 认证密钥 (可选，但推荐使用)",
-		Region:  "地域 (可选)",
-		Zone:    "可用区 (可选)",
-		Labels:  "标签 (可选)，格式: key1=value1,key2=value3=[a,b,c]",
-		SSHKeys: "SSH 私钥目录 (可选，默认 ~/.ssh/)",
-	})
-	if err := fs.Parse(args); err != nil {
-		return nil, fs, err
-	}
-	return cmd, fs, nil
-}
-
-// svcArgsFrom 从 StartCmd 还原服务命令行参数（只带非空项，保持 binPath 干净）
-func svcArgsFrom(c *agent.StartCmd) []string {
-	args := []string{"service", "run", "-server", c.Server}
-	if c.ID != "" {
-		args = append(args, "-id", c.ID)
-	}
-	if c.Secret != "" {
-		args = append(args, "-secret", c.Secret)
-	}
-	if c.Region != "" {
-		args = append(args, "-region", c.Region)
-	}
-	if c.Zone != "" {
-		args = append(args, "-zone", c.Zone)
-	}
-	if c.Labels != "" {
-		args = append(args, "-labels", c.Labels)
-	}
-	if c.SSHKeys != "" {
-		args = append(args, "-ssh-keys", c.SSHKeys)
-	}
-	return args
-}
-
 // svcInstall 注册（或升级已注册的）服务：Automatic 开机自启 + 崩溃自动重启
 // 5s/10s/20s（24h 计数重置，同 install.ps1 的 sc failure 策略），随后启动
+// （svcBind/svcArgsFrom 见 svcargs.go：平台无关的部分下沉，故能在 linux CI 覆盖）
 func svcInstall(args []string, stdout io.Writer) int {
-	cmd, _, err := svcBind(args)
+	cmd, err := svcBind(args)
 	if err != nil {
 		fmt.Fprintln(stdout, "参数错误:", err)
 		return 1
@@ -371,10 +328,7 @@ func (a *agentService) Execute(args []string, r <-chan svc.ChangeRequest, status
 
 	// 参数即进程命令行去掉 exe（`service run -server ...` 或存量直挂的
 	// `start -server ...`），剥掉动词后按 start 同款 flag 解析
-	flagArgs := os.Args[1:]
-	for len(flagArgs) > 0 && (flagArgs[0] == "service" || flagArgs[0] == "run" || flagArgs[0] == "start") {
-		flagArgs = flagArgs[1:]
-	}
+	flagArgs := svcStripVerbs(os.Args[1:])
 	cmd := &agent.StartCmd{Version: version}
 	fs := flag.NewFlagSet("service run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

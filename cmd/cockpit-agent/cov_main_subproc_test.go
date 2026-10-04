@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -49,7 +50,12 @@ func TestCovAgentMainEntry(t *testing.T) {
 
 // TestCovAgentMainGracefulExit 子进程真实启动 agent 连上假 WS 服务，
 // 注册成功后由父进程发 SIGTERM，覆盖信号优雅退出与成功返回 0 的路径。
+// Windows 不支持向子进程投递 SIGTERM（Process.Signal 仅支持 Kill），
+// 该路径由 nightly 走查的服务停止（卸载）步骤覆盖。
 func TestCovAgentMainGracefulExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGTERM delivery to subprocess is unsupported on Windows")
+	}
 	if os.Getenv("COCKPIT_AGENT_MAIN_SUBPROC") != "" {
 		t.Skip("subprocess child")
 	}

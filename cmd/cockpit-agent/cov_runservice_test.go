@@ -13,7 +13,11 @@ import (
 	"github.com/cuihairu/cockpit/internal/agent"
 )
 
-// TestRunServiceDispatch 覆盖 run() 的 service 分支与 handleService 的各子命令
+// TestRunServiceDispatch 覆盖 run() 的 service 分支与 handleService 的各子命令。
+// 注意：涉及 SCM 实际读写的用例（uninstall/start/stop/status 未注册、
+// run 非 SCM）只断言退出码——输出文案随权限上下文而变（管理员输出
+// 「未注册」，非管理员输出「需要管理员权限」），且两者行为都正确。
+// install 的完整注册链由 nightly 的 Build Agent Installer job 真机走查。
 func TestRunServiceDispatch(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -23,13 +27,16 @@ func TestRunServiceDispatch(t *testing.T) {
 	}{
 		{"service no args", []string{"cockpit-agent", "service"}, 1, "用法:"},
 		{"service unknown", []string{"cockpit-agent", "service", "foobar"}, 1, "未知子命令"},
-		{"service install missing server", []string{"cockpit-agent", "service", "install"}, 1, "参数错误"},
-		{"service install ok", []string{"cockpit-agent", "service", "install", "-server", "ws://localhost:9000/ws"}, 1, "需要管理员权限"}, // 无管理员权限预期失败
-		{"service uninstall not exist", []string{"cockpit-agent", "service", "uninstall"}, 1, "未注册"},
-		{"service start not exist", []string{"cockpit-agent", "service", "start"}, 1, "未注册"},
-		{"service stop not exist", []string{"cockpit-agent", "service", "stop"}, 1, "未注册"},
-		{"service status not exist", []string{"cockpit-agent", "service", "status"}, 1, "未注册"},
-		{"service run (not in SCM)", []string{"cockpit-agent", "service", "run", "-server", "ws://localhost:9000/ws"}, 1, "service dispatch error"},
+		// install 无 -server：svcBind 后 Validate 先于任何 SCM 访问失败，
+		// 输出与权限无关（参数解析失败才走「参数错误」分支）
+		{"service install missing server", []string{"cockpit-agent", "service", "install"}, 1, "missing required -server flag"},
+		{"service uninstall not exist", []string{"cockpit-agent", "service", "uninstall"}, 1, ""},
+		{"service start not exist", []string{"cockpit-agent", "service", "start"}, 1, ""},
+		{"service stop not exist", []string{"cockpit-agent", "service", "stop"}, 1, ""},
+		{"service status not exist", []string{"cockpit-agent", "service", "status"}, 1, ""},
+		// run 非 SCM：StartServiceCtrlDispatcher 必失败 → 退出 1；
+		// 「service dispatch error」经 log 输出到 %ProgramData% 日志文件而非 stdout
+		{"service run (not in SCM)", []string{"cockpit-agent", "service", "run", "-server", "ws://localhost:9000/ws"}, 1, ""},
 	}
 
 	for _, tt := range tests {
@@ -46,16 +53,19 @@ func TestRunServiceDispatch(t *testing.T) {
 	}
 }
 
-// TestHandleStartRedirectServiceStart 覆盖 handleStart -> redirectServiceStart 的分支（非 SCM 上下文返回 false）
+// TestHandleStartRedirectServiceStart 覆盖 handleStart -> redirectServiceStart
+// 的非 SCM 分支（控制台运行恒为 false，流程继续到 Validate 失败）。
+// 注意：故意不带 -server——带合法地址会真正启动 agent（Run 阻塞重连），
+// 测试会挂死；这里断言「非 SCM 上下文未拦截 + 参数校验照常生效」。
 func TestHandleStartRedirectServiceStart(t *testing.T) {
-	// 非 SCM 环境下 redirectServiceStart 应返回 false
 	var buf bytes.Buffer
-	args := []string{"cockpit-agent", "start", "-server", "ws://localhost:9000/ws"}
-	// 这里只测 redirectServiceStart 返回 false 的路径（即不进入 svc.Run）
-	// 实际 handleStart 会继续跑 flag.Parse 并 Validate 失败（因为缺少必要参数），退出码 1
+	args := []string{"cockpit-agent", "start"}
 	code := run(args, &buf)
 	if code != 1 {
 		t.Errorf("expected exit 1 (validate fail), got %d: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "错误") {
+		t.Errorf("expected validate error output, got: %s", buf.String())
 	}
 }
 
@@ -107,10 +117,10 @@ func TestPrintServiceUsage(t *testing.T) {
 	}
 }
 
-// TestBinPath 覆盖 binPath 转义拼接
+// TestBinPath 覆盖 binPath 转义拼接（含空格路径的引号包裹）
 func TestBinPath(t *testing.T) {
 	exe := `C:\Program Files\CockpitAgent\cockpit-agent.exe`
-	args := []string{"service", "run", "-server", `ws://test:9000/ws`}
+	args := []string{"service", "run", "-server", "ws://test:9000/ws"}
 	bp := binPath(exe, args)
 	if !strings.HasPrefix(bp, `"C:\Program Files\CockpitAgent\cockpit-agent.exe"`) {
 		t.Errorf("binPath missing quoted exe: %s", bp)
@@ -120,9 +130,9 @@ func TestBinPath(t *testing.T) {
 	}
 }
 
-// TestSvcRunDispatcherNotInSCM 覆盖 svcRunDispatcher 非 SCM 路径（svc.Run 返回错误）
+// TestSvcRunDispatcherNotInSCM 覆盖 svcRunDispatcher 非 SCM 路径（svc.Run
+// -> StartServiceCtrlDispatcher 在非服务进程必失败，应返回 1）
 func TestSvcRunDispatcherNotInSCM(t *testing.T) {
-	// 非 SCM 上下文调用 svc.Run 会返回错误，svcRunDispatcher 应返回 1
 	code := svcRunDispatcher()
 	if code != 1 {
 		t.Errorf("svcRunDispatcher outside SCM: want 1 got %d", code)
@@ -171,9 +181,9 @@ func TestRunUsage(t *testing.T) {
 	}
 }
 
-// TestStartCmdBind 覆盖 startCmd.BindWithUsage (通过 run -> handleStart)
+// TestStartCmdBind 覆盖 startCmd.BindWithUsage（通过 run -> handleStart 的
+// flag 面与 StartCmd 字段绑定）
 func TestStartCmdBind(t *testing.T) {
-	// 验证 flag 绑定包含必需参数
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	cmd := &agent.StartCmd{Version: "test"}
 	cmd.BindWithUsage(fs, agent.StartUsage{
