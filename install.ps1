@@ -1,5 +1,10 @@
 # Cockpit Agent 一键安装（Windows PowerShell 5.1+ / pwsh）
 #
+# 图形化安装首选 nightly release 的 cockpit-agent-setup-nightly.exe（Inno
+# Setup 安装器：装目录/开始菜单/桌面快捷方式/服务化开机自启/卸载器一站式）。
+# 本脚本是无 GUI/脚本化批量装机路径，能力对齐（服务注册经 agent 自身
+# `service install` 子命令，SCM 协议完整应答）。
+#
 # 从每日构建（nightly release，匿名可直链下载）拉取与本机架构匹配的
 # cockpit-agent 并安装，可选注册 Windows 服务（开机自启）。
 #
@@ -231,23 +236,15 @@ try {
             throw "注册服务需要 -ServerUrl（或已注册过 $ServiceName 服务）"
         }
 
-        if ($svc) {
-            Write-Step "删除旧服务（重新注册以刷新启动参数）..."
-            Remove-Service -Name $ServiceName
-            Start-Sleep -Seconds 1
-        }
-
         $startArgs = Build-StartArgs
-        $arguments = $startArgs -join ' '
-        Write-Step "注册 Windows 服务 $ServiceName ..."
-        New-Service -Name $ServiceName `
-            -BinaryPathName "`"$binPath`" $arguments" `
-            -DisplayName "Cockpit Infrastructure Monitoring Agent" `
-            -Description "Cockpit Agent - Connects to Cockpit Server for infrastructure monitoring" `
-            -StartupType Automatic | Out-Null
-
-        # 失败自动重启：5s / 10s / 20s，24h 内计数重置
-        & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/20000 | Out-Null
+        # 服务注册交给 agent 自身子命令（二进制内置 SCM 协议应答：60 秒内
+        # StartServiceCtrlDispatcher + 状态机，失败自动重启 5s/10s/20s）。
+        # 存量 New-Service 直挂 `start` 会被 SCM 判定无响应杀死——此路径收口。
+        # 已注册时 agent 内部走升级：停服务 → 刷新启动参数（BinaryPathName）→ 重启
+        Write-Step "注册/升级 Windows 服务 $ServiceName（Automatic + 失败自动重启）..."
+        $svcArgs = @('service', 'install') + ($startArgs | Select-Object -Skip 1)
+        & $binPath @svcArgs
+        if ($LASTEXITCODE -ne 0) { throw "service install 失败（exit $LASTEXITCODE）" }
 
         # 连接信息留档（服务参数改配置后需重跑本脚本重新注册）
         $configDir = 'C:\ProgramData\CockpitAgent'
@@ -261,9 +258,8 @@ ZONE=$Zone
 LABELS=$Labels
 "@ | Out-File -FilePath (Join-Path $configDir 'config.env') -Encoding ASCII
 
-        Write-Step "启动服务..."
-        Start-Service -Name $ServiceName
-        Start-Sleep -Seconds 2
+        Write-Step "确认服务状态..."
+        & $binPath service status
         $svc = Get-Service -Name $ServiceName
         if ($svc.Status -eq 'Running') {
             Write-Host "服务已启动: $ServiceName（Automatic + 失败自动重启）" -ForegroundColor Green
@@ -276,7 +272,7 @@ LABELS=$Labels
             Write-Host "检测到既有 $ServiceName 服务但当前非管理员——新版本将在下次服务重启时生效" -ForegroundColor Yellow
         } else {
             Write-Step "重启既有 $ServiceName 服务以加载新版本..."
-            Start-Service -Name $ServiceName
+            Restart-Service -Name $ServiceName
             Write-Host "服务已重启: $ServiceName" -ForegroundColor Green
         }
     } elseif (-not [string]::IsNullOrEmpty($ServerUrl)) {

@@ -29,6 +29,8 @@ func run(args []string, stdout io.Writer) int {
 	switch command {
 	case "start":
 		return handleStart(args[2:], stdout)
+	case "service":
+		return handleService(args[2:], stdout)
 	case "version", "-v", "--version":
 		printVersion(stdout)
 		return 0
@@ -47,6 +49,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "命令:")
 	fmt.Fprintln(w, "  start     启动 Agent")
+	fmt.Fprintln(w, "  service   Windows 服务管理（install/uninstall/start/stop/status/run）")
 	fmt.Fprintln(w, "  version   显示版本信息")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "使用 'cockpit-agent <command> -h' 查看具体命令的帮助")
@@ -58,6 +61,13 @@ func printVersion(w io.Writer) {
 
 // handleStart `cockpit-agent start [-server ws://...]`
 func handleStart(args []string, stdout io.Writer) int {
+	// Windows SCM 直挂形态（install.ps1 的 New-Service 把 `start -server ...`
+	// 注册为服务）：必须走 StartServiceCtrlDispatcher，否则 30 秒后被 SCM
+	// 判定无响应杀死。控制台运行时该拦截恒为 false。
+	if redirectServiceStart(args, stdout) {
+		return 0
+	}
+
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	startCmd := &agent.StartCmd{Version: version}
 	startCmd.BindWithUsage(fs, agent.StartUsage{

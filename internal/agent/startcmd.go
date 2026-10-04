@@ -116,6 +116,24 @@ func (c *StartCmd) Run() error {
 	return a.Start()
 }
 
+// RunService 与 Run 同为阻塞运行，但退出信号来自 stop 通道：Windows 服务
+// 的 SCM 控制（Stop/Shutdown）不产生信号量，由 svc handler 收到控制码后
+// 关闭 stop 通道触发 a.Stop()（systemd/容器路径仍走 Run 的信号分支）
+func (c *StartCmd) RunService(stop <-chan struct{}) error {
+	cfg, err := c.BuildConfig()
+	if err != nil {
+		return err
+	}
+
+	a := NewAgent(cfg)
+	go func() {
+		<-stop
+		a.Stop()
+	}()
+
+	return a.Start()
+}
+
 // parseLabels parses labels from a comma-separated key=value string.
 func parseLabels(labelsStr string) map[string]interface{} {
 	labels := make(map[string]interface{})

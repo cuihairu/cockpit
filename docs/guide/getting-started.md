@@ -116,7 +116,19 @@ Linux / macOS：
 curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | bash
 ```
 
-Windows（PowerShell 5.1+ / pwsh）：
+Windows 图形化安装（推荐，Inno Setup 安装器）：从
+[nightly release](https://github.com/cuihairu/cockpit/releases/latest) 下载
+`cockpit-agent-setup-nightly.exe`（同名 `.sha256` 校验文件一并提供），双击
+运行：装到 `%ProgramFiles%\Cockpit Agent`、开始菜单 + 桌面快捷方式（带 agent
+图标）、安装向导填写 Server WebSocket 地址、可勾选「注册 Windows 服务并开机
+自启」（崩溃自动重启 5s/10s/20s）、控制面板标准卸载条目。静默装机：
+
+```powershell
+# 静默安装（服务化开机自启；/SERVER 必填，否则服务注册参数校验失败）
+.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws
+```
+
+Windows 无 GUI / 批量装机走 PowerShell 脚本（PowerShell 5.1+ / pwsh）：
 
 ```powershell
 irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
@@ -175,6 +187,24 @@ OpenWrt 路由器无需手工编译：nightly release 提供多架构
 - `-server` 必须指向 Server 的 Agent WebSocket 入口，通常以 `/ws` 结尾。
 - `-secret` 可选但推荐；当 Server 中该 Agent 已配置 secret 后，后续注册必须提供。
 - 未指定 `-region` / `-zone` 时，Agent 会尝试读取 `COCKPIT_REGION` / `COCKPIT_ZONE`，否则使用 `unknown`。
+
+### Windows 服务管理
+
+`cockpit-agent` 自带服务化子命令（需管理员 PowerShell），安装器与脚本两条安装
+路径共用同一入口，服务名 `CockpitAgent`（开机自启 + 崩溃自动重启 5s/10s/20s）：
+
+```powershell
+# 注册（已注册则升级：刷新启动参数后重启）
+.\cockpit-agent.exe service install -server wss://cockpit.cuihairu.site/ws
+
+.\cockpit-agent.exe service status    # 运行状态与启动类型
+.\cockpit-agent.exe service stop
+.\cockpit-agent.exe service start
+.\cockpit-agent.exe service uninstall  # 停止并注销（卸载安装包时自动执行）
+```
+
+服务无控制台，日志写在 `%ProgramData%\CockpitAgent\agent.log`（连接信息同目录
+`config.env`）。
 
 ## 生产环境最小配置
 

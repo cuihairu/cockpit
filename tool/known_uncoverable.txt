@@ -54,3 +54,7 @@ internal/agent/agent.go:122,123	3. startedAtOrNow 零值兜底分支（仅未走
 internal/agent/agent.go:158,158	3. servicesRefreshLoop 取消上下文退出分支（需完整 Agent 生命周期触发 ctx.Done()，单测无真实后台循环难以确定性构造）
 
 
+
+# ---------- 5. Windows agent 服务化（service_windows.go 平台分支，linux 侧不可达） ----------
+
+cmd/cockpit-agent/main.go:68,69	redirectServiceStart 命中 SCM 上下文后的 return 0（linux stub 恒 false；真 Windows 由 nightly 走查覆盖）

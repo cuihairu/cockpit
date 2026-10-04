@@ -87,9 +87,24 @@ docker compose -f deployments/docker/docker-compose.yml up -d
    Cockpit Agent v20261001
    ```
 
-### Windows（PowerShell 5.1+）
+### Windows
 
-1. 下载并安装（免管理员，装到当前用户目录并写入用户 PATH）：
+**图形化安装器（推荐）**：从 [nightly release](https://github.com/cuihairu/cockpit/releases/latest)
+下载 `cockpit-agent-setup-nightly.exe`（同名 `.sha256` 为校验文件），双击运行：
+装到 `%ProgramFiles%\Cockpit Agent`、开始菜单 + 桌面快捷方式（带 agent 图标）、
+向导内填写 Server 地址、可勾选「注册 Windows 服务并开机自启」、控制面板标准
+卸载条目。静默装机：
+
+```powershell
+.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws
+```
+
+服务管理：`cockpit-agent service install|uninstall|start|stop|status`（服务名
+`CockpitAgent`，日志 `%ProgramData%\CockpitAgent\agent.log`）。
+
+**PowerShell 脚本路径**（免管理员，装到当前用户目录并写入用户 PATH）：
+
+1. 下载并安装：
 
    ```powershell
    irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex

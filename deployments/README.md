@@ -136,7 +136,14 @@ Stop-Service -Name CockpitServer
 
 ## Windows Agent
 
-一键安装（[install.ps1](../install.ps1)，装到当前用户目录并加入用户 PATH，无需管理员）：
+图形化安装器（推荐，nightly release 提供 `cockpit-agent-setup-nightly.exe` + `.sha256` 校验文件）：装到 `%ProgramFiles%\Cockpit Agent`，开始菜单 + 桌面快捷方式（带图标），向导内填 Server 地址，勾选「注册 Windows 服务并开机自启」，控制面板标准卸载条目。构建脚本见 [packaging/windows/agent.iss](../packaging/windows/agent.iss)。
+
+```powershell
+# 静默安装（服务化；/SERVER 必填）
+.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws
+```
+
+一键脚本安装（[install.ps1](../install.ps1)，装到当前用户目录并加入用户 PATH，无需管理员）：
 
 ```powershell
 irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
@@ -150,20 +157,31 @@ irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
   -AgentId "server01" -Region "home" -Zone "datacenter" -Secret "optional-agent-secret"
 ```
 
-重跑即升级（覆盖二进制并重启既有服务）。
+重跑即升级（覆盖二进制并重启既有服务）。脚本内部走 `cockpit-agent service install`（SCM 协议完整应答；脚本、安装器、手工命令三条路径同入口同服务名）。
 
 管理命令：
 
 ```powershell
+# agent 自带子命令（安装器/脚本/手工共用）
+.\cockpit-agent.exe service status
+.\cockpit-agent.exe service stop
+.\cockpit-agent.exe service start
+.\cockpit-agent.exe service uninstall
+
+# 或 PowerShell 原生
 Get-Service -Name CockpitAgent
 Restart-Service -Name CockpitAgent
 Stop-Service -Name CockpitAgent
 ```
 
+服务无控制台，日志 `%ProgramData%\CockpitAgent\agent.log`。
+
 卸载：
 
 ```powershell
-.\uninstall-windows.ps1 -Component "All"
+.\uninstall-windows.ps1 -Component "All"   # 脚本安装形态
+# 安装器形态：控制面板/设置 → 应用，或静默
+.\unins000.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 ## 生产环境注意

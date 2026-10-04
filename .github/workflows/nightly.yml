@@ -280,6 +280,151 @@ jobs:
             dist/cockpit-agent-openwrt-${{ matrix.arch }}.tar.gz
           retention-days: 7
 
+  # Windows 安装器（Inno Setup 6，windows-latest 镜像预装）：setup.exe +
+  # SHA256 侧车进 nightly release；随后真 Windows 走查 安装→服务
+  # Automatic+Running（开机自启）→exe 图标→开始菜单/桌面快捷方式→静默卸载
+  # 全清，截图与图标抽样留档上传（BUGS.md B1 用户催办项的验收面）
+  build-agent-installer:
+    name: Build Agent Installer (windows)
+    needs: check-activity
+    if: needs.check-activity.outputs.should-build == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27'
+
+      - name: Build agent (windows-amd64, pure static)
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p stage dist
+          go build -tags rdp -trimpath -ldflags="-s -w -X main.version=$(date +%Y%m%d)" \
+            -o stage/cockpit-agent.exe ./cmd/cockpit-agent
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          # windows-latest 镜像预装 Inno Setup 6；缺失时明确报错不静默跳过
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Error "ISCC.exe not found: $iscc（runner 镜像缺 Inno Setup 6）"
+            exit 1
+          }
+          $stageDir = Join-Path $PWD 'stage'
+          if (-not (Test-Path (Join-Path $stageDir 'cockpit-agent.exe'))) {
+            Write-Error "staging dir missing cockpit-agent.exe: $stageDir"
+            exit 1
+          }
+          # 产物名 cockpit-agent-setup-nightly.exe 与 zip 资产的
+          # cockpit-agent-<goos>-<goarch>-nightly.* 刻意错开（install.ps1
+          # 按架构拉 zip 不会误取安装器）
+          & $iscc `
+            "/DAppVersion=nightly" `
+            "/DStageDir=$stageDir" `
+            "/O$PWD\dist" `
+            'packaging\windows\agent.iss'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "ISCC failed with exit $LASTEXITCODE"
+            exit 1
+          }
+          Get-ChildItem dist -Filter 'cockpit-agent-setup-*.exe' | Select-Object Name, Length
+
+      - name: SHA256 checksum
+        shell: pwsh
+        run: |
+          $exe = 'dist\cockpit-agent-setup-nightly.exe'
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  cockpit-agent-setup-nightly.exe" | Out-File -FilePath "$exe.sha256" -Encoding ascii
+          Get-Content "$exe.sha256"
+
+      - name: Walkthrough (install / icon / autostart / uninstall + screenshots)
+        timeout-minutes: 12
+        # Windows PowerShell 5.1（非 pwsh 7）：System.Drawing / System.Windows.Forms
+        # （图标抽取 + 桌面截图）在 5.1 的 GAC 里确定可用
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Join-Path $PWD 'dist\cockpit-agent-setup-nightly.exe'
+          $appDir = Join-Path $env:ProgramFiles 'Cockpit Agent'
+          $exe = Join-Path $appDir 'cockpit-agent.exe'
+          $server = 'wss://walkthrough.invalid/ws'
+
+          # ① 静默安装（服务任务默认勾选 + /SERVER 给地址）；管理员 runner 无 UAC
+          $p = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/SERVER=$server" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "installer exit $($p.ExitCode)"; exit 1 }
+          if (-not (Test-Path $exe)) { Write-Error "not installed: $exe"; exit 1 }
+          Write-Host "installed: $exe"
+
+          # ② 开机自启：服务已注册 + Automatic + 轮询至 Running
+          $svc = Get-Service -Name 'CockpitAgent' -ErrorAction SilentlyContinue
+          if (-not $svc) { Write-Error 'service CockpitAgent not registered'; exit 1 }
+          if ($svc.StartType -ne 'Automatic') { Write-Error "StartType=$($svc.StartType), want Automatic"; exit 1 }
+          $deadline = (Get-Date).AddSeconds(30)
+          while ((Get-Date) -lt $deadline -and $svc.Status -ne 'Running') {
+            Start-Sleep -Milliseconds 500
+            $svc.Refresh()
+          }
+          if ($svc.Status -ne 'Running') { Write-Error "service status=$($svc.Status)"; exit 1 }
+          Write-Host 'service: Automatic + Running'
+          & $exe service status
+
+          # ③ 图标：从 exe 资源段抽关联图标（RT_GROUP_ICON 落 PE 的实证）
+          Add-Type -AssemblyName System.Drawing
+          $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe)
+          if (-not $icon) { Write-Error 'ExtractAssociatedIcon returned null'; exit 1 }
+          $icon.ToBitmap().Save((Join-Path $PWD 'walkthrough-icon.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+          Write-Host 'icon extracted to walkthrough-icon.png'
+
+          # ④ 快捷方式（开始菜单 + 桌面）
+          $menuLnk = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Cockpit Agent\Cockpit Agent.lnk'
+          $deskLnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Cockpit Agent.lnk'
+          if (-not (Test-Path $menuLnk)) { Write-Error "start menu shortcut missing: $menuLnk"; exit 1 }
+          if (-not (Test-Path $deskLnk)) { Write-Error "desktop shortcut missing: $deskLnk"; exit 1 }
+          Write-Host 'shortcuts: start menu + desktop OK'
+
+          # ⑤ 桌面截图留档（CopyFromScreen；失败不阻塞——前三步断言是硬证据）
+          try {
+            Add-Type -AssemblyName System.Windows.Forms
+            $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap($b.Width, $b.Height)
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.X, $b.Y, 0, 0, $bmp.Size)
+            $bmp.Save((Join-Path $PWD 'walkthrough-desktop.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+            Write-Host 'screenshot saved to walkthrough-desktop.png'
+          } catch {
+            Write-Warning "screenshot skipped: $_"
+          }
+
+          # ⑥ 静默卸载 → 服务/文件/快捷方式全清
+          $unins = Join-Path $appDir 'unins000.exe'
+          if (-not (Test-Path $unins)) { Write-Error "unins000.exe missing"; exit 1 }
+          $u = Start-Process -FilePath $unins -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($u.ExitCode -ne 0) { Write-Error "uninstaller exit $($u.ExitCode)"; exit 1 }
+          if (Test-Path $exe) { Write-Error "uninstall left behind: $exe"; exit 1 }
+          if (Get-Service -Name 'CockpitAgent' -ErrorAction SilentlyContinue) { Write-Error 'service still registered after uninstall'; exit 1 }
+          if (Test-Path $menuLnk) { Write-Error 'start menu shortcut left behind'; exit 1 }
+          if (Test-Path $deskLnk) { Write-Error 'desktop shortcut left behind'; exit 1 }
+          Write-Host 'WALKTHROUGH_OK: install -> autostart service -> icon -> shortcuts -> uninstall clean'
+
+      - name: Upload installer + walkthrough evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: cockpit-agent-installer
+          path: |
+            dist/cockpit-agent-setup-nightly.exe
+            dist/cockpit-agent-setup-nightly.exe.sha256
+            walkthrough-icon.png
+            walkthrough-desktop.png
+          retention-days: 7
+          if-no-files-found: error
+
   build-web:
     name: Build Web
     needs: check-activity
@@ -318,7 +463,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: [check-activity, build, build-agent, build-openwrt, build-web]
+    needs: [check-activity, build, build-agent, build-agent-installer, build-openwrt, build-web]
     if: needs.check-activity.outputs.should-build == 'true'
     steps:
       - name: Checkout code
@@ -361,6 +506,7 @@ jobs:
           | \`cockpit-darwin-arm64-nightly.tar.gz\` | macOS | Apple Silicon |
           | \`cockpit-agent-*-nightly.tar.gz\` | Agent (纯静态) | linux amd64/arm64/armv7 · darwin amd64/arm64 |
           | \`cockpit-agent-windows-*-nightly.zip\` | Windows Agent (纯静态) | x86_64 · ARM64 |
+          | \`cockpit-agent-setup-nightly.exe\` (+\`.sha256\`) | Windows Agent 安装器 | x86_64 · 装目录/快捷方式/服务化开机自启/卸载器 |
           | \`cockpit-agent_*.ipk / cockpit-agent-openwrt-*.tar.gz\` | OpenWrt Agent | mipsel/mips/aarch64_generic/arm_cortex-a7/x86_64 |
           | \`cockpit-web-nightly.tar.gz\` | Web UI | cross-platform |" \
             dist/cockpit-linux-amd64-nightly.tar.gz \
@@ -368,6 +514,8 @@ jobs:
             dist/cockpit-darwin-arm64-nightly.tar.gz \
             dist/cockpit-agent-*-nightly.tar.gz \
             dist/cockpit-agent-*-nightly.zip \
+            dist/cockpit-agent-setup-nightly.exe \
+            dist/cockpit-agent-setup-nightly.exe.sha256 \
             dist/cockpit-agent_*.ipk \
             dist/cockpit-agent-openwrt-*.tar.gz \
             dist/cockpit-web-nightly.tar.gz
