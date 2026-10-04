@@ -26,19 +26,21 @@
 # 豁免是否仍成立。区间登记的漂移只提醒不失败（区间覆盖语义）——但区间外的
 # 新增缺口仍会红，故区间止行应随文件末尾收紧。
 
-# ---------- 1. 场景编排 main()（合计 2092 语句） ----------
+# ---------- 1. 场景编排 main()（合计 2356 语句） ----------
 
 scripts/acceptance/guac/probe/main.go:539,1153	1. main() 场景编排（S1-S30 真机 guacd/sshd/VNC/容器栈 + .acceptance 证据）
 scripts/acceptance/guac/cdp/main.go:402,713	1. main() 场景编排（C1-C7 真机 headless-shell Chrome 驱动 Web 三协议远控）
 scripts/acceptance/logs/probe/main.go:397,713	1. main() 场景编排（T0-T4 真机三 agent/systemd/docker 突发源）
 scripts/acceptance/services/probe/main.go:307,644	1. main() 场景编排（T0-T5 真机 systemd 动词面/unit 文件编辑/journal 跳转）
 scripts/acceptance/traefik/probe/main.go:362,802	1. main() 场景编排（T1-T10 真机 Traefik file provider 热加载 + 自有 CA 握手）
+scripts/acceptance/jobs/probe/main.go:306,672	1. main() 场景编排（J0-J8 真机 REST/agent 执行/审计/权限面 + .acceptance 证据）
 
-# ---------- 2. 真机命令默认闭包（4 语句） ----------
+# ---------- 2. 真机命令默认闭包（5 语句） ----------
 
 scripts/acceptance/guac/probe/main.go:94,97	2. dockerExecCmd 默认闭包体（需真 docker exec；单测恒注入桩）
 scripts/acceptance/logs/probe/main.go:75,78	2. systemdRunCmd 默认闭包体（需真 sudo systemd-run）
 scripts/acceptance/logs/probe/main.go:79,82	2. journalCtlCmd 默认闭包体（需真 journalctl）
+scripts/acceptance/jobs/probe/main.go:66,68	2. pgrepCmd 默认闭包体（需真 pgrep；单测恒注入桩）
 
 # ---------- 3. 死防御（9 语句） ----------
 

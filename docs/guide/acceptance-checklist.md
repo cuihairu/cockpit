@@ -186,14 +186,41 @@
 ## 统一 Job 执行（agent.exec）
 
 设计：[jobs-design](./jobs-design.md)。前置：一台在线 Linux agent（命令经 `sh -c` 执行）。
+真机验收（2026-10-05，探针 `scripts/acceptance/jobs/` 五件套 9/9 PASS，证据
+`.acceptance/jobs/evidence/`：probe.log + create-J1..J5.json + audit-job_run.json）。
 
-- [ ] 创建 Job（在线 agent，`uptime`）→ 弹窗回显 success、输出非空、退出码 0；台账新增一条（15s 轮询内可见）
-- [ ] 非零退出（`exit 3`）→ failed、退出码 3、error 无输出回退
-- [ ] 超时（`sleep 30`，timeout_s=1）→ failed、error 含 timed out；agent 侧进程组 SIGKILL，`ps` 复核无孤儿 sleep 残留
-- [ ] 输出截断：>64KB 大输出 → truncated 标记，业务字段不炸 RPC
-- [ ] 离线 agent：创建弹窗下拉禁用该机；直连 `POST /api/jobs` → 503，不落幽灵 Job 记录
-- [ ] 审计：CreateJob 与终态 `job_run`（resource=job、details 含 type/target/status/params）在审计日志页留痕
-- [ ] 权限：无 `jobs:write` 不见「执行命令」入口；无 `jobs:read` 进不了 Jobs 页
+- [x] 创建 Job（在线 agent，`uptime`）→ 弹窗回显 success、输出非空、退出码 0；台账新增一条（15s 轮询内可见）
+  证据：J1 `echo J1-OUTPUT-MARK && uptime` 82ms 返回 success/exitCode 0/输出 80B 含标记，
+  actor/type/target/parameters 往返一致、startedAt/finishedAt 落定；台账 0→1 条且倒序首位
+  即该条、单条详情含同样输出。Web 接线在位：15s 轮询 `Jobs/index.tsx:51`
+  （refetchInterval 15000）、终态成功提示按 STATUS_META 回显（`:84`）、
+  菜单 perm `jobs:read`（`App.tsx:211`）
+- [x] 非零退出（`exit 3`）→ failed、退出码 3、error 无输出回退
+  证据：J2 `echo J2-BEFORE-OUT; exit 3` → status=failed、exitCode=3、exit 前输出仍带回
+  （D4 业务字段）；error 实际为 `exit status 3`（agent trimExecErr 归一，设计「error
+  为空」的表述按实现修正——非零退出与超时的错误讯息走同一字段）
+- [x] 超时（`sleep 30`，timeout_s=1）→ failed、error 含 timed out；agent 侧进程组 SIGKILL，`ps` 复核无孤儿 sleep 残留
+  证据：J3 `sleep 297` timeout_s=1 → failed、exitCode=-1、error=`timed out after 1s`，
+  墙钟 1.078s（按时返回非等满）；`pgrep -f "sleep 297"` 复核零命中（进程组杀净，
+  无孙进程持管道悬挂）
+- [x] 输出截断：>64KB 大输出 → truncated 标记，业务字段不炸 RPC
+  证据：J4 `seq 1 20000`（全量 ≈108KB）→ success、output 恰 65536B、尾行 20000 保留、
+  首行 1 已截（agent `jobExecMaxOutput` 与 server `storage.JobMaxOutput` 双端同限截尾）。
+  `truncated` 标记在 agent RPC data 内，jobView 视图不暴露（表意按实现修正）
+- [x] 离线 agent：创建弹窗下拉禁用该机；直连 `POST /api/jobs` → 503，不落幽灵 Job 记录
+  证据：J5 目标 `jobs-acc-ghost`（从未注册；与「曾在线后掉线」同一 registry.Get 分支，
+  logs T4 同口径）→ 503 `agent offline`，台账 4→4 条不变、ghost 目标记录 0。Web 下拉
+  `Jobs/index.tsx:65` `disabled: a.status === 'offline'` 且标签标「（离线）」
+- [x] 审计：CreateJob 与终态 `job_run`（resource=job、details 含 type/target/status/params）在审计日志页留痕
+  证据：J7 `GET /api/admin/audit/logs?resource=job&action=job_run` 命中 J1-J4 每 Job
+  恰一条（resource_id=Job ID、username=admin、details 含 type/target/status/params.command）；
+  创建前的 503/400 校验失败不产审计，审计页按 resource=job 可查
+- [x] 权限：无 `jobs:write` 不见「执行命令」入口；无 `jobs:read` 进不了 Jobs 页
+  证据：J8 viewer（jobs:read）GET 列表/详情 200、POST 403；自定义仅 `dns:read` 角色
+  GET/POST 全 403；web 入口 PermGuard `jobs:write`（`Jobs/index.tsx:169`）+ 菜单
+  `jobs:read`（`App.tsx:211`）。**验收逮到真缺陷**：`/api/jobs` 未登记 `resourceRules`
+  → RBAC governed=false 整体放行，viewer 也能执行（与 agent-tags 补规则前同类）；
+  修为 `rbac.go` 补 `{"/api/jobs", "jobs", ""}` + 三角色矩阵 7 例（rbac_test.go）
 
 ## 移动端（Flutter，iOS + Android）
 

@@ -17,6 +17,12 @@
 - **未实现**（按本文「边界（明确不做）」节，立项时再设计，不写进当前能力）：
   异步执行/取消（`cancelled` 与独立 `timeout` 终态）、Workflow/定时触发、
   输出流式、Action/Event 抽象与 AI 接线（P5）。
+- **真机验收**（2026-10-05，探针 `scripts/acceptance/jobs/` 五件套 9/9 PASS，
+  acceptance-checklist「统一 Job 执行」节七项全勾）：执行链路（82ms 成功回执 /
+  exit 3 输出带回 / 超时 1.078s 按时返回且 `pgrep` 无孤儿 / 截尾恰 64KB 尾部保留）、
+  离线 503 不落幽灵、校验面 400×7、终态审计恰一条、权限双角色 403 全部实证。
+  **验收逮到 D8 路由面缺口**：`/api/jobs` 未登记 `resourceRules`，RBAC
+  governed=false 整体放行（viewer 可执行），修为补规则 + 三角色矩阵 7 例。
 
 ## 现状与痛点
 
