@@ -53,6 +53,7 @@ var resourceRules = []resourceRule{
 	{"/api/resources/", "inventory", ""},
 	{"/api/alerts", "alerts", ""},
 	{"/api/agent-tags", "inventory", ""}, // 标签挂服务器，与 /agents/{id}/tags 同归 inventory
+	{"/api/jobs", "jobs", ""},            // 执行 Job 路由层校验（jobs-design D8：GET=台账 read、POST=执行 write）
 	{"/api/agents", "inventory", ""},
 }
 

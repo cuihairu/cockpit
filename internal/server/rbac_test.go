@@ -72,6 +72,15 @@ func TestRBACMatrix(t *testing.T) {
 		{"viewer read agent tags", "viewer", "GET", "/api/agents/a1/tags", 200},
 		{"viewer set agent tags", "viewer", "PUT", "/api/agents/a1/tags", 403},
 		{"operator set agent tags", "operator", "PUT", "/api/agents/a1/tags", 200},
+		// 执行 Job（jobs-design.md D8，真机验收核对补规则前 /api/jobs 同
+		// agent-tags 先例整体放行）：台账 read 各角色可读，执行 write 拒 viewer
+		{"viewer read jobs", "viewer", "GET", "/api/jobs", 200},
+		{"viewer job detail", "viewer", "GET", "/api/jobs/j1", 200},
+		{"viewer create job", "viewer", "POST", "/api/jobs", 403},
+		{"operator read jobs", "operator", "GET", "/api/jobs", 200},
+		{"operator create job", "operator", "POST", "/api/jobs", 200},
+		{"admin create job", "admin", "POST", "/api/jobs", 200},
+		{"admin job detail", "admin", "GET", "/api/jobs/j1", 200},
 		{"viewer me", "viewer", "GET", "/api/me", 200},
 		{"viewer status", "viewer", "GET", "/api/status", 200},
 		// operator：模块 read+write 全放（含 acme 签发）、管理域全拒
