@@ -52,6 +52,9 @@ func (a *Agent) setupProviders() {
 	// 1.7 SSH Provider：远程 SSH 密钥管理（guacd 密钥认证用）
 	a.rpc.RegisterProvider(rpc.NewSSHProvider(a.config.SSHKeys))
 
+	// 1.8 Job Provider：统一执行通道（jobs-design.md），exec 平台无关无条件注册
+	a.rpc.RegisterProvider(rpc.NewJobProvider())
+
 	// 2. 按检测到的能力注册
 	for _, cap := range a.capabilities {
 		switch cap.Type {

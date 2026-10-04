@@ -34,6 +34,7 @@ func TestCovServeAPIRoutes(t *testing.T) {
 		{"agents list wrong method", http.MethodPost, "/api/agents", http.StatusMethodNotAllowed},
 		{"agents list", http.MethodGet, "/api/agents", http.StatusOK},
 		{"drift config", http.MethodGet, "/api/drift/config", http.StatusOK},
+		{"jobs list", http.MethodGet, "/api/jobs", http.StatusOK},
 		// handleRecordings/handleServerBackups/handleDNS 均先剥 /api 前缀再比对
 		//（曾以 r.URL.Path 直比剥前缀路径 → 全 404，Web 三页不可用；
 		// 真机验收发现并修复，2026-09-30）

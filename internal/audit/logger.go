@@ -55,6 +55,8 @@ const (
 	ActionCronDelete = "cron_delete"
 	// systemd 服务管理（见 docs/guide/service-design.md）
 	ActionServiceAction = "service_action"
+	// 执行 Job（见 docs/guide/jobs-design.md）：创建即执行，终态回写同记一条
+	ActionJobRun = "job_run"
 	// 防漂移检测：手动登记基线「以当前为准」（见 docs/guide/drift-design.md M4）
 	ActionDriftRecord = "drift_record"
 )
@@ -95,6 +97,9 @@ const ResourceProxySite = "proxy_site"
 
 // ResourceCronJob 定时任务资源类型（见 docs/guide/cron-design.md）
 const ResourceCronJob = "cron_job"
+
+// ResourceJob 执行 Job 资源类型（见 docs/guide/jobs-design.md）
+const ResourceJob = "job"
 
 // ResourceService systemd 服务资源类型（见 docs/guide/service-design.md）
 const ResourceService = "service"

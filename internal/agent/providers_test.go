@@ -273,8 +273,9 @@ func TestSetupProviders_HardwareMonitorRegistersSmart(t *testing.T) {
 // baseTypes 平台相关的无条件注册类型，测试期望以它为基础：
 // system 始终注册；backup 仅 Linux 注册（与 setupProviders 的注册条件一致）。
 func baseTypes(extra ...string) []string {
-	// ssh 与 system/file 同为无条件注册（providers.go 1.7，guacd 密钥认证用）
-	want := []string{"system", "file", "ssh"}
+	// ssh 与 system/file 同为无条件注册（providers.go 1.7，guacd 密钥认证用）；
+	// job 同为无条件注册（providers.go 1.8，exec 平台无关，jobs-design.md）
+	want := []string{"system", "file", "ssh", "job"}
 	if runtime.GOOS == "linux" {
 		want = append(want, "backup")
 	}
