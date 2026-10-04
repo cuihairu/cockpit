@@ -1,34 +1,29 @@
 #!/usr/bin/env bash
-# Windows 图标链再生成：logo.svg → 多尺寸 .ico → rsrc .syso（exe 资源段）
-#
+# Windows 图标全链再生（SVG → 多尺寸 ico → rsrc .syso）
+# 用法：bash scripts/gen-windows-icon.sh
 # 产物：
-#   packaging/windows/agent.ico           安装器/快捷方式图标（7 尺寸）
-#   cmd/cockpit-agent/rsrc_windows_amd64.syso  go build windows/amd64 自动链接
-#   cmd/cockpit-agent/rsrc_windows_arm64.syso  go build windows/arm64 自动链接
-#
-# 依赖：ImageMagick（magick，SVG 光栅化）+ rsrc（go run 拉取，免装）
-# 注意：syso 按 <名>_<GOOS>_<GOARCH>.syso 命名才会被 go build 拾取，且只影响
-# windows 目标（linux/darwin 构建忽略）；logo 变更后重跑本脚本并提交全部产物。
+#   packaging/windows/agent.ico                 ← Inno Setup / 快捷方式 / 卸载条目
+#   cmd/cockpit-agent/rsrc_windows_amd64.syso   ← GOOS=windows GOARCH=amd64
+#   cmd/cockpit-agent/rsrc_windows_arm64.syso   ← GOOS=windows GOARCH=arm64
+# 依赖：ImageMagick (magick)、go install github.com/akavel/rsrc@latest
+
 set -euo pipefail
-cd "$(dirname "$0")/.."
 
-SIZES=(16 24 32 48 64 128 256)
-RSRC_VERSION=v0.10.2
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+SVG="$ROOT/docs/public/logo.svg"
+PACK_ICO="$ROOT/packaging/windows/agent.ico"
+CMD_DIR="$ROOT/cmd/cockpit-agent"
 
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+command -v magick >/dev/null || { echo "need magick (ImageMagick 7)" >&2; exit 1; }
+command -v rsrc >/dev/null || { echo "need rsrc (go install github.com/akavel/rsrc@latest)" >&2; exit 1; }
 
-ico_args=()
-for s in "${SIZES[@]}"; do
-  magick -background none web/public/logo.svg -resize "${s}x${s}" "$tmp/$s.png"
-  ico_args+=("$tmp/$s.png")
-done
-magick "${ico_args[@]}" packaging/windows/agent.ico
+echo "→ 光栅化多尺寸 ico: $PACK_ICO"
+magick "$SVG" -define icon:auto-resize=256,128,64,48,32,16 "$PACK_ICO"
 
-for arch in amd64 arm64; do
-  go run "github.com/akavel/rsrc@${RSRC_VERSION}" \
-    -ico packaging/windows/agent.ico \
-    -o "cmd/cockpit-agent/rsrc_windows_${arch}.syso"
-done
+echo "→ 生成 rsrc .syso (amd64)"
+rsrc -ico "$PACK_ICO" -o "$CMD_DIR/rsrc_windows_amd64.syso"
 
-echo "OK: agent.ico + rsrc_windows_{amd64,arm64}.syso 已再生成"
+echo "→ 生成 rsrc .syso (arm64)"
+rsrc -ico "$PACK_ICO" -o "$CMD_DIR/rsrc_windows_arm64.syso"
+
+echo "✓ 完成。在 CI 中直接用现成 syso 编译（GOOS=windows GOARCH=amd64/arm64 即可自动链接）。"
