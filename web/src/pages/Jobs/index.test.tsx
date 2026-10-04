@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { message } from 'antd'
+import type { Job } from '@/services/jobs'
 import JobsPage from './index'
 
 // Jobs：全机执行台账（15s 轮询列表）+ 创建即执行弹窗 + 终态详情弹窗
@@ -40,9 +41,11 @@ const msgSuccess = vi.spyOn(message, 'success')
 const agents = [
   { id: 'a1', hostname: 'web-1', status: 'online', capabilities: [] },
   { id: 'a2', hostname: 'db-1', status: 'offline', capabilities: [] },
+  // 无 hostname：盖 agentOptions 里 a.hostname || a.id 兜底分支
+  { id: 'a3', status: 'online', capabilities: [] },
 ]
 
-const jobs = [
+const jobs: Job[] = [
   {
     id: 'job-1',
     type: 'agent.exec',
@@ -70,7 +73,7 @@ const jobs = [
   },
 ]
 
-const renderPage = (list = jobs) => {
+const renderPage = (list: Job[] = jobs) => {
   apiMock.getAgents.mockResolvedValue(agents)
   jobsMock.listJobs.mockResolvedValue(list)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -124,7 +127,7 @@ describe('Jobs', () => {
   it('创建执行：选主机 + 命令 → createJob 收到 type/target/parameters', async () => {
     renderPage()
     fireEvent.click(await screen.findByText('执行命令'))
-    const modal = await screen.findByText('执行命令', { selector: '.ant-modal-title' })
+    await screen.findByText('执行命令', { selector: '.ant-modal-title' })
 
     // 目标下拉：离线 agent 禁用
     const selects = document.querySelectorAll('.ant-modal .ant-select')
@@ -171,6 +174,77 @@ describe('Jobs', () => {
     renderPage()
     fireEvent.click((await screen.findAllByText('查看'))[0])
     expect(await screen.findByText('load average: 0.10')).toBeInTheDocument()
+    expect(screen.getByText('退出码')).toBeInTheDocument()
+  })
+
+  it('台账边角：running 行结果列回退、无参数命令回退、无完成时间耗时回退', async () => {
+    renderPage([
+      {
+        id: 'job-3',
+        type: 'agent.exec',
+        target: 'a1',
+        actor: 'cui',
+        status: 'running',
+        createdAt: '2026-10-04T12:02:00Z',
+        startedAt: '2026-10-04T12:02:00Z', // 有开始无结束 → 耗时 '-'（|| 右值侧）
+      },
+    ])
+    expect(await screen.findByText('执行中')).toBeInTheDocument()
+    // 命令列（无 parameters → '-'）、结果列（running → '-'）、耗时列各一个回退
+    await waitFor(() => expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(3))
+    // running 非终态无「查看」入口
+    expect(screen.queryByText('查看')).not.toBeInTheDocument()
+  })
+
+  it('创建执行：清空超时则 parameters 不带 timeout_s', async () => {
+    renderPage()
+    fireEvent.click(await screen.findByText('执行命令'))
+    await screen.findByText('执行命令', { selector: '.ant-modal-title' })
+    const selects = document.querySelectorAll('.ant-modal .ant-select')
+    await pickOption(selects[0] as HTMLElement, 'web-1')
+    fireEvent.change(document.querySelector('.ant-modal textarea') as HTMLTextAreaElement, {
+      target: { value: 'uptime' },
+    })
+    // InputNumber 清空 → form 值为 undefined → if (raw.timeout_s) 假侧
+    fireEvent.change(
+      document.querySelector('.ant-modal input[role="spinbutton"]') as HTMLInputElement,
+      { target: { value: '' } },
+    )
+    fireEvent.click(modalOk())
+    await waitFor(() =>
+      expect(jobsMock.createJob).toHaveBeenCalledWith({
+        type: 'agent.exec',
+        target: 'a1',
+        parameters: { command: 'uptime' },
+      }),
+    )
+  })
+
+  it('失败详情：error 段落渲染与无输出回退（（无输出））', async () => {
+    renderPage()
+    fireEvent.click((await screen.findAllByText('查看'))[1]) // job-2：error + 无 output
+    expect(await screen.findByText('agent rejected')).toBeInTheDocument()
+    expect(screen.getByText('（无输出）')).toBeInTheDocument()
+  })
+
+  it('稀疏终态详情：无退出码回退横杠 + 亚秒耗时 ms', async () => {
+    renderPage([
+      {
+        id: 'job-4',
+        type: 'agent.exec',
+        target: 'a1',
+        actor: 'cui',
+        status: 'failed',
+        parameters: { command: 'df' },
+        createdAt: '2026-10-04T12:03:00Z',
+        startedAt: '2026-10-04T12:03:00.9Z', // 5ms 亚秒 → 耗时走 ms 分支
+        finishedAt: '2026-10-04T12:03:00.905Z',
+      },
+    ])
+    expect(await screen.findByText('5ms')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('查看'))
+    // 详情弹窗：exitCode undefined → 退出码回退 '-'
+    await waitFor(() => expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(1))
     expect(screen.getByText('退出码')).toBeInTheDocument()
   })
 

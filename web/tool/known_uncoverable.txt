@@ -23,11 +23,6 @@ components/GuacamoleModal/index.tsx:407 displayRef null 早退（SSH 尺寸同�
 components/GuacamoleModal/index.tsx:359 sendClipboardToRemote clientRef null 早退：两个粘贴入口（终端 paste / 工具栏按钮）都只在 state==='connected' 时存在，cleanup 先于断开移除 client，恒有值（原 226 漂移）
 components/GuacamoleModal/index.tsx:271 doDeleteSaved savedCred 判空早退：删除入口仅在已存凭据面板渲染，savedCred 恒非空，防御
 pages/Workbench/index.tsx:103 openAgentTerminal selectedAgent 防御早退：兜底按钮在 SSH Tab 内，Tab 仅在选中 agent 后可切
-pages/Workbench/index.tsx:104 同上（message.warning 文案行）
-pages/Workbench/index.tsx:105 同上（return）
-pages/Workbench/index.tsx:108 未检测到 SSH 服务防御早退：该按钮所在 ConnectionPanel 仅在 remoteServices 有 ssh 时才渲染兜底按钮
-pages/Workbench/index.tsx:109 同上（message.warning 文案行）
-pages/Workbench/index.tsx:110 同上（return）
 pages/Recordings/index.tsx:83 recording null 早退：回放入口由行内按钮发起，recording 必已选中
 pages/Recordings/index.tsx:166 recording/termDivRef null 早退：弹窗内容未挂载时不建终端，防御
 pages/Backups/index.tsx:376 restoreTarget null 早退：恢复按钮仅在选中目标后可点
@@ -64,7 +59,6 @@ pages/Backups/index.tsx:194 preHook ?? '' 同上
 pages/Stacks/StackDetail.tsx:208 taskMeta 空值侧兜底：任务终态提示与 failed 日志弹窗均已断言（含弹窗标题）
 pages/DNS/index.tsx:385 Modal onCancel 内联回调：取消关闭并重开重置两断言均实证，v8 对 JSX 属性内联函数记 0
 pages/DNS/DDNSPanel.tsx:198 agent 列 render 三元/||：hostname 缺省用 id、未知 id 原样显示均已断言
-pages/Agents/columns.tsx:82 能力 +N 溢出 Tag 分支：4 能力渲染 +1、3 能力不渲染均已断言，Tooltip 包装致 v8 漏计
 pages/Drift/ConsistencyTab.tsx:139 mismatch 字段映射 hostname 分支：fixture 含 hostname 明细且「主机名」渲染断言通过，v8 对 Table columns 内联 render 三元漏计
 contexts/UserContext.tsx:90 login 后拉权限 setUser updater：login 成功用例断言 user 合并结果，async 回调内联漏计
 pages/Acme/index.tsx:543 按主域名填默认路径 onClick：编辑（a.com）与新建（空域名 example.com 兜底）双向断言均有
@@ -102,13 +96,14 @@ pages/Services/HealthPanel.tsx:288 白名单摘要行：自愈目标白名单断
 pages/Services/HealthPanel.tsx:306 取消按钮内联 onClick（setEditing(false)）：取消用例断言 drawer wrapper 落 hidden class
 
 # ---- 2026-10-03 全量收口：App/GuacPlayer/GuacamoleModal/TerminalModal 漂移重登记 ----
-# App.tsx（原 290/316/430/447-449 随 RBAC 菜单与面包屑重构漂移）
-App.tsx:298 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 290 漂移）
-App.tsx:324 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 316 漂移）
-App.tsx:439 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 430 漂移）
-App.tsx:456 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 447→455→456 两次漂移）
-App.tsx:457 同上（return first 三元；原 448→456→457）
-App.tsx:458 同上（首项 link 内联 onClick navigate('/')；原 449→457→458）
+# App.tsx（原 290/316/430/447-449 随 RBAC 菜单与面包屑重构漂移；2026-10-04
+# Jobs 菜单项/路由插入后整体 +16 再漂移，重登记）
+App.tsx:314 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 290→298，+16）
+App.tsx:340 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 316→324，+16）
+App.tsx:455 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 430→439，+16）
+App.tsx:472 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 447→455→456，+16）
+App.tsx:473 同上（return first 三元；原 448→456→457，+16）
+App.tsx:474 同上（首项 link 内联 onClick navigate('/')；原 449→457→458，+16）
 
 # components/GuacPlayer/index.tsx（解析器/连接体已由 duck tunnel 用例覆盖，剩两点）
 components/GuacPlayer/index.tsx:39 parseGuacInstructions elements.length > 0 假侧：内层循环进入时至少 push 一个元素或抛错，恒真死侧
@@ -216,14 +211,6 @@ components/TagManageModal.tsx:155
 components/TagManageModal.tsx:159
 components/TagManageModal.tsx:160
 
-# App.tsx - RBAC 菜单新增分支，现有用例覆盖主路径，边界分支暂无直测
-App.tsx:306
-App.tsx:332
-App.tsx:447
-App.tsx:464
-App.tsx:465
-App.tsx:466
-
 # pages/Agents/columns.tsx - Agent 列新增标签筛选渲染分支，现有表格用例覆盖基础渲染
 pages/Agents/columns.tsx:12
 pages/Agents/columns.tsx:13
@@ -254,10 +241,6 @@ pages/Workbench/index.tsx:65
 pages/Workbench/index.tsx:72
 pages/Workbench/index.tsx:101
 pages/Workbench/index.tsx:102
-pages/Workbench/index.tsx:104
-pages/Workbench/index.tsx:105
-pages/Workbench/index.tsx:108
-pages/Workbench/index.tsx:109
 pages/Workbench/index.tsx:125
 pages/Workbench/index.tsx:126
 pages/Workbench/index.tsx:127
@@ -299,3 +282,9 @@ pages/Agents/helpers.tsx:54
 pages/Agents/helpers.tsx:55
 pages/Agents/helpers.tsx:57
 pages/Agents/helpers.tsx:59
+
+# ---- 2026-10-04 Jobs 页（pages/Jobs）：类型契约不可达死侧；其余边角分支已由 mock 直测 ----
+pages/Jobs/index.tsx:36 STATUS_META[status] ?? 兜底：JobStatus 闭合四元组（pending/running/success/failed）全在 STATUS_META，未知态契约不可达
+pages/Jobs/index.tsx:84 STATUS_META[job.status]?.label ?? job.status 兜底：创建成功提示的 status 契约同 36，恒走 STATUS_META
+pages/Jobs/index.tsx:94 formatTime 假侧 '-'：createdAt 服务端 gorm 必填，表格/详情恒有值
+pages/Jobs/index.tsx:252 detail.actor || '-'：actor 类型必填（登录用户），恒有值
