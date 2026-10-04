@@ -35,8 +35,7 @@ AppPublisherURL=https://github.com/cuihairu/cockpit
 DefaultDirName={autopf}\Cockpit Agent
 DefaultGroupName=Cockpit Agent
 DisableProgramGroupPage=yes
-; /SERVER=... 静默装机开关：{param:server} 展开依赖本指令（缺失则 /SERVER 被静默忽略）
-EnableParamMsg=yes
+; /SERVER=... 静默装机开关：{param:server} 为 Inno 原生常量，无需额外指令
 SetupIconFile=agent.ico
 UninstallDisplayName=Cockpit Agent
 UninstallDisplayIcon={app}\cockpit-agent.exe
@@ -95,9 +94,8 @@ end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  { 未勾选服务任务时跳过连接页 }
-  if (PageID = ServerPage.ID) and (not IsTaskSelected('service')) then
-    Result := True;
+  { 未勾选服务任务时跳过连接页；其余页面一律不跳过 }
+  Result := (PageID = ServerPage.ID) and (not IsTaskSelected('service'));
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;

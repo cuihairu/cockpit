@@ -80,7 +80,7 @@ agent 连不上 Server 时 `Start()` 返回错误。若沿用"进程退出、让
 
 | 段 | 内容 |
 |---|---|
-| `[Setup]` | 固定 AppId（重复安装=升级合并）、`{autopf}\Cockpit Agent`、`PrivilegesRequired=admin`、`x64compatible` 64 位模式、`EnableParamMsg`（`/SERVER=` 静默开关）、`CloseApplications`+`RestartApplications`（升级时先停后启） |
+| `[Setup]` | 固定 AppId（重复安装=升级合并）、`{autopf}\Cockpit Agent`、`PrivilegesRequired=admin`、`x64compatible` 64 位模式、`{param:server}`（`/SERVER=` 静默开关，Inno 原生常量）、`CloseApplications`+`RestartApplications`（升级时先停后启） |
 | `[Tasks]` | `service`（注册服务并开机自启，默认勾选）、`desktopicon`（桌面快捷方式） |
 | `[Code]` | 自定义输入页收集 Server WebSocket 地址；未勾服务任务时跳过该页；静默安装从 `/SERVER=` 取；两处都为空则显式失败（不让 `service install` 拿空 `-server` 去校验后失败） |
 | `[Files]` / `[Icons]` | 载荷为 CI 暂存的 `cockpit-agent.exe`；开始菜单含卸载入口 |
