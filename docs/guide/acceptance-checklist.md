@@ -14,6 +14,17 @@
 - [x] 习惯性核对：变更类操作在「审计日志」页有留痕——通过 go test ./audit 检查审计路径完整性
 - [x] 敏感字段（证书内容、密钥）不出现在审计 detail——通过审计日志内容检查验证
 
+## Windows Agent 安装包（setup.exe）
+
+设计：[windows-agent-design](./windows-agent-design.md)。产物 `cockpit-agent-setup-nightly.exe`（+`.sha256`）进 nightly release；真机验收在 nightly 的 `Build Agent Installer` job（`windows-latest`）内自动走查，证据为该 job 的 artifact 与日志。
+
+- [ ] 静默装机 → `%Program Files%\Cockpit Agent` 落地、开始菜单 + 桌面快捷方式存在
+- [ ] 服务 `CockpitAgent`：`Automatic`（开机自启）+ `Running`；`service status` 输出一致
+- [ ] exe 图标：`ExtractAssociatedIcon` 抽出图标（PE `.rsrc` 的 RT_ICON/RT_GROUP_ICON 真机可读），证据 `walkthrough-icon.png`
+- [ ] 桌面截图留档（安装态 UI + 图标可见），证据 `walkthrough-desktop.png`
+- [ ] 静默卸载 → exe/服务/开始菜单/桌面快捷方式/`%ProgramData%\CockpitAgent` 全清
+- [ ] 交互安装走查：任务勾选（服务/桌面快捷方式）+ Server 地址页校验（留空拦截）
+
 ## 应用部署（Stacks）
 
 设计：[stack-deploy-design](./stack-deploy-design.md）。前置：一台真实 Docker 主机（agent 在线、docker 可用）。

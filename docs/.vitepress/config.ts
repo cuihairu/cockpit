@@ -43,6 +43,7 @@ export default defineConfig({
             { text: '移动端方案：Flutter', link: '/guide/mobile-design' },
             { text: 'P1 方案：应用部署', link: '/guide/stack-deploy-design' },
             { text: 'OpenWrt Agent 打包设计', link: '/guide/openwrt-agent-design' },
+            { text: 'Windows Agent 打包设计', link: '/guide/windows-agent-design' },
             { text: '服务健康探针与自愈设计', link: '/guide/service-health-design' }
           ]
         }
