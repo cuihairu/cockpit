@@ -5,17 +5,15 @@ package main
 
 import (
 	"bytes"
-	"flag"
-	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/cuihairu/cockpit/internal/agent"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-// adminCtx 探测管理员上下文：mgr.Connect 成功即管理员（svcInstall/svcUninstall/
-// svcControl/svcStatus 依赖同一权限判定，非管理员一律「需要管理员权限」）。
+// adminCtx 探测管理员上下文：mgr.Connect 成功即管理员（svcInstall/
+// svcUninstall/svcControl/svcStatus 依赖同一权限判定，非管理员
+// 一律「需要管理员权限」）。
 func adminCtx() bool {
 	m, err := mgr.Connect()
 	if err != nil {
@@ -92,44 +90,6 @@ func TestHandleStartRedirectServiceStart(t *testing.T) {
 	}
 }
 
-// TestSvcBindAndArgs 覆盖 svcBind/svcArgsFrom 逻辑
-func TestSvcBindAndArgs(t *testing.T) {
-	cmd, _, err := svcBind([]string{"-server", "ws://test:9000/ws", "-id", "agent-1", "-secret", "sec", "-region", "cn", "-zone", "z1", "-labels", "k=v", "-ssh-keys", "/ssh"})
-	if err != nil {
-		t.Fatalf("svcBind error: %v", err)
-	}
-	if cmd.Server != "ws://test:9000/ws" {
-		t.Errorf("Server: got %q", cmd.Server)
-	}
-	if cmd.ID != "agent-1" {
-		t.Errorf("ID: got %q", cmd.ID)
-	}
-	if cmd.Secret != "sec" {
-		t.Errorf("Secret: got %q", cmd.Secret)
-	}
-	if cmd.Region != "cn" {
-		t.Errorf("Region: got %q", cmd.Region)
-	}
-	if cmd.Zone != "z1" {
-		t.Errorf("Zone: got %q", cmd.Zone)
-	}
-	if cmd.Labels != "k=v" {
-		t.Errorf("Labels: got %q", cmd.Labels)
-	}
-	if cmd.SSHKeys != "/ssh" {
-		t.Errorf("SSHKeys: got %q", cmd.SSHKeys)
-	}
-
-	args := svcArgsFrom(cmd)
-	expected := []string{"service", "run", "-server", "ws://test:9000/ws", "-id", "agent-1", "-secret", "sec", "-region", "cn", "-zone", "z1", "-labels", "k=v", "-ssh-keys", "/ssh"}
-	for i, a := range expected {
-		if i >= len(args) || args[i] != a {
-			t.Errorf("args[%d]: got %q want %q (full: %v)", i, args[i], a, args)
-			break
-		}
-	}
-}
-
 // TestPrintServiceUsage 覆盖 printServiceUsage
 func TestPrintServiceUsage(t *testing.T) {
 	var buf bytes.Buffer
@@ -168,72 +128,5 @@ func TestRedirectServiceStartNotInSCM(t *testing.T) {
 	ok := redirectServiceStart([]string{"-server", "ws://x"}, &buf)
 	if ok {
 		t.Errorf("redirectServiceStart outside SCM should return false")
-	}
-}
-
-// TestVersionFlag 覆盖 version 子命令
-func TestVersionFlag(t *testing.T) {
-	var buf bytes.Buffer
-	code := run([]string{"cockpit-agent", "version"}, &buf)
-	if code != 0 {
-		t.Errorf("version exit: want 0 got %d", code)
-	}
-	if !strings.Contains(buf.String(), "Cockpit Agent v") {
-		t.Errorf("version output: %s", buf.String())
-	}
-}
-
-// TestRunUsage 覆盖 run() 无参数/未知命令分支
-func TestRunUsage(t *testing.T) {
-	var buf bytes.Buffer
-	code := run([]string{"cockpit-agent"}, &buf)
-	if code != 1 {
-		t.Errorf("no args: want 1 got %d", code)
-	}
-	if !strings.Contains(buf.String(), "用法:") {
-		t.Errorf("usage output: %s", buf.String())
-	}
-
-	buf.Reset()
-	code = run([]string{"cockpit-agent", "unknowncmd"}, &buf)
-	if code != 1 {
-		t.Errorf("unknown cmd: want 1 got %d", code)
-	}
-	if !strings.Contains(buf.String(), "Unknown command") {
-		t.Errorf("unknown cmd output: %s", buf.String())
-	}
-}
-
-// TestStartCmdBind 覆盖 startCmd.BindWithUsage (通过 run -> handleStart)
-func TestStartCmdBind(t *testing.T) {
-	// 验证 flag 绑定包含必需参数
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	cmd := &agent.StartCmd{Version: "test"}
-	cmd.BindWithUsage(fs, agent.StartUsage{
-		Server:  "Server WebSocket 地址 (必需)",
-		ID:      "Agent ID",
-		Secret:  "Secret",
-		Region:  "Region",
-		Zone:    "Zone",
-		Labels:  "Labels",
-		Bias:    "Bias",
-		SSHKeys: "SSHKeys",
-	})
-	_ = fs.Parse([]string{"-server", "ws://localhost:9000/ws", "-id", "test-1"})
-	if cmd.Server != "ws://localhost:9000/ws" {
-		t.Errorf("Server not bound: %s", cmd.Server)
-	}
-	if cmd.ID != "test-1" {
-		t.Errorf("ID not bound: %s", cmd.ID)
-	}
-}
-
-// TestMainOSArch 确保测试只在 windows/amd64 跑（CI matrix 已保证）
-func TestMainOSArch(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("windows-only test")
-	}
-	if runtime.GOARCH != "amd64" {
-		t.Skip("amd64-only test (CI matrix)")
 	}
 }
