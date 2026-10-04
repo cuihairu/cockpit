@@ -66,12 +66,6 @@ function Get-AssetUrl {
     return "https://github.com/$Repo/releases/download/$ReleaseTag/cockpit-agent-windows-$Arch-$ReleaseTag.zip"
 }
 
-function Quote-CmdArg {
-    param([string]$v)
-    # Windows 服务命令行引号规则：内嵌 " 转义为 \"（其前的 \ 按 MSVCRT 规则成对加倍）
-    return '"' + ($v -replace '(\\*)"', '$1$1\"') + '"'
-}
-
 function ConvertTo-ServerUrl {
     # 服务端地址规范化：域名/IP[:端口] → wss://<addr>/ws（纯地址默认 wss——
     # 服务端前置 nginx 80 端口 301 到 https，ws:// 握手不跟随重定向会失败）；
@@ -105,14 +99,17 @@ function Test-ServerInConfig {
 }
 
 function Build-StartArgs {
-    # 服务启动参数（与 cockpit-agent start 的 flag 面一一对应）
+    # 服务启动参数（与 cockpit-agent start 的 flag 面一一对应）。
+    # 返回原始值不预加引号：调用点是 PowerShell 原生调用 `& $exe @args`，
+    # 由 PowerShell 按 argv 语义自行转义；预加引号会把字面 " 传进 Go 的
+    # flag 值（旧版拼 BinaryPathName 字符串才需要引号，该路径已收口）
     if ([string]::IsNullOrEmpty($ServerUrl)) { throw "注册服务需要 -ServerUrl（或既有 $ServiceName 服务）" }
-    $startArgs = @('start', '-server', (Quote-CmdArg $ServerUrl))
-    if (-not [string]::IsNullOrEmpty($AgentId)) { $startArgs += @('-id', (Quote-CmdArg $AgentId)) }
-    if (-not [string]::IsNullOrEmpty($Secret)) { $startArgs += @('-secret', (Quote-CmdArg $Secret)) }
-    if (-not [string]::IsNullOrEmpty($Region)) { $startArgs += @('-region', (Quote-CmdArg $Region)) }
-    if (-not [string]::IsNullOrEmpty($Zone)) { $startArgs += @('-zone', (Quote-CmdArg $Zone)) }
-    if (-not [string]::IsNullOrEmpty($Labels)) { $startArgs += @('-labels', (Quote-CmdArg $Labels)) }
+    $startArgs = @('start', '-server', $ServerUrl)
+    if (-not [string]::IsNullOrEmpty($AgentId)) { $startArgs += @('-id', $AgentId) }
+    if (-not [string]::IsNullOrEmpty($Secret)) { $startArgs += @('-secret', $Secret) }
+    if (-not [string]::IsNullOrEmpty($Region)) { $startArgs += @('-region', $Region) }
+    if (-not [string]::IsNullOrEmpty($Zone)) { $startArgs += @('-zone', $Zone) }
+    if (-not [string]::IsNullOrEmpty($Labels)) { $startArgs += @('-labels', $Labels) }
     return $startArgs
 }
 
