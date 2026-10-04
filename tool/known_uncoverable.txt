@@ -26,7 +26,7 @@
 # 豁免是否仍成立。区间登记的漂移只提醒不失败（区间覆盖语义）——但区间外的
 # 新增缺口仍会红，故区间止行应随文件末尾收紧。
 
-# ---------- 1. 场景编排 main()（合计 2356 语句） ----------
+# ---------- 1. 场景编排 main()（合计 2771 语句） ----------
 
 scripts/acceptance/guac/probe/main.go:539,1153	1. main() 场景编排（S1-S30 真机 guacd/sshd/VNC/容器栈 + .acceptance 证据）
 scripts/acceptance/guac/cdp/main.go:402,713	1. main() 场景编排（C1-C7 真机 headless-shell Chrome 驱动 Web 三协议远控）
@@ -34,15 +34,20 @@ scripts/acceptance/logs/probe/main.go:397,713	1. main() 场景编排（T0-T4 真
 scripts/acceptance/services/probe/main.go:307,644	1. main() 场景编排（T0-T5 真机 systemd 动词面/unit 文件编辑/journal 跳转）
 scripts/acceptance/traefik/probe/main.go:362,802	1. main() 场景编排（T1-T10 真机 Traefik file provider 热加载 + 自有 CA 握手）
 scripts/acceptance/jobs/probe/main.go:306,672	1. main() 场景编排（J0-J8 真机 REST/agent 执行/审计/权限面 + .acceptance 证据）
+scripts/acceptance/server-backup/probe/main.go:315,606	1. main() 场景编排（B0-B9 真机双实例/定时 tick 等待/sqlite3 产物抽查 + .acceptance 证据）
+scripts/acceptance/notify/probe/main.go:270,399	1. main() 场景编排（N0-N4 真机 server/webhook 接收器实收/审计面 + .acceptance 证据）
 
-# ---------- 2. 真机命令默认闭包（5 语句） ----------
+# ---------- 2. 真机命令默认闭包（6 语句） ----------
 
 scripts/acceptance/guac/probe/main.go:94,97	2. dockerExecCmd 默认闭包体（需真 docker exec；单测恒注入桩）
 scripts/acceptance/logs/probe/main.go:75,78	2. systemdRunCmd 默认闭包体（需真 sudo systemd-run）
 scripts/acceptance/logs/probe/main.go:79,82	2. journalCtlCmd 默认闭包体（需真 journalctl）
 scripts/acceptance/jobs/probe/main.go:66,68	2. pgrepCmd 默认闭包体（需真 pgrep；单测恒注入桩）
+scripts/acceptance/server-backup/probe/main.go:84,86	2. sqlite3Cmd 默认闭包体（需真 sqlite3；单测恒注入桩）
 
-# ---------- 3. 死防御（9 语句） ----------
+# ---------- 3. 死防御（13 语句） ----------
+
+internal/server/server.go:368,372	3. NewManagerWithConfig 错误分支（仅 fsnotify.NewWatcher 失败=inotify 实例耗尽可达；单测 watcher 泄漏撞 128 上限时才被顺带覆盖，环境事件不可确定性构造——本机不复现即红，登记兜底两环境）
 
 scripts/acceptance/guac/probe/main.go:351,352	3. parseInstr len(Args)==0 防御（strings.Split 非空串恒 ≥1 段，不可达）
 internal/server/api_guacamole.go:240,241	3. collectGuacRecording 稳定后复 Stat 竞态防御（loop break 与复 Stat 之间无代码；仅外部并发 unlink 的微秒窗口可触发，单测不可确定性构造；复 Stat 取 info.Size() 供元数据，非冗余可删）

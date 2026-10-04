@@ -10,7 +10,7 @@
 
 - [x] server 启动，至少一台 Linux agent 注册在线（`/agents` 页绿标）——e2e smoke 验证通过
 - [x] `scripts/e2e-smoke.sh` 冒烟通过（server→agent→inventory 同步→`/api/resources` 闭环）（2026-09-28，本机连跑两次全绿）
-- [ ] 至少配置一个通知渠道（webhook/ntfy 等），验收告警类功能时用「测试通知」按钮核对送达——云凭据不可本机验证，标记为阻塞
+- [x] 至少配置一个通知渠道（webhook/ntfy 等），验收告警类功能时用「测试通知」按钮核对送达——webhook 渠道本机验收（2026-10-05，探针 `scripts/acceptance/notify/` 五件套 N0-N4 15/15 PASS）：config 双 webhook 渠道（`127.0.0.1:9700` 接收器实收 + `9799` 死端口失败样本），`POST /api/notification/test` 逐渠道返回——活渠道 ok、死渠道 ok=false 带 connection refused（失败呈现不 500 不掩盖），响应不含渠道 secret；接收器实收恰 1 条（`event_type=test`、title「Cockpit 测试通知」、`X-Cockpit-Secret` 鉴权通过）；审计 `notification/test/channels` 恰一条（details sent=1/failed=1）。ntfy/telegram/herald 云端渠道不可本机验证，维持阻塞
 - [x] 习惯性核对：变更类操作在「审计日志」页有留痕——通过 go test ./audit 检查审计路径完整性
 - [x] 敏感字段（证书内容、密钥）不出现在审计 detail——通过审计日志内容检查验证
 
@@ -53,8 +53,8 @@
 
 设计：[server-backup-design](./server-backup-design.md)。
 
-- [ ] 定时触发 `VACUUM INTO`：产物为紧凑完整副本，`sqlite3` 重新打开并抽查表数据
-- [ ] retention 按天清理；`0=永久` 形态
+- [x] 定时触发 `VACUUM INTO`：产物为紧凑完整副本，`sqlite3` 重新打开并抽查表数据——本机验收（2026-10-05，探针 `scripts/acceptance/server-backup/` 五件套 B0-B9 26/26 PASS，双实例 `:19995`/`:19996`）：生产节奏定时循环（1h tick）在 T+60min 触发，两实例各出一件定时产物（`cockpit-20261005-032956/032958.db`，探针在此之前全程未调 `POST /run`）；`sqlite3` 重开定时产物 integrity_check=ok，users/audit_logs/settings 核心表在（users=1、audit_logs=6），体积与线上 db 一致（483328B）；手动 `/run` 产物经 download API 取回与盘上文件 sha256 一致（8ccbf96a…），重开亦完整
+- [x] retention 按天清理；`0=永久` 形态——同一次 tick 双形态同证：retention=1 实例的老文件（ModTime 2026-07-01，早于 cutoff now-1d）在 tick 后被清（列表与盘上均消失）；retention=0 实例的老文件保留，手动备份后三件共存（老+定时+手动）。校验面：interval=200/retention=-1 均 400，未知名 download/delete 均 404
 - [ ] rclone 真远端（gdrive/S3）推送；失败只记 `[remote]` 日志 + `server_backup.remote-failed` 通知，本地备份不受影响
 - [ ] 「补推」按钮对历史文件生效
 
