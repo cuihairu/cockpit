@@ -88,7 +88,7 @@ begin
   ServerPage := CreateInputQueryPage(wpSelectTasks,
     'Cockpit Server 连接', 'Agent 要连接到哪台 Cockpit Server？',
     '服务注册需要服务器地址（安装后可重跑安装包或手动执行 service install 变更）。');
-  ServerPage.Add('WebSocket 地址（如 wss://cockpit.example.com/ws）:');
+  ServerPage.Add('WebSocket 地址（如 wss://cockpit.example.com/ws）:', False);
   ServerPage.Values[0] := ExpandConstant('{param:server}');
 end;
 
