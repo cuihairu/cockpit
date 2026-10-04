@@ -96,3 +96,4 @@ web/coverage-main/
 # 可复用工具与夹具在 scripts/acceptance/）
 .acceptance/
 bin/
+cmd/cockpit-agent/assets/
