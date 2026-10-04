@@ -413,6 +413,12 @@ jobs:
           if (Test-Path $deskLnk) { Write-Error 'desktop shortcut left behind'; exit 1 }
           Write-Host 'WALKTHROUGH_OK: install -> autostart service -> icon -> shortcuts -> uninstall clean'
 
+          # 证据并入 dist/：upload-artifact 以全部路径的公共祖先做归档根，
+          # 若混用仓库根路径（walkthrough-*.png 在根）→ 归档带 dist/ 前缀，
+          # Release 下载后落成 dist/dist/…，其 glob 不中直接挂（首跑实挂）
+          Get-ChildItem walkthrough-*.png -ErrorAction SilentlyContinue |
+            Move-Item -Destination dist -Force
+
       - name: Upload installer + walkthrough evidence
         uses: actions/upload-artifact@v7
         with:
@@ -420,8 +426,8 @@ jobs:
           path: |
             dist/cockpit-agent-setup-nightly.exe
             dist/cockpit-agent-setup-nightly.exe.sha256
-            walkthrough-icon.png
-            walkthrough-desktop.png
+            dist/walkthrough-icon.png
+            dist/walkthrough-desktop.png
           retention-days: 7
           if-no-files-found: error
 
