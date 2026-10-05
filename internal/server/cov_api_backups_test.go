@@ -351,6 +351,10 @@ func TestCovBackupRestoreAndTaskExtraBranches(t *testing.T) {
 	rec = covRec()
 	s2.handleBackupRestore(rec, covReq(http.MethodPost, "/r", strings.NewReader(body)), cfg2)
 	covWantCode(t, "restore rpc error", rec, http.StatusBadGateway)
+	// agent 原始错误透传（非空目录拒绝等原因可读，S2 stacks 错误遮蔽同族先例）
+	if body := rec.Body.String(); !strings.Contains(body, "boom") {
+		t.Errorf("restore rpc error body = %q, want agent error passthrough", body)
+	}
 
 	// task get：agent rpc error → 502
 	rec = covRec()

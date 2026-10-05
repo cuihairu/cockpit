@@ -100,7 +100,10 @@ const probeField = (label: string) =>
 
 describe('Settings', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    // reset 而非 clear：clearAllMocks 不清 once 队列与持久实现，上一用例
+    // 未消费的 mockResolvedValueOnce/mockRejectedValueOnce 会抢在下一用例的
+    // mockResolvedValue 之前生效（once 优先级更高），造成跨用例串台
+    vi.resetAllMocks()
     admin = true
     localStorage.clear()
   })
@@ -275,6 +278,13 @@ describe('Settings', () => {
     await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('部分渠道发送失败，详见下方结果'))
     expect(await screen.findByText('dial timeout')).toBeInTheDocument()
     expect(screen.getByText('发送成功')).toBeInTheDocument()
+    // antd Button 的 innerLoading 由其内部 effect 单独清除，与父组件 testing=false
+    // 的提交不同步：结果表已渲染但 class 可能仍是 ant-btn-loading，此时点击被
+    // rc-button 静默吞掉（CPU 饥饿下 effect flush 滞后数秒，CI 2026-10-04 镜像
+    // 失败实证）。等 loading class 消失（= 可点击态）再点，同 Nas
+    // ant-switch-loading 等待惯例
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /发送测试通知/ })).not.toHaveClass('ant-btn-loading'))
     fireEvent.click(screen.getByRole('button', { name: /发送测试通知/ }))
     await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('通知未启用：请在服务端 config.yaml 的 notification 段配置渠道'))
   })

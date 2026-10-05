@@ -989,6 +989,19 @@
 1. [**删除前三重引用确认**：① 全仓 `grep -rn "screenshot-themes"`（排除 node_modules/.git）零命中；② `web/package.json` scripts 六项（dev/build/preview/lint/test/test:coverage）无引用；③ `git log --all -- web/screenshot-themes.cjs` 为空——从未被 git 跟踪，删除不涉历史改写、无需 `git rm`。]
 2. [**处置**：工作树零残留，脚本现存 `/tmp/opencode/screenshot-themes.cjs.bak`（临时目录重启即失，无需保留策略）。]
 
+## CI 修复：Settings 通知测试镜像 flake（2026-10-05）
+
+main@31a99e2 的 Test job 红（run 37228723208），仅 `web/src/pages/Settings/index.test.tsx` 两用例，且**互为镜像**：A「测试通知部分失败与 503 未启用分支」期望 503 文案实收「部分渠道发送失败」，B「未知渠道与空错误文案」恰好反向。本机单文件与 1 核压测均绿。
+
+1. [**根因（1 核 + 3 hogs 同钉压测第 7 轮精确复现，诊断打点钉死）**：click 2 前按钮 class 仍为 `ant-btn-loading`——antd Button 的 `innerLoading`（`antd/es/button/button.js:123` useState）由组件自身 effect（`:149 setLoading(loadingOrDelay.loading)`）清除，与父组件 `testing=false` 的提交**不同步**：结果表（`dial timeout`）随父提交先渲染，但 effect flush 在 CPU 饥饿下滞后数秒，期间 `fireEvent.click` 被 rc-button 静默吞掉（apiCalls 停 1、503 once 不消费）。随后 `vi.clearAllMocks` 不清 once 队列的缺陷放大成串台：A 残留的 `mockRejectedValueOnce(503)` 抢占 B 的 `mockResolvedValue`（once 优先级更高，vitest 5 的 clearAllMocks 不动 `onceMockImplementations`）→ B 实收 503 文案。]
+2. [**修复（测试侧两处，产品零改动）**：① click 2 前 `waitFor(() => expect(btn).not.toHaveClass('ant-btn-loading'))`（同 Nas `ant-switch-loading` 等待惯例）；② `beforeEach` 改 `vi.resetAllMocks`（清 once 队列与持久实现；对 `vi.spyOn` 恢复原实现、spy 仍装——`@vitest/spy` mockReset 的 `resetToMockImplementation: true` 特例，message/toast 行为不变）。验证：本机 16/16 绿 + 同型压测 **10/10 全绿**（修复前同条件 1/7 复现）。]
+
+## agent 侧备份真机验收七件套（2026-10-05）
+
+1. [**探针**：`scripts/acceptance/agent-backup/` 七件（setup-env / run-server / restart-server / probe+test / stop-server / teardown-env），K0-K11 **44/44 PASS**（server `:19998` + webhook 接收器 `:9701` + agent abk-acc-a1）。覆盖：daily@ 到点自动执行（due+5s、next_run 顺延 24h±600s）；`restart-server.sh 110` 停机 110s 跨 due 恢复后补跑恰一次、75s 不重放；tar.gz 逐条目 sha256 diff（8 条目夹具，符号链接记链接不跟随）；retention=2 连跑三件留最新两件；256MB 分块下载 1025 块 + server VmHWM 30.6→47.2MB（上限 300MB，证无整包缓冲）；恢复空目录源树零改动、非空目录 502 透传 `not empty`；Zip Slip 样例（`../`、`sub/../../`）跳过不落盘；`backup.failed` webhook 实收（事件白名单按 `EventConfig.Type` **字段**匹配，yaml 需显式 `type: backup.failed`）；校验矩阵 12+5（穿越名/ghost agent/缺 rclone 配置期拦截均 400）。]
+2. [**server 修复**：`handleBackupRestore` 透传 agent `rpcResp.Error`（原吞成通用 502——S2 stacks dirError 同族错误遮蔽），cov 测试补 body 含原始错误断言；`webhook_receiver.py` 端口参数化（argv[3] 默认 9700，notify 两参调用兼容）。]
+3. [**登记与回填**：`tool/known_uncoverable.txt` 登记 probe main() 区间 `662,1157`（K0-K11 真机编排，头部合计 2771→3224）；acceptance-checklist 42-46 五条回填 [x] 并撤「Docker 主机必需」标注（agent 侧打包不依赖 docker），行 36 dirError 注记更新（2026-09-29 已完成，剩余仅非 root agent）。]
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。

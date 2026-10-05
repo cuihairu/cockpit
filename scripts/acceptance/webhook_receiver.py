@@ -6,6 +6,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 LOG = sys.argv[2] if len(sys.argv) > 2 else ".acceptance/logs/webhooks.jsonl"
 EXPECT_SECRET = sys.argv[1] if len(sys.argv) > 1 else ""
+# 端口缺省 9700（notify 先例）；server-backup 等并行域传 argv[3] 错开
+PORT = int(sys.argv[3]) if len(sys.argv) > 3 else 9700
 
 
 class Hook(BaseHTTPRequestHandler):
@@ -29,4 +31,4 @@ class Hook(BaseHTTPRequestHandler):
         pass
 
 
-HTTPServer(("127.0.0.1", 9700), Hook).serve_forever()
+HTTPServer(("127.0.0.1", PORT), Hook).serve_forever()

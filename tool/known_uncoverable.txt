@@ -26,7 +26,7 @@
 # 豁免是否仍成立。区间登记的漂移只提醒不失败（区间覆盖语义）——但区间外的
 # 新增缺口仍会红，故区间止行应随文件末尾收紧。
 
-# ---------- 1. 场景编排 main()（合计 2771 语句） ----------
+# ---------- 1. 场景编排 main()（合计 3224 语句） ----------
 
 scripts/acceptance/guac/probe/main.go:539,1153	1. main() 场景编排（S1-S30 真机 guacd/sshd/VNC/容器栈 + .acceptance 证据）
 scripts/acceptance/guac/cdp/main.go:402,713	1. main() 场景编排（C1-C7 真机 headless-shell Chrome 驱动 Web 三协议远控）
@@ -35,6 +35,7 @@ scripts/acceptance/services/probe/main.go:307,644	1. main() 场景编排（T0-T5
 scripts/acceptance/traefik/probe/main.go:362,802	1. main() 场景编排（T1-T10 真机 Traefik file provider 热加载 + 自有 CA 握手）
 scripts/acceptance/jobs/probe/main.go:306,672	1. main() 场景编排（J0-J8 真机 REST/agent 执行/审计/权限面 + .acceptance 证据）
 scripts/acceptance/server-backup/probe/main.go:315,606	1. main() 场景编排（B0-B9 真机双实例/定时 tick 等待/sqlite3 产物抽查 + .acceptance 证据）
+scripts/acceptance/agent-backup/probe/main.go:662,1157	1. main() 场景编排（K0-K11 真机 server/agent 打包恢复/分块下载/调度 tick 停机重启/webhook 实收 + .acceptance 证据）
 scripts/acceptance/notify/probe/main.go:270,399	1. main() 场景编排（N0-N4 真机 server/webhook 接收器实收/审计面 + .acceptance 证据）
 
 # ---------- 2. 真机命令默认闭包（6 语句） ----------
@@ -54,6 +55,12 @@ internal/server/api_guacamole.go:240,241	3. collectGuacRecording 稳定后复 St
 internal/server/guac_relay.go:66,67	3. net.Listen 回环临时端口失败防御（127.0.0.1:0 由内核分配端口，仅 fd 耗尽才失败，进程内单测不可构造）
 internal/server/api_guacamole.go:377,390	3. startGuacRelay listen 失败分支（同 guac_relay.go:66,67 根因，中继起不来即 listen 失败）
 internal/server/api_guacamole.go:491,496	3. relayAddr SplitHostPort 失败防御（恒为 listener.Addr().String() 的 host:port 形态）
+scripts/acceptance/agent-backup/probe/main.go:426,427	3. buildTree 回调 filepath.Rel 死防御（p 恒由同一 root 的 filepath.Walk 派生，POSIX 同根不可失败）
+scripts/acceptance/agent-backup/probe/main.go:553,554	3. writeEvilTar WriteHeader 失败分支（tar.Writer→gzip→os.File 纯本地写链，仅磁盘满/fd 级故障可触发，无注入点）
+scripts/acceptance/agent-backup/probe/main.go:560,562	3. writeEvilTar 越界条目写失败清理路径（同上磁盘级错误不可构造）
+scripts/acceptance/agent-backup/probe/main.go:565,567	3. writeEvilTar 正常条目写失败清理路径（同上）
+scripts/acceptance/agent-backup/probe/main.go:569,571	3. writeEvilTar tw.Close 失败清理路径（同上）
+scripts/acceptance/agent-backup/probe/main.go:573,575	3. writeEvilTar gz.Close 失败清理路径（同上）
 
 # ---------- 4. 新增 Agent 服务面/启动时刻字段的测试回退路径（4 语句） ----------
 

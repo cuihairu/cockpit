@@ -33,17 +33,17 @@
 - [x] compose 完整语义：环境变量、volumes、自定义网络、depends_on 启动顺序（2026-09-28，.env 注入 printenv 实证；命名卷 db 写 → app 读 + depends_on 顺序；自定义 bridge 网络 + 服务间 DNS）
 - [x] restart / pull 动作真实生效；部署历史时间线与部署日志可对应（2026-09-28，pull/restart 任务 success，历史 finishedAt 回填含诚实 failed）
 - [x] 模板库一键新建与 import 路径（2026-09-28，模板/import 为 UI 填充路径，落库即常规 create+up——真机以原始 compose 等价验证，UI 链路由 vitest 覆盖）
-- [ ] stacks 目录不存在/无权限时列表页目录自检告警的呈现——部分完成（2026-09-28）：目录不存在→自动创建 0700、dirWritable=true 实证；路径非法→agent 报错透传修复已落地；剩余：list 失败时 dirError 仍到不了列表页（见 todo.md stacks 条目后续小项）+ 无权限场景需非 root agent
+- [ ] stacks 目录不存在/无权限时列表页目录自检告警的呈现——部分完成（2026-09-28；dirError 一截已随 2026-09-29 列表面修复完成，见 todo.md stacks 条目）：目录不存在→自动创建 0700、dirWritable=true 实证；路径非法→agent 报错透传修复已落地；剩余：无权限场景需非 root agent
 
 ## 备份与恢复（agent 侧）
 
-设计：[backup-design](./backup-design.md）。前置：Docker 主机；异地项需 rclone 与真实远端。
+设计：[backup-design](./backup-design.md）。前置：本机 server+agent 即可验收（打包/恢复为 agent 侧实现，不依赖 Docker 主机）；异地项需 rclone 与真实远端。
 
-- [ ] 定时调度到点执行一次（daily@HH:mm / every:Nh 任一形态）；停机补跑只补一次——Docker 主机必需，标记为阻塞
-- [ ] 打包产物：tar.gz 完整、路径穿越防护（构造带 `../` 文件的目录验证拒绝）、符号链接不跟随——Docker 主机必需，标记为阻塞
-- [ ] retention 自动清理到期备份；运行历史与失败 `backup.failed` 通知送达——Docker 主机必需，标记为阻塞
-- [ ] 恢复双阶段：独立目录解包绝不覆盖原路径；Zip Slip 构造样例被拒；任务日志可读——Docker 主机必需，标记为阻塞
-- [ ] 备份文件下载（分块 RPC 流转发，GB 级不炸内存）——Docker 主机必需，标记为阻塞
+- [x] 定时调度到点执行一次（daily@HH:mm / every:Nh 任一形态）；停机补跑只补一次——本机验收（2026-10-05，探针 `scripts/acceptance/agent-backup/` 七件套 K0-K11 44/44 PASS，server `:19998` + agent abk-acc-a1）：`daily@` 创建时 due=now+2min，到点后约 +5s 自动执行恰一次、`next_run_at` 顺延 24h±600s；停机补跑——`restart-server.sh 110` 停机 110s 跨过 due，恢复后首 tick 补跑恰一次，再观察 75s 不重放
+- [x] 打包产物：tar.gz 完整、路径穿越防护（构造带 `../` 文件的目录验证拒绝）、符号链接不跟随——同探针：运行产物下载 sha256 与盘上一致、归档逐条目 diff（夹具树 8 条目含 nested 目录）；删除/下载带 `../` 穿越名请求均 400 拒绝；符号链接条目记为链接本身不跟随（`link-to-readme`→`readme.txt`、指向 `/etc/hostname` 的绝对链接均保留为 link）
+- [x] retention 自动清理到期备份；运行历史与失败 `backup.failed` 通知送达——同探针：retention=2 连跑三件后仅留最新两件（run1.File 盘上消失）；`backup.failed` 经 webhook 接收器 `:9701` 实收（事件白名单按 `EventConfig.Type` 字段匹配，yaml 需写 `type: backup.failed`）
+- [x] 恢复双阶段：独立目录解包绝不覆盖原路径；Zip Slip 构造样例被拒；任务日志可读——同探针：恢复到空目录成功且源树 8 条目 sha 零改动；目标非空目录被 agent 拒绝、502 透传原始错误含 `not empty`；Zip Slip 构造样例（`../zipslip-escape-1`、`sub/../../zipslip-escape-2`）跳过不落盘、`ok.txt` 正常解出；restore 需 confirm、相对 dest 请求 400
+- [x] 备份文件下载（分块 RPC 流转发，GB 级不炸内存）——同探针：256MB 样本 1025 块（256KB/块）流式转发，Content-Length=盘上真长、sha256 一致；server `/proc` VmHWM 30.6→47.2MB（上限 300MB）证明无整包缓冲（GB 级行由下方「GB 级完整链」兜底）
 - [ ] 异地保留：真实 S3/B2 远端推送成功；断网/错密钥时 `backup.remote-failed` 独立通知且不改任务终态；文件行「补传」成功——异地云凭据不可本机验证，标记为阻塞
 - [ ] rclone 网盘限速场景下的超时与错误呈现——Docker 主机+rclone 配置不可本机验证，标记为阻塞
 - [ ] GB 级完整链：大目录打包 → 推送 → 换机恢复——Docker 主机+大存储不可本机验证，标记为阻塞

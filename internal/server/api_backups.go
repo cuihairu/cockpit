@@ -509,8 +509,13 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request, cfg
 		return
 	}
 	rpcResp, err := protocol.DecodeRPCResponse(resp)
+	// agent 侧拒绝（如 destDir 非空）的原始原因透传给用户；解码失败仍用通用文案
+	msg := "failed to start restore on agent"
+	if err == nil && rpcResp.Status == "error" && rpcResp.Error != "" {
+		msg = rpcResp.Error
+	}
 	if err != nil || rpcResp.Status == "error" {
-		s.handleError(w, r, http.StatusBadGateway, "failed to start restore on agent")
+		s.handleError(w, r, http.StatusBadGateway, msg)
 		return
 	}
 	s.auditBackup(r, audit.ActionBackupRestore, cfg.ID, cfg.Name,
