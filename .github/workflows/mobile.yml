@@ -74,3 +74,28 @@ jobs:
 
       - name: Build debug APK
         run: flutter build apk --debug
+
+  # iOS 侧验证（2026-10-05 口径：只写代码，编译验证走 GitHub macOS runner，
+  # 不占本地、不卡主线）。--no-codesign 无签名账号即可编译过（iOS 真机安装
+  # 与上架签名不在 CI 范围）；--debug 比 release 快得多，验证目标是「编译过」。
+  build-ios:
+    name: iOS Build (unsigned, macOS)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Build iOS (no codesign)
+        run: flutter build ios --no-codesign --debug

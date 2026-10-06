@@ -53,7 +53,10 @@ Cockpit web UI 是桌面优先（antd 数据密集表格、多栏工作台），
 
 - **D8 CI 独立 `mobile.yml`**：`paths: mobile/**` 触发，`flutter analyze` +
   `flutter test` + APK 构建（`subosito/flutter-action`）。iOS 构建不进 CI
-  （需 macOS runner + 签名账号），本地/真机阶段再议。
+  （需 macOS runner + 签名账号），本地/真机阶段再议。（2026-10-07 更新：
+  按第三版口径补 `build-ios` job——macOS runner `flutter build ios
+  --no-codesign --debug` 无签名账号验证「编译过」；签名与真机安装仍不在
+  CI 范围。）
 
 ## 里程碑
 
@@ -117,8 +120,9 @@ mobile/                  # Flutter 工程，与 web/ 平行
 ## 落地前提与验收
 
 - 本机需安装 Flutter SDK（stable）。本机为 Linux：**Android APK 可本地构建；
-  iOS 无法本地构建**（需 macOS + Xcode），iOS 侧交付形态为源码工程 + 真机验收
-  项挂起，待有 Mac 或 CI macOS runner 再闭环。
+  iOS 无法本地构建**（需 macOS + Xcode）——iOS 编译验证已闭环到 CI macOS
+  runner（2026-10-07，`mobile.yml` build-ios 无签名 debug 构建）；iOS 真机
+  安装与上架签名仍需自有 Mac/账号，真机验收项挂起。
 - 自动化验收：`flutter analyze` 0 问题、`flutter test` 全绿、`mobile.yml` CI 绿。
 - 真机验收（补入 `docs/guide/acceptance-checklist.md` 移动端一节）：
   - Android 真机安装 APK：登录 → TOTP → 仪表盘数据与 server 一致；
