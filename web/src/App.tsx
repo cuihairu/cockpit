@@ -41,6 +41,7 @@ import { permAll } from '@/utils/perm'
 import { logger } from '@/utils/logger'
 import { BrandLogo } from '@/components/BrandLogo'
 import { ThemeColorSwatches } from '@/components/ThemeColorSwatches'
+import { MobileTabBar } from '@/components/MobileTabBar'
 import { resolveThemePreset } from '@/theme/themePresets'
 import { resolveSkinTokens } from '@/theme/themeSkins'
 import './App.less'
@@ -425,102 +426,106 @@ const MainLayout = () => {
   )
 
   return (
-    <ProLayout
-      fixSiderbar
-      layout={isMobile || settings.compactMode ? 'side' : 'mix'}
-      theme={resolvedTheme}
-      colorWeak={false}
-      title={settings.siteName}
-      logo={<BrandLogo size={26} color={resolveThemePreset(settings.themeColor).color} />}
-      navTheme={resolvedTheme === 'dark' ? 'realDark' : 'light'}
-      contentWidth="Fluid"
-      location={{ pathname: location.pathname }}
-      route={{ path: '/', routes: visibleRoutes } as ProLayoutProps['route']}
-      fixedHeader
-      siderWidth={208}
-      headerContentRender={HeaderContent}
-      rightContentRender={RightContent}
-      headerTitleRender={(logo, title) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {logo}
-          {title}
+    <>
+      <ProLayout
+        fixSiderbar
+        layout={isMobile || settings.compactMode ? 'side' : 'mix'}
+        theme={resolvedTheme}
+        colorWeak={false}
+        title={settings.siteName}
+        logo={<BrandLogo size={26} color={resolveThemePreset(settings.themeColor).color} />}
+        navTheme={resolvedTheme === 'dark' ? 'realDark' : 'light'}
+        contentWidth="Fluid"
+        location={{ pathname: location.pathname }}
+        route={{ path: '/', routes: visibleRoutes } as ProLayoutProps['route']}
+        fixedHeader
+        siderWidth={208}
+        headerContentRender={HeaderContent}
+        rightContentRender={RightContent}
+        headerTitleRender={(logo, title) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {logo}
+            {title}
+          </div>
+        )}
+        menuItemRender={(menuItemProps, defaultDom) => {
+          return (
+            <a
+              href={menuItemProps.path}
+              onClick={(e) => {
+                e.preventDefault()
+                navigate(menuItemProps.path || '/')
+              }}
+            >
+              {defaultDom}
+            </a>
+          )
+        }}
+        breadcrumbRender={(routers = []) => {
+          return [
+            {
+              path: '/',
+              breadcrumbName: '首页',
+            },
+            ...routers,
+          ]
+        }}
+        itemRender={(route, _params, routes, _paths) => {
+          const first = routes.indexOf(route) === 0
+          return first ? (
+            <a href="/" onClick={(e) => { e.preventDefault(); navigate('/') }}>
+              {route.breadcrumbName}
+            </a>
+          ) : (
+            <span>{route.breadcrumbName}</span>
+          )
+        }}
+        menuHeaderRender={false}
+      >
+        <div className={settings.compactMode ? 'app-density-compact' : undefined}>
+          <Suspense fallback={<PageLoading />}>
+            {permDenied ? <ForbiddenPage /> : (
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/resources/compute" element={<ComputePage />} />
+              <Route path="/resources/services" element={<ServicesResPage />} />
+              <Route path="/resources/domains" element={<DomainsPage />} />
+              <Route path="/resources/certificates" element={<CertsPage />} />
+              <Route path="/resources/gateways" element={<GatewaysPage />} />
+              <Route path="/resources/storages" element={<StoragesPage />} />
+              <Route path="/workbench" element={<Workbench />} />
+              <Route path="/logsearch" element={<LogSearch />} />
+              <Route path="/agents" element={<Agents />} />
+              <Route path="/docker" element={<Docker />} />
+              <Route path="/stacks" element={<Stacks />} />
+              <Route path="/backups" element={<Backups />} />
+              <Route path="/proxy" element={<Proxy />} />
+              <Route path="/cron" element={<Cron />} />
+              <Route path="/jobs" element={<Jobs />} />
+              <Route path="/services" element={<Services />} />
+              <Route path="/network" element={<Network />} />
+              <Route path="/disk" element={<Disk />} />
+              <Route path="/nas" element={<Nas />} />
+              <Route path="/drift" element={<Drift />} />
+              <Route path="/dns" element={<DNS />} />
+              <Route path="/domains" element={<Domains />} />
+              <Route path="/acme" element={<Acme />} />
+              <Route path="/recordings" element={<Recordings />} />
+              <Route path="/monitor" element={<Monitor />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/settings/setup-totp" element={<SetupTOTP />} />
+              <Route path="/settings/audit-logs" element={<AuditLogs />} />
+              <Route path="/access/users" element={<Users />} />
+              <Route path="/access/roles" element={<Roles />} />
+              <Route path="/profile" element={<Profile />} />
+            </Routes>
+            )}
+          </Suspense>
         </div>
-      )}
-      menuItemRender={(menuItemProps, defaultDom) => {
-        return (
-          <a
-            href={menuItemProps.path}
-            onClick={(e) => {
-              e.preventDefault()
-              navigate(menuItemProps.path || '/')
-            }}
-          >
-            {defaultDom}
-          </a>
-        )
-      }}
-      breadcrumbRender={(routers = []) => {
-        return [
-          {
-            path: '/',
-            breadcrumbName: '首页',
-          },
-          ...routers,
-        ]
-      }}
-      itemRender={(route, _params, routes, _paths) => {
-        const first = routes.indexOf(route) === 0
-        return first ? (
-          <a href="/" onClick={(e) => { e.preventDefault(); navigate('/') }}>
-            {route.breadcrumbName}
-          </a>
-        ) : (
-          <span>{route.breadcrumbName}</span>
-        )
-      }}
-      menuHeaderRender={false}
-    >
-      <div className={settings.compactMode ? 'app-density-compact' : undefined}>
-        <Suspense fallback={<PageLoading />}>
-          {permDenied ? <ForbiddenPage /> : (
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/resources/compute" element={<ComputePage />} />
-            <Route path="/resources/services" element={<ServicesResPage />} />
-            <Route path="/resources/domains" element={<DomainsPage />} />
-            <Route path="/resources/certificates" element={<CertsPage />} />
-            <Route path="/resources/gateways" element={<GatewaysPage />} />
-            <Route path="/resources/storages" element={<StoragesPage />} />
-            <Route path="/workbench" element={<Workbench />} />
-            <Route path="/logsearch" element={<LogSearch />} />
-            <Route path="/agents" element={<Agents />} />
-            <Route path="/docker" element={<Docker />} />
-            <Route path="/stacks" element={<Stacks />} />
-            <Route path="/backups" element={<Backups />} />
-            <Route path="/proxy" element={<Proxy />} />
-            <Route path="/cron" element={<Cron />} />
-            <Route path="/jobs" element={<Jobs />} />
-            <Route path="/services" element={<Services />} />
-            <Route path="/network" element={<Network />} />
-            <Route path="/disk" element={<Disk />} />
-            <Route path="/nas" element={<Nas />} />
-            <Route path="/drift" element={<Drift />} />
-            <Route path="/dns" element={<DNS />} />
-            <Route path="/domains" element={<Domains />} />
-            <Route path="/acme" element={<Acme />} />
-            <Route path="/recordings" element={<Recordings />} />
-            <Route path="/monitor" element={<Monitor />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/settings/setup-totp" element={<SetupTOTP />} />
-            <Route path="/settings/audit-logs" element={<AuditLogs />} />
-            <Route path="/access/users" element={<Users />} />
-            <Route path="/access/roles" element={<Roles />} />
-            <Route path="/profile" element={<Profile />} />
-          </Routes>
-          )}
-        </Suspense>
-      </div>
-    </ProLayout>
+      </ProLayout>
+      {/* 窄屏底部导航（组件内按断点自隐藏）：权限裁剪后的路由树驱动 */}
+      <MobileTabBar routes={visibleRoutes} />
+    </>
   )
 }
 

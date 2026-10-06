@@ -483,4 +483,26 @@ html[data-theme='dark'] {
       font-size: 20px;
     }
   }
+
+  // 表格兜底：未设 scroll.x 的表格窄屏挤压变形（全站 50+ 表，逐个补 prop
+  // 略慢且漏未来新表）——统一内容区横向滚动 + 最小宽度，与上方 Modal
+  // max-width 同哲学，覆盖现存与未来全部表格；已设 scroll.x 的表 antd
+  // 自带 overflow-x: auto 与内联 width，本规则只兜更小的场景，表现不变。
+  // :has() 守卫让空态表格（ant-table-placeholder 行）不参与，避免空态
+  // 插画被拉出可视区；旧浏览器不支持 :has 时退化为全量 min-width，
+  // 仅空态观感差异，可接受。
+  .ant-table-content {
+    overflow-x: auto;
+
+    &:not(:has(.ant-table-placeholder)) > table {
+      min-width: 640px;
+    }
+  }
+
+  // 底部导航（MobileTabBar，fixed 吸底）让位：页尾最后一行不被遮挡
+  .ant-pro-page-container-children-container,
+  .dashboard-container,
+  .page-container {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
 }
