@@ -105,4 +105,27 @@ describe('MobileTabBar', () => {
       expect(screen.queryAllByText(label).length).toBe(1)
     }
   })
+
+  it('无名路由被更多面板过滤（flattenLeaves 防御分支）', async () => {
+    renderBar([...FULL_ROUTES, { path: '/orphan' }])
+    fireEvent.click(screen.getByText('更多'))
+    expect(await screen.findByText('反向代理')).toBeInTheDocument()
+    expect(screen.queryByText('/orphan')).not.toBeInTheDocument()
+  })
+
+  it('「更多」面板点击条目导航到对应路径', async () => {
+    const LocationProbe = () => {
+      const loc = useLocation()
+      return <div data-testid="loc">{loc.pathname}</div>
+    }
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <MobileTabBar routes={FULL_ROUTES} />
+        <LocationProbe />
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByText('更多'))
+    fireEvent.click(await screen.findByText('反向代理'))
+    expect(screen.getByTestId('loc').textContent).toBe('/proxy')
+  })
 })

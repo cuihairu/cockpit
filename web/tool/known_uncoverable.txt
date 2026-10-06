@@ -97,13 +97,15 @@ pages/Services/HealthPanel.tsx:306 取消按钮内联 onClick（setEditing(false
 
 # ---- 2026-10-03 全量收口：App/GuacPlayer/GuacamoleModal/TerminalModal 漂移重登记 ----
 # App.tsx（原 290/316/430/447-449 随 RBAC 菜单与面包屑重构漂移；2026-10-04
-# Jobs 菜单项/路由插入后整体 +16 再漂移，重登记）
-App.tsx:314 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 290→298，+16）
-App.tsx:340 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 316→324，+16）
-App.tsx:455 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 430→439，+16）
-App.tsx:472 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 447→455→456，+16）
-App.tsx:473 同上（return first 三元；原 448→456→457，+16）
-App.tsx:474 同上（首项 link 内联 onClick navigate('/')；原 449→457→458，+16）
+# Jobs 菜单项/路由插入后整体 +16 再漂移，重登记；2026-10-07 移动端适配
+# 76a51d0 带入 MobileTabBar import（+1，314/340 段）与 MainLayout fragment
+# 包装（再 +1，455 段起），按 2026-10-07 lcov 实测第三次重登记）
+App.tsx:315 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 290→298→314，+16）
+App.tsx:341 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 316→324→340，+16）
+App.tsx:457 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 430→439→455，+16）
+App.tsx:474 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 447→455→456→472，+16）
+App.tsx:475 同上（return first 三元；原 448→456→457→473，+16）
+App.tsx:476 同上（首项 link 内联 onClick navigate('/')；原 449→457→458→474，+16）
 
 # components/GuacPlayer/index.tsx（解析器/连接体已由 duck tunnel 用例覆盖，剩两点）
 components/GuacPlayer/index.tsx:39 parseGuacInstructions elements.length > 0 假侧：内层循环进入时至少 push 一个元素或抛错，恒真死侧
