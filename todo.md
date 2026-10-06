@@ -1008,6 +1008,11 @@ main@31a99e2 的 Test job 红（run 37228723208），仅 `web/src/pages/Settings
 2. [**rdp tag websocket 测试 panic 修复**：`go test -tags rdp ./internal/agent/` 2/3 复现 `panic: repeated read on failed websocket connection`——gorilla 对连接一旦读失败（**含读超时**，SetReadDeadline 到期同样置位 readErr）永久禁止再读，NextReader 侧 readErrCount 累计 1000 即 panic；`agent_ws_test.go` 的 `readUntil` 旧实现按 2s 分片读+超时重试，首个分片超时后微秒级空转瞬间撞满上限。修复：等待窗口一次性给满整段 deadline，任何读错误立即弃连返回（重试语义只属于外层轮询不属于连接）。3/3 连跑全绿；CPU 饥饿下注册消息晚到 >2s 是既有触发面，CI 同款命令迟早踩中。]
 3. [**环境插曲**：出境中断期 `TestCovAcmeIssueEntryFailures` 因真实 LE staging 目录不可达（EOF）本地红 + `acme_issuer.go:270,271` 相应缺盖——网络恢复即自愈（该用例注释本就声明「有外网走到 dnsProvider 校验，无外网止步于 Register」，CI 有外网恒绿），不改测试不登记。]
 
+## mobile M3 收口：三页账实对齐 + VNC 探索项关闭（2026-10-07）
+
+1. [**账实对齐**：盘点发现 M3 路线图第 3 项（SMART/NAS/组网观测只读三页）已于 b5d15a6（2026-10-01）交付——`smart_page`/`nas_page`/`overlay_page` 三页 + agents_page 动作单入口 + 20 个 widget 测试（smart/nas/overlay_page_test 三文件），但 todo 无对应条目、mobile-design.md:86 仍写「待做」。本笔补账：mobile-design.md M2 偏差段（反代顺延项经 todo M4/M5 于 2026-09-23 收口）与 M3 节改写为完成态（Stacks 2026-09-29 + 三页 2026-10-01）。至此 **Flutter M1-M9 功能线全部交付**，移动端剩余均为真机验收项（挂起待验）与 iOS 侧（按 2026-10-05 口径低优先级填空）。]
+2. [**VNC/桌面观看探索项收口（决策=不做）**：D7 立项时标注「Flutter 生态弱、不承诺」，收口评估三条路线——a) webview 嵌 noVNC 需裸 VNC 端口暴露，与「VNC 统一经 guacd + /api/remote/guacamole 隧道」架构冲突；b) Dart 实现 Guacamole 协议客户端（指令解析 + CustomPainter 渲染 + 键鼠编码）= 重造 guacamole-js，违反「不重造底层」边界纪律；c) 定位判断：应急操作已被 M2 SSH 终端覆盖，手机小屏看桌面价值低。触发条件（满足任一再立项）：明确移动看桌面需求出现，或 Flutter 侧出现维护活跃的 noVNC 等价物。桌面观看由 web Guacamole 三协议承担。]
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。

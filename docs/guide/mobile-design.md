@@ -48,7 +48,8 @@ Cockpit web UI 是桌面优先（antd 数据密集表格、多栏工作台），
   WebSocket 指标流），仪表盘场景轮询省电且实现简单。
 
 - **D7 终端 / 桌面后置**：终端 M2 用 xterm.dart + 既有 remote ticket WebSocket；
-  VNC/桌面观看在 Flutter 侧生态弱（无 noVNC 等价物），列为探索项不承诺。
+  VNC/桌面观看在 Flutter 侧生态弱（无 noVNC 等价物），列为探索项不承诺
+  （2026-10-07 收口为不做，评估依据见 M3 节）。
 
 - **D8 CI 独立 `mobile.yml`**：`paths: mobile/**` 触发，`flutter analyze` +
   `flutter test` + APK 构建（`subosito/flutter-action`）。iOS 构建不进 CI
@@ -76,14 +77,28 @@ Cron 只读视图（外部条目原文展示，写操作留桌面端）、文件
 条目详情）、SSH 终端（tickets 票据 + WS 子协议 + xterm.dart）、生物识别锁
 （local_auth 启动门）。
 
-与原计划的偏差：反代（nginx/traefik）视图**未做**，顺延 M3 评估；备份视图
-落位为资源页第三 tab 而非独立页；Cron 与文件在移动端明确**只读**——增删改
-类操作留桌面端，与「手机看、桌面改」的定位一致。
+与原计划的偏差：反代（nginx/traefik）视图原顺延 M3 评估，后经 todo M4
+（只读三态，2026-09-23）与 M5（新建/编辑/删除写操作，a9c095f4）两批收口；
+备份视图落位为资源页第三 tab 而非独立页；Cron 与文件在移动端明确**只读**——
+增删改类操作留桌面端，与「手机看、桌面改」的定位一致。
 
-**M3**（进行中）：Stacks 部署操作已落地（2026-09-29）——stack 列表 +
-up/down/restart/pull 异步操作（taskId 2s 轮询）+ compose/.env 只读预览；
-偏差：compose 编辑、stack 删除与部署历史留桌面端，与「手机看、桌面改」一致。
-SMART/NAS/组网观测只读视图、VNC 探索项待做。
+**M3**（2026-10-07 收口）：Stacks 部署操作已落地（2026-09-29，todo M8）——
+stack 列表 + up/down/restart/pull 异步操作（taskId 2s 轮询）+ compose/.env
+只读预览；偏差：compose 编辑、stack 删除与部署历史留桌面端。
+SMART/NAS/组网观测只读三页已落地（2026-10-01，b5d15a6，20 个 widget 测试
+收口）——per-agent 动作单入口（不进底部 tab，与反代/Stacks 同款），
+`smart_page`（健康三态与异常盘置顶口径对齐 web Disk 页）、`nas_page`
+（池/挂载/共享三段 + 超阈值高亮）、`overlay_page`（四工具运行态快照），
+巡检配置与写操作留桌面端。
+**VNC/桌面观看探索项收口（2026-10-07，决策=不做）**：D7 立项时即标注
+「Flutter 侧生态弱、不承诺」，收口评估——① 路线 a「webview 嵌 noVNC」
+需裸 VNC 端口暴露，与 cockpit「VNC 统一经 guacd + /api/remote/guacamole
+隧道」的既有架构冲突；② 路线 b「Dart 实现 Guacamole 协议客户端」
+（指令解析 + CustomPainter 渲染 + 键鼠事件编码）等于重造 guacamole-js，
+违反「不重造底层」边界纪律；③ 定位判断：应急操作已被 M2 SSH 终端覆盖，
+手机小屏看桌面 + 触控映射价值低。触发条件（满足任一再立项）：出现明确
+移动看桌面需求，或 Flutter 侧出现维护活跃的 noVNC 等价物。桌面观看
+由 web 端 Guacamole 三协议（RDP/VNC/SSH）承担，移动端不重复建设。
 
 ## 目录结构
 
