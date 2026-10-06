@@ -408,8 +408,8 @@ func TestCovTerminalAgentClose(t *testing.T) {
 	s := covRemoteSetup(t)
 	agent := covRegisterBareAgent(t, s, "agent-term2")
 
-	conn, _ := covDirectWS(t, s.handleTerminalWebSocket, "/api/remote/terminal",
-		covTerminalTicket(t, s, "agent-term2"), true)
+	conn, _, tDone := covDirectWSJoined(t, s.handleTerminalWebSocket, "/api/remote/terminal",
+		covTerminalTicket(t, s, "agent-term2"))
 	defer conn.Close()
 
 	var connect map[string]interface{}
@@ -440,6 +440,10 @@ func TestCovTerminalAgentClose(t *testing.T) {
 
 	// 未知 connID：no-op
 	s.HandleTerminalClose("nope", "x")
+	// agent 关闭路径的 closeTerminalSession 在 handler goroutine：尾部 audit
+	// 写与 TempDir 清理并发（CI 实测 RemoveAll「directory not empty」flake），
+	// 同 TestCovTerminalDataFlow：join handler 排干再返回
+	covWaitHandlerExit(t, "terminal handler after agent close", tDone)
 }
 
 func TestCovTerminalWebSocketBadRequests(t *testing.T) {
