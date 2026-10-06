@@ -1002,6 +1002,12 @@ main@31a99e2 的 Test job 红（run 37228723208），仅 `web/src/pages/Settings
 2. [**server 修复**：`handleBackupRestore` 透传 agent `rpcResp.Error`（原吞成通用 502——S2 stacks dirError 同族错误遮蔽），cov 测试补 body 含原始错误断言；`webhook_receiver.py` 端口参数化（argv[3] 默认 9700，notify 两参调用兼容）。]
 3. [**登记与回填**：`tool/known_uncoverable.txt` 登记 probe main() 区间 `662,1157`（K0-K11 真机编排，头部合计 2771→3224）；acceptance-checklist 42-46 五条回填 [x] 并撤「Docker 主机必需」标注（agent 侧打包不依赖 docker），行 36 dirError 注记更新（2026-09-29 已完成，剩余仅非 root agent）。]
 
+## 本地全量门禁补漏（2026-10-05，网络中断期 push 冻结、照常 commit）
+
+1. [**probe 28 段缺口收口**：agent-backup 探针首次全量 `go test ./...` coverage 暴露 662 行以下 28 段未登记缺口（32 语句）。补 `main_test.go` 五组错误分支测试：req 序列化/拒连、查询 helper（configByID/runsOf/waitTerminalRun/runConfig/filesOf/startRestore/waitTerminalTask）的非 200/坏 JSON/空列表/超时序列（失败相位恒定返回、超时是唯一出口，与 pollStep 无关）、下载断流（Content-Length 谎报→io.Copy 错）、FIFO 特殊文件走 entryFor default、归档坏条目（TypeChar→other；声明 100 字节只写 5→io.Copy 报错）、writeEvilTar 坏路径；余 6 段磁盘级死防御（buildTree 的 filepath.Rel、writeEvilTar 写失败清理路径）登记 known_uncoverable 第 3 节。]
+2. [**rdp tag websocket 测试 panic 修复**：`go test -tags rdp ./internal/agent/` 2/3 复现 `panic: repeated read on failed websocket connection`——gorilla 对连接一旦读失败（**含读超时**，SetReadDeadline 到期同样置位 readErr）永久禁止再读，NextReader 侧 readErrCount 累计 1000 即 panic；`agent_ws_test.go` 的 `readUntil` 旧实现按 2s 分片读+超时重试，首个分片超时后微秒级空转瞬间撞满上限。修复：等待窗口一次性给满整段 deadline，任何读错误立即弃连返回（重试语义只属于外层轮询不属于连接）。3/3 连跑全绿；CPU 饥饿下注册消息晚到 >2s 是既有触发面，CI 同款命令迟早踩中。]
+3. [**环境插曲**：出境中断期 `TestCovAcmeIssueEntryFailures` 因真实 LE staging 目录不可达（EOF）本地红 + `acme_issuer.go:270,271` 相应缺盖——网络恢复即自愈（该用例注释本就声明「有外网走到 dnsProvider 校验，无外网止步于 Register」，CI 有外网恒绿），不改测试不登记。]
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。

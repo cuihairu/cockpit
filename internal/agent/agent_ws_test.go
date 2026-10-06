@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"errors"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -213,15 +211,18 @@ func readUntil(t *testing.T, conn *websocket.Conn, timeout time.Duration, pred f
 	codec := protocol.NewCodec()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		// 等待窗口一次性给满整段 deadline：gorilla 对连接一旦读失败
+		// （含读超时——SetReadDeadline 到期同样置位 readErr）就永久
+		// 禁止再读，NextReader 侧 readErrCount 累计 1000 直接 panic
+		// （repeated read on failed websocket connection）。旧实现按
+		// 2s 分片读+超时重试，首个分片超时后即陷入微秒级空转瞬间撞满
+		// 上限——CPU 饥饿下注册消息晚到 >2s 时必炸（rdp tag 实测 2/3 复现）
+		conn.SetReadDeadline(deadline)
 		msg, err := codec.ReadMessage(conn)
 		if err != nil {
-			// 仅读超时可重试：对端断开等连接级失败必须退出——
-			// gorilla 对 failed connection 再 ReadMessage 直接 panic
-			// （repeated read on failed websocket connection）
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				continue
+			// 连接级失败/自然超时都只能弃连返回；自然超时补一句定位
+			if time.Now().After(deadline) {
+				t.Errorf("timed out waiting for message")
 			}
 			return nil
 		}
