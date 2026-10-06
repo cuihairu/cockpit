@@ -481,6 +481,15 @@ func TestCovTerminalWebSocketBadRequests(t *testing.T) {
 		defer terminalSessionsMu.Unlock()
 		return len(terminalSessions) == 0
 	})
+
+	// 发送失败分支也要收尾录制：Close 回填 durationMs（0=进行中），不留悬挂文件
+	recs, err := s.db.ListTerminalRecordings(10)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("recording rows = %d, err = %v", len(recs), err)
+	}
+	if recs[0].DurationMs <= 0 {
+		t.Fatalf("recording not finished on send-failure branch: durationMs = %d", recs[0].DurationMs)
+	}
 }
 
 // ============ 桌面 ============

@@ -155,6 +155,7 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 
 	if err := agent.SendMessage(msg); err != nil {
 		log.Printf("Failed to send proxy start message: %v", err)
+		session.recorder.Close() // 已开的录制文件与元数据行照常收尾（其余出口都走这条）
 		conn.WriteJSON(map[string]interface{}{
 			"type":    "error",
 			"message": "Failed to establish connection to agent",
