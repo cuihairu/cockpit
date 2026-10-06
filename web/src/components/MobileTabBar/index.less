@@ -1,0 +1,36 @@
+// 底部导航（<768px 渲染，见组件内 Grid.useBreakpoint）：fixed 吸底 +
+// safe-area（iPhone 底部横条）适配。色彩直引 SettingsContext 写入的
+// 皮肤 CSS 变量（带默认皮肤兜底值），明暗随主题。
+.mobile-tabbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: stretch;
+  height: calc(52px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--cockpit-chrome, #fff);
+  border-top: 1px solid var(--cockpit-border, #e2e8f0);
+}
+
+.mobile-tabbar-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--cockpit-text-muted, #64748b);
+  font-size: 11px;
+  text-decoration: none;
+
+  .anticon {
+    font-size: 18px;
+  }
+
+  &.active {
+    color: var(--cockpit-primary, #e11d8f);
+  }
+}
