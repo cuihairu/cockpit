@@ -224,7 +224,7 @@
 
 ## 移动端（Flutter，iOS + Android）
 
-设计：[mobile-design](./mobile-design.md)。前置：Android 真机（或模拟器）安装 debug APK（CI `Mobile` workflow artifact 或本地 `flutter build apk --debug`）；server 可达（公网或同网段）。iOS 构建需 macOS + Xcode（本仓库 CI 不构建 iOS，见 D8）。
+设计：[mobile-design](./mobile-design.md)。前置：Android 真机（或模拟器）安装 debug APK（CI `Mobile` workflow artifact 或本地 `flutter build apk --debug`）；server 可达（公网或同网段）。iOS 编译验证已闭环到 CI macOS runner（`Mobile` workflow build-ios job，无签名 debug 构建，见 D8）；iOS 真机安装与上架签名仍需自有 Mac/账号，下述清单 iOS 侧暂以 Android 真机为准。
 
 - [ ] 首启引导：输入 server 地址 → `/health` 通过 → 落盘进入登录页；错误地址的失败呈现可读
 - [ ] 登录：用户名密码 → 开启 TOTP 的账号进入验证码二步 → 成功后底部四 tab 可用
