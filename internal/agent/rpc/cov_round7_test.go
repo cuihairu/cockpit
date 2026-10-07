@@ -171,8 +171,14 @@ func TestCovOverlayWgAndFRP(t *testing.T) {
 	}
 
 	// frpc admin 连接失败 + frps admin 正常：整体 degraded、两端各归各
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"proxies":[{"a":1},{"a":2}],"tcp":[]}`))
+	// （frps 走 /api/serverinfo 的 proxyTypeCount 求和——真机 0.61.2 实证
+	// frps 无 /api/status）
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/serverinfo" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`{"version":"0.51.3","proxyTypeCount":{"tcp":2,"udp":0}}`))
 	}))
 	t.Cleanup(srv.Close)
 	t.Setenv("COCKPIT_FRPC_ADMIN", "127.0.0.1:1") // 死地址 → 连接失败
@@ -228,6 +234,57 @@ func TestCovFetchFRPAdminTunnelCount(t *testing.T) {
 	}
 	mode = "ok"
 	n, err := fetchFRPAdminTunnelCount(addr)
+	if err != nil || n != 3 {
+		t.Fatalf("count: n=%d err=%v", n, err)
+	}
+}
+
+// TestCovFetchFRPSAdminProxyCount frps 管理面（/api/serverinfo 的
+// proxyTypeCount 求和）：连接失败 / 非 200 / 坏 JSON / 缺 proxyTypeCount /
+// 成功求和。frps 无 /api/status（真机 0.61.2 实证 404），与 frpc 客户端分流
+func TestCovFetchFRPSAdminProxyCount(t *testing.T) {
+	if _, err := fetchFRPSAdminProxyCount("127.0.0.1:1"); err == nil {
+		t.Fatal("expect dial error")
+	}
+	var mode string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		switch mode {
+		case "status500":
+			http.Error(w, "boom", http.StatusInternalServerError)
+		case "badjson":
+			w.Write([]byte("not-json"))
+		case "nocount":
+			w.Write([]byte(`{"version":"0.61.2"}`))
+		case "halfbody":
+			// 声明超长 Content-Length 但只写半截 → 客户端读 body 报错
+			w.Header().Set("Content-Length", "1000")
+			w.Write([]byte(`{"vers`))
+		default:
+			w.Write([]byte(`{"version":"0.61.2","proxyTypeCount":{"tcp":2,"udp":1}}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	addr := srv.Listener.Addr().String()
+
+	mode = "status500"
+	if _, err := fetchFRPSAdminProxyCount(addr); err == nil || !strings.Contains(err.Error(), "status 500") {
+		t.Fatalf("500: %v", err)
+	}
+	mode = "badjson"
+	if _, err := fetchFRPSAdminProxyCount(addr); err == nil || !strings.Contains(err.Error(), "invalid admin api json") {
+		t.Fatalf("badjson: %v", err)
+	}
+	mode = "nocount"
+	n, err := fetchFRPSAdminProxyCount(addr)
+	if err != nil || n != 0 {
+		t.Fatalf("nocount: n=%d err=%v", n, err)
+	}
+	mode = "halfbody"
+	if _, err := fetchFRPSAdminProxyCount(addr); err == nil {
+		t.Fatal("halfbody: expect read error")
+	}
+	mode = "ok"
+	n, err = fetchFRPSAdminProxyCount(addr)
 	if err != nil || n != 3 {
 		t.Fatalf("count: n=%d err=%v", n, err)
 	}

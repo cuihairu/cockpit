@@ -136,7 +136,17 @@
 设计：[overlay-design](./overlay-design.md)。前置：ZeroTier Central / Tailscale 管理 API token；装 ZeroTier/Tailscale/WireGuard/frp 的真实主机若干。
 
 - [ ] 运行态观测：真实 peers/interfaces 快照（wg 确认私钥/预共享密钥不出现）；跨 agent 同节点按最低延迟合并、来源徽标正确
-- [ ] frp 分级观测：零配置只出版本+进程；配 admin 地址后隧道计数出现
+- [x] frp 分级观测：零配置只出版本+进程；配 admin 地址后隧道计数出现
+  （2026-10-07，scripts/acceptance/overlay/probe-frp.sh O1-O3 全 PASS——容器内
+  真实 frp 0.61.2（frps bind 7100 + admin 7400、frpc admin 7500 + 一条 tcp
+  proxy、loginFailExit=false 防首连撞未监听即永久退出）：O1 零配置 status=ok +
+  version + 双进程 running 且无 tunnels/proxies 键；O2 双 admin 地址 →
+  frpc.tunnels=1、frps.proxies=1；O3 frpc admin 死端口 → status=degraded +
+  adminError，frps 侧不受影响。**验收逮到并修复真缺陷**：frps 没有 frpc 的
+  `/api/status`（真机 404——原实现调它恒 adminError 404 + degraded，frps
+  admin 从未在真 frp 上工作过）；修为 frps 走 dashboard 稳定路由
+  `/api/serverinfo` 的 proxyTypeCount 求和（fetchFRPSAdminProxyCount）+ 单测
+  （含半截 body 读错分支），overlay-design.md D7 与数据源表措辞同步修正）
 - [ ] 云端管理：真 token 拉取 ZT 网络/成员与 TS 设备列表；授权/取消授权、除名、删除四类变更端到端生效（云端后台复核）
 - [ ] 未纳管设备识别：云端手动加一台不入面板的设备 → 「未纳管」徽标出现
 - [ ] agent 身份上报：本机身份 chip 的 ZT node id / TS device id 与云端同键对照 → 「面板纳管」徽标

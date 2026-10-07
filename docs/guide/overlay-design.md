@@ -40,7 +40,7 @@
 | D4 | 探测条件 | `zerotier-cli` / `tailscale` / `wg` / `frpc\|frps` 任一 LookPath 通过 → `overlay` capability；provider 内各 reader 再自检，缺席工具返回 `unavailable` | 门在 detector、粒度在 reader；一台装两个工具也只注册一个 provider |
 | D5 | RPC 方法 | 单方法 `overlay.status` 一次返回全部工具快照 | 四类都是只读快照，个人场景 peers 个位数到几十，一次拉齐省去前端多次往返；总量保护：每工具 peers 截断 200 |
 | D6 | **密钥安全** | 输出字段**白名单构造**：`wg show dump` 的 private key / preshared key 字段一律不进响应；ZeroTier/Tailscale/frp 输出天然无密钥 | wg dump 文本含私钥与预共享密钥，白名单比黑名单删除可靠 |
-| D7 | frp 分级观测 | 零配置：LookPath + 版本 + 进程存活；`COCKPIT_FRPC_ADMIN` / `COCKPIT_FRPS_ADMIN`（`host:port`）配置后调 admin API `/api/status` 拿隧道级状态 | frp 无状态 CLI；admin 端口是可选配置，不能为观测强求改用户 frp 配置 |
+| D7 | frp 分级观测 | 零配置：LookPath + 版本 + 进程存活；`COCKPIT_FRPC_ADMIN` / `COCKPIT_FRPS_ADMIN`（`host:port`）配置后调 admin API 拿隧道级状态——两侧路由不同（真机 frp 0.61.2 实证）：frpc `GET /api/status`（隧道表计数）、frps `GET /api/serverinfo`（`proxyTypeCount` 求和；frps 无 `/api/status`，调它 404） | frp 无状态 CLI；admin 端口是可选配置，不能为观测强求改用户 frp 配置 |
 | D8 | REST 挂载 | `GET /api/agents/{id}/overlay/status`，serveAPI `/agents/` 分支，JWT；浏览类**不记审计**（同 logs/cron 浏览口径） | M2 出现授权/除名等变更操作时才引入审计 |
 | D9 | 持久化 | 不落库——CLI 即事实源，server 纯转发 | 无状态同步问题；「全网视角」由前端逐 agent 拉取聚合 |
 | D10 | CLI 执行 | 每命令 5s 超时（context），argv 直传不经 shell，输出 1MB 截断 | tailscale status 在大网下可达百 ms 级，5s 兜底足够；同 logs 的纪律 |
@@ -101,7 +101,7 @@ WireGuard 取最近握手 < 3 分钟、frp 取 admin API 连通。
 | ZeroTier | `zerotier-cli -j listnetworks` / `-j listpeers` | JSON；peers 的 `paths[]` 取 `active` 且 `preferred` 的一条为 endpoint | 无密钥字段 |
 | Tailscale | `tailscale status --json --peers`（旧版不认 `--peers` 则回退 `status --json`） | JSON；`Self` + `Peer{}`；`CurAddr` → endpoint、`Relay` → relay | 无密钥字段 |
 | WireGuard | `wg show all dump` | 行式表格；interface 行取 listen port / pubkey，peer 行取 endpoint / allowed-ips / latest-handshake / transfer | **interface 行 private key、peer 行 preshared key 字段丢弃**（白名单字段另构输出） |
-| frp | `frpc -v` / `frps -v`、`pgrep`、admin API `/api/status`（D7） | JSON；frps 取 proxy 汇总，frpc 取隧道表 | admin API 响应不含 token |
+| frp | `frpc -v` / `frps -v`、`pgrep`、admin API（D7：frpc `/api/status`、frps `/api/serverinfo`） | JSON；frps 取 proxyTypeCount 汇总，frpc 取隧道表 | admin API 响应不含 token |
 
 ### 校验与保护
 

@@ -261,7 +261,7 @@ func (p *OverlayProvider) readFRP() *overlayTool {
 		}
 	}
 	if admin := os.Getenv("COCKPIT_FRPS_ADMIN"); admin != "" {
-		proxies, err := fetchFRPAdminTunnelCount(admin)
+		proxies, err := fetchFRPSAdminProxyCount(admin)
 		if err != nil {
 			t.Status = "degraded"
 			extra["frps"].(map[string]interface{})["adminError"] = err.Error()
@@ -309,6 +309,37 @@ func fetchFRPAdminTunnelCount(addr string) (int, error) {
 		if json.Unmarshal(raw, &rows) == nil {
 			count += len(rows)
 		}
+	}
+	return count, nil
+}
+
+// fetchFRPSAdminProxyCount frps 管理面代理数：/api/serverinfo 的 proxyTypeCount
+// 求和。frps 没有 frpc 的 /api/status（真机 frp 0.61.2 实证 404——那是 frpc
+// 的路由），frps dashboard 的稳定路由是 /api/serverinfo。
+func fetchFRPSAdminProxyCount(addr string) (int, error) {
+	client := &http.Client{Timeout: overlayAdminTimeout}
+	url := "http://" + strings.TrimPrefix(strings.TrimPrefix(addr, "http://"), "https://") + "/api/serverinfo"
+	resp, err := client.Get(url)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, overlayMaxOutput))
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("admin api status %d", resp.StatusCode)
+	}
+	var doc struct {
+		ProxyTypeCount map[string]int `json:"proxyTypeCount"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return 0, fmt.Errorf("invalid admin api json: %w", err)
+	}
+	count := 0
+	for _, n := range doc.ProxyTypeCount {
+		count += n
 	}
 	return count, nil
 }
