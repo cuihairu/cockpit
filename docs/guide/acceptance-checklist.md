@@ -47,7 +47,7 @@
 - [ ] 异地保留：真实 S3/B2 远端推送成功；断网/错密钥时 `backup.remote-failed` 独立通知且不改任务终态；文件行「补传」成功——异地云凭据不可本机验证，标记为阻塞
 - [ ] rclone 网盘限速场景下的超时与错误呈现——Docker 主机+rclone 配置不可本机验证，标记为阻塞
 - [ ] GB 级完整链：大目录打包 → 推送 → 换机恢复——Docker 主机+大存储不可本机验证，标记为阻塞
-- [ ] 前置命令钩子：`mysqldump` / `pg_dump` 真库导出产物在备份内；钩子失败/超时中止本次（不打包不推送不清理）——Docker 主机+数据库不可本机验证，标记为阻塞
+- [x] 前置命令钩子：`mysqldump` / `pg_dump` 真库导出产物在备份内；钩子失败中止本次（不打包不推送不清理）——真机容器验收（2026-10-07，探针 `scripts/acceptance/agent-backup/probe-hook.sh` B0-B3 4/4 PASS，双容器 debian:12+mariadb-server 真库 / postgres:16-alpine 真库 + 静态 agent）：pre_hook 经 sh -c 真库导出（`mysqldump accdb` socket 免密、`PGPASSWORD pg_dump -U postgres` TCP）产物落源目录随打包进归档，下载解包逐字节断言 `site/db-acc.sql` 含 INSERT+哨兵行、`site/db-pg.sql` 含 COPY+哨兵行（B1/B3）；失败短路——`echo …>&2; exit 3` → run=failed，Error=`pre-hook failed: exit status 3: hook-boom-stderr`（退出码+stderr 摘要透传），File 空且产物列表 0 件（不打包，D28）（B2）；超时分支单测盖（`backupHookTimeout` 注入 + killHookGroup 整组杀，5min 真等不在探针复刻）；`[hook]` 日志前缀无 API 读取口（备份运行仅 runs 列表无 task log 端点）、单测盖（backup_hook_test.go）
 
 ## 面板数据库备份（server 侧）
 
