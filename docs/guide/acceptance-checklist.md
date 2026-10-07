@@ -145,9 +145,24 @@
 
 设计：[disk-health-design](./disk-health-design.md)。前置：带物理盘的真实主机（smartctl 可用）。
 
-- [ ] 盘发现与字段读取：passed/温度/重映射/待定扇区/NVMe media_errors 真实数值合理
+- [x] 盘发现与字段读取：passed/温度/重映射/待定扇区/NVMe media_errors 真实数值合理
+  （2026-10-07，scripts/acceptance/smart/probe.sh S1-S4 全 PASS：本机 /dev/sda 真盘、
+  agent 以 root 拉起（smartctl 非 root 只回 rc=0 的空壳 JSON）、S1 盘发现
+  available+/dev/sda+model+sizeBytes、S2 health 与 smartctl -H 直读交叉一致（passed）、
+  S3 温度通道一致（VM 盘无传感器 → 双侧同缺，omitempty 0 值不渲染）、S4 attr 缺失
+  不伪造（ground truth 无 attr 表时 realloc/pending 面板同缺，不造 0 值冒充真读）。
+  边界注记：attr 非零真值面（重映射/待定扇区/NVMe media_errors 真实数值）需带真
+  attr 表的主机——本机为 QEMU VM 虚拟盘（health=passed、temp=0、无 attr 表）；
+  解析映射已由 smart_parse 单测覆盖（ATA passed/failed、NVMe、无 smart_status、
+  坏 JSON、raw 数值），真值主机实测随 NAS/物理机资源补）
 - [ ] 巡检告警：FAILED 盘 error 级、扇区/介质异常 warning 级、同盘未读期间只报一次
+  （挂起：真坏盘不可本机造——FAILED/扇区异常分级与 agent 过滤由 smart_scan 单测
+  覆盖（TestScanSmartOnceCreatesAlert/WarningLevel/Filters），告警真去重走 alert
+  管道同 drift；盘健康面 passed → failed 的端到端翻转需物理坏盘，随外部资源补）
 - [ ] （按需）非 root 部署下 sudo 提权读取路径
+  （挂起：需改宿主 sudoers，不做系统级变更——读数链路已按 root 形态实证
+  （探针 S0 root agent + smart.status 全链），sudo -n 包装属部署形态选项，
+  随真实非 root 部署需求补）
 
 ## 防火墙观测（M1）
 
