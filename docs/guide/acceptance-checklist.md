@@ -33,7 +33,7 @@
 - [x] compose 完整语义：环境变量、volumes、自定义网络、depends_on 启动顺序（2026-09-28，.env 注入 printenv 实证；命名卷 db 写 → app 读 + depends_on 顺序；自定义 bridge 网络 + 服务间 DNS）
 - [x] restart / pull 动作真实生效；部署历史时间线与部署日志可对应（2026-09-28，pull/restart 任务 success，历史 finishedAt 回填含诚实 failed）
 - [x] 模板库一键新建与 import 路径（2026-09-28，模板/import 为 UI 填充路径，落库即常规 create+up——真机以原始 compose 等价验证，UI 链路由 vitest 覆盖）
-- [ ] stacks 目录不存在/无权限时列表页目录自检告警的呈现——部分完成（2026-09-28；dirError 一截已随 2026-09-29 列表面修复完成，见 todo.md stacks 条目）：目录不存在→自动创建 0700、dirWritable=true 实证；路径非法→agent 报错透传修复已落地；剩余：无权限场景需非 root agent
+- [x] stacks 目录不存在/无权限时列表页目录自检告警的呈现（2026-10-07 收口，scripts/acceptance/stacks/probe-dir.sh K1-K4 全 PASS：本机 cui agent 即非 root 形态、`COCKPIT_STACKS_DIR` 指 root:root 0700 目录——K1 单 agent stack.list 失败 → 502 错误体附 info.dirError="write probe: … permission denied"+dirWritable=false；K2 聚合 GET /api/stacks 的 agentInfo 同样带出（web 目录告警实际消费面）；K3/K4 对照目录不存在→agent 自动创建 0700、dirWritable=true+composeVersion。dirError→列表页告警横幅呈现已于 2026-09-29 列表面修复落地（Stacks/index.tsx info.dirError 渲染 + server 侧 dirError 随 info 下发单测），本探针补齐真实非 root agent 的 E2E 场景。此前 2026-09-28 已证：目录不存在自动创建、路径非法报错透传）
 
 ## 备份与恢复（agent 侧）
 
