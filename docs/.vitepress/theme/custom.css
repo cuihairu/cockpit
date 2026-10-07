@@ -19,12 +19,13 @@
      纯色（2026-10 主题审核批：字体渐变全站禁用） */
 
   --vp-custom-outline: #b11964;
+}
 
-  .VPFeature .icon {
-    border-radius: 10px;
-    background-color: var(--vp-c-brand-soft);
-    color: var(--vp-c-brand-1);
-  }
+/* feature 图标：品牌 soft 底 + brand 前景色（原嵌在 :root 内选择器不生效，移正） */
+.VPFeature .icon {
+  border-radius: 10px;
+  background-color: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
 }
 
 /* 暗色：亮色系主色压暗会发闷，整体提一档 */
