@@ -190,12 +190,15 @@ var wgHandshakeOnline = 3 * time.Minute
 //
 // dump 行格式（tab 分隔，首列为 interface 名）：
 //
-//	interface 行: <iface> <private-key> <listen-port> <fwmark>
+//	interface 行: <iface> <private-key> <public-key> <listen-port> <fwmark>
+//	              （wireguard-tools v1.0.20200513+ 有 public-key 列；
+//	              旧版为 <iface> <private-key> <listen-port> <fwmark>）
 //	peer 行:      <iface> <public-key> <preshared-key> <endpoint>
 //	              <allowed-ips> <latest-handshake> <rx> <tx> <keepalive>
 //
 // 私钥与预共享密钥列（各行的敏感列）不进入返回值：interface 行只取
-// listen-port（字段数 >= 9 视为 peer 行，其余按 interface 行处理）。
+// listen-port——fwmark 恒为末列，port 取倒数第二列，两代布局兼容
+// （字段数 >= 9 视为 peer 行，其余按 interface 行处理）。
 func parseWGDump(out []byte, now time.Time) []map[string]interface{} {
 	type wgIface struct {
 		name   string
@@ -235,9 +238,11 @@ func parseWGDump(out []byte, now time.Time) []map[string]interface{} {
 			iface.peers = append(iface.peers, peer)
 			continue
 		}
-		// interface 行：只取 listen-port（fields[2]），private-key（fields[1]）丢弃
+		// interface 行：只取 listen-port（倒数第二列，fwmark 恒为末列——
+		// 新版布局 port 在 fields[3]、旧版在 fields[2]）；
+		// private-key/public-key 列丢弃
 		if len(fields) >= 3 {
-			iface.listen = fields[2]
+			iface.listen = fields[len(fields)-2]
 		}
 	}
 

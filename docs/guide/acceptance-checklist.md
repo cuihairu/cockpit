@@ -135,7 +135,20 @@
 
 设计：[overlay-design](./overlay-design.md)。前置：ZeroTier Central / Tailscale 管理 API token；装 ZeroTier/Tailscale/WireGuard/frp 的真实主机若干。
 
-- [ ] 运行态观测：真实 peers/interfaces 快照（wg 确认私钥/预共享密钥不出现）；跨 agent 同节点按最低延迟合并、来源徽标正确
+- [x] 运行态观测 wg 半：真实 interfaces 快照 + 私钥/预共享密钥不出现
+  （2026-10-07，scripts/acceptance/overlay/probe-wg.sh W1-W3 全 PASS——
+  NET_ADMIN 容器真 wg0（wireguard-tools 建接口，内核 wireguard 模块宿主侧
+  自动加载）：W1 真实快照 wg0/listenPort=51820/peerCount=1/endpoint 与
+  allowed-ips 原样；W2 私钥与预共享密钥 hex 不在响应（D6 白名单）；W3 peer
+  公钥（公开数据）原样。**验收逮到并修复真缺陷**：新版 wireguard-tools
+  （v1.0.20200513+）interface 行多一列 public-key（真机 1.0.20210914 实证
+  `<iface> <私钥> <公钥> <端口> <fwmark>` 五列），旧解析按固定下标取
+  fields[2] 把公钥当 listenPort 渲染——私钥未泄（fields[1] 恒弃），但端口
+  字段显示为一段 base64；修为取倒数第二列（fwmark 恒末列）两代布局兼容 +
+  新布局回归单测，包覆盖保 100.0%）
+- [ ] 运行态观测 ZT/TS 半 + 跨 agent 同节点合并：真实 peers 快照与合并徽标
+  （挂起：需真 zerotier 网络 / tailscale tailnet 登录与第二台主机，云端与
+  daemon 侧不可本机造，随外部资源补；解析/合并逻辑单测已盖）
 - [x] frp 分级观测：零配置只出版本+进程；配 admin 地址后隧道计数出现
   （2026-10-07，scripts/acceptance/overlay/probe-frp.sh O1-O3 全 PASS——容器内
   真实 frp 0.61.2（frps bind 7100 + admin 7400、frpc admin 7500 + 一条 tcp

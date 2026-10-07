@@ -176,6 +176,28 @@ func TestParseWGDumpStripsSecrets(t *testing.T) {
 	}
 }
 
+// 新版 wireguard-tools（v1.0.20200513+）interface 行多一列 public-key——
+// 真机 wg 1.0.20210914 实证布局：<iface> <private-key> <public-key>
+// <listen-port> <fwmark>。按旧固定下标取 fields[2] 会把公钥当 listenPort
+// （验收探针 W1 实测逮到）；listen-port 取倒数第二列两代兼容
+func TestParseWGDumpModernLayout(t *testing.T) {
+	dump := "wg0\tSECRET-PRIVATE-KEY\tIFACE-PUBKEY=\t51820\toff\n"
+	result := parseWGDump([]byte(dump), time.Unix(1789000100, 0))
+	blob := marshalJSONForTest(result)
+	if strings.Contains(blob, "SECRET") {
+		t.Fatal("modern layout leaked private key (D6 violation)")
+	}
+	if strings.Contains(blob, "IFACE-PUBKEY") {
+		t.Fatal("interface public key should not be rendered")
+	}
+	if len(result) != 1 {
+		t.Fatalf("len = %d, want 1", len(result))
+	}
+	if got := result[0]["listenPort"]; got != "51820" {
+		t.Fatalf("listenPort = %v, want 51820（公钥列不得挤占 port）", got)
+	}
+}
+
 func TestParseWGDumpOnlineWindow(t *testing.T) {
 	now := time.Unix(1789000100, 0)
 	// 9 字段 peer 行：iface\tpub\tpsk\tendpoint\tallowed\thandshake\trx\ttx\tkeepalive
