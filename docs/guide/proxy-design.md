@@ -91,6 +91,16 @@ reload                        失败 → 回滚旧内容（或删除新文件）
   reload 失败处理（回滚）；
 - meta 注释：单行压缩 JSON，`# cockpit:meta {...}`；不含敏感信息（证书是路径引用）。
 
+> 拦截语义注记（2026-10-07 真机探针实证，措辞修正）：新片段的**语法/证书错误由
+> reload 的前置解析同步拦截**——`nginx -s reload` 的 -s 进程在发 SIGHUP 前先自解
+> 析全量配置，坏片段在该进程即报 emerg、退出非零 → 走上述回滚路径；pre-write 的
+> `nginx -t` 实际只护存量配置（apply 前提健康检查）。**bind 冲突是唯一异步盲区**：
+> -s 进程不 bind socket，master 侧 bind 失败（如端口已被占）落在 error.log，apply
+> 返回 200 且片段留盘，但旧配置继续服役——数据面安全（「apply 失败站点照旧」仍成
+> 立），上报层无法同步感知；systemctl 模式同构（debian nginx.service 的 ExecReload
+> 即 `nginx -s reload`）。同步错误摘要如需闭环，候选做法是 reload 后嗅探 error.log
+> （启发式），留 M2 评估。
+
 ### 渲染模板（http 站点示例）
 
 ```nginx

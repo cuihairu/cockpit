@@ -382,7 +382,8 @@ func (p *NginxProvider) reload() error {
 func systemctlMissing(stderr string) bool {
 	s := strings.ToLower(stderr)
 	return strings.Contains(s, "not found") || strings.Contains(s, "不存在") ||
-		strings.Contains(s, "failed to connect") // 无 systemd 运行（容器内）
+		strings.Contains(s, "failed to connect") || // 无 systemd 运行（容器内）
+		strings.Contains(s, "not been booted") // systemctl 二进制在但 systemd 未运行（容器手装 systemd 包）
 }
 
 // parseMeta 从片段内容首行解析 meta 注释

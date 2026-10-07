@@ -316,4 +316,16 @@ func TestProxyReloadFallsBackToSignal(t *testing.T) {
 			t.Fatalf("should not fall back to signal, calls = %v", runner2.calls)
 		}
 	}
+
+	// systemctl 二进制在但 systemd 未运行（容器手装 systemd 包）→ 应 fallback：
+	// 「System has not been booted with systemd」不是真故障，只是无 init 可言
+	runner3 := &mockNginxRunner{systemctlErr: errors.New("System has not been booted with systemd (systemd not in use?): Protocol not supported.")}
+	p3 := newNginxTestProvider(t, runner3)
+	site3 := &ProxySite{Name: "nb", ServerNames: []string{"nb.com"}, Upstream: "1.1.1.1:80", Scheme: "http"}
+	if _, err := p3.Call("site.apply", siteParams(t, site3)); err != nil {
+		t.Fatalf("apply should succeed via fallback on not-been-booted: %v", err)
+	}
+	if !strings.Contains(strings.Join(runner3.calls, " | "), "nginx -s reload") {
+		t.Fatalf("expected signal fallback for not-been-booted, calls = %s", strings.Join(runner3.calls, " | "))
+	}
 }

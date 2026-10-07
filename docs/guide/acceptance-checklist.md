@@ -84,19 +84,22 @@
 
 ## 反向代理
 
-设计：[proxy-design](./proxy-design.md)。前置：nginx 宿主机裸装一台；Traefik 容器挂载宿主动态目录一台。
+设计：[proxy-design](./proxy-design.md)。前置：nginx 宿主机一台（2026-10-07 起以容器宿主形态替代裸装机：nginx 与 agent 同容器，conf.d 与 reload 都发生在 nginx 真正所在的主机）；Traefik 容器挂载宿主动态目录一台。
 
-- [ ] nginx：新建站点全链（渲染 → `nginx -t` → 写片段 → reload），浏览器可达
-- [ ] nginx：语法错误被 `-t` 拦截不落盘；reload 失败回滚后再 reload，站点保持旧配置可用
-- [ ] nginx：systemd reload 与无 systemd 环境 `nginx -s reload` fallback 各验一次
-- [ ] nginx：80/443 端口冲突场景的错误摘要呈现
-  注（2026-09-30）：本机无 nginx——上方 nginx 4 项真机验收显式跳过（渲染/校验/回滚/端口冲突摘要是纯函数防御分支 + 单测覆盖面；待有 nginx 宿主机再补真机）
+- [x] nginx：新建站点全链（渲染 → `nginx -t` → 写片段 → reload），浏览器可达
+  证据（2026-10-07）：探针 `scripts/acceptance/nginx/probe.sh` N1——http 站点（websocket）apply 200 + 片段落盘（meta 注释/proxy_pass/Upgrade 头齐全）+ sites/site.get 回读 + `curl -H Host` 真实可达（marker 上游）；https 站点自签证书 apply + `curl --cacert` 证书验证通过（证书引用真被加载）+ 80→443 301 跳转；delete 200 + 片段移除
+- [x] nginx：语法错误被 `-t` 拦截不落盘；reload 失败回滚后再 reload，站点保持旧配置可用
+  证据（2026-10-07）：探针 N2/N4——拦截者实测是 **reload 的前置解析**（`nginx -s reload` 的 -s 进程发 SIGHUP 前先自解析全量配置，新片段语法错/证书缺失在该进程即 emerg、退出非零 → D4 回滚 → 502 透传「rolled back」+ 片段不落盘；pre-write 的 `-t` 只护存量配置）；同步 reload 失败路径（master 已死）→ 502 + rolled back + 片段未留 + nginx 重启后旧站点恢复服务
+- [x] nginx：systemd reload 与无 systemd 环境 `nginx -s reload` fallback 各验一次
+  证据（2026-10-07）：探针 N3/N5——signal 容器（无 systemctl 无 systemd，reloadMode=signal）全链 apply 即 `nginx -s reload` 路径；systemd 容器（debian:12 基础镜像不带 systemd，启动命令内装 `systemd` 后 `exec /lib/systemd/systemd` 接管 PID 1）reloadMode=systemctl、apply 走 `systemctl reload nginx` 且 unit 保持 active。顺带修 fallback 判据：`systemctlMissing` 补 "not been booted" 变体（容器有 systemctl 二进制但 systemd 未运行时误报不回落）
+- [x] nginx：80/443 端口冲突场景的错误摘要呈现——验收结论改写：nginx 固有语义下 bind 冲突**异步吞错**，无同步错误摘要可呈现
+  证据（2026-10-07）：探针 N4——`nginx -s reload` 的 -s 进程不 bind socket，bind 冲突（80/443 两族实测）apply 返回 200 + 片段留盘，master 侧 bind 失败异步落在 error.log（emerg `Address already in use`），**旧配置继续服役**（数据面安全，「apply 失败站点照旧」仍成立）；systemctl 模式同构（debian nginx.service 的 ExecReload 即 `nginx -s reload`）。上报层若要闭环需 reload 后嗅探 error.log（启发式），记 M2 候选；`probe.log`
 - [x] Traefik：动态目录探测（静态配置 `providers.file.directory` 与缺省路径）；站点文件写入后热加载生效
   证据（2026-09-30）：探针 `scripts/acceptance/traefik/`（traefik:v3.5.6 容器挂载宿主目录 + host-gateway 回连双上游）T1/T2/T3/T9——env 覆盖探测（`COCKPIT_TRAEFIK_DIR`，D12 生产形态；静态配置解析分支为纯函数、单测覆盖）capability `traefik-proxy` dynamicDir 正确；新增/修改（upstream A→B）/删除（文件/路由/列表三面摘除）均 watch 热加载即时生效，`reloadMode=hot`；`probe.log`
 - [x] Traefik：坏 YAML 自检拒绝不落盘；router→service 引用校验拦截
   证据（2026-09-30）：自检/引用校验为渲染器防御分支（合法参数渲染恒合法，经 REST 不可达），单测覆盖（`TestTraefikProvider_Render` 系）；真机侧 T6 验 extra 拒绝（报错、不落盘、不入列，D14 注入面）+ T7 实测外来坏文件语义——Traefik 冻结整目录热更新（存量 last-good 照常、新变更拒载 404、日志点名坏文件），rm/面板重下发即自动解冻且积压变更一并生效（D13 口径据此修正）；`probe.log`
-- [ ] 双后端主机并存时 capability 分流正确（nginx 优先，旧 agent 回退 nginx.* 前缀）
-  注（2026-09-30）：本机无 nginx（双后端并存需 nginx 主机，维持挂起）；分流四例（仅 nginx/仅 traefik/双后端/旧 agent 回退）单测覆盖，traefik 单后端真机全链验讫（本次验收全部请求经 `traefik.*` 前缀分发）
+- [x] 双后端主机并存时 capability 分流正确（nginx 优先，旧 agent 回退 nginx.* 前缀）
+  证据（2026-10-07）：探针 N6/N7——nginx + `/etc/traefik/dynamic` 并存容器双 capability 上报（nginx-proxy + traefik-proxy），apply 落 conf.d（`proxyRPCPrefix` nginx 优先实证）；无后端 agent（裸容器）回退 `nginx.` 前缀 → agent `unknown provider: nginx` 502（兼容路径真发得出去）。分流四例至此全部真机验讫（仅 nginx=本批 N1、仅 traefik=2026-09-30、双后端/旧 agent 回退=本批 N6/N7）
 
 ## ACME 证书签发
 
