@@ -173,6 +173,16 @@ func TestServiceHealthScanLoopLifecycle(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("scan loop did not exit on ctx cancel")
 	}
+
+	// 二段：ctx 已取消时再起循环——启动等待的 ctx 可中断 select 直接走
+	// Done 分支退出（等待期可中断分支的覆盖；driftScanLoop 同款语义）
+	done2 := make(chan struct{})
+	go func() { s.serviceHealthScanLoop(); close(done2) }()
+	select {
+	case <-done2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scan loop did not exit on cancelled ctx during start wait")
+	}
 }
 
 // TestServiceHealthScanListError 配置清单查询失败：整轮放弃不 panic

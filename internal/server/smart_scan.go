@@ -77,8 +77,15 @@ func agentHasSmart(a *Agent) bool {
 
 // smartScanLoop 定时巡检循环（每分钟醒来对比间隔，间隔可动态改）
 func (s *Server) smartScanLoop() {
-	time.Sleep(smartScanStartWait)
-	ticker := time.NewTicker(smartScanTick)
+	// 启动等待改局部量 + ctx 可中断 select（driftScanLoop 同款）：关停不
+	// 留启动宽限期的僵尸 goroutine，泄漏循环也不再跨测试边界读包级节奏变量
+	startWait, tick := smartScanStartWait, smartScanTick
+	select {
+	case <-time.After(startWait):
+	case <-s.ctx.Done():
+		return
+	}
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
 	var lastScan time.Time

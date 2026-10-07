@@ -61,8 +61,15 @@ func (s *Server) SetAcmeScanInterval(seconds int) error {
 
 // acmeScanLoop 定时续期循环（每分钟醒来对比间隔，间隔可动态改）
 func (s *Server) acmeScanLoop() {
-	time.Sleep(acmeScanStartWait)
-	ticker := time.NewTicker(acmeScanTick)
+	// 启动等待改局部量 + ctx 可中断 select（driftScanLoop 同款）：关停不
+	// 留启动宽限期的僵尸 goroutine，泄漏循环也不再跨测试边界读包级节奏变量
+	startWait, tick := acmeScanStartWait, acmeScanTick
+	select {
+	case <-time.After(startWait):
+	case <-s.ctx.Done():
+		return
+	}
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
 	var lastScan time.Time

@@ -82,3 +82,22 @@ func TestCovScanLoopsDisabledInterval(t *testing.T) {
 	spawn(t, "smartScanLoop disabled", func(s *Server) func() { return s.smartScanLoop }, func(s *Server) error { return s.SetSmartScanInterval(0) })
 	spawn(t, "acmeScanLoop disabled", func(s *Server) func() { return s.acmeScanLoop }, func(s *Server) error { return s.SetAcmeScanInterval(0) })
 }
+
+// TestCovScanLoopsStartWaitCancel ctx 预先取消再起循环：启动等待的 ctx
+// 可中断 select 直接走 Done 分支退出（五循环改 driftScanLoop 同款后的
+// 新分支覆盖——关停不再留启动宽限期僵尸 goroutine）
+func TestCovScanLoopsStartWaitCancel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fn   func(s *Server) func()
+	}{
+		{"ddnsScanLoop", func(s *Server) func() { return s.ddnsScanLoop }},
+		{"nasScanLoop", func(s *Server) func() { return s.nasScanLoop }},
+		{"smartScanLoop", func(s *Server) func() { return s.smartScanLoop }},
+		{"acmeScanLoop", func(s *Server) func() { return s.acmeScanLoop }},
+	} {
+		s := covLoopServer(t)
+		s.cancel()
+		covWaitExit(t, tc.name+" start-wait cancel", covSpawnLoop(tc.fn(s)))
+	}
+}

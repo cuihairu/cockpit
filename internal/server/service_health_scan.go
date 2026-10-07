@@ -38,8 +38,16 @@ type serviceHealthEventView struct {
 // serviceHealthScanLoop 归集循环（smart_scan 同构：每 tick 醒来即扫，
 // 节奏固定无需动态间隔）
 func (s *Server) serviceHealthScanLoop() {
-	time.Sleep(serviceHealthScanStartWait)
-	ticker := time.NewTicker(serviceHealthScanTick)
+	// 启动等待改局部量 + ctx 可中断 select（driftScanLoop 同款）：关停不
+	// 留启动宽限期的僵尸 goroutine，泄漏循环也不再跨测试边界读包级节奏
+	// 变量构成数据竞争（CI -race 实证 2026-10-07）
+	startWait, tick := serviceHealthScanStartWait, serviceHealthScanTick
+	select {
+	case <-time.After(startWait):
+	case <-s.ctx.Done():
+		return
+	}
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	for {
 		select {
