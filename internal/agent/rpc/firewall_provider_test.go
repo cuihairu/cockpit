@@ -330,3 +330,115 @@ func TestFirewallCallUnknownAction(t *testing.T) {
 		t.Error("unsupported action should error")
 	}
 }
+
+func TestFirewallProviderType(t *testing.T) {
+	// RPC provider 类型 = firewall capability 名（注册表按此挂载）
+	if got := NewFirewallProvider(nil).Type(); got != "firewall" {
+		t.Errorf("Type() = %q, want firewall", got)
+	}
+}
+
+func TestFirewallStatusNftBadJSON(t *testing.T) {
+	// nft 退出 0 但输出非 JSON → 解析失败置 available=false + 原因（D8）
+	withFirewallBins(t, "nft")
+	p := NewFirewallProvider(firewallFakeRun(map[string][]byte{"nft": []byte("{not json")}, nil))
+	resp, err := p.Call("status", nil)
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	m := resp.(map[string]interface{})
+	if m["available"] != false {
+		t.Errorf("available = %v, want false", m["available"])
+	}
+	if e, _ := m["error"].(string); !strings.Contains(e, "invalid nft json") {
+		t.Errorf("error = %q, want parse failure note", e)
+	}
+}
+
+func TestFirewallStatusNftFailsNoIptablesTool(t *testing.T) {
+	// nft 在但读数失败，iptables-save 缺 → no firewall read tool available
+	withFirewallBins(t, "nft")
+	p := NewFirewallProvider(firewallFakeRun(nil, map[string]error{"nft": errors.New("exit 1")}))
+	resp, err := p.Call("status", nil)
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	m := resp.(map[string]interface{})
+	if m["available"] != false {
+		t.Errorf("available = %v, want false", m["available"])
+	}
+	if e, _ := m["error"].(string); e != "no firewall read tool available" {
+		t.Errorf("error = %q, want no-tool note", e)
+	}
+}
+
+func TestFirewallStatusIPv6Success(t *testing.T) {
+	// ip6tables-save 成功 → v6 表并入（family=ipv6）且计入 totalRules（D4）
+	withFirewallBins(t, "nft", "iptables", "iptables-save", "ip6tables-save")
+	runs := firewallFakeRun(map[string][]byte{
+		"iptables-save":  []byte(firewallIptablesSaveSample),
+		"ip6tables-save": []byte("*filter\n:INPUT DROP [0:0]\n-A INPUT -j ACCEPT\nCOMMIT\n"),
+	}, map[string]error{"nft": errors.New("exit 1")})
+	p := NewFirewallProvider(runs)
+	resp, err := p.Call("status", nil)
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	m := resp.(map[string]interface{})
+	if m["available"] != true {
+		t.Fatalf("available = %v, want true", m["available"])
+	}
+	if m["totalRules"] != 5 {
+		t.Errorf("totalRules = %v, want 5 (4 v4 + 1 v6)", m["totalRules"])
+	}
+	var v6 *firewallTable
+	tables := m["tables"].([]firewallTable)
+	for i := range tables {
+		if tables[i].Family == "ipv6" {
+			v6 = &tables[i]
+		}
+	}
+	if v6 == nil || v6.Name != "filter" {
+		t.Errorf("ipv6 table missing: %+v", tables)
+	}
+}
+
+func TestFirewallIptablesVariantNoMatch(t *testing.T) {
+	// --version 无 (nf_tables)/(legacy) 标注 → variant 置空
+	withFirewallBins(t, "iptables", "iptables-save")
+	runs := firewallFakeRun(map[string][]byte{
+		"iptables":      []byte("iptables v1.8.7"),
+		"iptables-save": []byte(firewallIptablesSaveSample),
+	}, nil)
+	p := NewFirewallProvider(runs)
+	resp, err := p.Call("status", nil)
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	m := resp.(map[string]interface{})
+	if v, _ := m["iptablesVariant"].(string); v != "" {
+		t.Errorf("iptablesVariant = %q, want empty", v)
+	}
+}
+
+func TestFirewallNftVersionProbeFails(t *testing.T) {
+	// nft --version 执行失败 → backendVersion 置空（读数本身不受影响）
+	withFirewallBins(t, "nft")
+	p := NewFirewallProvider(func(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+		if len(args) > 0 && args[len(args)-1] == "--version" {
+			return nil, nil, errors.New("exec format error")
+		}
+		return []byte(firewallNftSample), nil, nil
+	})
+	resp, err := p.Call("status", nil)
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	m := resp.(map[string]interface{})
+	if m["available"] != true {
+		t.Errorf("available = %v, want true", m["available"])
+	}
+	if v, _ := m["backendVersion"].(string); v != "" {
+		t.Errorf("backendVersion = %q, want empty", v)
+	}
+}

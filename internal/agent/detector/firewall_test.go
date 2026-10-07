@@ -60,6 +60,17 @@ func TestFirewallDetectorNone(t *testing.T) {
 	}
 }
 
+func TestFirewallDetectorPriorityAndName(t *testing.T) {
+	// 名称/优先级元数据（Priority 参与多检测器排序）
+	d := &FirewallDetector{}
+	if d.Name() != "firewall" {
+		t.Errorf("Name() = %q, want firewall", d.Name())
+	}
+	if d.Priority() != 30 {
+		t.Errorf("Priority() = %d, want 30", d.Priority())
+	}
+}
+
 func TestFirewallDetectorVersionRunFails(t *testing.T) {
 	// LookPath 命中但 --version 跑不动（坏安装）→ 视为不可用
 	withFirewallDetectorStubs(t, "nft")

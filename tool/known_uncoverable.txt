@@ -38,17 +38,16 @@ scripts/acceptance/server-backup/probe/main.go:315,606	1. main() 场景编排（
 scripts/acceptance/agent-backup/probe/main.go:662,1157	1. main() 场景编排（K0-K11 真机 server/agent 打包恢复/分块下载/调度 tick 停机重启/webhook 实收 + .acceptance 证据）
 scripts/acceptance/notify/probe/main.go:270,399	1. main() 场景编排（N0-N4 真机 server/webhook 接收器实收/审计面 + .acceptance 证据）
 
-# ---------- 2. 真机命令默认闭包（6 语句） ----------
+# ---------- 2. 真机命令默认闭包（13 语句） ----------
 
 scripts/acceptance/guac/probe/main.go:94,97	2. dockerExecCmd 默认闭包体（需真 docker exec；单测恒注入桩）
 scripts/acceptance/logs/probe/main.go:75,78	2. systemdRunCmd 默认闭包体（需真 sudo systemd-run）
 scripts/acceptance/logs/probe/main.go:79,82	2. journalCtlCmd 默认闭包体（需真 journalctl）
 scripts/acceptance/jobs/probe/main.go:66,68	2. pgrepCmd 默认闭包体（需真 pgrep；单测恒注入桩）
 scripts/acceptance/server-backup/probe/main.go:84,86	2. sqlite3Cmd 默认闭包体（需真 sqlite3；单测恒注入桩）
+internal/agent/detector/firewall.go:18,19	2. firewallRunVersion 默认闭包体（需真执行 <bin> --version；探测测试恒注入桩——同 journalCtlCmd 真机命令则）
 
-# ---------- 3. 死防御（13 语句） ----------
-
-internal/server/server.go:368,372	3. NewManagerWithConfig 错误分支（仅 fsnotify.NewWatcher 失败=inotify 实例耗尽可达；单测 watcher 泄漏撞 128 上限时才被顺带覆盖，环境事件不可确定性构造——本机不复现即红，登记兜底两环境）
+# ---------- 3. 死防御（2 语句） ----------
 
 scripts/acceptance/guac/probe/main.go:351,352	3. parseInstr len(Args)==0 防御（strings.Split 非空串恒 ≥1 段，不可达）
 internal/server/api_guacamole.go:240,241	3. collectGuacRecording 稳定后复 Stat 竞态防御（loop break 与复 Stat 之间无代码；仅外部并发 unlink 的微秒窗口可触发，单测不可确定性构造；复 Stat 取 info.Size() 供元数据，非冗余可删）
@@ -64,8 +63,8 @@ scripts/acceptance/agent-backup/probe/main.go:573,575	3. writeEvilTar gz.Close �
 
 # ---------- 4. 新增 Agent 服务面/启动时刻字段的测试回退路径（4 语句） ----------
 
-internal/agent/agent.go:122,123	3. startedAtOrNow 零值兜底分支（仅未走 NewAgent 的测试构造体触发；正常路径 startedAt 在 NewAgent 初始化时已设）
-internal/agent/agent.go:158,158	3. servicesRefreshLoop 取消上下文退出分支（需完整 Agent 生命周期触发 ctx.Done()，单测无真实后台循环难以确定性构造）
+internal/agent/agent.go:119,120	3. startedAtOrNow 零值兜底分支（仅未走 NewAgent 的测试构造体触发；正常路径 startedAt 在 NewAgent 初始化时已设；e454d12 删行漂移 -3，2026-10-07 校准）
+internal/agent/agent.go:155,155	3. servicesRefreshLoop 取消上下文退出分支（需完整 Agent 生命周期触发 ctx.Done()，单测无真实后台循环难以确定性构造；e454d12 删行漂移 -3，2026-10-07 校准）
 
 
 

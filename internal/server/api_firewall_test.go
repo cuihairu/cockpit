@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/cuihairu/cockpit/internal/storage"
@@ -128,6 +129,88 @@ func TestFirewallAgentErrorPassthrough(t *testing.T) {
 	s.handleAgentFirewallAPI(rec, httptest.NewRequest(http.MethodGet, "/api/agents/a1/firewall/status", nil), "a1/firewall/status")
 	if rec.Code != http.StatusBadGateway || rec.Body.String() == "" {
 		t.Fatalf("error passthrough: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestFirewallErrorFamilies 防火墙 API 的错误/兜底分支族（手法对齐
+// TestCovAgentStatusAPIErrorFamilies / TestCovPctSmartAgentClosed）：
+// 空 agentID/子路径守卫、transport 失败（agent 已 Close）、RPC 解码失败、
+// 空错误消息兜底、success 无 data 的 {} 回退，外加 api.go 分发行的全路由命中
+func TestFirewallErrorFamilies(t *testing.T) {
+	s := covNewServer(t)
+	okEmpty := func(string, map[string]interface{}) map[string]interface{} {
+		return map[string]interface{}{"status": "success"}
+	}
+	errEmpty := func(string, map[string]interface{}) map[string]interface{} {
+		return map[string]interface{}{"status": "error"}
+	}
+	badResp := func(string, map[string]interface{}) map[string]interface{} {
+		return map[string]interface{}{"status": 123}
+	}
+	covFakeAgent(t, s, "fw-empty", []string{"firewall"}, errEmpty)
+	covFakeAgent(t, s, "fw-bad", []string{"firewall"}, badResp)
+	covFakeAgent(t, s, "fw-ok", []string{"firewall"}, okEmpty)
+
+	// 路由守卫：切分后 agentID 或子路径为空 → 404
+	rec := covRec()
+	s.handleAgentFirewallAPI(rec, covReq(http.MethodGet, "/api/agents//firewall/status", nil), "/firewall/status")
+	covWantCode(t, "empty agentID", rec, http.StatusNotFound)
+	rec = covRec()
+	s.handleAgentFirewallAPI(rec, covReq(http.MethodGet, "/api/agents/fw-ok/firewall/", nil), "fw-ok/firewall/")
+	covWantCode(t, "empty sub", rec, http.StatusNotFound)
+
+	// agent 已关闭 → CallAgent transport 失败 → 502 failed to reach agent
+	closed := NewAgent("fw-closed", nil)
+	if err := s.registry.Register(closed); err != nil {
+		t.Fatal(err)
+	}
+	closed.Close()
+	rec = covRec()
+	s.handleAgentFirewallAPI(rec, covReq(http.MethodGet, "/api/agents/fw-closed/firewall/status", nil), "fw-closed/firewall/status")
+	covWantCode(t, "closed agent", rec, http.StatusBadGateway)
+
+	// RPC 响应形态非法 → 502 invalid response
+	rec = covRec()
+	s.handleAgentFirewallAPI(rec, covReq(http.MethodGet, "/api/agents/fw-bad/firewall/status", nil), "fw-bad/firewall/status")
+	covWantCode(t, "bad rpc payload", rec, http.StatusBadGateway)
+
+	// 错误消息为空 → "agent rejected the operation" 兜底
+	rec = covRec()
+	s.handleAgentFirewallAPI(rec, covReq(http.MethodGet, "/api/agents/fw-empty/firewall/status", nil), "fw-empty/firewall/status")
+	covWantCode(t, "empty error msg", rec, http.StatusBadGateway)
+	if !strings.Contains(rec.Body.String(), "agent rejected the operation") {
+		t.Errorf("fallback msg missing: %s", rec.Body.String())
+	}
+
+	// success 无 data → {} 回退
+	rec = covRec()
+	s.handleAgentFirewallAPI(rec, covReq(http.MethodGet, "/api/agents/fw-ok/firewall/status", nil), "fw-ok/firewall/status")
+	covWantCode(t, "nil data", rec, http.StatusOK)
+	if strings.TrimSpace(rec.Body.String()) != "{}" {
+		t.Errorf("nil data fallback = %s, want {}", rec.Body.String())
+	}
+}
+
+// TestFirewallDispatchRoute api.go 分发行：全路由经认证中间件命中
+// /firewall/ 子资源分发（registerRoutes 完整装配）
+func TestFirewallDispatchRoute(t *testing.T) {
+	s := covNewServer(t)
+	covFakeAgent(t, s, "fw-route", []string{"firewall"}, func(string, map[string]interface{}) map[string]interface{} {
+		return map[string]interface{}{"status": "success", "data": map[string]interface{}{"available": true}}
+	})
+	mux := http.NewServeMux()
+	s.registerRoutes(mux)
+	token, err := s.authService().GenerateToken("1", "admin", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := covReq(http.MethodGet, "/api/agents/fw-route/firewall/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := covRec()
+	mux.ServeHTTP(rec, req)
+	covWantCode(t, "dispatched firewall status", rec, http.StatusOK)
+	if !strings.Contains(rec.Body.String(), "available") {
+		t.Errorf("body = %s, want firewall status payload", rec.Body.String())
 	}
 }
 
