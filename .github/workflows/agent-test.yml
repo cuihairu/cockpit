@@ -142,12 +142,17 @@ jobs:
 
       - name: Test each package with coverage
         run: |
+          # 失败包的输出必须落日志：bash -e 下 output=$(go test) 失败即退出，
+          # echo 没跑到——CI 只剩 exit 1 零证据（2026-10-07 Coverage Check 红
+          # 无法定位的根因）。rc 收集 + 循环跑完统一退出，后续包不被中断
           mkdir -p coverage
+          rc=0
           for pkg in $(go list ./internal/agent/... ./cmd/cockpit-agent/...); do
             echo "Testing $pkg"
-            output=$(go test "$pkg" -coverprofile=coverage/"$(echo $pkg | tr '/' '_')".out -covermode=atomic 2>&1)
+            output=$(go test "$pkg" -coverprofile=coverage/"$(echo $pkg | tr '/' '_')".out -covermode=atomic 2>&1) || rc=1
             echo "$output"
           done
+          exit $rc
 
       - name: Merge coverage profiles
         run: |
