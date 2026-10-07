@@ -135,12 +135,12 @@ docker compose --profile guacd up -d
 | --- | --- |
 | `/ws` | Agent 长连接 |
 | `/api/remote/guacamole` | Guacamole 隧道（RDP/VNC/SSH） |
-| `/api/remote/terminal`、`/api/remote/desktop`、`/api/remote/vnc` | 自行开发/兜底远控通道 |
+| `/api/remote/terminal` | 内置终端（经 Agent 的 SSH 兜底通道） |
 
 Nginx 片段：
 
 ```nginx
-location ~ ^/api/remote/(terminal|desktop|vnc|guacamole) {
+location ~ ^/api/remote/(terminal|guacamole) {
     proxy_pass http://127.0.0.1:9000;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;

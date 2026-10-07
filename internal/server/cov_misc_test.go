@@ -1,6 +1,6 @@
 package server
 
-// 杂项覆盖率补充测试：splitTarget / sendCloseToAgent / hasPrefix /
+// 杂项覆盖率补充测试：sendCloseToAgent / hasPrefix /
 // password_reset_handlers / remote_audit（目标白名单与出口策略、远控审计）。
 
 import (
@@ -15,31 +15,6 @@ import (
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/storage"
 )
-
-// ============ splitTarget（api_desktop.go 纯函数）============
-
-func TestCovSplitTarget(t *testing.T) {
-	cases := []struct {
-		target   string
-		wantHost string
-		wantPort int
-	}{
-		{"host.example:22", "host.example", 22},
-		{"127.0.0.1:8080", "127.0.0.1", 8080},
-		{"no-port", "no-port", 0},
-		{"", "", 0},
-		{":22", ":22", 0},         // 冒号在开头 → idx=0 → 原样返回
-		{"host:abc", "host", 0},   // 非数字端口 → 0
-		{"a:b:22", "a:b", 22},     // 多冒号取最后一个
-		{"[::1]:22", "[::1]", 22}, // IPv6 字面量
-	}
-	for _, c := range cases {
-		host, port := splitTarget(c.target)
-		if host != c.wantHost || port != c.wantPort {
-			t.Errorf("splitTarget(%q) = (%q, %d), want (%q, %d)", c.target, host, port, c.wantHost, c.wantPort)
-		}
-	}
-}
 
 // ============ sendCloseToAgent（api_remote.go 纯转发分支）============
 

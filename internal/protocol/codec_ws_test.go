@@ -106,57 +106,15 @@ func TestDecodeProxyError(t *testing.T) {
 	}
 }
 
-func TestDecodeDesktopDataHeader(t *testing.T) {
-	msg := &Message{
-		Type: MessageTypeDesktopData,
-		Payload: map[string]interface{}{
-			"sessionId":   "sess-1",
-			"desktopType": DesktopMsgScreenUpdate,
-		},
-	}
-
-	h, err := DecodeDesktopDataHeader(msg)
-	if err != nil {
-		t.Fatalf("DecodeDesktopDataHeader() error = %v", err)
-	}
-	if h.SessionID != "sess-1" {
-		t.Errorf("SessionID = %q, want sess-1", h.SessionID)
-	}
-	if h.DesktopType != DesktopMsgScreenUpdate {
-		t.Errorf("DesktopType = %q, want %q", h.DesktopType, DesktopMsgScreenUpdate)
-	}
-}
-
-func TestDecodeDesktopDisconnected(t *testing.T) {
-	msg := &Message{
-		Type: MessageTypeDesktopClose,
-		Payload: map[string]interface{}{
-			"sessionId": "sess-2",
-			"reason":    "user closed",
-		},
-	}
-
-	d, err := DecodeDesktopDisconnected(msg)
-	if err != nil {
-		t.Fatalf("DecodeDesktopDisconnected() error = %v", err)
-	}
-	if d.SessionID != "sess-2" {
-		t.Errorf("SessionID = %q, want sess-2", d.SessionID)
-	}
-	if d.Reason != "user closed" {
-		t.Errorf("Reason = %q, want user closed", d.Reason)
-	}
-}
-
 func TestDecodePayloadTypeMismatch(t *testing.T) {
-	// sessionId is a string field; a number must fail unmarshalling
+	// proxyId is a string field; a number must fail unmarshalling
 	msg := &Message{
 		Payload: map[string]interface{}{
-			"sessionId": 123,
+			"proxyId": 123,
 		},
 	}
-	if _, err := DecodeDesktopDisconnected(msg); err == nil {
-		t.Error("DecodeDesktopDisconnected() should fail on type mismatch")
+	if _, err := DecodeProxyClose(msg); err == nil {
+		t.Error("DecodeProxyClose() should fail on type mismatch")
 	}
 }
 

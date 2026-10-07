@@ -554,12 +554,6 @@ func TestCovRemoteUpgradeFailures(t *testing.T) {
 		ticket  string
 	}{
 		{"terminal", s.handleTerminalWebSocket, covTerminalTicket(t, s, "agent-up")},
-		{"desktop", s.handleDesktopWebSocket, covTicket(t, s, map[string]string{
-			"agent_id": "agent-up", "host": "127.0.0.1", "port": "3389", "protocol": "rdp",
-		})},
-		{"vnc", s.handleVNCWebSocket, covTicket(t, s, map[string]string{
-			"agent_id": "agent-up", "host": "127.0.0.1", "port": "5900", "protocol": "vnc",
-		})},
 	}
 	for _, c := range cases {
 		rec := covRec()

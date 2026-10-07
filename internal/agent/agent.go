@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/agent/detector"
-	"github.com/cuihairu/cockpit/internal/agent/rdp"
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/proxy"
@@ -22,14 +21,13 @@ import (
 
 // Agent Cockpit Agent
 type Agent struct {
-	serverURL      string
-	conn           *websocket.Conn
-	codec          *protocol.Codec
-	rpc            *rpc.Handler
-	collector      *Collector     // 系统信息采集器
-	proxyHandler   *proxy.Handler // 代理处理器
-	desktopHandler *rdp.Handler   // 桌面会话处理器
-	outbound       chan *protocol.Message
+	serverURL    string
+	conn         *websocket.Conn
+	codec        *protocol.Codec
+	rpc          *rpc.Handler
+	collector    *Collector     // 系统信息采集器
+	proxyHandler *proxy.Handler // 代理处理器
+	outbound     chan *protocol.Message
 
 	// 注册信息
 	agentID      string
@@ -88,7 +86,7 @@ type Config struct {
 	Region    string                 `json:"region,omitempty"`
 	Zone      string                 `json:"zone,omitempty"`
 	Labels    map[string]interface{} `json:"labels,omitempty"`
-	Bias      int                    `json:"bias,omitempty"`      // 同机器多 agent 偏移量，默认 0
+	Bias      int                    `json:"bias,omitempty"`     // 同机器多 agent 偏移量，默认 0
 	Metadata  map[string]interface{} `json:"metadata,omitempty"` // 自定义元数据 key-value
 	SSHKeys   string                 `json:"ssh_keys,omitempty"` // SSH 密钥目录，默认 ~/.ssh/
 	// Version 二进制版本（由 cmd/cockpit-agent 的 version 注入），
@@ -101,18 +99,17 @@ func NewAgent(cfg Config) *Agent {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Agent{
-		serverURL:      cfg.ServerURL,
-		codec:          protocol.NewCodec(),
-		rpc:            rpc.NewHandler(),
-		collector:      NewCollector(),
-		proxyHandler:   proxy.NewHandler(),
-		desktopHandler: rdp.NewHandler(),
-		outbound:       make(chan *protocol.Message, 1024),
-		capabilities:   []protocol.Capability{},
-		startedAt:      time.Now(),
-		ctx:            ctx,
-		cancel:         cancel,
-		config:         &cfg,
+		serverURL:    cfg.ServerURL,
+		codec:        protocol.NewCodec(),
+		rpc:          rpc.NewHandler(),
+		collector:    NewCollector(),
+		proxyHandler: proxy.NewHandler(),
+		outbound:     make(chan *protocol.Message, 1024),
+		capabilities: []protocol.Capability{},
+		startedAt:    time.Now(),
+		ctx:          ctx,
+		cancel:       cancel,
+		config:       &cfg,
 	}
 }
 
@@ -225,9 +222,6 @@ func (a *Agent) Start() error {
 // Stop 停止 Agent
 func (a *Agent) Stop() {
 	a.cancel()
-	if a.desktopHandler != nil {
-		a.desktopHandler.Stop()
-	}
 	if a.proxyHandler != nil {
 		a.proxyHandler.Stop()
 	}
@@ -264,9 +258,6 @@ func (a *Agent) connect() error {
 	a.proxyHandler.SetSendFunc(a.sendMessage)
 	a.proxyHandler.SetKeyDir(a.config.SSHKeys)
 	a.proxyHandler.Start(conn)
-
-	// 启动桌面处理器
-	a.desktopHandler.SetSendFunc(a.sendMessage)
 
 	log.Printf("Connected to server")
 	return nil
@@ -489,16 +480,6 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		})
 	}
 
-	// rdp-client capability：RDP 桌面代理客户端可用性（-tags rdp 非 darwin 构建）。
-	// stub 构建不上报，Web 据此禁用 RDP 入口而非连上后才吃 error
-	// （见 agent-egress-sdwan.md D124 记录的缺口）。
-	if rdpClientAvailable() {
-		capabilities = append(capabilities, protocol.Capability{
-			Type:    "rdp-client",
-			Version: "1",
-		})
-	}
-
 	return capabilities
 }
 
@@ -716,12 +697,6 @@ func (a *Agent) handleMessage(msg *protocol.Message) {
 		a.proxyHandler.HandleProxyData(msg)
 	case protocol.MessageTypeProxyClose:
 		a.proxyHandler.HandleProxyClose(msg)
-	case protocol.MessageTypeDesktopNew:
-		a.desktopHandler.HandleDesktopNew(msg)
-	case protocol.MessageTypeDesktopData:
-		a.desktopHandler.HandleDesktopData(msg)
-	case protocol.MessageTypeDesktopClose:
-		a.desktopHandler.HandleDesktopClose(msg)
 	default:
 		log.Printf("Unknown message type: %s", msg.Type)
 	}

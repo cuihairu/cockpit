@@ -21,10 +21,6 @@ func (s *Server) handleMessage(agent *Agent, msg *protocol.Message) {
 		s.handleProxyClose(agent, msg)
 	case protocol.MessageTypeProxyError:
 		s.handleProxyError(agent, msg)
-	case protocol.MessageTypeDesktopData:
-		s.HandleDesktopData(msg)
-	case protocol.MessageTypeDesktopClose:
-		s.HandleDesktopClose(msg)
 	default:
 		log.Printf("Unknown message type: %s from agent %s", msg.Type, agent.ID)
 	}

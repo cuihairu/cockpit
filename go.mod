@@ -10,7 +10,6 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.1
-	github.com/nakagami/grdp v0.9.11
 	github.com/pquerna/otp v1.5.0
 	github.com/shirou/gopsutil/v3 v3.24.5
 	golang.org/x/crypto v0.57.0
@@ -48,7 +47,6 @@ require (
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
-	github.com/lunixbochs/struc v0.0.0-20200707160740-784aaebc1d40 // indirect
 	github.com/mattn/go-sqlite3 v1.14.44 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect

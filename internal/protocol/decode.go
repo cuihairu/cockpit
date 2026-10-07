@@ -124,13 +124,3 @@ func DecodeProxyClose(msg *Message) (ProxyClosePayload, error) {
 func DecodeProxyError(msg *Message) (ProxyErrorPayload, error) {
 	return DecodePayload[ProxyErrorPayload](msg)
 }
-
-// DecodeDesktopDataHeader 解析桌面数据消息的路由头（sessionId + desktopType）
-func DecodeDesktopDataHeader(msg *Message) (DesktopDataHeaderPayload, error) {
-	return DecodePayload[DesktopDataHeaderPayload](msg)
-}
-
-// DecodeDesktopDisconnected 解析桌面断开事件
-func DecodeDesktopDisconnected(msg *Message) (DesktopDisconnectedPayload, error) {
-	return DecodePayload[DesktopDisconnectedPayload](msg)
-}

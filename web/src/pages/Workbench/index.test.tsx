@@ -277,7 +277,7 @@ describe('Workbench', () => {
               vnc: { host: '10.0.0.1', port: 5900, name: 'VNC', running: true },
             },
           },
-          // RDP 入口前置拦截：无 rdp-client capability（stub 构建）时禁用
+          // 未知/历史 capability 对入口无影响（web 不做 capability 前置拦截）
           { type: 'rdp-client' },
         ],
       },
@@ -326,7 +326,7 @@ describe('Workbench', () => {
     expect(msgWarning).not.toHaveBeenCalled()
   })
 
-  it('RDP 入口走 GuacamoleModal（guacd 终结协议，无需 agent rdp-client capability）', async () => {
+  it('RDP 入口走 GuacamoleModal（guacd 终结协议，agent 无需特殊 capability）', async () => {
     msgWarning.mockClear()
     renderPage([
       {
@@ -343,7 +343,7 @@ describe('Workbench', () => {
               rdp: { host: '10.0.0.1', port: 3389, name: 'RDP', running: true },
             },
           },
-          // 无 rdp-client：agent 为 stub 构建（未开 -tags rdp）
+          // agent 不带特殊 capability 也不影响入口：连接能力在 guacd 侧
         ],
       },
     ] as unknown as Agent[])
@@ -352,7 +352,7 @@ describe('Workbench', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /RDP/ }))
     })
-    // Guacamole 路径：协议由 guacd 终结，agent 是否带 -tags rdp 不再前置拦截
+    // Guacamole 路径：协议由 guacd 终结，agent 侧构建形态不再前置拦截
     expect(msgWarning).not.toHaveBeenCalled()
     await screen.findByTestId('guac-modal')
   })

@@ -9,8 +9,7 @@
 | Web UI HTTP API | Browser | `/api/*` | JWT Bearer；登录和密码重置等公开接口除外 |
 | Agent 控制通道 | Agent | `/ws` | 首条 `register` 消息；可选 Agent secret |
 | 远程终端 | Browser | `/api/remote/terminal` | 短期 ticket，经 `Sec-WebSocket-Protocol` 传递 |
-| VNC 透传 | Browser | `/api/remote/vnc` | 短期 ticket，经 `Sec-WebSocket-Protocol` 传递 |
-| RDP 桌面 | Browser | `/api/remote/desktop` | 短期 ticket，经 `Sec-WebSocket-Protocol` 传递 |
+| Guacamole 桌面（RDP/VNC/SSH） | Browser | `/api/remote/guacamole` | 短期 ticket，经 `Sec-WebSocket-Protocol` 传递 |
 
 ## Agent WebSocket
 
@@ -203,7 +202,7 @@ new WebSocket("ws://server:9000/api/remote/terminal", [ticket])
 
 远程目标默认只允许连接 `remote_control.allowed_targets` 中显式配置的主机名、IP 或 CIDR；设置 `remote_control.allow_arbitrary_target: true` 后才允许任意目标。当前实现不会从 inventory 自动派生远控 allow-list。
 
-RDP 桌面依赖 Agent 以 `rdp` build tag 构建。默认 Agent 构建不会静默吞掉桌面请求，而是通过 `desktop_data` 的 `error` 消息返回“不支持 RDP”的明确错误。
+RDP/VNC/SSH 桌面走 Guacamole 隧道（`/api/remote/guacamole`）：guacd 终结协议，Agent 只做 `guac:` 前缀的 TCP 中继，无特殊构建要求。
 
 ## HTTP API
 

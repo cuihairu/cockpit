@@ -20,8 +20,7 @@ const ws = new WebSocket('/api/remote/terminal', [ticket])
 对应服务端入口：
 
 - `/api/remote/terminal`
-- `/api/remote/vnc`
-- `/api/remote/desktop`
+- `/api/remote/guacamole`
 
 这些入口会从 `Sec-WebSocket-Protocol` 读取 ticket，而不是从 URL query 读取认证 token。
 

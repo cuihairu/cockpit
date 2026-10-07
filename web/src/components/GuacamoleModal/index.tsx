@@ -94,7 +94,7 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
     enabled: state === 'connecting',
   })
 
-  // 打开时自动填充上次使用的凭据（不含密码，同 DesktopModal），并探测
+  // 打开时自动填充上次使用的凭据（不含密码），并探测
   // 保险箱里有没有这组目标的已存凭据（有 → 默认一键连接态）
   useEffect(() => {
     if (visible) {

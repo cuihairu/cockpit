@@ -56,32 +56,6 @@ func TestHandleMessageProxyClose(t *testing.T) {
 	a.handleMessage(msg)
 }
 
-func TestHandleMessageDesktopNew(t *testing.T) {
-	a := NewAgent(Config{ServerURL: "ws://localhost:8080"})
-	msg := protocol.NewMessage(protocol.MessageTypeDesktopNew, map[string]any{
-		"sessionId": "desktop-1",
-		"target":    "192.168.1.100",
-	})
-	a.handleMessage(msg)
-}
-
-func TestHandleMessageDesktopData(t *testing.T) {
-	a := NewAgent(Config{ServerURL: "ws://localhost:8080"})
-	msg := protocol.NewMessage(protocol.MessageTypeDesktopData, map[string]any{
-		"sessionId": "desktop-1",
-		"type":      "keyboard",
-	})
-	a.handleMessage(msg)
-}
-
-func TestHandleMessageDesktopClose(t *testing.T) {
-	a := NewAgent(Config{ServerURL: "ws://localhost:8080"})
-	msg := protocol.NewMessage(protocol.MessageTypeDesktopClose, map[string]any{
-		"sessionId": "desktop-1",
-	})
-	a.handleMessage(msg)
-}
-
 func TestHandleMessageUnknown(t *testing.T) {
 	a := NewAgent(Config{ServerURL: "ws://localhost:8080"})
 	msg := protocol.NewMessage("unknown_type", nil)
@@ -122,9 +96,6 @@ func TestAgentSubHandlersInitialized(t *testing.T) {
 	if a.proxyHandler == nil {
 		t.Error("proxyHandler should be initialized")
 	}
-	if a.desktopHandler == nil {
-		t.Error("desktopHandler should be initialized")
-	}
 	if a.rpc == nil {
 		t.Error("rpc handler should be initialized")
 	}
@@ -146,9 +117,6 @@ func TestHandleMessageMultipleTypes(t *testing.T) {
 		protocol.MessageTypeProxyNew,
 		protocol.MessageTypeProxyData,
 		protocol.MessageTypeProxyClose,
-		protocol.MessageTypeDesktopNew,
-		protocol.MessageTypeDesktopData,
-		protocol.MessageTypeDesktopClose,
 		"unknown_message_type",
 	}
 

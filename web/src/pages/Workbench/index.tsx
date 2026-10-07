@@ -104,7 +104,7 @@ const Workbench = () => {
     }
 
     // 三个远控 Tab（ssh/rdp/vnc）全部经 Guacamole 网关由 guacd 终结协议，
-    // agent 不参与（无需 rdp-client capability）；出口策略与审计仍在 server
+    // agent 只做 TCP 转发（无需特殊 capability）；出口策略与审计仍在 server
     // 侧（D3/D4）。openConnection 的入参类型 WorkbenchTab 就不含 telnet，
     // 所以这里没有「走 TerminalModal」的第二分支——telnet 只在 Agents 页有
     // 入口（那里仍经 useRemoteModals 分流到 TerminalModal）

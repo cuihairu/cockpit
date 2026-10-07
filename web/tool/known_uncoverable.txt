@@ -18,7 +18,6 @@ pages/Cron/index.tsx:210 同上（deleteJob）
 pages/Docker/index.tsx:44 cleanDockerLog 空串早退：调用侧对空日志已短路，防御分支不可达
 components/GuacPlayer/index.tsx:77 displayRef null 早退：弹窗未挂载不触发 effect，防御（原 26，duck tunnel 接入后漂移）
 components/MetricsChart/index.tsx:50 containerRef null 早退：echarts init 前置防御，React 保证挂载后 effect 才跑
-components/VNCModal/index.tsx:75 vncContainerRef null 早退：RFB 挂载点在凭据阶段预挂载，ref 恒有值，前置防御不可达（原 67→71→75，vncStateRef 插入 + useEffect 改写后两次漂移）
 components/GuacamoleModal/index.tsx:407 displayRef null 早退（SSH 尺寸同步/粘贴 effect）：display 容器与 state==='connected' 同渲染，effect 跑时 ref 必已赋值（原 274 漂移）
 components/GuacamoleModal/index.tsx:359 sendClipboardToRemote clientRef null 早退：两个粘贴入口（终端 paste / 工具栏按钮）都只在 state==='connected' 时存在，cleanup 先于断开移除 client，恒有值（原 226 漂移）
 components/GuacamoleModal/index.tsx:271 doDeleteSaved savedCred 判空早退：删除入口仅在已存凭据面板渲染，savedCred 恒非空，防御
@@ -37,8 +36,6 @@ pages/Network/index.tsx:792 同上（tools.length === 0 的 return null 边已�
 pages/Network/index.tsx:736 join Modal okButtonProps 表达式行：用例已断言空输入禁用态并成功提交，v8 对 Modal JSX prop 行计数漏计
 
 # ---- 生命周期/时序在 jsdom 下不可注入或与真实语义互斥 ----
-components/DesktopModal/index.tsx:126 超时回调 if 条件行：回调体（disconnect/错误提示/回表单）已由 30s 超时用例断言，v8 对命中分支条件行漏计（原 122，stateRef 改 useEffect 后漂移）
-components/VNCModal/index.tsx:60 超时回调 if 条件行：同 DesktopModal 126，cleanup/置断开/错误提示已由 30s 超时用例断言
 pages/Docker/index.tsx:237 requestAnimationFrame 回调内滚动防御：jsdom rAF 触发时序不稳定，滚动语义属浏览器行为
 
 # ---- 无 UI 入口 / 数据演进防御（当前数据形态下不可达）----

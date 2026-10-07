@@ -354,7 +354,7 @@ func (c failWriteConn) Write(p []byte) (int, error) {
 
 // TestGuacamoleSelectWriteFailInjected 覆盖 select write 失败分支（340-345）。
 // dialGuacd 注入 mock conn（Write 必失败）——TCP RST 时序不可稳定，var 注入
-// 确定性触发（与 stdinPipeFn/rdpClientAvailable 同性质：行为中性测试注入点）。
+// 确定性触发（与 stdinPipeFn 同性质：行为中性测试注入点）。
 func TestGuacamoleSelectWriteFailInjected(t *testing.T) {
 	defer covClearSessions()
 	s := covRemoteSetup(t)

@@ -53,7 +53,7 @@ Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连接 Ser
 | --- | --- |
 | `internal/server` | HTTP 路由、Agent WebSocket、API 聚合、远程会话、代理、告警循环、指标清理 |
 | `internal/agent` | Agent 生命周期、能力检测、心跳、消息循环、采集器、远程代理执行 |
-| `internal/protocol` | Server 与 Agent 的 WebSocket 消息结构、消息类型、远程桌面子协议 |
+| `internal/protocol` | Server 与 Agent 的 WebSocket 消息结构、消息类型与解码 helper |
 | `internal/storage` | GORM/SQLite 模型、迁移、资源 CRUD、用户、审计、告警、指标、代理配置 |
 | `internal/inventory` | Inventory YAML schema、解析、校验、同步到 storage |
 | `internal/sync` | Server 运行期 inventory 文件监听；复用 `internal/inventory.Syncer` 将声明式资源同步到 storage |
@@ -110,22 +110,22 @@ Web UI 默认请求 `/api`。公开接口包括登录、Token 刷新、TOTP 验�
 - `/api/alerts`（告警列表与已读标记）
 - `/api/metrics/*`
 - `/api/proxies`
-- `/api/remote/*`（tickets / sessions / terminal / desktop / vnc）
+- `/api/remote/*`（tickets / sessions / terminal / guacamole / vault）
 - `/api/admin/audit/*`
 - `/api/auth/totp/*`（generate / enable / disable 需 JWT；verify 公开）
 
 ### 远程访问与代理
 
-远程终端、VNC、RDP/桌面连接使用短期 ticket：
+远程终端与桌面连接（Guacamole 隧道）使用短期 ticket：
 
 1. 浏览器先携带 JWT 请求 `POST /api/remote/tickets`。
 2. Server 生成 5 分钟有效、单次使用 ticket。
-3. 浏览器连接 `/api/remote/terminal`、`/api/remote/vnc` 或 `/api/remote/desktop`，把 ticket 放在 `Sec-WebSocket-Protocol`。
-4. Server 校验 ticket 后，把连接请求转成 `proxy_*` 或 `desktop_*` 消息发给对应 Agent。
+3. 浏览器连接 `/api/remote/terminal` 或 `/api/remote/guacamole`，把 ticket 放在 `Sec-WebSocket-Protocol`。
+4. Server 校验 ticket 后，把连接请求转成 `proxy_*` 消息发给对应 Agent（终端直连目标；桌面经 `guac:` 中继到 guacd）。
 5. Agent 连接目标服务并把数据通过 Server 转发回浏览器。
 
 这个边界保证浏览器不需要知道内网拓扑，也不需要直接连 Agent。
-远控目标默认只允许 `remote_control.allowed_targets` 中显式配置的主机名、IP 或 CIDR；RDP 桌面还要求 Agent 使用 `rdp` build tag 构建，默认构建会返回明确的不支持错误。
+远控目标默认只允许 `remote_control.allowed_targets` 中显式配置的主机名、IP 或 CIDR。
 
 ## 协议边界
 
@@ -146,10 +146,9 @@ Server 与 Agent 的消息统一为：
 | --- | --- |
 | Agent -> Server | `register`, `heartbeat`, `rpc_response`, `proxy_close`, `proxy_error` |
 | Server -> Agent | `rpc_request`, `ping`, `proxy_new` |
-| 双向 | `error`, `proxy_data`, `desktop_data`, `desktop_close` |
-| Server -> Agent | `desktop_new` |
+| 双向 | `error`, `proxy_data` |
 
-`register` 必须是 Agent 建立 `/ws` 后的第一条消息。RPC 使用请求消息 ID 关联响应。代理和远程桌面数据使用 `proxyId`、`connId` 或 `sessionId` 关联具体连接。
+`register` 必须是 Agent 建立 `/ws` 后的第一条消息。RPC 使用请求消息 ID 关联响应。代理数据使用 `proxyId`、`connId` 关联具体连接。
 
 ## 安全边界
 

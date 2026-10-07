@@ -20,24 +20,14 @@ Server 可以向 Agent 发送 `proxy_new` 消息，Agent 收到后连接目标 `
 - `internal/proxy/manager.go`：Server 端可监听本地端口，将客户端连接转发到指定 Agent。
 - `internal/server/api_remote.go`：远程终端入口通过 ticket 创建到 Agent 的代理连接。
 
-### VNC 透传
+### 桌面远控（RDP/VNC/SSH，Guacamole）
 
-VNC WebSocket 入口会把浏览器 noVNC 的二进制数据转成代理数据，经 Server 和 Agent 转发到 VNC 目标。该路径适合“浏览器直接打开 Agent 网络内的 VNC 服务”。
-
-关键实现：
-
-- `internal/server/api_vnc.go`
-- `web/src/components/VNCModal/index.tsx`
-
-### RDP 桌面
-
-RDP 走专用桌面消息，而不是普通 TCP 透传。Agent 端依赖 `grdp` 客户端，只有在支持平台使用 `rdp` build tag 构建时才可用。默认构建会返回明确的不支持错误。
+RDP/VNC/SSH 桌面统一走 Guacamole 隧道：浏览器 `GuacamoleModal` 连 `/api/remote/guacamole`，Server 把 guacamole-common-js 指令转成 `guac:` 前缀的 `proxy_new/proxy_data` 发给 Agent，Agent 只做到 guacd 的 TCP 中继，协议由 guacd 终结（RDP 走 FreeRDP、VNC 走 libvncclient）。无特殊构建标签要求；自研 grdp 与 noVNC 直连路径已删除（D-2026-10-07-1）。
 
 关键实现：
 
-- `internal/server/api_desktop.go`
-- `internal/agent/rdp/handler.go`
-- `internal/agent/rdp/rdp_stub.go`
+- `internal/server/api_guacamole.go`：ticket 校验、`guac:` 指令编解码与字节中继。
+- `web/src/components/GuacamoleModal/index.tsx`：guacamole-common-js 渲染与输入。
 
 ### 固定端口代理
 
@@ -119,11 +109,11 @@ remote_control:
 
 ### 第二阶段：补齐协议级远控
 
-SSH 建议实现真正 SSH client，而不是把 xterm 直接接到 TCP 端口。Agent 端负责 SSH 握手、认证、PTY、resize 和 stdout/stderr 转发，Server 只负责编排、审计和 WebSocket 中转。
+协议级远控已由 Guacamole 栈统一落地：RDP/VNC/SSH 桌面经 guacd 终结，浏览器不自行实现协议栈；Agent 不做协议终结、只做 TCP 中继，构建产物无特殊标签要求。
 
-RDP 需要明确构建产物是否默认启用 `-tags rdp`。如果不默认启用，UI 应基于 Agent capability 给出不可用提示。
+SSH 另有内置终端兜底路径：Agent 端用 `x/crypto/ssh`（`internal/agent/rpc/ssh_provider.go`）完成握手、认证和 PTY 转发，Server 只负责编排、审计和 WebSocket 中转。
 
-VNC 可继续沿用现有二进制透传路径，重点补齐 ACL、错误反馈和审计。
+剩余工作是 ACL、错误反馈和审计在两条路径上的统一，而不是再造协议客户端。
 
 ### 第三阶段：端口发布
 
@@ -154,9 +144,9 @@ Cockpit 更适合作为控制面和运维入口，数据平面交给成熟隧道
 | 目标 | 当前状态 | 说明 |
 | --- | --- | --- |
 | Agent 访问其网络可达的单个 TCP 目标 | 基础具备 | 通过 `proxy_new` 和 `proxy_data` 转发 |
-| VNC 浏览器直连 | 基本具备 | noVNC 经 Server/Agent 透传到 VNC 服务 |
-| RDP 浏览器直连 | 条件具备 | Agent 需用 `-tags rdp` 构建 |
-| 浏览器真正 SSH 登录 | 不完整 | 缺少 SSH client、认证和 PTY 实现 |
+| VNC 浏览器直连 | 基本具备 | 经 Guacamole（guacd 终结 VNC），Agent 仅 `guac:` TCP 中继 |
+| RDP 浏览器直连 | 基本具备 | 经 Guacamole（guacd 终结 RDP），无特殊构建标签 |
+| 浏览器真正 SSH 登录 | 基本具备 | Guacamole SSH 桌面；Agent 内置 `x/crypto/ssh` 终端兜底 |
 | 本地 SSH 客户端经 Server 端口转发 | 架构可支持 | 需要补监听策略和产品化入口 |
 | 一个网段以某个 Agent 为出口 | 部分支持 | 已支持 CIDR allow-list 和 per-agent egress policy，但仍不是透明路由 |
 | 真 SD-WAN / 透明三层组网 | 当前不支持 | 建议集成 WireGuard 或 Headscale/Tailscale |

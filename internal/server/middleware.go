@@ -75,8 +75,6 @@ func (s *Server) AuditMiddleware(next http.Handler) http.Handler {
 		// 因此 WebSocket 路径直接透传，跳过审计（WS 会话由专门的远控审计覆盖）。
 		if r.URL.Path == "/ws" ||
 			r.URL.Path == "/api/remote/terminal" ||
-			r.URL.Path == "/api/remote/desktop" ||
-			r.URL.Path == "/api/remote/vnc" ||
 			r.URL.Path == "/api/remote/guacamole" {
 			next.ServeHTTP(w, r)
 			return

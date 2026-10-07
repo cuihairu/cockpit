@@ -315,8 +315,6 @@ func TestCovHandleMessageDispatch(t *testing.T) {
 		protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{"proxyId": "p1", "connId": "c1", "data": "aGk="}),
 		protocol.NewMessage(protocol.MessageTypeProxyClose, map[string]interface{}{"proxyId": "p1", "connId": "c1", "reason": "done"}),
 		protocol.NewMessage(protocol.MessageTypeProxyError, map[string]interface{}{"proxyId": "p1", "error": "boom"}),
-		protocol.NewMessage(protocol.MessageTypeDesktopData, map[string]interface{}{"bad": 1}),
-		protocol.NewMessage(protocol.MessageTypeDesktopClose, nil),
 		protocol.NewMessage(protocol.MessageType("unknown-type"), nil),
 	}
 	for i, msg := range cases {
@@ -444,21 +442,14 @@ func TestCovHandleProxyMessages(t *testing.T) {
 	s.handleProxyData(agent, protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{
 		"proxyId": "terminal-xyz", "connId": "tc2", "data": "aGk=",
 	}))
-	// vnc 前缀 → HandleVNCData（无会话，no-op）
-	s.handleProxyData(agent, protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{
-		"proxyId": "vnc-xyz", "connId": "vc1", "data": "aGk=",
-	}))
 	// 普通代理通道（proxyMgr 无该代理 → 错误日志）
 	s.handleProxyData(agent, protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{
 		"proxyId": "plain-1", "connId": "cc", "data": "aGk=",
 	}))
 
-	// close：terminal / vnc / 普通三路
+	// close：terminal / 普通两路
 	s.handleProxyClose(agent, protocol.NewMessage(protocol.MessageTypeProxyClose, map[string]interface{}{
 		"proxyId": "other", "connId": "tc1", "terminal": true,
-	}))
-	s.handleProxyClose(agent, protocol.NewMessage(protocol.MessageTypeProxyClose, map[string]interface{}{
-		"proxyId": "vnc-xyz", "connId": "vc1",
 	}))
 	s.handleProxyClose(agent, protocol.NewMessage(protocol.MessageTypeProxyClose, map[string]interface{}{
 		"proxyId": "plain-1", "connId": "cc",

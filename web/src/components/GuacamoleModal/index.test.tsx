@@ -244,7 +244,7 @@ describe('GuacamoleModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
     await waitFor(() => expect(clientMock.connect).toHaveBeenCalled())
 
-    // 分辨率下拉（RemoteToolbar 的 Select）：与 DesktopModal 测试同款交互
+    // 分辨率下拉（RemoteToolbar 的 Select）
     fireEvent.click(screen.getByText('分辨率'))
     fireEvent.click((await screen.findAllByText('1920 x 1080'))[0])
     await waitFor(() => expect(clientMock.sendSize).toHaveBeenCalledWith(1920, 1080))

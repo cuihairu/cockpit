@@ -267,12 +267,6 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 注册远控凭据保险箱 API（见 api_vault.go）
 	s.registerVaultAPI(mux)
 
-	// 注册桌面连接 API
-	s.registerDesktopAPI(mux)
-
-	// 注册 VNC 连接 API
-	s.registerVNCAPI(mux)
-
 	// 注册 Guacamole 桌面隧道 API（guacd + guacamole-common-js 路线，
 	// 见 docs/remote-desktop-guacamole-design.md）
 	s.registerGuacamoleAPI(mux)
@@ -573,14 +567,6 @@ func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
 		return
 	}
 
-	// VNC 连接：proxyId 以 "vnc" 前缀
-	if hasPrefix(p.ProxyID, "vnc") {
-		if err := s.HandleVNCData(p.ConnID, p.Data); err != nil {
-			log.Printf("HandleVNCData error: %v", err)
-		}
-		return
-	}
-
 	if err := s.proxyMgr.HandleProxyData(p.ProxyID, p.ConnID, p.Data); err != nil {
 		log.Printf("HandleProxyData error: %v", err)
 	}
@@ -618,12 +604,6 @@ func (s *Server) handleProxyClose(agent *Agent, msg *protocol.Message) {
 	// 检查是否是终端连接
 	if p.Terminal || hasPrefix(p.ProxyID, "terminal") {
 		s.HandleTerminalClose(p.ConnID, p.Reason)
-		return
-	}
-
-	// 检查是否是 VNC 连接
-	if hasPrefix(p.ProxyID, "vnc") {
-		s.HandleVNCClose(p.ConnID, p.Reason)
 		return
 	}
 

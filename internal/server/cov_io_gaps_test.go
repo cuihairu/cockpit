@@ -101,57 +101,38 @@ func TestCovSendLoopsPanicOnNilClientWS(t *testing.T) {
 	defer covClearSessions()
 	s := covRemoteSetup(t)
 
-	d := &DesktopSession{ID: "cov-nil-d", UserID: "1", Username: "cov",
-		AgentID: "agent-nil", Target: "h:5900", ConnID: "cov-cd",
-		CreatedAt: time.Now(), LastActive: time.Now(), done: make(chan struct{})}
-	go s.desktopSendLoop(d)
-
 	tm := &TerminalSession{ID: "cov-nil-t", UserID: "1", Username: "cov",
 		AgentID: "agent-nil", Protocol: "ssh", Host: "h", Port: 22, ConnID: "cov-ct",
 		CreatedAt: time.Now(), LastActive: time.Now(), done: make(chan struct{})}
 	go s.terminalSendLoop(tm)
 
-	v := &VNCSession{ID: "cov-nil-v", UserID: "1", Username: "cov",
-		AgentID: "agent-nil", Target: "h:5900", ConnID: "cov-cv",
-		CreatedAt: time.Now(), LastActive: time.Now(), done: make(chan struct{})}
-	go s.vncSendLoop(v)
-
-	for desc, done := range map[string]chan struct{}{"desktop": d.done, "terminal": tm.done, "vnc": v.done} {
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Errorf("sendLoop(nil ws) did not exit via panic-recover: %s", desc)
-		}
+	select {
+	case <-tm.done:
+	case <-time.After(5 * time.Second):
+		t.Error("sendLoop(nil ws) did not exit via panic-recover: terminal")
 	}
 }
 
 // ============ keepalive ping 写死连接失败（覆盖 ping 错误分支） ============
 
 func TestCovKeepalivePingDeadConn(t *testing.T) {
-	covShortIntervals(t) // desktop/terminal keepalive 200ms
+	covShortIntervals(t) // terminal keepalive 200ms
 	defer covClearSessions()
 	s := covRemoteSetup(t)
 
 	// LastActive 为当前时间：确保走 ping 失败退出而非 30 分钟超时
-	d := &DesktopSession{ID: "cov-ping-d", UserID: "1", Username: "cov",
-		AgentID: "agent-ping", Target: "h:5900", ConnID: "cov-pd",
-		ClientWS:  covDeadWS(t, s),
-		CreatedAt: time.Now(), LastActive: time.Now(), done: make(chan struct{})}
 	tm := &TerminalSession{ID: "cov-ping-t", UserID: "1", Username: "cov",
 		AgentID: "agent-ping", Protocol: "ssh", Host: "h", Port: 22, ConnID: "cov-pt",
 		ClientWS:  covDeadWS(t, s),
 		CreatedAt: time.Now(), LastActive: time.Now(), done: make(chan struct{})}
 
-	exited := make(chan struct{}, 2)
-	go func() { s.desktopKeepaliveLoop(d); exited <- struct{}{} }()
+	exited := make(chan struct{}, 1)
 	go func() { s.terminalKeepaliveLoop(tm); exited <- struct{}{} }()
 
-	for i := 0; i < 2; i++ {
-		select {
-		case <-exited:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("keepalive loop did not exit on ping failure")
-		}
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("keepalive loop did not exit on ping failure")
 	}
 }
 
