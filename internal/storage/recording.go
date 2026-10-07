@@ -23,8 +23,11 @@ type TerminalRecording struct {
 	// 或 guac（Guacamole 会话流，guacd 落盘后收集，见 todo.md M3 D1）
 	Format     string    `gorm:"size:8" json:"format"`
 	StartedAt  time.Time `json:"startedAt"`
-	DurationMs int64     `json:"durationMs"` // 结束时回填，0 = 进行中
+	DurationMs int64     `json:"durationMs"` // 结束时回填；亚毫秒会话为 0，完成态以 FinishedAt 为准
 	Bytes      int64     `json:"bytes"`      // 结束时回填
+	// FinishedAt 结束回填时刻；nil = 进行中。DurationMs 的 0 值与「进行中」
+	// 哨兵在亚毫秒会话上冲突（快机 CI 实测），完成判定以本字段为准
+	FinishedAt *time.Time `json:"finishedAt"`
 }
 
 // CreateTerminalRecording 会话开始时登记录制元数据
@@ -32,10 +35,10 @@ func (d *DB) CreateTerminalRecording(rec *TerminalRecording) error {
 	return d.db.Create(rec).Error
 }
 
-// FinishTerminalRecording 结束时回填时长与字节数
+// FinishTerminalRecording 结束时回填时长与字节数并落完成时刻
 func (d *DB) FinishTerminalRecording(sessionID string, durationMs, bytes int64) error {
 	return d.db.Model(&TerminalRecording{}).Where("session_id = ?", sessionID).
-		Updates(map[string]interface{}{"duration_ms": durationMs, "bytes": bytes}).Error
+		Updates(map[string]interface{}{"duration_ms": durationMs, "bytes": bytes, "finished_at": time.Now()}).Error
 }
 
 // ListTerminalRecordings 倒序取录制列表（进行中的也在列）

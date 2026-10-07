@@ -30,6 +30,11 @@ func TestCovTerminalRecordingLifecycle(t *testing.T) {
 		t.Fatalf("CreateTerminalRecording() second error = %v", err)
 	}
 
+	// 未回填的行是「进行中」：FinishedAt 为 nil（完成态判定依据）
+	if rec, err := db.GetTerminalRecording("sess-1"); err != nil || rec.FinishedAt != nil {
+		t.Fatalf("in-progress FinishedAt = %v, err = %v, want nil", rec.FinishedAt, err)
+	}
+
 	if err := db.FinishTerminalRecording("sess-1", 53000, 2048); err != nil {
 		t.Fatalf("FinishTerminalRecording() error = %v", err)
 	}
@@ -40,6 +45,9 @@ func TestCovTerminalRecordingLifecycle(t *testing.T) {
 	}
 	if rec.DurationMs != 53000 || rec.Bytes != 2048 {
 		t.Errorf("DurationMs = %d, Bytes = %d, want 53000, 2048", rec.DurationMs, rec.Bytes)
+	}
+	if rec.FinishedAt == nil {
+		t.Error("FinishedAt should be set after FinishTerminalRecording")
 	}
 	if rec.Username != "admin" {
 		t.Errorf("Username = %s, want admin", rec.Username)

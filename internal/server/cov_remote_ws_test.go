@@ -482,13 +482,15 @@ func TestCovTerminalWebSocketBadRequests(t *testing.T) {
 		return len(terminalSessions) == 0
 	})
 
-	// 发送失败分支也要收尾录制：Close 回填 durationMs（0=进行中），不留悬挂文件
+	// 发送失败分支也要收尾录制：Close 回填元数据（FinishedAt 落值），不留悬挂
+	// 文件。不用 DurationMs 判定——亚毫秒会话为 0，与「进行中」哨兵冲突（CI
+	// 快机实测 durationMs = 0 假红）；完成态以 FinishedAt 为准
 	recs, err := s.db.ListTerminalRecordings(10)
 	if err != nil || len(recs) != 1 {
 		t.Fatalf("recording rows = %d, err = %v", len(recs), err)
 	}
-	if recs[0].DurationMs <= 0 {
-		t.Fatalf("recording not finished on send-failure branch: durationMs = %d", recs[0].DurationMs)
+	if recs[0].FinishedAt == nil {
+		t.Fatal("recording not finished on send-failure branch: finishedAt is nil")
 	}
 }
 
