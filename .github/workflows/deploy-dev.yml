@@ -27,15 +27,17 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12
+
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
           cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Install pnpm
-        run: npm install -g pnpm
 
       - name: Get version
         id: version
