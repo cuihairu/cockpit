@@ -37,8 +37,6 @@ var resourceRules = []resourceRule{
 	{"/api/metrics", "inventory", ""},
 	{"/api/admin/audit", "audit", "read"},
 	{"/api/remote", "terminal", "write"},
-	{"/api/desktop", "terminal", "write"},
-	{"/api/vnc", "terminal", "write"},
 	{"/api/recordings", "recordings", ""},
 	{"/api/drift/config", "drift", ""},
 	{"/api/inventory/consistency", "inventory", ""},
