@@ -101,6 +101,11 @@ const AgentFirewallPanel: React.FC<{ agentId: string }> = ({ agentId }) => {
 
   const tables = data.tables ?? []
   if (tables.length === 0) {
+    // 截断 meta-only（>4MB 只回摘要，tables 空 + error 有值）走错误说明，
+    // 不误报「规则集为空」——规则其实存在，只是没带回来
+    if (data.error) {
+      return <Alert type="info" showIcon message={data.error} />
+    }
     return <Empty description="规则集为空（未配置任何规则）" />
   }
 

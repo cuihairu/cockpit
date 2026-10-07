@@ -144,6 +144,26 @@ describe('Firewall', () => {
     expect(await screen.findByText('web-01 规则集过大，仅显示前 4MB')).toBeInTheDocument()
   })
 
+  it('截断 meta-only（tables 空 + error）：面板显示 error 说明而非误报规则集为空', async () => {
+    renderPage(() =>
+      Promise.resolve({
+        available: true,
+        backend: 'nftables',
+        backendVersion: 'nftables 1.0.6',
+        totalRules: 20000,
+        tables: [],
+        truncated: true,
+        error: 'ruleset output 7698112 bytes exceeds 4194304 limit, summary only',
+      }),
+    )
+    expect((await screen.findAllByText('web-01')).length).toBeGreaterThan(0)
+    fireEvent.click(panelHeader('web-01'))
+    expect(
+      await screen.findByText(/ruleset output 7698112 bytes exceeds 4194304 limit/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('规则集为空（未配置任何规则）')).not.toBeInTheDocument()
+  })
+
   it('无防火墙主机：空态且不发状态查询', async () => {
     renderPage(undefined, [mkAgent('ag-9', 'win-01', false)])
     expect(

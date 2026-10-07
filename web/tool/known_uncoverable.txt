@@ -293,9 +293,9 @@ pages/Jobs/index.tsx:252 detail.actor || '-'：actor 类型必填（登录用户
 
 # pages/Firewall/index.tsx - 防火墙观测页防御分支（provider 恒回 tables/rules 数组，缺省不可达）
 pages/Firewall/index.tsx:102 tables ?? [] 兜底：provider 恒返回 tables 数组，防御
-pages/Firewall/index.tsx:117 空规则集 Empty 行：v8 插桩报未覆盖，用例已断言该 Empty 文案
-pages/Firewall/index.tsx:175 chain.rules ?? [] 兜底：缺 rules 链用例已覆盖 ?? 路径，余为插桩分支
+pages/Firewall/index.tsx:122 空规则集 Empty 行：v8 插桩报未覆盖；截断 meta-only Alert 分支由新用例覆盖后 Empty 纯路径仍未直测（2026-10-07 截断分支插入 +5 平移）
+pages/Firewall/index.tsx:180 chain.rules ?? [] 兜底：缺 rules 链用例已覆盖 ?? 路径，余为插桩分支（2026-10-07 +5 平移）
 pages/Firewall/index.tsx:48 basePolicies(status.tables ?? []) 兜底：provider 恒返回 tables，防御
 pages/Firewall/index.tsx:68 计数模板 packets/bytes ?? 0：字节 omitempty 为 0 的路径未直测
-pages/Firewall/index.tsx:304 面板 label hostname || id：v8 插桩报点，无 hostname 用例已断言 id 回退
-pages/Firewall/index.tsx:310 truncated 消息模板：v8 插桩报点，截断用例已断言该文案
+pages/Firewall/index.tsx:309 面板 label hostname || id：v8 插桩报点，无 hostname 用例已断言 id 回退（2026-10-07 +5 平移）
+pages/Firewall/index.tsx:315 truncated 消息模板：v8 插桩报点，截断用例已断言该文案（2026-10-07 +5 平移）

@@ -154,10 +154,10 @@
 - [x] 规则快照真读：nft -j JSON 与 iptables-save 双后端解析真实规则集，表/链/规则计数与 nft list ruleset 对照合理（2026-10-07 本机探针 F2/F3：5 表 22 链 114 规则，ipv4+ipv6 双族）
 - [x] 非 root 说明态：available=false + 真实权限错误透传（2026-10-07 本机探针 F4，"you must be root"）
 - [x] 权限位单一 read 档（D10）：无 firewall:read 自定义角色 403、内置 viewer 200（2026-10-07 本机探针 F5）
-- [ ] 浏览器实测页面三态：总览/按主机面板/策略徽标/cockpit 标注在真实数据下的渲染（单测已覆盖，真机页面待验）
-- [ ] iptables-legacy 主机（variant=legacy）：真实主机读数与变体标注（2026-10-07 数据面已验：probe-hosts H2 容器真读 legacy variant + 种子规则 + ipv4/ipv6 双族；页面变体标注随浏览器轮）
-- [ ] 无防火墙工具的裸容器主机：页面空态（「暂无带防火墙工具的在线主机」）（2026-10-07 数据面已验：probe-hosts H1 裸容器无 capability + status 502 unknown provider；页面空态随浏览器轮）
-- [ ] 超大规则集（>4MB）truncated 告警与 meta-only/行界截断呈现（2026-10-07 数据面已验：probe-hosts H3 nft 7.7MB meta-only + H4 iptables 5.1MB 行界截断留 16362 条；页面 truncated 告警随浏览器轮）
+- [x] 浏览器实测页面三态：总览/按主机面板/策略徽标/cockpit 标注在真实数据下的渲染（2026-10-07 probe-web W1-W6：headless Chrome 驱动真实 web/dist——空态 Empty 文案、总览行后端+variant 标注、input accept 徽标、不可读/部分读取状态列、面板规则明细 + cockpit Tag；断言走 DOM innerText，headless-shell 容器无 CJK 字体截图呈 tofu 属容器字形缺失）
+- [x] iptables-legacy 主机（variant=legacy）：真实主机读数与变体标注（2026-10-07 probe-hosts H2 数据面真读 + probe-web W3a/W4 页面 variant 标注与规则明细）
+- [x] 无防火墙工具的裸容器主机：页面空态（2026-10-07 probe-hosts H1 数据面 502 unknown provider + probe-web W2 空态文案渲染）
+- [x] 超大规则集（>4MB）truncated 告警与 meta-only/行界截断呈现（2026-10-07 probe-hosts H3 nft 7.7MB meta-only + H4 iptables 5.1MB 行界截断留 16362 条；probe-web W3d 页顶 4MB 告警 + W6 面板 meta-only 错误说明不误报「规则集为空」）
 
 ## 日志检索
 
