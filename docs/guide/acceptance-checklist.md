@@ -146,6 +146,19 @@
 - [ ] 巡检告警：FAILED 盘 error 级、扇区/介质异常 warning 级、同盘未读期间只报一次
 - [ ] （按需）非 root 部署下 sudo 提权读取路径
 
+## 防火墙观测（M1）
+
+设计：[firewall-design](./firewall-design.md)。探针：`scripts/acceptance/firewall/probe.sh`（本机三形态 agent：root/无 nft PATH/非 root）。
+
+- [x] capability 上报：nft/iptables 元数据与真实安装一致；双后端选择（D2）真实回落（2026-10-07 本机探针 F1/F3：nft 在走 nftables、PATH 摘除 nft 后 iptables-save + variant 解析 nf_tables）
+- [x] 规则快照真读：nft -j JSON 与 iptables-save 双后端解析真实规则集，表/链/规则计数与 nft list ruleset 对照合理（2026-10-07 本机探针 F2/F3：5 表 22 链 114 规则，ipv4+ipv6 双族）
+- [x] 非 root 说明态：available=false + 真实权限错误透传（2026-10-07 本机探针 F4，"you must be root"）
+- [x] 权限位单一 read 档（D10）：无 firewall:read 自定义角色 403、内置 viewer 200（2026-10-07 本机探针 F5）
+- [ ] 浏览器实测页面三态：总览/按主机面板/策略徽标/cockpit 标注在真实数据下的渲染（单测已覆盖，真机页面待验）
+- [ ] iptables-legacy 主机（variant=legacy）：真实主机读数与变体标注
+- [ ] 无防火墙工具的裸容器主机：页面空态（「暂无带防火墙工具的在线主机」）
+- [ ] 超大规则集（>4MB）truncated 告警与 meta-only/行界截断呈现
+
 ## 日志检索
 
 设计：[logs-design](./logs-design.md)。前置：多台 agent（含 systemd 主机与 docker 主机）。
