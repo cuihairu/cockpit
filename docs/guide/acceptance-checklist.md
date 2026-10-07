@@ -222,7 +222,16 @@
 - [ ] OMV：`X-Openmediavault-Sessionid` 头认证全流程；`"1.50 GiB"` 容量字符串解析；2FA 账号等同失败降级
 - [ ] mdadm 降级演练：拔盘/标记 fault 后告警送达（真去重）
 - [ ] ZFS / SMB / NFS 主机真实枚举
-- [ ] `COCKPIT_NAS_TARGETS` 跳板探测：无本地存储工具的主机（Windows/macOS）可作跳板观测
+- [x] `COCKPIT_NAS_TARGETS` 跳板探测机制：targets 解析→拨号→失联降级→source
+  归一全链（2026-10-07，scripts/acceptance/nas/probe-jump.sh J1-J2 全 PASS——
+  debian:12-slim 裸容器静态 agent：J1 合法 targets（死端口 dsm）→ nas/status
+  200、source=linux 不掺 dsm、pools/shares 空、available 与 df mounts 自洽
+  （失联 target 只 log 跳过不崩不超时）；J2 非 JSON env 整体忽略不崩。
+  形态实证两则：docker bind mount 让宿主真实块设备在容器 df 可见（≥1GB
+  计入 mounts 是正确行为）；/proc 宿主共享 → mdstat 恒存在 → DetectNas
+  mdstat 分支在 Linux 恒真（nas capability 恒上报）——env 注册分支只在
+  Windows/macOS 跳板平台可见，属解析层（单测盖）。真 DSM/TrueNAS/OMV 远端
+  观测维持挂起随真实 NAS）
 
 ## 服务管理（三后端）
 
