@@ -121,7 +121,7 @@
 - [ ] 记录缺失自动创建（TTL auto、无代理）；IP 变化更新保留原 TTL/Proxied
 - [ ] 同 zone+type 多记录共享一轮 ListRecords（观察 Cloudflare 后台调用频次无放大）
 - [ ] 失败告警去重（同记录未读期间只报一次）；恢复后静默自愈清错
-- [ ] 巡检间隔修改即时生效；`0=关闭` 形态
+- [x] 巡检间隔修改即时生效；`0=关闭` 形态——本机验收（2026-10-07，探针 `scripts/acceptance/ddns/probe-scan.sh` D1-D5 6/6 PASS，零外部依赖形态：配置指 ghost agent + 不配 CF token，检查在 provider/agent 前置校验快速失败但 CheckedAt/LastStatus/LastError 回写任何错误路径都走，用 CheckedAt 推进做扫描观测）：默认 300 回读、59/86401/非数字拒 400 合法值不污染；interval=60 到点扫描（failed 回写 + LastError 非空）→ 连续推进（实测 gap=120s——60s 门槛 × 60s tick 组合下 `Since(lastScan)<60` 偶真跳一拍，门槛语义预期非缺陷）→ PUT 0 后跨 ≥1 原扫描窗 CheckedAt 冻结 → 改回 60 恢复推进（间隔修改即时生效双向实证）。真 CF 记录比对/出口 IP 探测/告警去重维持挂起（120-123 需真 token 与动态 IP 环境）
 
 ## DNS 域名管理
 
