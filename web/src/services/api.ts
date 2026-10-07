@@ -88,6 +88,7 @@ import type {
   CronUserEntry,
   SmartScanConfig,
   SmartStatus,
+  FirewallStatus,
   NasScanConfig,
   NasStatus,
   DDNSConfig,
@@ -1224,6 +1225,13 @@ class ApiService {
 
   async putSmartConfig(scanIntervalSeconds: number): Promise<void> {
     await this.client.put('/smart/config', { scan_interval_seconds: scanIntervalSeconds })
+  }
+
+  // ========== 防火墙观测（iptables/nftables 只读快照，见 firewall-design.md） ==========
+
+  // 单机防火墙规则集快照（纯转发，浏览类不记审计）
+  async getFirewallStatus(agentId: string): Promise<FirewallStatus> {
+    return this.client.get<unknown, FirewallStatus>(`/agents/${encodeURIComponent(agentId)}/firewall/status`)
   }
 
   // ========== NAS 存储观测（见 nas-design.md） ==========

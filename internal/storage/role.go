@@ -51,6 +51,8 @@ var resourceActions = map[string][]string{
 	"services":   {"read", "write"},
 	"smart":      {"read", "write"},
 	"recordings": {"read", "write"},
+	// 防火墙观测（firewall-design.md D10）：M1 只读快照，单 read 档
+	"firewall": {"read"},
 	// 执行 Job（jobs-design.md）：读写均为执行态操作（write=创建执行，
 	// read=查看列表/详情）
 	"jobs": {"read", "write"},
@@ -78,7 +80,7 @@ func allPermissions() []string {
 		"inventory", "files", "logs", "terminal", "docker", "stack", "cron",
 		"backup", "acme", "dns", "ddns", "proxy", "overlay", "drift", "nas",
 		"alerts", "audit", "users", "roles", "settings",
-		"services", "smart", "recordings", "jobs",
+		"services", "smart", "recordings", "jobs", "firewall",
 	} {
 		for _, a := range resourceActions[res] {
 			out = append(out, res+":"+a)

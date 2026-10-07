@@ -123,51 +123,46 @@ const AgentFirewallPanel: React.FC<{ agentId: string }> = ({ agentId }) => {
     { title: '包/字节', key: 'counters', width: 170, render: (_: unknown, r) => formatCounters(r) },
   ]
 
-  const tableItems = tables.map((t, ti) => ({
-    key: `${t.family}:${t.name}:${ti}`,
-    label: (
-      <Space size={8}>
-        <Typography.Text strong>{t.name}</Typography.Text>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {t.family}
-        </Typography.Text>
-      </Space>
-    ),
-    children: (
-      <Space direction="vertical" style={{ width: '100%' }} size={12}>
-        {(t.chains ?? []).map((chain: FirewallChain, ci: number) => {
-          const policy = chain.policy ? chain.policy.toLowerCase() : ''
-          const meta = POLICY_META[policy]
-          return (
-            <div key={`${chain.name}:${ci}`}>
-              <Space size={8} style={{ marginBottom: 4 }}>
-                <Typography.Text code>{chain.name}</Typography.Text>
-                {meta && <Badge status={meta.status} text={policy} />}
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  {chain.rules?.length ?? 0} 条规则
-                </Typography.Text>
-              </Space>
-              <Table<FirewallRule & { key: string }>
-                size="small"
-                rowKey={(r, idx) => `${r.handle ?? idx}`}
-                dataSource={(chain.rules ?? []).map((r, ri) => ({ ...r, key: `${r.handle ?? 'x'}:${ri}` }))}
-                pagination={false}
-                columns={ruleColumns}
-                locale={{ emptyText: '空链' }}
-              />
-            </div>
-          )
-        })}
-      </Space>
-    ),
-  }))
-
+  // 表 → 链 → 规则平铺（主机面板已是展开门禁，不再嵌套折叠——规则表
+  // 全部渲染，单机 ruleset 体量可控）
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={8}>
-      {data.error && (
-        <Alert type="info" showIcon message={data.error} />
-      )}
-      <Collapse items={tableItems} size="small" />
+    <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      {data.error && <Alert type="info" showIcon message={data.error} />}
+      {tables.map((t, ti) => (
+        <div key={`${t.family}:${t.name}:${ti}`}>
+          <Space size={8} style={{ marginBottom: 6 }}>
+            <Typography.Text strong>{t.name}</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t.family}
+            </Typography.Text>
+          </Space>
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            {(t.chains ?? []).map((chain: FirewallChain, ci: number) => {
+              const policy = chain.policy ? chain.policy.toLowerCase() : ''
+              const meta = POLICY_META[policy]
+              return (
+                <div key={`${chain.name}:${ci}`}>
+                  <Space size={8} style={{ marginBottom: 4 }}>
+                    <Typography.Text code>{chain.name}</Typography.Text>
+                    {meta && <Badge status={meta.status} text={policy} />}
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {chain.rules?.length ?? 0} 条规则
+                    </Typography.Text>
+                  </Space>
+                  <Table<FirewallRule & { key: string }>
+                    size="small"
+                    rowKey={(r, idx) => `${r.handle ?? idx}`}
+                    dataSource={(chain.rules ?? []).map((r, ri) => ({ ...r, key: `${r.handle ?? 'x'}:${ri}` }))}
+                    pagination={false}
+                    columns={ruleColumns}
+                    locale={{ emptyText: '空链' }}
+                  />
+                </div>
+              )
+            })}
+          </Space>
+        </div>
+      ))}
     </Space>
   )
 }

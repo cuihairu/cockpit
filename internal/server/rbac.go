@@ -67,6 +67,7 @@ var agentSubResources = map[string]string{
 	"domains":   "dns", // D7 只读清单/片段
 	"overlay/":  "overlay",
 	"smart/":    "smart",
+	"firewall/": "firewall",
 }
 
 // requiredPerms 返回 path+method 所需权限点与是否归 RBAC 管：

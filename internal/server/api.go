@@ -145,6 +145,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			s.handleAgentSmartAPI(w, r, agentID)
 			return
 		}
+		// 防火墙规则集快照 /agents/{id}/firewall/...（见 api_firewall.go）
+		if strings.Contains(agentID, "/firewall/") {
+			s.handleAgentFirewallAPI(w, r, agentID)
+			return
+		}
 		// Handle /agents/{id}/secret sub-path
 		if strings.HasSuffix(agentID, "/secret") {
 			s.handleAgentSecret(w, r, strings.TrimSuffix(agentID, "/secret"))

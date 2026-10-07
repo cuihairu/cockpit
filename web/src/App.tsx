@@ -24,6 +24,7 @@ import {
   PlayCircleOutlined,
   ThunderboltOutlined,
   SafetyCertificateOutlined,
+  SafetyOutlined,
   GlobalOutlined,
   LinkOutlined,
   VideoCameraOutlined,
@@ -65,6 +66,7 @@ const Jobs = lazy(() => import('./pages/Jobs'))
 const Services = lazy(() => import('./pages/Services'))
 const Network = lazy(() => import('./pages/Network'))
 const Disk = lazy(() => import('./pages/Disk'))
+const Firewall = lazy(() => import('./pages/Firewall'))
 const Nas = lazy(() => import('./pages/Nas'))
 const Drift = lazy(() => import('./pages/Drift'))
 const Agents = lazy(() => import('./pages/Agents'))
@@ -228,6 +230,12 @@ const routeConfig: PermRouteItem = {
       name: '磁盘健康',
       icon: <HddOutlined />,
       perm: 'smart:read',
+    },
+    {
+      path: '/firewall',
+      name: '防火墙',
+      icon: <SafetyOutlined />,
+      perm: 'firewall:read',
     },
     {
       path: '/nas',
@@ -505,6 +513,7 @@ const MainLayout = () => {
               <Route path="/services" element={<Services />} />
               <Route path="/network" element={<Network />} />
               <Route path="/disk" element={<Disk />} />
+              <Route path="/firewall" element={<Firewall />} />
               <Route path="/nas" element={<Nas />} />
               <Route path="/drift" element={<Drift />} />
               <Route path="/dns" element={<DNS />} />

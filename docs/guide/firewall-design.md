@@ -18,10 +18,10 @@ Cockpit 现状：
 - **D3 RPC 单方法 `firewall.status`**，只读、无入参、校验面为零（smart D2/overlay 同风格）。
 - **D4 数据面命令与超时**：
   - nftables：`nft -j list ruleset`（JSON 一次拿全量）；
-  - iptables：`iptables-save`（全量文本，逐行解析）；
+  - iptables：`iptables-save`（IPv4，必须成功）+ `ip6tables-save`（IPv6，尽力而为——命令缺失或失败只追加 `error` 说明、不拖垮整包，IPv4 数据照常返回）；
   - 超时：单命令 10s，整次 RPC 30s（smart D3 同量级）；
-  - 输出体积上限 4MB：超限截断并置 `truncated: true`，页面明确提示「规则集过大，仅显示前 4MB」——极端机型的全量 ruleset 不能把 RPC 和前端内存打爆；
-  - 读数命令失败 → `available=false` + `error` 原因，不像 SMART 逐盘粒度——防火墙是单集合，没有「部分成功」。
+  - 输出体积上限 4MB，超限均置 `truncated: true` 但截断语义分后端：nft 的 JSON 无法安全半解析 → 超限**不解析**，只回 meta + 截断说明；iptables-save 是行式文本 → 按行界截断（丢最后半行），已截部分照常解析。页面明确提示「规则集过大，仅显示前 4MB」；
+  - 读数命令失败 → `available=false` + `error` 原因，不像 SMART 逐盘粒度——防火墙是单集合，没有「部分成功」（唯一例外即上条 IPv6 尽力而为：v4 是主体，v6 只是补充）。
 - **D5 字段白名单，不透传原始 JSON**。nft `-j` 的完整对象树很大且含 counters 噪声，provider 解析为扁平规则列表：每条 `handle`（nft）/行号（iptables）、`text`（人读摘要）、`packets`/`bytes`（有则带）。iptables-save 逐行切 `*table`/`:chain policy`/规则行三元组。绝不把原始输出整段塞给前端（smart D4 同则）。
 - **D6 摘要统计与默认策略单列**。按 `family×table×chain` 聚合规则数；input/forward/output 等基础链的 `policy`（accept/drop）单列提升为页面徽标——「默认策略是不是 accept」是巡检第一眼。
 - **D7 cockpit 名下标注：预留识别、不在 M1 造空功能**。cockpit 现在不创建任何防火墙规则（全仓无写路径），M1 页面无标注可打。预留机制：将来 cockpit 引入规则时统一带注释标记（iptables `-m comment --comment "cockpit:xxx"`、nft `comment "cockpit:xxx"`），provider 识别 `cockpit:` 前缀置 `ownedByCockpit=true`，前端高亮。机制先写进本决策，代码等第一条规则真实存在时再启用。
@@ -72,8 +72,8 @@ Cockpit 现状：
 }
 ```
 
-- iptables 后端：`backend="iptables"`，`iptablesVariant` 为 `nf_tables`/`legacy`（来自 `iptables --version`，仅展示）；tables 无 family 概念，`family=""`；规则 `handle` 省略，`text` 为规则行原文。
-- `available=false` 时 tables 为空、`error` 带原因；工具全缺时 `backend=""`。
+- iptables 后端：`backend="iptables"`，`iptablesVariant` 为 `nf_tables`/`legacy`（来自 `iptables --version`，仅展示）；iptables-save 输出按表切分，`family` 固定 `ipv4`/`ipv6`（对应 iptables-save / ip6tables-save）；规则 `handle` 省略，`text` 为规则行原文（`-A CHAIN` 之后的部分）。
+- `available=false` 时 tables 为空、`error` 带原因；工具全缺时 `backend=""`。`available=true` 时 `error` 仍可能非空（IPv6 读数失败的尽力而为说明、nft 超限 meta-only 说明）——`error` 是附加信息不是失败标志，以 `available` 为准。
 - `totalRules` 供总览条与后续告警批次做基线比对。
 
 ## 实现切分（M1，本任务）
@@ -86,8 +86,8 @@ Cockpit 现状：
 
 ## 测试要点
 
-- 解析器：nft JSON（含 counters/无 counters、comment 前缀识别、非法 JSON 不 panic）；iptables-save（多表、`:chain POLICY` 行、空表）；超限截断逻辑；
-- provider：fake Commander 注入；nft 缺失走 iptables 分支；两命令全失败 → `available=false`；`--version` 解析 legacy/nf_tables；
+- 解析器：nft JSON（含 counters/无 counters、comment 前缀识别、非法 JSON 不 panic）；iptables-save（多表、`:chain POLICY` 行、空表）；超限截断逻辑（nft meta-only / iptables 行界）；
+- provider：fake Commander 注入；nft 缺失走 iptables 分支；两命令全失败 → `available=false`；`--version` 解析 legacy/nf_tables；IPv6 尽力而为（失败省略不拖垮 v4）；
 - detector：nft/iptables 各自存在与全缺四种组合的 capability/metadata 断言；
 - server：离线 503、agent error 502 透传、rbac `firewall/` 前缀映射；
 - 前端：三态渲染（无 capability/available=false/正常数据）、truncated Alert、`tsc --noEmit` + vite build。

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Firewall from './index'
-import type { Agent, FirewallStatus } from '@/types'
+import type { Agent, FirewallChain, FirewallStatus, FirewallTable } from '@/types'
 
 // Firewall（防火墙观测）：三态渲染（无 capability 空态 / available=false 说明态 /
 // 正常总览+规则明细）、truncated Alert、默认策略徽标、cockpit 规则标注
@@ -73,9 +73,9 @@ describe('Firewall', () => {
 
   it('正常态：总览行（后端/版本/规则数/默认策略徽标），truncated=false 无告警', async () => {
     renderPage()
-    // 总览行出现（异步查询完成后）
+    // 总览行出现（异步查询完成后）；web-01 同时在总览行与面板头
     expect(await screen.findByText('nftables')).toBeInTheDocument()
-    expect(await screen.findByText('web-01')).toBeInTheDocument()
+    expect((await screen.findAllByText('web-01')).length).toBeGreaterThan(0)
     expect(screen.getByText('nft 1.0.9')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument() // 规则总数
     expect(screen.getByText('input accept')).toBeInTheDocument()
@@ -135,7 +135,8 @@ describe('Firewall', () => {
     // 面板说明态
     fireEvent.click(panelHeader('web-01'))
     expect(await screen.findByText(/防火墙规则集不可读（iptables）/)).toBeInTheDocument()
-    expect(await screen.findByText(/Permission denied/)).toBeInTheDocument()
+    // Permission denied 同时出现在总览状态列与面板说明（两处）
+    expect((await screen.findAllByText(/Permission denied/)).length).toBeGreaterThan(0)
   })
 
   it('truncated=true：页顶 Alert 提示 4MB 截断', async () => {
@@ -153,8 +154,123 @@ describe('Firewall', () => {
 
   it('cockpit 名下规则带标注', async () => {
     renderPage()
+    // 等面板头渲染出来再展开
+    expect((await screen.findAllByText('web-01')).length).toBeGreaterThan(0)
     fireEvent.click(panelHeader('web-01'))
     expect(await screen.findByText('cockpit')).toBeInTheDocument()
     expect(await screen.findByText('tcp dport 9000 accept')).toBeInTheDocument()
+  })
+
+  it('策略去重（跨表同名基础链取首个）/计数列/非常规策略/无基础链占位', async () => {
+    // ag-a：inet/ip 两表都有 input——去重只显首个；output queue 走默认徽标；
+    // 规则带 counters 验证「包/字节」列
+    const dedupStatus = (): FirewallStatus => ({
+      available: true,
+      backend: 'nftables',
+      totalRules: 1,
+      tables: [
+        {
+          family: 'inet',
+          name: 'filter',
+          chains: [
+            {
+              name: 'input',
+              policy: 'accept',
+              rules: [{ text: 'tcp dport 22 accept', packets: 5, bytes: 10, ownedByCockpit: false }],
+            },
+            { name: 'output', policy: 'queue', rules: [] },
+            { name: 'sanction', rules: [] },
+          ],
+        },
+        { family: 'ip', name: 'filter', chains: [{ name: 'input', policy: 'drop', rules: [] }] },
+      ],
+      truncated: false,
+    })
+    // ag-b：只有自定义链（prerouting 无策略）→ 默认策略列占位 —
+    const noBaseStatus: FirewallStatus = {
+      available: true,
+      backend: 'nftables',
+      totalRules: 0,
+      tables: [{ family: 'inet', name: 'raw', chains: [{ name: 'prerouting', rules: [] }] }],
+      truncated: false,
+    }
+    renderPage((id) => Promise.resolve(id === 'ag-1' ? dedupStatus() : noBaseStatus), [
+      mkAgent('ag-1', 'web-01'),
+      mkAgent('ag-2', 'db-01'),
+    ])
+    // 总览先行：去重 / 非常规策略 / 无基础链占位
+    expect(await screen.findByText('input accept')).toBeInTheDocument()
+    expect(screen.getAllByText('input accept')).toHaveLength(1) // ip/filter input drop 被去重
+    expect(screen.getByText('output queue')).toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0) // ag-2 无基础链占位
+    // 计数列在面板内：展开 ag-1
+    fireEvent.click(panelHeader('web-01'))
+    expect(await screen.findByText('5 / 10')).toBeInTheDocument()
+  })
+
+  it('面板获取失败提示 + available=false 无后端时的回退文案', async () => {
+    renderPage(
+      (id) =>
+        id === 'ag-1'
+          ? Promise.reject(new Error('connection refused'))
+          : Promise.resolve({
+              available: false,
+              backend: '',
+              totalRules: 0,
+              tables: [],
+              truncated: false,
+            }),
+      [mkAgent('ag-1', 'web-01'), mkAgent('ag-2', 'db-01')],
+    )
+    // 等面板头渲染出来再展开
+    expect((await screen.findAllByText('web-01')).length).toBeGreaterThan(0)
+    // 面板查询失败 → 单主机提示
+    fireEvent.click(panelHeader('web-01'))
+    expect(await screen.findByText('该主机防火墙状态获取失败')).toBeInTheDocument()
+    // available=false 且无 backend/error → 通用回退说明
+    fireEvent.click(panelHeader('db-01'))
+    expect(await screen.findByText('防火墙规则集不可读')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Agent 需以 root 运行才能读取防火墙规则集'),
+    ).toBeInTheDocument()
+  })
+
+  it('空规则集/缺 chains/rules 字段回退/空规则文本占位/离线与无主机名 agent', async () => {
+    // ag-1：available 但 tables 空 → 面板空态；含缺 chains 的表、缺 rules 的链、空 text 规则
+    const sparse: FirewallStatus = {
+      available: true,
+      backend: 'iptables',
+      totalRules: 1,
+      tables: [
+        { family: 'ipv4', name: 'mangle', chains: undefined as unknown as FirewallTable['chains'] },
+        {
+          family: 'ipv4',
+          name: 'filter',
+          chains: [{ name: 'INPUT', rules: undefined as unknown as FirewallChain['rules'] }, { name: 'FORWARD', rules: [{ text: '', ownedByCockpit: false }] }],
+        },
+      ],
+      truncated: false,
+    }
+    // ag-2：离线（capability 在也不进清单）；ag-3：无 hostname（回退 id 展示）
+    const offlineAgent = { ...mkAgent('ag-2', 'gone-01'), status: 'offline' } as Agent
+    const noHostAgent = { ...mkAgent('ag-3', ''), status: 'online' } as Agent
+    renderPage(
+      (id) =>
+        Promise.resolve(id === 'ag-1' ? sparse : { ...nftStatus, tables: [] }),
+      [mkAgent('ag-1', 'web-01'), offlineAgent, noHostAgent],
+    )
+    // 离线 agent 不入面板与总览
+    expect(await screen.findByText('nftables')).toBeInTheDocument()
+    expect(screen.queryByText('gone-01')).toBeNull()
+    // 无 hostname 的 agent 回退用 id
+    expect(screen.getAllByText('ag-3').length).toBeGreaterThan(0)
+    // 展开面板：空链占位与空规则文本占位
+    fireEvent.click(panelHeader('web-01'))
+    expect(await screen.findByText('0 条规则')).toBeInTheDocument() // rules 缺省 → 0
+    expect(await screen.findByText('（无表达式）')).toBeInTheDocument()
+    expect(screen.getAllByText('空链').length).toBeGreaterThan(0)
+    // 空规则集面板（tables 空 → Empty 引导）
+    fireEvent.click(panelHeader('ag-3'))
+    expect(await screen.findByText('规则集为空（未配置任何规则）')).toBeInTheDocument()
   })
 })
