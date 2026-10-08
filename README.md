@@ -1,10 +1,12 @@
+[English](README.md) | [中文](README.zh.md)
+
 <p align="center">
   <img src="web/public/logo.svg" alt="Cockpit Logo" width="120" height="120">
 </p>
 
 <h1 align="center">Cockpit</h1>
 
-个人混合基础设施控制台，用于把分散在本地机房、云 VPS、NAT 后节点上的资源收敛到一个轻量 Server + Agent 控制面。
+A personal hybrid infrastructure console that consolidates resources scattered across local machine rooms, cloud VPS instances, and nodes behind NAT into a single lightweight Server + Agent control plane.
 
 [![Test](https://img.shields.io/github/actions/workflow/status/cuihairu/cockpit/test.yml?branch=main&logo=github&label=Test)](https://github.com/cuihairu/cockpit/actions/workflows/test.yml)
 [![Docs](https://img.shields.io/github/actions/workflow/status/cuihairu/cockpit/docs.yml?branch=main&logo=github&label=Docs)](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml)
@@ -15,15 +17,15 @@
 [![Agent: x86_64](https://img.shields.io/badge/arch-x86__64-5B5B5B)](https://cuihairu.github.io/cockpit/guide/getting-started)
 [![Agent: aarch64](https://img.shields.io/badge/arch-aarch64-5B5B5B)](https://cuihairu.github.io/cockpit/guide/getting-started)
 
-## 核心特性
+## Features
 
-面板把资源、执行、远控三条线收在一处。资源侧从 Inventory YAML 同步出统一资源视图，拨测心跳、到期告警、配置漂移检测都挂这份数据，告警发 Herald / ntfy / webhook / Telegram 四个渠道。执行侧有一本全机 Job 台账，对任意在线 agent 下发命令，状态、退出码、输出回写可查；Docker 容器全量管理，应用按 compose 文件以 Stacks 部署。远控侧终端、VNC、桌面走短期 ticket 转发并支持会话录制；反向代理站点、ACME 证书、DNS/DDNS、备份恢复、服务/Cron/SMART/NAS/组网观测也在同一面板操作。
+The console brings resources, execution, and remote access together in one place. On the resource side, a unified inventory view is synced from Inventory YAML; probe heartbeats, expiration alerts, and configuration drift detection all run on this data, with alerts delivered through four channels: Herald, ntfy, webhook, and Telegram. On the execution side, a fleet-wide Job ledger dispatches commands to any online agent with trackable status, exit codes, and captured output; Docker containers get full lifecycle management, and applications deploy as Stacks from compose files. On the remote access side, terminal, VNC, and desktop sessions go through short-lived ticket forwarding with session recording; reverse proxy sites, ACME certificates, DNS/DDNS, backup and restore, and service/Cron/SMART/NAS/network observability are all operated from the same console.
 
-Agent 经 WebSocket 主动连出注册，NAT 后的节点不用暴露任何入站端口。
+Agents register by dialing out over WebSocket, so nodes behind NAT never need to expose any inbound ports.
 
-## 快速开始
+## Quick Start
 
-> 前置：先有一台 Cockpit Server（Docker 一条起，部署机无需编译环境）：
+> Prerequisite: a running Cockpit Server first (a single Docker command; the deploy host needs no build toolchain):
 
 ```bash
 cp deployments/docker/.env.example deployments/docker/.env && vi deployments/docker/.env
@@ -32,53 +34,53 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 
 ### Linux
 
-1. 下载并安装（自动检测架构，从每日构建匿名直链下载，装完自动验证）：
+1. Download and install (architecture auto-detected, fetched anonymously from daily builds, verified automatically after install):
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | bash
    ```
 
-2. 连接服务器（示例用本站域名，替换为你的 Cockpit 服务端地址）：
+2. Connect to the server (the example uses this site's domain; replace it with your own Cockpit server address):
 
    ```bash
    cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
    ```
 
-3. 验证安装：
+3. Verify the installation:
 
    ```bash
    cockpit-agent --version
    ```
 
-   验证成功预期输出：
+   Expected output on success:
 
    ```text
    Cockpit Agent v20261001
    ```
 
-   （版本号为安装当日日期；agent 日志出现 `Registered as agent: ...` 即已连上服务器）
+   (The version number is the date of installation; `Registered as agent: ...` in the agent log means the server connection is up.)
 
 ### macOS
 
-1. 下载并安装（与 Linux 共用 `install.sh`，自动识别 Darwin 与 arm64/amd64）：
+1. Download and install (same `install.sh` as Linux; detects Darwin and arm64/amd64 automatically):
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | bash
    ```
 
-2. 连接服务器：
+2. Connect to the server:
 
    ```bash
    cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
    ```
 
-3. 验证安装：
+3. Verify the installation:
 
    ```bash
    cockpit-agent --version
    ```
 
-   验证成功预期输出：
+   Expected output on success:
 
    ```text
    Cockpit Agent v20261001
@@ -86,60 +88,57 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 
 ### Windows
 
-**图形化安装器（推荐）**：从 [nightly release](https://github.com/cuihairu/cockpit/releases/latest)
-下载 `cockpit-agent-setup-nightly.exe`（同名 `.sha256` 为校验文件），双击运行：
-装到 `%ProgramFiles%\Cockpit Agent`、开始菜单 + 桌面快捷方式（带 agent 图标）、
-向导内填写 Server 地址、可勾选「注册 Windows 服务并开机自启」、控制面板标准
-卸载条目。静默装机：
+**Graphical installer (recommended)**: download `cockpit-agent-setup-nightly.exe` from the [nightly release](https://github.com/cuihairu/cockpit/releases/latest) (the identically named `.sha256` file is for verification) and run it by double-click.
+It installs to `%ProgramFiles%\Cockpit Agent`, creates Start menu and desktop shortcuts (with the agent icon), asks for the Server address in the wizard, offers an optional "Register Windows service with auto-start on boot" checkbox, and registers a standard uninstall entry in Control Panel. For silent installation:
 
 ```powershell
 .\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws
 ```
 
-服务管理：`cockpit-agent service install|uninstall|start|stop|status`（服务名
-`CockpitAgent`，日志 `%ProgramData%\CockpitAgent\agent.log`）。
+Service management: `cockpit-agent service install|uninstall|start|stop|status` (service name
+`CockpitAgent`, log at `%ProgramData%\CockpitAgent\agent.log`).
 
-**PowerShell 脚本路径**（免管理员，装到当前用户目录并写入用户 PATH）：
+**PowerShell script path** (no administrator required; installs into the current user's directory and adds it to the user PATH):
 
-1. 下载并安装：
+1. Download and install:
 
    ```powershell
    irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
    ```
 
-2. 连接服务器（新开一个终端使 PATH 生效）：
+2. Connect to the server (open a new terminal so the PATH takes effect):
 
    ```powershell
    cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
    ```
 
-3. 验证安装：
+3. Verify the installation:
 
    ```powershell
    cockpit-agent --version
    ```
 
-   验证成功预期输出：
+   Expected output on success:
 
    ```text
    Cockpit Agent v20261001
    ```
 
-## 文档
+## Documentation
 
-完整安装（一键安装细节 / 平台矩阵 / 源码构建 / OpenWrt ipk）、配置说明、架构与各功能设计文档均在文档站：
+Full installation details (one-line installer internals / platform matrix / building from source / OpenWrt ipk), configuration reference, architecture, and per-feature design docs live on the documentation site:
 
-- [介绍](https://cuihairu.github.io/cockpit/guide/introduction)
-- [快速开始](https://cuihairu.github.io/cockpit/guide/getting-started)
-- [架构与边界](https://cuihairu.github.io/cockpit/guide/architecture)
-- [协议与 API 边界](https://cuihairu.github.io/cockpit/guide/protocol)
-- [Docker 部署](https://cuihairu.github.io/cockpit/operations/deploy-docker)
-- Agent 手工部署与服务单元样例：[deployments/README.md](deployments/README.md)
+- [Introduction](https://cuihairu.github.io/cockpit/guide/introduction)
+- [Quick Start](https://cuihairu.github.io/cockpit/guide/getting-started)
+- [Architecture and Boundaries](https://cuihairu.github.io/cockpit/guide/architecture)
+- [Protocol and API Boundaries](https://cuihairu.github.io/cockpit/guide/protocol)
+- [Docker Deployment](https://cuihairu.github.io/cockpit/operations/deploy-docker)
+- Agent manual deployment and service unit examples: [deployments/README.md](deployments/README.md)
 
-## 底座
+## Foundations
 
-本仓库基于开源组件构建，自己写的是控制面接线与各 provider 层：Server 与 Agent 用 Go，存储经 GORM 落 SQLite，实时通道跑在 gorilla/websocket 上；Web 端是 React 19 + Ant Design，终端渲染用 xterm.js；桌面与 VNC/SSH 远控接 Apache Guacamole（guacd 服务端 + guacamole-common-js 1.5.0 客户端），内置终端的 SSH 走 golang.org/x/crypto/ssh；证书签发用 go-acme/lego（DNS-01），移动端是 Flutter，文档站是 VitePress，Windows 安装器由 Inno Setup 打包。
+This repository is built on open-source components; what is written here is the control plane wiring and the provider layers: Server and Agent are in Go, storage goes through GORM into SQLite, and the realtime channel runs on gorilla/websocket; the web frontend is React 19 + Ant Design with xterm.js for terminal rendering; desktop and VNC/SSH remote access are backed by Apache Guacamole (guacd server + guacamole-common-js 1.5.0 client), and the built-in terminal's SSH uses golang.org/x/crypto/ssh; certificate issuance uses go-acme/lego (DNS-01), the mobile app is Flutter, the docs site is VitePress, and the Windows installer is packaged with Inno Setup.
 
-## 许可证
+## License
 
 Apache License 2.0
