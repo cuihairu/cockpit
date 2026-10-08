@@ -96,8 +96,14 @@ func (s *Server) handleProxyCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ProxyType != "tcp" && req.ProxyType != "udp" {
-		req.ProxyType = "tcp" // 默认 TCP
+	// proxyType 校验（拍板 2026-10-08-2，文档一致性审计遗留观察收口）：数据面
+	// 仅实现 TCP 拨号（proxy/handler.go DialTimeout 硬编码 "tcp"），此前接受
+	// "udp" 但转发仍走 TCP——静默错转；改为诚实失败。空值保持默认 tcp。
+	if req.ProxyType == "" {
+		req.ProxyType = "tcp"
+	} else if req.ProxyType != "tcp" {
+		http.Error(w, "Unsupported proxyType "+req.ProxyType+": data plane implements TCP only", http.StatusBadRequest)
+		return
 	}
 
 	// 检查 Agent 是否存在
@@ -223,6 +229,11 @@ func (s *Server) handleProxyUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AgentID != "" {
 		proxy.AgentID = req.AgentID
+	}
+	// 同 create 的 proxyType 校验（拍板 2026-10-08-2）：显式更新同样只收 tcp
+	if req.ProxyType != "" && req.ProxyType != "tcp" {
+		http.Error(w, "Unsupported proxyType "+req.ProxyType+": data plane implements TCP only", http.StatusBadRequest)
+		return
 	}
 	if req.ProxyType != "" {
 		proxy.ProxyType = req.ProxyType

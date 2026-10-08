@@ -145,8 +145,8 @@ RPC payload 使用 `method` 和 `params`。方法名按 `<provider>.<action>` �
 
 代理消息用于 Server 通过在线 Agent 访问 Agent 本机或其网络可达的 TCP 目标。
 
-> 注：代理配置的 `proxyType` 字段允许填 `udp`（API 校验与落库均接受），
-> 但当前 Agent 侧转发实现只按 TCP 拨号——`udp` 配置不会产生 UDP 数据面。
+> 注：代理仅支持 TCP 转发；`proxyType` 入参非 `tcp` 一律 400 拒绝（`udp`
+> 曾被接受但数据面仍按 TCP 拨号——静默错转，已改为诚实失败，见 D-2026-10-08-2）。
 
 | 类型 | 方向 | 用途 |
 | --- | --- | --- |

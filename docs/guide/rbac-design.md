@@ -51,11 +51,16 @@ agent 与 websocket 通道零改动（权限在 server 收口，agent 只接受 
 
 ## 权限点清单（D3 展开）
 
+> 完整权限点集以 `internal/storage/role.go` `resourceActions` 为单一事实源
+> （下表为摘录，含 P0/P1 补全的 `services`/`smart`/`recordings`/`firewall`/`jobs`）。
+
 ```
 inventory:read/write    files:read/write       logs:read           terminal:write
 docker:read/write       stack:read/write       cron:read/write     backup:read/write
 acme:read/write/admin   dns:read/write         ddns:read/write     proxy:read/write
 overlay:read/write      drift:read/write       nas:read/write      alerts:read/write
+services:read/write     smart:read/write       recordings:read/write
+firewall:read           jobs:read/write
 audit:read              users:admin            roles:admin         settings:admin
 ```
 

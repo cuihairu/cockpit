@@ -1,9 +1,8 @@
 # NAS 系统对接设计
 
-> 状态：M1 + M2-DSM 设计定稿。统一快照模型 + 多 Provider 架构：M1 通用 Linux
+> 状态：M1 + M2 全实现。统一快照模型 + 多 Provider 架构：M1 通用 Linux
 > NAS（agent 本地命令观测，零凭据零配置）打通全链路；M2 群晖 DSM / TrueNAS /
-> OpenMediaVault 网络 API provider（agent 内网访问，OpenWrt/PVE 同款），DSM
-> 已实现，TrueNAS/OMV 排队。
+> OpenMediaVault 网络 API provider（agent 内网访问，OpenWrt/PVE 同款），**均已实现**。
 
 ## D1 目标与统一模型
 

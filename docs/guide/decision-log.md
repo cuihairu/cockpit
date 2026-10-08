@@ -77,3 +77,21 @@ SMART/NAS/Overlay 同族（观测→告警→（远期）操作），能力复�
 **备选**：直接校验失败（拒绝同步）——否决：单文件 inventory 手工维护，硬失败伤易用性
 且与「同步容错、Errors 计数不中断」的既有 sync 纪律冲突。**重开条件**：多租户/CMDB
 严格口径需求出现时再议。
+
+## D-2026-10-08-2 代理 proxyType 拒收 udp（文档一致性审计遗留观察拍板）
+
+**定了什么**：`POST/PUT/PATCH /api/proxies` 的 `proxyType` 校验收紧为**只收
+`tcp`（空值默认 tcp），其余一律 400**（错误体说明数据面仅 TCP）。落在
+`internal/server/api_proxy.go` create/update 两处；protocol 与 storage 注释同步
+标注「udp 预留未实现」。
+
+**为什么**：文档一致性审计（docs/审计-文档一致性.md A4）发现 API 此前接受
+`proxyType: "udp"`（校验+落库均通过），但 Agent 侧转发实现只按 TCP 拨号
+（`proxy/handler.go` `DialTimeout` 硬编码 `"tcp"`）——用户会拿到一个名为 UDP
+实际走 TCP 的静默错转代理。web/mobile 均无 udp 入口（零 UI 暴露、无存量用户），
+诚实失败优于静默错转。
+
+**备选**：真实现 UDP 数据面转发——否决：无 UI 需求、无消费场景，无连接语义的
+数据报转发要走独立设计立项，不值当；仅文档注记不改行为——否决：陷阱永续存在，
+每轮审计重复发现。**重开条件**：出现真实 UDP 代理需求（DNS 隧道等）时走设计
+立项实现数据面，届时放开校验。

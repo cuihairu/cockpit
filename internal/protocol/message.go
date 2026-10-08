@@ -178,7 +178,7 @@ type RegisterResponse struct {
 // ProxyNewPayload 新建代理连接负载
 type ProxyNewPayload struct {
 	ProxyID   string `json:"proxyId"`            // 代理ID
-	ProxyType string `json:"proxyType"`          // tcp / udp
+	ProxyType string `json:"proxyType"`          // 仅 tcp（udp 预留未实现，API 拒收，见 D-2026-10-08-2）
 	Target    string `json:"target"`             // 目标地址，如 192.168.31.1:80
 	ConnID    string `json:"connId,omitempty"`   // 连接ID（运行时附加）
 	Terminal  bool   `json:"terminal,omitempty"` // 终端会话标记

@@ -347,10 +347,11 @@ func TestCovProxyUpdateDeleteStatus(t *testing.T) {
 	covWantCode(t, "update empty id", update(http.MethodPut, `{"name":"x"}`), http.StatusBadRequest)
 	covWantCode(t, "update missing", update(http.MethodPut, `{"id":"ghost"}`), http.StatusNotFound)
 	covWantCode(t, "update port conflict", update(http.MethodPatch, `{"id":"p1","remotePort":18001}`), http.StatusConflict)
-	rec = update(http.MethodPut, `{"id":"p1","name":"renamed","agentId":"agent-px","proxyType":"udp","remotePort":18300,"target":"127.0.0.1:9","description":"d","enabled":false}`)
+	// proxyType 显式改值按 D-2026-10-08-2 只收 tcp（udp 400 由 api_test 专测）
+	rec = update(http.MethodPut, `{"id":"p1","name":"renamed","agentId":"agent-px","proxyType":"tcp","remotePort":18300,"target":"127.0.0.1:9","description":"d","enabled":false}`)
 	covWantCode(t, "update ok", rec, http.StatusOK)
 	got, _ := s.db.GetProxy("p1")
-	if got.Name != "renamed" || got.ProxyType != "udp" || got.RemotePort != 18300 || got.Enabled {
+	if got.Name != "renamed" || got.ProxyType != "tcp" || got.RemotePort != 18300 || got.Enabled {
 		t.Fatalf("updated proxy = %+v", got)
 	}
 	// ReloadProxy 分支

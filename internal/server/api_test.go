@@ -1918,7 +1918,9 @@ func TestHandleProxyCreateSuccess(t *testing.T) {
 	}
 }
 
-func TestHandleProxyCreateUDP(t *testing.T) {
+func TestHandleProxyCreateUDPRejected(t *testing.T) {
+	// 拍板 2026-10-08-2：数据面仅 TCP（handler.go 拨号硬编码 "tcp"），udp 入参
+	// 从「接受后静默按 TCP 转发」改为 400 诚实失败
 	s := newTestServerWithDB(t)
 	setupAdmin(s)
 
@@ -1936,8 +1938,39 @@ func TestHandleProxyCreateUDP(t *testing.T) {
 	_, req := doAuthenticatedRequest(s, http.MethodPost, "/api/proxies", body)
 	rr := callWithAuth(s, s.handleProxyCreate, req)
 
-	if rr.Code != http.StatusCreated {
-		t.Errorf("Status = %d, want %d: %s", rr.Code, http.StatusCreated, rr.Body.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "TCP only") {
+		t.Errorf("Body should explain TCP-only data plane, got: %s", rr.Body.String())
+	}
+}
+
+func TestHandleProxyUpdateTypeRejected(t *testing.T) {
+	// 拍板 2026-10-08-2：PUT/PATCH 显式改 proxyType 同样只收 tcp
+	s := newTestServerWithDB(t)
+	setupAdmin(s)
+
+	s.db.UpsertAgent(&storage.Agent{ID: "agent-1", Status: "online"})
+	s.db.CreateProxy(&storage.Proxy{
+		ID: "px-1", Name: "P1", AgentID: "agent-1", ProxyType: "tcp",
+		RemotePort: 8081, Target: "localhost:3000", Enabled: true,
+	})
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"id":        "px-1",
+		"proxyType": "udp",
+	})
+	_, req := doAuthenticatedRequest(s, http.MethodPut, "/api/proxies", body)
+	rr := callWithAuth(s, s.handleProxyUpdate, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+	// 拒绝后存量配置不得被改动
+	proxy, err := s.db.GetProxy("px-1")
+	if err != nil || proxy.ProxyType != "tcp" {
+		t.Errorf("stored proxyType must stay tcp after rejected update, got %v (err=%v)", proxy, err)
 	}
 }
 
