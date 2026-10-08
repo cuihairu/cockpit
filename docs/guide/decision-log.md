@@ -95,3 +95,35 @@ SMART/NAS/Overlay 同族（观测→告警→（远期）操作），能力复�
 数据报转发要走独立设计立项，不值当；仅文档注记不改行为——否决：陷阱永续存在，
 每轮审计重复发现。**重开条件**：出现真实 UDP 代理需求（DNS 隧道等）时走设计
 立项实现数据面，届时放开校验。
+
+## D-2026-10-08-3 过期 agent 自动判定与列表隐藏（用户「清理过期 agent」闭环）
+
+**定了什么**：三件套——①**心跳回写 DB `last_seen`**（`dispatcher.go`
+handleHeartbeat 每 30s 心跳调 `TouchAgentLastSeen`，此前只在注册/断连落库）；
+②**服务端自动过期判定**（`alert_loop.go` cleanupLoop 每 30s tick 跑
+`expireStaleAgents`：`last_seen` 超阈值仍标 `online` 的假在线行批量标 `offline`
+并释放其注册表连接，清理动作带日志）；③**阈值可配可见**：`AGENT_EXPIRE_MINUTES`
+env 优先，`yaml agent.expire_minutes` 兜底，缺省 5 分钟，负值关闭；`/api/status`
+下发 `agentExpireMinutes`，web Agents 页顶部展示「过期阈值：X」。列表侧默认**隐藏**
+过期行（`last_seen` 超阈值即隐藏，不看 status），Alert 提示「已隐藏 N 台」+ 显示
+切换；**DB 行不删**——密钥/标签/历史档案保留，物理清除走既有手动「清理离线 agent」
+钮（thresholdMinutes 口径不变）。
+
+**为什么（此前为何屡提不实现——三处断链）**：077b10f（10-04）只做了**手动清理**
+这一层（`POST /api/agents/cleanup` + CleanupOfflineButton），而自动判定链整条缺失：
+(a) 心跳**从不写 DB**，`last_seen` 冻结在注册时刻，服务端重启后全部 DB 行永远
+`status=online`（假在线幽灵，DB 侧无任何可判定的时间证据）；(b) cleanupLoop 只清
+**内存注册表**（60s 超时关连接），DB 幽灵行无自动判定、无人清理；(c) 阈值只是弹窗
+里自由填的入参，无服务端配置、UI 不展示，「过期」概念在产品面不存在。本批把
+(a) 证据、(b) 判定、(c) 配置可见三处补齐。
+
+**过期 ≠ 删除的边界**：自动删行会顺带删掉 `secret_hash`（agent 密钥配置）、标签
+关联与档案——agent 短暂离线即被摘除会造成重新注册时密钥失效、清单丢失；且
+`authenticateAgentRegistration` 对无密钥哈希行放行（历史兼容），自动删行等于开了
+ID 冒名注册的口子。故过期只做「判定 + 标离线 + 列表隐藏 + 资源释放」，删除权留给
+人工按钮（删除时不可恢复，弹窗已有二次确认）。
+
+**备选**：过期即自动删 DB 行——否决（密钥/档案丢失 + 兼容放行口子，见上）；只改
+web 不动服务端——否决：DB 侧假在线行无从判定，隐藏口径没有数据基础。**重开条件**：
+若需要「离线 N 天自动摘除清单」的资产轮转策略，应加**独立的保留期配置**（默认远长
+于 5 分钟，如 30 天）而非复用过期阈值，走 todo 立项。

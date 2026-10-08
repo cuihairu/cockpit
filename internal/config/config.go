@@ -169,6 +169,11 @@ type EventConfig struct {
 // AgentConfig Agent 配置
 type AgentConfig struct {
 	APIKeyHeader string `yaml:"api_key_header"`
+	// ExpireMinutes Agent 过期判定阈值（分钟）：超过该时长无心跳/上报即判过期
+	// ——服务端自动把 DB 里假在线行标离线，UI 默认隐藏过期行（不删库，
+	// 密钥/标签/档案保留）。默认 5；负值关闭自动过期；env
+	// AGENT_EXPIRE_MINUTES 优先。
+	ExpireMinutes int `yaml:"expire_minutes,omitempty"`
 }
 
 // InventoryConfig Inventory 配置
@@ -271,6 +276,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Agent.APIKeyHeader == "" {
 		cfg.Agent.APIKeyHeader = "X-API-Key"
+	}
+	if cfg.Agent.ExpireMinutes == 0 {
+		cfg.Agent.ExpireMinutes = 5
 	}
 
 	if cfg.Inventory == nil {

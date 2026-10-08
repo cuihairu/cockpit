@@ -30,6 +30,14 @@ func (s *Server) handleMessage(agent *Agent, msg *protocol.Message) {
 func (s *Server) handleHeartbeat(agent *Agent, msg *protocol.Message) {
 	agent.Heartbeat()
 
+	// DB last_seen 回写：过期判定依据（D-2026-10-08-3 根因①——此前只在
+	// 注册/断连落库，服务端重启后假在线行无从判定）。nil-db 守卫同下。
+	if s.db != nil {
+		if err := s.db.TouchAgentLastSeen(agent.ID, time.Now()); err != nil {
+			log.Printf("Agent %s last_seen update failed: %v", agent.ID, err)
+		}
+	}
+
 	// 类型化解码心跳负载；忽略错误（agent 可能发空 payload）
 	if hb, err := protocol.DecodeHeartbeat(msg); err == nil {
 		if hb.SystemInfo != nil {

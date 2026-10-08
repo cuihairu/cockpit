@@ -98,6 +98,7 @@ docker compose exec cockpit-server cockpit version
 | `TZ` | 缺省 `Asia/Shanghai` |
 | `GUACD_ADDR` | guacd 地址（启用远控时设 `guacd:4822`） |
 | `GUACD_RECORDING_PATH` | guacd 录制目录，缺省 `/var/lib/guacamole` |
+| `AGENT_EXPIRE_MINUTES` | Agent 过期阈值（分钟），缺省 5：心跳超过该时长即判过期——服务端自动标离线并释放连接，列表默认隐藏（密钥/标签保留，物理清除走「清理离线 agent」钮）；负值关闭 |
 | `GUACD_LOG_LEVEL` | 缺省 `info`，**别开 `debug`**（会打印 connect 指令参数，含口令/私钥） |
 
 ## 远控栈（guacd，可选）

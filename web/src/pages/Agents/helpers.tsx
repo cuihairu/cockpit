@@ -91,3 +91,17 @@ export const statusConfig: Record<
   offline: { icon: <CloseCircleOutlined />, color: 'default', text: '离线' },
   error: { icon: <ExclamationCircleOutlined />, color: 'error', text: '异常' },
 }
+
+// 过期判定（与服务端 expireStaleAgents 同口径，D-2026-10-08-3）：
+// last_seen 距今超过阈值即过期——不看 status（服务端 30s sweep 才把假在线
+// 标 offline，UI 不等它，直接按 last_seen 说话）。expireMinutes<=0 = 自动
+// 过期关闭，永不过期；last_seen 缺失/为 0 视为未过期（避免隐藏首帧数据）。
+export const isAgentExpired = (
+  agent: Pick<Agent, 'lastSeen'>,
+  expireMinutes: number,
+): boolean => {
+  if (!expireMinutes || expireMinutes <= 0) return false
+  const ts = Number(agent.lastSeen)
+  if (!ts) return false
+  return Date.now() / 1000 - ts > expireMinutes * 60
+}

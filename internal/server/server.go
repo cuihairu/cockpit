@@ -76,6 +76,7 @@ var storageValidateKey = storage.ValidateKey
 // NewServer 创建新服务器
 func NewServer(cfg *config.Config) *Server {
 	cfg = config.Normalize(cfg)
+	applyAgentExpireEnv(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// 打开数据库（config.Normalize 已保证 Path 非空）

@@ -289,6 +289,35 @@ func (d *DB) UpdateAgentPresence(id string, startedAt time.Time, services []Agen
 	return d.db.Model(&Agent{}).Where("id = ?", id).Updates(updates).Error
 }
 
+// TouchAgentLastSeen 心跳路径回写 DB last_seen。此前 last_seen 只在注册/
+// 断连时落库，服务端一旦非优雅重启，DB 行永远停在假在线——过期判定失去
+// 依据（D-2026-10-08-3 根因①）。30s 级单行 UPDATE，SQLite 量级无压力。
+func (d *DB) TouchAgentLastSeen(id string, ts time.Time) error {
+	return d.db.Model(&Agent{}).Where("id = ?", id).
+		Update("last_seen", ts).Error
+}
+
+// MarkStaleAgentsOffline 把 last_seen 早于 cutoff 且仍标 online 的行批量改
+// offline（D-2026-10-08-3：服务端重启/非优雅断连留下的假在线行）。先查后改，
+// 返回被改的 ID 供调用方释放内存注册表资源并写日志；行已是 offline 则不动。
+func (d *DB) MarkStaleAgentsOffline(cutoff time.Time) ([]string, error) {
+	var ids []string
+	if err := d.db.Model(&Agent{}).
+		Where("status = ? AND last_seen < ?", "online", cutoff).
+		Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if err := d.db.Model(&Agent{}).
+		Where("id IN ?", ids).
+		Update("status", "offline").Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // ListSystemInfoSnapshotsByAgent 批量取系统信息快照（Agent 列表页要系统/架构列，
 // 避免每台机器一次查询）
 func (d *DB) ListSystemInfoSnapshotsByAgent(agentIDs []string) (map[string]*SystemInfoSnapshot, error) {

@@ -10,7 +10,7 @@ import type { Agent } from '@/types'
 // （RDP/VNC/SSH 走 Guacamole Modal、telnet 走 TerminalModal；两者有独立测试，
 // 这里 mock 成轻量桩）
 
-const apiMock = vi.hoisted(() => ({ getAgents: vi.fn(), cleanupAgents: vi.fn() }))
+const apiMock = vi.hoisted(() => ({ getAgents: vi.fn(), cleanupAgents: vi.fn(), getStatus: vi.fn() }))
 vi.mock('@/services/api', () => ({ api: apiMock }))
 
 // 清理离线入口按 inventory:write 裁剪（PermGuard → usePerm）
@@ -132,6 +132,9 @@ describe('Agents', () => {
     apiMock.getAgents.mockResolvedValue(agents)
     apiMock.cleanupAgents.mockReset()
     apiMock.cleanupAgents.mockResolvedValue({ status: 'ok', removed: ['ag-2'], count: 1 })
+    // 默认关闭自动过期（agentExpireMinutes=0）：存量用例不受隐藏逻辑影响
+    apiMock.getStatus.mockReset()
+    apiMock.getStatus.mockResolvedValue({ agentExpireMinutes: 0 })
   })
 
   it('列表渲染：类型/状态/能力列', async () => {
@@ -411,5 +414,58 @@ describe('Agents', () => {
     const capRow = rowOf('ag-c')
     expect(within(capRow).getByText('+2')).toBeInTheDocument()
     expect(within(capRow).getByText('物理机')).toBeInTheDocument()
+  })
+
+  it('过期 agent 默认隐藏 + 阈值可见 + 显示切换（D-2026-10-08-3）', async () => {
+    // 心跳远超阈值（5 分钟）的离线行 + 心跳新鲜的在线行
+    apiMock.getAgents.mockResolvedValue([
+      { ...agents[0], lastSeen: Date.now() / 1000 },
+      { ...agents[1], lastSeen: Date.now() / 1000 - 3600 },
+    ] as unknown as Agent[])
+    apiMock.getStatus.mockResolvedValue({ agentExpireMinutes: 5 })
+    renderPage()
+
+    // 阈值配置可见 + 过期行默认不展示
+    await screen.findByText('过期阈值：5 分钟')
+    expect(screen.queryByText('db-01')).not.toBeInTheDocument()
+    expect(screen.getByText(/已隐藏 1 台过期 agent/)).toBeInTheDocument()
+
+    // 切「显示」→ 过期行回来，行内仍标「离线」
+    fireEvent.click(screen.getByRole('button', { name: '显示' }))
+    expect(await screen.findByText('db-01')).toBeInTheDocument()
+    expect(within(rowOf('ag-2')).getByText('离线')).toBeInTheDocument()
+
+    // 切回「隐藏」
+    fireEvent.click(screen.getByRole('button', { name: '隐藏' }))
+    await waitFor(() => expect(screen.queryByText('db-01')).not.toBeInTheDocument())
+  })
+
+  it('无过期 agent 时提示保持开启且不提供切换', async () => {
+    apiMock.getAgents.mockResolvedValue([
+      { ...agents[0], lastSeen: Date.now() / 1000 },
+      { ...agents[1], lastSeen: Date.now() / 1000 },
+    ] as unknown as Agent[])
+    apiMock.getStatus.mockResolvedValue({ agentExpireMinutes: 5 })
+    renderPage()
+
+    await screen.findByText('db-01')
+    expect(screen.getByText(/当前无过期 agent/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '显示' })).not.toBeInTheDocument()
+  })
+
+  it('agentExpireMinutes=0 显示自动过期已关闭', async () => {
+    renderPage()
+    await screen.findByText('web-01')
+    expect(screen.getByText('自动过期已关闭')).toBeInTheDocument()
+    expect(screen.queryByText(/已隐藏/)).not.toBeInTheDocument()
+  })
+
+  it('status 查询失败优雅降级（不隐藏行、不出过期 UI）', async () => {
+    apiMock.getStatus.mockRejectedValue(new Error('boom'))
+    renderPage()
+    await screen.findByText('web-01')
+    await screen.findByText('db-01')
+    expect(screen.queryByText(/过期阈值/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/已隐藏/)).not.toBeInTheDocument()
   })
 })

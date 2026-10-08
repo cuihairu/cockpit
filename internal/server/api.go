@@ -203,6 +203,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"total":  stats.AgentsTotal,
 			"online": stats.AgentsOnline,
 		},
+		// Agent 过期阈值（分钟，0=自动过期已关闭）：web 列表据此隐藏过期
+		// 行并在清理钮旁展示口径（D-2026-10-08-3）
+		"agentExpireMinutes": int(s.agentExpireThreshold() / time.Minute),
 	}
 
 	s.writeJSON(w, http.StatusOK, status)

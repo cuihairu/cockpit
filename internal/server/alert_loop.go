@@ -2,14 +2,71 @@ package server
 
 import (
 	"log"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/alert"
+	"github.com/cuihairu/cockpit/internal/config"
 )
 
 // cleanupLoop 定期清理离线 Agent 与过期终端录制
 // cleanupLoop 间隔。包级变量仅为测试可注入，默认值即生产取值。
 var cleanupLoopInterval = 30 * time.Second
+
+// applyAgentExpireEnv 让 AGENT_EXPIRE_MINUTES 环境变量覆盖 yaml 的
+// agent.expire_minutes（部署面习惯用 env 调运行参数，见 /etc/default/cockpit-server）。
+func applyAgentExpireEnv(cfg *config.Config) {
+	raw := os.Getenv("AGENT_EXPIRE_MINUTES")
+	if raw == "" || cfg == nil || cfg.Agent == nil {
+		return
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		log.Printf("Invalid AGENT_EXPIRE_MINUTES %q, keep %d: %v", raw, cfg.Agent.ExpireMinutes, err)
+		return
+	}
+	cfg.Agent.ExpireMinutes = v
+}
+
+// agentExpireThreshold Agent 过期判定阈值；0 = 自动过期已关闭（配置为负值）。
+// nil-safe：测试直接构造 &Server{} 不带 cfg 时也返回默认 5 分钟。
+func (s *Server) agentExpireThreshold() time.Duration {
+	const def = 5
+	minutes := def
+	if s.cfg != nil && s.cfg.Agent != nil {
+		minutes = s.cfg.Agent.ExpireMinutes
+	}
+	if minutes < 0 {
+		return 0
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+// expireStaleAgents 过期 Agent 自动判定（D-2026-10-08-3，用户「清理过期
+// agent」闭环）：把 DB 里 last_seen 超过阈值仍标 online 的假在线行批量标
+// offline，并顺带释放其内存注册表资源（关连接）。列表侧的过期隐藏由 web
+// 按 /api/status 下发的 agentExpireMinutes 执行——DB 行不删，密钥/标签/
+// 档案保留，物理清除走既有手动「清理离线 agent」钮。
+func (s *Server) expireStaleAgents() {
+	threshold := s.agentExpireThreshold()
+	if threshold <= 0 {
+		return
+	}
+	stale, err := s.db.MarkStaleAgentsOffline(time.Now().Add(-threshold))
+	if err != nil {
+		log.Printf("Agent expiry sweep failed: %v", err)
+		return
+	}
+	for _, id := range stale {
+		// 资源释放：Unregister 内部已 Close（关 Send 通道 + WS 连接）
+		s.registry.Unregister(id)
+	}
+	if len(stale) > 0 {
+		log.Printf("Expired %d agent(s) with no heartbeat for %s: %v",
+			len(stale), threshold, stale)
+	}
+}
 
 func (s *Server) cleanupLoop() {
 	ticker := time.NewTicker(cleanupLoopInterval)
@@ -24,6 +81,8 @@ func (s *Server) cleanupLoop() {
 			if len(removed) > 0 {
 				log.Printf("Cleaned up offline agents: %v", removed)
 			}
+			// 过期判定：心跳/上报超阈值 → 假在线标离线 + 资源释放（有日志）
+			s.expireStaleAgents()
 			// 过期终端录制清理（小时节流，见 recording-design.md D6）
 			if time.Since(lastRecordingCleanup) > recordingCleanupInterval {
 				lastRecordingCleanup = time.Now()

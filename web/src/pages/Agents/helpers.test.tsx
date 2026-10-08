@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent } from '@/types'
-import { getVirtDisplay, getRemoteServices, virtTypeConfig, statusConfig } from './helpers'
+import { getVirtDisplay, getRemoteServices, virtTypeConfig, statusConfig, isAgentExpired } from './helpers'
 
 // helpers：虚拟化显示映射与远程服务提取（纯逻辑）
 
@@ -110,5 +110,33 @@ describe('配置表完整性', () => {
     expect(statusConfig.online.text).toBe('在线')
     expect(statusConfig.offline.text).toBe('离线')
     expect(statusConfig.error.text).toBe('异常')
+  })
+})
+
+describe('isAgentExpired', () => {
+  const now = Date.now() / 1000
+
+  it('last_seen 超过阈值即过期，不论 status', () => {
+    expect(isAgentExpired(baseAgent({ lastSeen: now - 3600, status: 'online' }), 5)).toBe(true)
+    expect(isAgentExpired(baseAgent({ lastSeen: now - 3600, status: 'offline' }), 5)).toBe(true)
+  })
+
+  it('心跳新鲜（阈值内）不过期', () => {
+    expect(isAgentExpired(baseAgent({ lastSeen: now }), 5)).toBe(false)
+    expect(isAgentExpired(baseAgent({ lastSeen: now - 60 }), 5)).toBe(false)
+  })
+
+  it('阈值 <=0 = 自动过期关闭', () => {
+    expect(isAgentExpired(baseAgent({ lastSeen: now - 86400 }), 0)).toBe(false)
+    expect(isAgentExpired(baseAgent({ lastSeen: now - 86400 }), -1)).toBe(false)
+  })
+
+  it('last_seen 缺失/为 0 视为未过期（不隐藏首帧数据）', () => {
+    expect(isAgentExpired(baseAgent({ lastSeen: '0' }), 5)).toBe(false)
+    expect(isAgentExpired(baseAgent({}), 5)).toBe(false)
+  })
+
+  it('字符串时间戳归一（与 formatOfflineDuration 同口径）', () => {
+    expect(isAgentExpired(baseAgent({ lastSeen: String(now - 3600) }), 5)).toBe(true)
   })
 })

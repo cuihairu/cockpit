@@ -1526,4 +1526,6 @@ export interface StatusResponse {
   domains: { valid: number; expiring: number }
   certificates: { valid: number; expiring: number }
   infrastructure: { total: number; online: number }
+  /** Agent 过期判定阈值（分钟，0 = 服务端自动过期已关闭），见 D-2026-10-08-3 */
+  agentExpireMinutes?: number
 }
