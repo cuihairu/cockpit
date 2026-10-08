@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,5 +91,38 @@ func TestMarkStaleAgentsOffline(t *testing.T) {
 	again, err := db.MarkStaleAgentsOffline(time.Now().Add(-5 * time.Minute))
 	if err != nil || len(again) != 0 {
 		t.Errorf("second sweep = %v, %v; want empty", again, err)
+	}
+}
+
+// TestMarkStaleAgentsOfflineErrorBranches 错误分支收口（100% 覆盖纪律）：
+// closed db 覆盖 Pluck 失败；BEFORE UPDATE 触发器阻断覆盖 Update 失败
+// （须先落一行 stale-online 让 Pluck 拿到非空 ids，否则 len==0 提前返回
+// 走不到 Update）——对齐 tag_test 的 RAISE(ABORT) 注入先例
+func TestMarkStaleAgentsOfflineErrorBranches(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+
+	// Update 失败：有 stale 行（Pluck 命中）+ 触发器阻断 UPDATE
+	if err := db.UpsertAgent(&Agent{ID: "ag-block", Hostname: "h", Status: "online"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := db.UpdateAgentStatus("ag-block", "online", time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	if err := db.db.Exec(`CREATE TRIGGER agent_status_boom BEFORE UPDATE ON agents
+		BEGIN SELECT RAISE(ABORT, 'agent update boom'); END`).Error; err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+	if _, err := db.MarkStaleAgentsOffline(time.Now()); err == nil ||
+		!strings.Contains(err.Error(), "agent update boom") {
+		t.Errorf("blocked update = %v, want boom error", err)
+	}
+
+	// Pluck 失败：closed db（触发器不影响 SELECT，须关库注入）
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if _, err := db.MarkStaleAgentsOffline(time.Now()); err == nil {
+		t.Error("closed db should fail pluck, got nil")
 	}
 }

@@ -204,3 +204,13 @@ func TestHandleStatusExposesExpireMinutes(t *testing.T) {
 		t.Errorf("agentExpireMinutes = %v, want 5", minutes)
 	}
 }
+
+// TestExpireStaleAgentsSweepError sweep 存储故障分支：closed db → 记日志
+// 直接返回，不 panic（对齐 api_dns_cmdb_test 的 closed-db 注入先例）
+func TestExpireStaleAgentsSweepError(t *testing.T) {
+	s := covNewServer(t)
+	if err := s.db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	s.expireStaleAgents() // 错误分支内 log+return，走到这里不 panic 即过
+}
