@@ -1946,6 +1946,36 @@ func TestHandleProxyCreateUDPRejected(t *testing.T) {
 	}
 }
 
+func TestHandleProxyCreateEmptyTypeDefaultsTCP(t *testing.T) {
+	// 拍板 2026-10-08-2 校验的空值路径：省略 proxyType 仍默认 tcp 落库
+	s := newTestServerWithDB(t)
+	setupAdmin(s)
+
+	s.db.UpsertAgent(&storage.Agent{ID: "agent-1", Status: "online"})
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"name":       "Default Type",
+		"agentId":    "agent-1",
+		"remotePort": 8090,
+		"target":     "localhost:3000",
+		"publicBind": true,
+	})
+
+	_, req := doAuthenticatedRequest(s, http.MethodPost, "/api/proxies", body)
+	rr := callWithAuth(s, s.handleProxyCreate, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("Status = %d, want %d: %s", rr.Code, http.StatusCreated, rr.Body.String())
+	}
+	var got storage.Proxy
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.ProxyType != "tcp" {
+		t.Errorf("stored ProxyType = %q, want tcp (empty input defaults)", got.ProxyType)
+	}
+}
+
 func TestHandleProxyUpdateTypeRejected(t *testing.T) {
 	// 拍板 2026-10-08-2：PUT/PATCH 显式改 proxyType 同样只收 tcp
 	s := newTestServerWithDB(t)
