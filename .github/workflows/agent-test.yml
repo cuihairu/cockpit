@@ -113,7 +113,12 @@ jobs:
           kill $AGENT_PID || true
 
       - name: Test RPC handlers
-        run: go test ./internal/agent/rpc/... -v
+        run: |
+          # testlog.txt "file too large" 已第 4 次复发（4bed8f8/fe47204/b57298a/
+          # 3a3873a，均红在本步的 internal/agent/rpc）——按批次 17 门槛动作把
+          # RLIMIT_FSIZE soft 提到 hard；若 hard 本身受限此命令会报错但不中断
+          ulimit -f unlimited || true
+          go test ./internal/agent/rpc/... -v
 
   # 单元测试覆盖检查
   coverage-check:
