@@ -46,7 +46,8 @@ export default defineConfig({
             { text: 'OpenWrt Agent 打包设计', link: '/guide/openwrt-agent-design' },
             { text: 'Windows Agent 打包设计', link: '/guide/windows-agent-design' },
             { text: '服务健康探针与自愈设计', link: '/guide/service-health-design' },
-            { text: '执行 Job 模型设计', link: '/guide/jobs-design' }
+            { text: '执行 Job 模型设计', link: '/guide/jobs-design' },
+            { text: 'Workflow 与异步 Job 设计', link: '/guide/workflow-design' }
           ]
         }
       ],

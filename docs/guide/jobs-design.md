@@ -133,6 +133,6 @@ target 非空；exec 需 `parameters.command` 非空且 ≤16KB；`timeout_s` 1-
 
 | 优先级 | 方向 | 依赖 |
 |--------|------|------|
-| P2 | Workflow：Job 编排（DAG/重试/审批） | 本模型 |
+| P2 | Workflow：Job 编排（线性链/重试/取消，DAG/审批留 M2）——已立项设计 [workflow-design](./workflow-design)（2026-10-09） | 本模型 |
 | P0′ | 事件模型：Job 终态事件进统一事件总线 | Event 抽象立项 |
 | P5 | AI 接线：Job API 即 AI 的执行面（agent.exec 之外补结构化类型） | 审计与限额先行 |
