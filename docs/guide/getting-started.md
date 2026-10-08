@@ -2,7 +2,7 @@
 
 ## 环境要求
 
-- Go 1.26.3 或兼容版本
+- Go 1.27 或兼容版本
 - Node.js 与 pnpm，用于构建 Web UI
 - Server 默认监听 `127.0.0.1:9000`
 
@@ -250,7 +250,7 @@ pwsh ./scripts/e2e-smoke.ps1    # Windows
 ## 不想编译？用 Docker
 
 官方镜像由 CI 推到 `ghcr.io/cuihairu/cockpit`（多 tag：`latest` / `main` /
-`v1.2.3` / 短 sha），部署机只要有 Docker 即可：
+短 sha；打 `v*` tag 时另有语义化版本系列），部署机只要有 Docker 即可：
 
 ```bash
 cp deployments/docker/.env.example deployments/docker/.env

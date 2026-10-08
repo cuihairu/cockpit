@@ -70,7 +70,7 @@ Cockpit web UI 是桌面优先（antd 数据密集表格、多栏工作台），
 | Agent 列表 + 详情指标 | `/api/agents`、metrics 端点 |
 | Docker 容器列表 + start/stop/restart | Docker 容器端点 |
 | 告警列表 + 全部已读 | `/api/alerts`、`PUT /api/alerts/read-all` |
-| 审计列表 | `/api/audit` |
+| 审计列表 | `/api/admin/audit/logs` |
 | 设置：server URL、自签开关、退出 | — |
 
 深色主题跟随系统；手机竖屏单栏布局。

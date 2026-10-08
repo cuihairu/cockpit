@@ -80,8 +80,8 @@ guacd 只讲 Guacamole 协议，默认监听 TCP `4822`。浏览器侧
 「浏览器直连 guacd」这条路**——guacd 不是 HTTP 服务，且内网端口不该暴露。
 
 所以需要一个 WS 网关：浏览器 WS ↔ Go 后端 ↔ guacd TCP。这个位置正好是
-Cockpit server 已经坐着的（现有 `/api/remote/terminal`、`/api/remote/desktop`
-都是「浏览器 WS ↔ server ↔ agent WS」的双跳管道，server 本就是远控网关）。
+Cockpit server 已经坐着的（现有 `/api/remote/terminal`、`/api/remote/guacamole`
+都是「浏览器 WS ↔ server ↔ agent WS / guacd TCP」的双跳管道，server 本就是远控网关）。
 
 放 Go 而不是放 guacamole-web 的理由同 D1：网关这里要做的不只是字节转发，
 还有**会话生命周期、票据校验、权限判定、审计落库**——全是 Cockpit 已有的

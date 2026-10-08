@@ -130,7 +130,9 @@ Agent 启动时会运行能力检测器，并在注册消息中上报 capability
 }
 ```
 
-当前检测器包括：
+当前 capability 共 17 个，分两类来源。
+
+探测式（`internal/agent/detector/`，满足条件才上报）：
 
 | 能力 | 检测依据 |
 | --- | --- |
@@ -138,7 +140,28 @@ Agent 启动时会运行能力检测器，并在注册消息中上报 capability
 | `pve-api` | `PVE_URL` 或常见 PVE API 地址 |
 | `docker-api` | `DOCKER_HOST` 或常见 Docker socket |
 | `hardware-monitor` | `smartctl`、温度传感器、UPS 工具 |
-| `network-monitor` | 网络接口、路由等平台信息 |
+| `firewall` | `nft` 或 `iptables` 可用（LookPath + `--version` 验证） |
+| `overlay` | `zerotier-cli` / `tailscale` / `wg` / `frp` 任一可用 |
+| `remote-services` | 本机常见远控端口探测（SSH 22 / RDP 3389 / VNC 590x / Telnet 23 / FTP 21） |
+
+代码直报（`agent.go` `detectCapabilities`，按平台/环境满足即上报）：
+
+| 能力 | 上报条件 |
+| --- | --- |
+| `backup` | Linux（标准库打包，零外部依赖） |
+| `file` | 恒上报（标准库全平台可用） |
+| `nginx-proxy` | 探测到 nginx 可执行与版本 |
+| `traefik-proxy` | 探测到 Traefik file provider 动态目录 |
+| `cron` | `crontab` 命令可用 |
+| `logs` | `journalctl` 或 `docker` 至少一个可用 |
+| `drift` | `nginx-proxy` / `traefik-proxy` / `cron` / `docker-api` 任一存在 |
+| `ddns` | 恒上报（标准库出站 HTTP 探公网 IP） |
+| `service` | Windows（SCM）/ macOS（launchd）/ systemd 之一 |
+| `nas` | 软件 RAID（`/proc/mdstat`）或任一存储工具存在 |
+
+> 历史注记：旧 `network-monitor` capability（WireGuard peer 数与 cloudflared
+> 进程级探测）已在 overlay M1 落地时删除（overlay-design.md D18），server/web
+> 无消费方。
 
 Agent 还会采集基础系统指标并通过心跳上报，包括 CPU、内存、磁盘、网络、系统版本、架构、负载和 uptime。
 

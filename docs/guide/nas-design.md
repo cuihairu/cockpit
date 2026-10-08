@@ -62,7 +62,7 @@ type NasShare struct {
 | linux | agent 本地命令 | /proc/mdstat、zpool、vgs、btrfs、df、testparm、exportfs | **M1** 已完成 |
 | dsm | agent→DSM HTTP API | SYNO.API 系列接口，Session 登录 | **M2** 已完成 |
 | truenas | agent→TrueNAS REST | /api/v2.0 pool/dataset/sharing，Basic Auth | **M2** 已完成 |
-| omv | agent→OMV JSON-RPC | Login + Rpc | M2 排队 |
+| omv | agent→OMV JSON-RPC | Login + Rpc | **M2** 已完成 |
 
 一个 agent 可观测多台网络 NAS（targets 数组），快照合并返回：来源设备标在
 每条记录的 `Host` 字段（本地观测为空，前端主机列显示 `agent · 设备`），

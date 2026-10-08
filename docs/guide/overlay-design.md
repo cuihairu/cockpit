@@ -136,7 +136,7 @@ WireGuard 取最近握手 < 3 分钟、frp 取 admin API 连通。
 - 管理面（ZeroTier Central / Tailscale API 成员授权、CMDB 对照发现未纳管设备）→ M2；
 - Agent 上报自身虚拟网身份到 Register/心跳（连接路径语义、按路径选路）→ 独立设计；
 - P2P 直连优化（server 与 agent 同网时 RPC 不经 server 中转）→ 远期；
-- `network-monitor` 旧 capability 的收敛合并 → 后续清理版本。
+- `network-monitor` 旧 capability 的收敛合并 → 已完成（见 D18，capability 已删除）。
 
 ## M1 清单
 
@@ -160,7 +160,7 @@ WireGuard 取最近握手 < 3 分钟、frp 取 admin API 连通。
 > 2026-09-19。M1 只读观测验证了数据模型与转发链路后，M2 补齐三块：
 > **A. 云管理面**（ZeroTier Central / Tailscale API 成员授权与除名，CMDB 对照）、
 > **B. agent 虚拟网身份上报**（Register 时携带，连接路径语义 + CMDB 对照的匹配键）、
-> **C. `network-monitor` 旧 capability 收敛**。A 与 B 互为表里：没有 B 的身份
+> **C. `network-monitor` 旧 capability 收敛**（已完成，见 D18）。A 与 B 互为表里：没有 B 的身份
 > 上报，A 的「未纳管设备」对照没有锚点。
 
 ## 架构总览

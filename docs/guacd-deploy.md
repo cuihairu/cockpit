@@ -93,7 +93,8 @@ ssh-copy-id -i /home/cui/.ssh/id_ed25519.pub user@target-host
 | `guacd-recordings` | 桌面会话录制文件（`.guac`） |
 | `guacd-drive` | RDP 驱动器重定向（阶段二预留） |
 
-录制文件由 Cockpit Server 在会话结束后自动收集到数据库。
+录制文件由 Cockpit Server 在会话结束后自动收走归档到数据卷的
+`/data/recordings/` 目录（元数据回填数据库；`collectGuacRecording`）。
 
 ## 健康检查
 

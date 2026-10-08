@@ -36,7 +36,7 @@ agent 与 websocket 通道零改动（权限在 server 收口，agent 只接受 
 |---|------|------|------|
 | D1 | 权限模型 | RBAC（角色→权限点集合），不做 ABAC/ACL | 管理面用户量个位数，按岗位授权足够；ABAC 的属性条件无处取值 |
 | D2 | 权限点粒度 | `<resource>:<action>`，action ∈ `read` / `write` / `admin` | 模块级足够（如 `files:write`、`acme:admin`）；按钮级授权成本高收益低 |
-| D3 | resource 清单 | 与现有 API 模块一一对应：`inventory` `files` `logs` `terminal` `docker` `stack` `cron` `backup` `acme` `dns` `ddns` `proxy` `overlay` `drift` `nas` `alerts` `audit` `users` `roles` `settings`，实现时对账补全 `services` `smart` `recordings` | 后端已有路由前缀就是天然 resource，不发明新分类 |
+| D3 | resource 清单 | 与现有 API 模块一一对应：`inventory` `files` `logs` `terminal` `docker` `stack` `cron` `backup` `acme` `dns` `ddns` `proxy` `overlay` `drift` `nas` `alerts` `audit` `users` `roles` `settings`；对账已补全 `services` `smart` `recordings`，后续随模块新增 `firewall`（firewall-design D10，单 read 档）与 `jobs`（jobs-design）。当前全集以 `internal/storage/role.go` `resourceActions` 为单一事实源 | 后端已有路由前缀就是天然 resource，不发明新分类 |
 | D4 | 角色存储 | 新增 `Role` 表（`name` 主键、`permissions` JSON、`builtin` 标记）；`User.role` 沿用字符串存角色名 | GORM AutoMigrate 一张表搞定；User 不需要外键约束，角色名即软引用 |
 | D5 | 权限校验位置 | auth middleware 之后加 `requirePermission(perm)`；`admin` 权限点隐含该 resource 的 read/write | 中间件链一处收口；「admin 隐含读写」让内置 admin 角色不用枚举全部权限点 |
 | D6 | 每请求查库 | 校验时直接查 `roles` 表，不做内存缓存 | 管理面 QPS 个位数；缓存失效逻辑（角色改了要踢在线用户）比省的那点查询贵得多 |
