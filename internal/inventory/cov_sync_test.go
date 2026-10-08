@@ -162,3 +162,71 @@ func TestCovSyncNilCertificate(t *testing.T) {
 		t.Errorf("Certificates.Created = %d, want 1 (nil cert skipped)", result.Certificates.Created)
 	}
 }
+
+// TestCovSyncLocationUnknownDefault 拍板 2026-10-08（todo Phase 2.2 region/zone
+// 校验项）：为空允许——四类资源省略 region/zone 不拒绝同步，落库统一标记
+// "unknown"；显式字段（含空白）归一；用户 labels 已给的键不被空字段覆盖。
+func TestCovSyncLocationUnknownDefault(t *testing.T) {
+	db := testDB(t)
+	inv := &Inventory{
+		Version: "v1",
+		Regions: map[string]*Region{},
+		ComputeInstances: map[string]*ComputeInstance{
+			"ci-blank": {Name: "vm-blank", Type: "vm", Agent: "a1"},
+			"ci-ws":    {Name: "vm-ws", Type: "vm", Agent: "a1", Region: "   ", Zone: "\t"},
+			"ci-full":  {Name: "vm-full", Type: "vm", Agent: "a1", Region: "r1", Zone: "z1"},
+		},
+		Services: map[string]*Service{
+			"svc-blank":   {Name: "web", Type: "http"},
+			"svc-labeled": {Name: "web2", Type: "http", Labels: map[string]string{"region": "r9"}},
+			"svc-field":   {Name: "web3", Type: "http", Region: "r1"},
+		},
+		Gateways: map[string]*Gateway{
+			"gw-partial": {Name: "edge", Type: "openwrt", Region: "r1"},
+		},
+		Storages: map[string]*Storage{
+			"st-blank": {Name: "data", Type: "nfs", Path: "/exports"},
+		},
+	}
+
+	result := NewSyncer(db).Sync(context.Background(), inv)
+	if result.ComputeInstances.Created != 3 || result.Services.Created != 3 ||
+		result.Gateways.Created != 1 || result.Storages.Created != 1 {
+		t.Fatalf("sync created = %+v, want all created (为空不拒绝)", result)
+	}
+
+	ci, err := db.GetComputeInstance("ci-blank")
+	if err != nil || ci.Region != "unknown" || ci.Zone != "unknown" {
+		t.Errorf("ci-blank region/zone = %q/%q (err=%v), want unknown/unknown", ci.Region, ci.Zone, err)
+	}
+	ci, err = db.GetComputeInstance("ci-ws")
+	if err != nil || ci.Region != "unknown" || ci.Zone != "unknown" {
+		t.Errorf("ci-ws 空白 region/zone = %q/%q, want 归一 unknown", ci.Region, ci.Zone)
+	}
+	ci, err = db.GetComputeInstance("ci-full")
+	if err != nil || ci.Region != "r1" || ci.Zone != "z1" {
+		t.Errorf("ci-full region/zone = %q/%q, want 显式值保留", ci.Region, ci.Zone)
+	}
+
+	svc, err := db.GetService("svc-blank")
+	if err != nil || svc.Labels["region"] != "unknown" || svc.Labels["zone"] != "unknown" {
+		t.Errorf("svc-blank labels = %v, want region/zone unknown", svc.Labels)
+	}
+	svc, err = db.GetService("svc-labeled")
+	if err != nil || svc.Labels["region"] != "r9" || svc.Labels["zone"] != "unknown" {
+		t.Errorf("svc-labeled labels = %v, want 用户 region=r9 保留 + zone=unknown", svc.Labels)
+	}
+	svc, err = db.GetService("svc-field")
+	if err != nil || svc.Labels["region"] != "r1" {
+		t.Errorf("svc-field labels = %v, want 显式 region=r1", svc.Labels)
+	}
+
+	gw, err := db.GetGateway("gw-partial")
+	if err != nil || gw.Labels["region"] != "r1" || gw.Labels["zone"] != "unknown" {
+		t.Errorf("gw-partial labels = %v, want region=r1 + zone=unknown", gw.Labels)
+	}
+	st, err := db.GetStorage("st-blank")
+	if err != nil || st.Labels["region"] != "unknown" || st.Labels["zone"] != "unknown" {
+		t.Errorf("st-blank labels = %v, want region/zone unknown", st.Labels)
+	}
+}

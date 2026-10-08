@@ -117,6 +117,8 @@ services:
 
 `resources` / `templates` 已在 schema 中保留，但同步到数据库的主路径是明确的资源字段，例如 `computeInstances`、`services`、`gateways`、`storages`。
 
+资源上的 `region` / `zone` 字段可省略：为空不阻塞同步，落库统一标记 `unknown`（显式值优先；`services`/`gateways`/`storages` 的地域写进各自 labels，用户在 labels 里显式给的键不被空字段覆盖）。Agent 注册侧同语义——未提供时默认 `unknown`（D-2026-10-08-1）。
+
 ## Agent 能力
 
 Agent 启动时会运行能力检测器，并在注册消息中上报 capability：

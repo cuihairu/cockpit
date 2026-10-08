@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/cuihairu/cockpit/internal/storage"
 )
@@ -15,6 +16,37 @@ type Syncer struct {
 // NewSyncer creates a syncer
 func NewSyncer(db *storage.DB) *Syncer {
 	return &Syncer{db: db}
+}
+
+// locationOrUnknown 资源列地域落库语义（拍板 2026-10-08，todo Phase 2.2
+// region/zone 校验项）：为空允许——不拒绝同步，省略或空白统一标记
+// "unknown"（语义见 docs/guide/concepts.md「Inventory 文件」与 decision-log）。
+func locationOrUnknown(v string) string {
+	if v = strings.TrimSpace(v); v != "" {
+		return v
+	}
+	return "unknown"
+}
+
+// applyLocationLabels 把 region/zone 写进 labels 并返回该 map（拍板同上）：
+// 显式字段优先（非空白即写入）；为空时仅在用户未通过 labels 显式给出该键时
+// 补 "unknown"。nil map 入参时新建返回（map 赋值不回传，须由调用方接住）。
+func applyLocationLabels(labels map[string]string, region, zone string) map[string]string {
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	set := func(key, v string) {
+		if v = strings.TrimSpace(v); v != "" {
+			labels[key] = v
+			return
+		}
+		if _, ok := labels[key]; !ok {
+			labels[key] = "unknown"
+		}
+	}
+	set("region", region)
+	set("zone", zone)
+	return labels
 }
 
 // Sync syncs inventory to database
@@ -217,8 +249,8 @@ func (s *Syncer) syncComputeInstances(inv *Inventory) *ResourceResult {
 			Name:     inst.Name,
 			Type:     inst.Type,
 			AgentID:  inst.Agent,
-			Region:   inst.Region,
-			Zone:     inst.Zone,
+			Region:   locationOrUnknown(inst.Region),
+			Zone:     locationOrUnknown(inst.Zone),
 			Status:   status,
 			CPUCores: inst.CPU,
 			MemoryMB: inst.Memory,
@@ -267,16 +299,8 @@ func (s *Syncer) syncServices(inv *Inventory) *ResourceResult {
 			Labels:  svc.Labels,
 		}
 
-		// Add region/zone to labels if specified
-		if storageSvc.Labels == nil {
-			storageSvc.Labels = make(map[string]string)
-		}
-		if svc.Region != "" {
-			storageSvc.Labels["region"] = svc.Region
-		}
-		if svc.Zone != "" {
-			storageSvc.Labels["zone"] = svc.Zone
-		}
+		// region/zone 落库语义（拍板 2026-10-08）：为空允许，标 unknown
+		storageSvc.Labels = applyLocationLabels(storageSvc.Labels, svc.Region, svc.Zone)
 
 		_, getErr := s.db.GetService(id)
 
@@ -314,16 +338,8 @@ func (s *Syncer) syncGateways(inv *Inventory) *ResourceResult {
 			Labels:   gw.Labels,
 		}
 
-		// Add region/zone to labels if specified
-		if storageGw.Labels == nil {
-			storageGw.Labels = make(map[string]string)
-		}
-		if gw.Region != "" {
-			storageGw.Labels["region"] = gw.Region
-		}
-		if gw.Zone != "" {
-			storageGw.Labels["zone"] = gw.Zone
-		}
+		// region/zone 落库语义（拍板 2026-10-08）：为空允许，标 unknown
+		storageGw.Labels = applyLocationLabels(storageGw.Labels, gw.Region, gw.Zone)
 
 		_, getErr := s.db.GetGateway(id)
 
@@ -359,16 +375,8 @@ func (s *Syncer) syncStorages(inv *Inventory) *ResourceResult {
 			Labels:  st.Labels,
 		}
 
-		// Add region/zone to labels if specified
-		if storageSt.Labels == nil {
-			storageSt.Labels = make(map[string]string)
-		}
-		if st.Region != "" {
-			storageSt.Labels["region"] = st.Region
-		}
-		if st.Zone != "" {
-			storageSt.Labels["zone"] = st.Zone
-		}
+		// region/zone 落库语义（拍板 2026-10-08）：为空允许，标 unknown
+		storageSt.Labels = applyLocationLabels(storageSt.Labels, st.Region, st.Zone)
 
 		_, getErr := s.db.GetStorage(id)
 

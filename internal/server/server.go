@@ -434,6 +434,17 @@ func (s *Server) CallAgent(agentID, method string, params map[string]interface{}
 	}
 }
 
+// locationOrUnknown 注册落库地域语义（拍板 2026-10-08，todo Phase 2.2
+// region/zone 校验项）：为空允许——不拒绝注册，空地域统一标记 "unknown"
+// （agent 侧 detectLocation 默认即 unknown，此处兜底第三方显式空值；语义见
+// docs/guide/concepts.md「Inventory 文件」与 decision-log）。
+func locationOrUnknown(v string) string {
+	if v = strings.TrimSpace(v); v != "" {
+		return v
+	}
+	return "unknown"
+}
+
 // toStorageAgent 将 Agent 转换为存储模型
 func toStorageAgent(agent *Agent) *storage.Agent {
 	capabilities := make([]storage.Capability, len(agent.Capabilities))
@@ -454,8 +465,8 @@ func toStorageAgent(agent *Agent) *storage.Agent {
 		Hostname:     agent.Hostname,
 		IP:           agent.IP,
 		LocalIPs:     agent.LocalIPs,
-		Region:       agent.Location.Region,
-		Zone:         agent.Location.Zone,
+		Region:       locationOrUnknown(agent.Location.Region),
+		Zone:         locationOrUnknown(agent.Location.Zone),
 		Version:      agent.Version,
 		Capabilities: capabilities,
 		Status:       "online",

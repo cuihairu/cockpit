@@ -443,3 +443,20 @@ func TestToStorageAgentNoVirtualization(t *testing.T) {
 		t.Errorf("VirtRole = %q, want empty", sa.VirtRole)
 	}
 }
+
+// TestToStorageAgentLocationUnknown 拍板 2026-10-08（todo Phase 2.2 region/zone
+// 校验项）：注册落库地域为空允许——零值 Location 落库标 "unknown"，空白归一，
+// 显式值保留（agent 侧 detectLocation 默认即 unknown，此处兜底显式空值）。
+func TestToStorageAgentLocationUnknown(t *testing.T) {
+	blank := toStorageAgent(NewAgent("agent-blank", nil))
+	if blank.Region != "unknown" || blank.Zone != "unknown" {
+		t.Errorf("blank Location = %q/%q, want unknown/unknown", blank.Region, blank.Zone)
+	}
+
+	agent := NewAgent("agent-ws", nil)
+	agent.Location = protocol.Location{Region: "   ", Zone: "z1"}
+	ws := toStorageAgent(agent)
+	if ws.Region != "unknown" || ws.Zone != "z1" {
+		t.Errorf("whitespace region = %q/%q, want unknown/z1", ws.Region, ws.Zone)
+	}
+}

@@ -61,3 +61,19 @@ SMART/NAS/Overlay 同族（观测→告警→（远期）操作），能力复�
 防火墙写操作风险等级最高（锁死远程访问），必须只读先行、真机验收后再议，与 Cron
 「外部条目只读」既有纪律同构。**边界**：只观测 iptables/nftables 现状与 cockpit 名下
 标注，不碰用户自有规则；云安全组（AWS SG 等）不在范围。
+
+## D-2026-10-08-1 region/zone 空值语义（todo Phase 2.2 拍板）
+
+**定了什么**：inventory 资源与 agent 注册的 region/zone 校验定为**为空允许 + 标记
+`unknown`**——不拒绝同步/注册：显式字段（非空白）优先保留；省略或空白统一落库
+`unknown`；用户在 labels 里显式给的 `region`/`zone` 键不被空字段覆盖。落在
+`internal/inventory/sync.go`（`locationOrUnknown` 列 + `applyLocationLabels` labels）
+与 `internal/server/server.go` `toStorageAgent`（注册兜底）。
+
+**为什么**：个人 homelab 场景地域常未知，校验失败会逼用户编造值；`unknown` 显式标记
+让「未填」与「留空展示」可区分，与 agent 侧 `detectLocation` 默认 `unknown` 的既有
+行为对齐（此前资源侧留空、agent 侧 unknown 两套口径不一致）。
+
+**备选**：直接校验失败（拒绝同步）——否决：单文件 inventory 手工维护，硬失败伤易用性
+且与「同步容错、Errors 计数不中断」的既有 sync 纪律冲突。**重开条件**：多租户/CMDB
+严格口径需求出现时再议。

@@ -341,7 +341,7 @@
 - `SyncResult` 增加对应结果字段。
 - 修正现有 Created/Updated 统计逻辑。当前 `Upsert` 后再读 `FirstSeen` 判断不可靠。
 - 对 agent 引用做校验：资源引用不存在的 agent 时返回明确错误或记录 result.Errors。
-- 对 region/zone 做基本校验：为空时允许但标记 unknown，或直接校验失败，二选一并写进文档。
+- 对 region/zone 做基本校验：为空时允许但标记 unknown，或直接校验失败，二选一并写进文档。✅ 拍板落地（2026-10-08，D-2026-10-08-1）：为空允许+标 unknown——`sync.go` `locationOrUnknown`/`applyLocationLabels` + `toStorageAgent` 注册兜底，语义写进 concepts.md「Inventory 文件」。
 
 验收标准：
 
@@ -1055,6 +1055,7 @@ main@31a99e2 的 Test job 红（run 37228723208），仅 `web/src/pages/Settings
 15. [**备份异地保留机制半真机验收（R0-R3 全 PASS，证据 .acceptance/agent-backup/probe-remote.log）**：`scripts/acceptance/agent-backup/probe-remote.sh` 容器内真 rclone + **local 后端远端**（`rclone config create bklocal local`，零云凭据真推）——rclone exec 编排链路首次对真二进制实证（此前单测全是 fake rcloneBin 注入）：R1 推送成功 remoteStatus=ok + 远端目录实收；R2 ghost remote（config 无 section）→ run 仍 success（D21 推送失败不改任务终态）+ remoteStatus=failed + remoteError 含 stderr 摘要 + `backup.remote-failed` webhook 实收 + 本地档完整可下载；R3 删远端产物后 sync-remote 补传恢复。**判定口径收获**：清单「真实 S3/B2 远端」类项拆两半——rclone 编排语义（argv/正则/状态跟踪/通知/补传）与云传输层；前者容器 local 后端可实证，后者（凭据/限速/断网）才真需云。server 侧异地（58/59）与录制推送（65/66）exec 在 server 进程——宿主无 rclone 且不代装（会改变生产 agent capability 上报），维持阻塞。**坑一枚**：rclone 错误文案含单引号（`didn't find section`），`repr()+eval` 解析断言值直接撞碎 bash——跨解释器传值改 `shlex.quote` 落临时文件再 `source`（eval 拼接法全线淘汰）。]
 16. [**DDNS 巡检间隔语义真机验收（D1-D5 6/6 全 PASS，证据 .acceptance/ddns/probe-scan.log）**：`scripts/acceptance/ddns/probe-scan.sh` **零外部依赖形态**——配置指 ghost agent + 不配 CF token，检查在 provider/agent 前置校验快速失败，但 CheckedAt/LastStatus/LastError 回写在 runDDNSCheck 任何错误路径都走 → 用 CheckedAt 推进做扫描观测（免真 token 免 agent 免容器，纯 server 侧）。断言面：D1 默认 300 回读 + 59/86401/非数字拒 400 不污染；D2 interval=60 到点扫描（failed 回写+LastError）；D3 连续推进；D4 PUT 0 跨 ≥1 原扫描窗 CheckedAt 冻结；D5 改回 60 恢复推进（间隔修改即时生效双向）。**真机事实**：interval=60 实测 gap=120s——60s 门槛 × 60s tick 组合下 `Since(lastScan)<60` 偶真跳一拍，门槛语义预期非缺陷（断言窗放宽 30-150s 兜住）。真 CF 比对/出口 IP 探测/告警去重维持挂起随真 token。]
 17. [**CI flake 沉淀：Test 腿「file too large」瞬时红（4bed8f8，rerun 后绿）**：stacks 批次笔 4bed8f8（纯探针+文档，零 Go 改动）Test 腿 attempt 1 红——错误是 Go 构建缓存目录写文件触及 runner RLIMIT_FSIZE（`file too large`），非测试失败、其余包全过，且该笔 Go 内容与绿 commit fd82057 相同（其 Test 已过）→ 判 flake，`gh run rerun 37624431407 --failed` 处置，attempt 2 Test completed/success、五腿全绿（run 37624431407 attempt 1=failure / attempt 2=success 经 API attempts 核实）。**教训**：①runner RLIMIT_FSIZE 形态（构建缓存大文件）不是测试红，绝不改测试迁就；②同内容绿 commit 可做 flake 判据（比对 diff 后零 Go 变更即可 rerun 而非排查）；③复现再考虑 GOTMPDIR/GOFLAGS 缓解，不预先加复杂度；④CI 轮询器必须钉 `git rev-parse` 完整 SHA——每圈重取 HEAD 的轮询器在 push 后会移目标（bvv5gayws 曾对已翻绿的 run 误报 exit 2，以 pinned-SHA 轮询为准），且 `gh run list --commit` 短 SHA 返回空。]
+18. [**region/zone 空值语义拍板落地（D-2026-10-08-1，todo Phase 2.2 挂项收口）**：定为**为空允许+标记 unknown**——`internal/inventory/sync.go` 新增 `locationOrUnknown`（compute 列）与 `applyLocationLabels`（service/gateway/storage labels，返回 map 由调用方接住——nil map 函数内新建不回传是 Go 值传递坑）、`internal/server/server.go` `toStorageAgent` 注册兜底；显式字段优先、用户 labels 已给的键不被空字段覆盖。测试：`TestCovSyncLocationUnknownDefault`（四类资源 空白/归一/显式/用户标签保留 六断言）+ `TestToStorageAgentLocationUnknown`；语义写进 concepts.md「Inventory 文件」+ decision-log D-2026-10-08-1。原计划项「为空允许 vs 校验失败二选一」就此关闭。]
 
 ## 巡检循环启动等待 ctx 可中断（2026-10-07）
 
