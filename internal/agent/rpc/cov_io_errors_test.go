@@ -7,6 +7,7 @@ package rpc
 
 import (
 	"archive/tar"
+	"flag"
 	"io"
 	"math"
 	"math/rand"
@@ -16,6 +17,23 @@ import (
 	"syscall"
 	"testing"
 )
+
+// shrinkTestLog RLIMIT_FSIZE 窗口前把 go test 框架的 testlog.txt 截为 0。
+// 框架对进程内每次文件操作向该文件即时追加一行，窗口内测试体自身的文件
+// 操作（fsize 类测试正是要写文件）也照样追加——文件已超窗口软限（如
+// 1KB）时追加即 EFBIG，错误拖到进程末尾以 "testing: can't write
+// testlog.txt: file too large" 报出并整包 FAIL（CI 第 5-7 次复发真因，
+// run 37934963613/37950067121/37952757780；shell 层 fsize 已 unlimited，
+// 与 ulimit/prlimit 无关）。截 0 后窗口内增量为 KB 级，不再撞限；丢失的
+// 条目只影响 go test 缓存键，无碍正确性。
+func shrinkTestLog(t *testing.T) {
+	t.Helper()
+	if f := flag.Lookup("test.testlogfile"); f != nil {
+		if path := f.Value.String(); path != "" {
+			_ = os.Truncate(path, 0)
+		}
+	}
+}
 
 // ============ backup.read 的 seek / read 失败 ============
 
@@ -159,6 +177,9 @@ func TestCovLogsQueryBadPayload(t *testing.T) {
 
 func TestCovCronWriteViaFileFsize(t *testing.T) {
 	p := NewCronProvider(nil)
+
+	// 窗口内测试体文件操作仍会追加框架 testlog，先截 0 防撞限（见 helper 注释）
+	shrinkTestLog(t)
 
 	var old syscall.Rlimit
 	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &old); err != nil {

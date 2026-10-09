@@ -122,11 +122,12 @@ jobs:
 
       - name: Test RPC handlers
         run: |
-          # testlog.txt "file too large" 已 6 次复发（4bed8f8/fe47204/b57298a/
-          # 3a3873a/37934963613/37950067121，均红在本步的 internal/agent/rpc）
-          # ——普通用户 ulimit 只能把 soft 提到 hard，第 6 次实证 hard 受限时
-          # ulimit 静默成功仍 EFBIG，改 root prlimit 双提 soft+hard；失败不
-          # 中断，打印双限留诊断证据
+          # testlog.txt "file too large" 已 7 次复发（4bed8f8/fe47204/b57298a/
+          # 3a3873a/37934963613/37950067121/37952757780，均红在本步的
+          # internal/agent/rpc）。第 7 次实证 shell 层 soft/hard 已 unlimited
+          # 仍红——真因是 rpc 两个 fsize 测试进程内 Setrlimit 窗口打到框架
+          # testlog 追加写，已在测试侧 shrinkTestLog 截 0 治理；本步
+          # ulimit/prlimit 保留作 runner 侧兜底与诊断证据
           sudo -n prlimit --fsize=unlimited --pid $$ 2>/dev/null || true
           ulimit -f unlimited || true
           echo "fsize soft=$(ulimit -Sf) hard=$(ulimit -Hf)"

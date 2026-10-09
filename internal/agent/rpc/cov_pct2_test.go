@@ -269,6 +269,9 @@ func TestCovPctPlistSkipErr(t *testing.T) {
 // （L305）：把 RLIMIT_FSIZE 压到 1KB 后写入 4KB 数据 → EFBIG → 原子写失败
 // 且目标不落盘；恢复 rlimit 后窗口外零影响。无法设置则 Skip。
 func TestCovPctAtomicWriteFileSizeLimit(t *testing.T) {
+	// 1KB 窗口最易撞框架 testlog 追加（CI 第 5-7 次复发真因），窗口前截 0
+	shrinkTestLog(t)
+
 	var old syscall.Rlimit
 	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &old); err != nil {
 		t.Skipf("getrlimit 不可用: %v", err)
