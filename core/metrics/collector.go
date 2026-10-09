@@ -1,4 +1,7 @@
-package agent
+// Package metrics 系统信息采集（agent-core ① 通用能力层）：gopsutil v3
+// CPU/内存/磁盘/网络/主机/负载采样（架构文档能力清单 #5，原地归位）。
+// 零业务、零平台分支；新依赖须过 OpenWrt 静态编译检查（CGO=0）。
+package metrics
 
 import (
 	"runtime"

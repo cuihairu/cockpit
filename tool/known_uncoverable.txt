@@ -65,7 +65,7 @@ scripts/acceptance/agent-backup/probe/main.go:573,575	3. writeEvilTar gz.Close �
 # ---------- 4. 新增 Agent 服务面/启动时刻字段的测试回退路径（4 语句） ----------
 
 internal/agent/agent.go:188,189	3. startedAtOrNow 零值兜底分支（仅未走 NewAgent 的测试构造体触发；正常路径 startedAt 在 NewAgent 初始化时已设；P2 heartbeat 装配 +18，2026-10-09 校准）
-internal/agent/agent.go:224,224	3. servicesRefreshLoop 取消上下文退出分支（需完整 Agent 生命周期触发 ctx.Done()，单测无真实后台循环难以确定性构造；P2 heartbeat 装配 +18，2026-10-09 校准）
+internal/agent/agent.go:225,225	3. servicesRefreshLoop 取消上下文退出分支（需完整 Agent 生命周期触发 ctx.Done()，单测无真实后台循环难以确定性构造；P3 metrics 迁出 +1，2026-10-09 校准）
 
 
 

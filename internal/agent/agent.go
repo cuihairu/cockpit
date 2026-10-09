@@ -13,6 +13,7 @@ import (
 
 	"github.com/cuihairu/cockpit/core/backoff"
 	"github.com/cuihairu/cockpit/core/heartbeat"
+	"github.com/cuihairu/cockpit/core/metrics"
 	"github.com/cuihairu/cockpit/core/register"
 	"github.com/cuihairu/cockpit/core/report"
 	"github.com/cuihairu/cockpit/internal/agent/detector"
@@ -28,8 +29,8 @@ type Agent struct {
 	conn         *websocket.Conn
 	codec        *protocol.Codec
 	rpc          *rpc.Handler
-	collector    *Collector     // 系统信息采集器
-	proxyHandler *proxy.Handler // 代理处理器
+	collector    *metrics.Collector // 系统信息采集器（core/metrics）
+	proxyHandler *proxy.Handler     // 代理处理器
 	outbound     chan *protocol.Message
 	upstream     *report.Upstream    // 统一上行（core/report：队列消费/放行门/串行写出）
 	registrar    *register.Registrar // 注册上线（core/register：ID 派生/报文/握手）
@@ -108,7 +109,7 @@ func NewAgent(cfg Config) *Agent {
 		serverURL:    cfg.ServerURL,
 		codec:        protocol.NewCodec(),
 		rpc:          rpc.NewHandler(),
-		collector:    NewCollector(),
+		collector:    metrics.NewCollector(),
 		proxyHandler: proxy.NewHandler(),
 		outbound:     make(chan *protocol.Message, 1024),
 		capabilities: []protocol.Capability{},
