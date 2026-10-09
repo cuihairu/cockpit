@@ -107,7 +107,7 @@ cmd/cockpit-agent/           # main 薄壳：core 零件装配 + 平台层接线
 
 - 不建独立 Go module（单仓单人节奏下独立 module 是纯摩擦，同 croupier 判断）。
 - core 各包互不横向依赖（`backoff`/`logx` 这类叶包除外）；`platform/` 只被 main 与 register/heartbeat 等需要平台事实的包 import，方向恒为 `包 → platform`，platform 不 import 任何 core 兄弟包。
-- 存量平台文件收编映射（P4 批执行）：`machineid_*` → `platform/<goos>/machineid.go`；`localip.go` → `core/platform` 无关、留 `core/netutil` 或原地（届时按内容定）；`rpc/service_windows_scm.go` → `platform/windows/`；`rpc/service_launchd_darwin.go` → `platform/darwin/`；`rpc/job_provider_{unix,windows}.go`、`file_stat_{unix,windows}.go`、`backup_hook_{unix,other}.go` → 就地保留为插件内平台文件并在 §8 白名单登记，P4 后新增一律进平台层。
+- 存量平台文件收编映射（P4 批执行）：`machineid_*` → `platform/<goos>/machineid.go`；`localip.go` → `core/platform` 无关、留 `core/netutil` 或原地（P7a 已定：**原地保留**——纯网络事实零 GOOS 分支、仅注册路径消费，非平台事实不进平台层，通用度亦不足以立 core/netutil）；`rpc/service_windows_scm.go` → `platform/windows/`；`rpc/service_launchd_darwin.go` → `platform/darwin/`；`rpc/job_provider_{unix,windows}.go`、`file_stat_{unix,windows}.go`、`backup_hook_{unix,other}.go` → 就地保留为插件内平台文件并在 §8 白名单登记，P4 后新增一律进平台层。
 
 ## 5. 构建矩阵（平台特化产物）
 

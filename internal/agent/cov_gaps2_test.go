@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cuihairu/cockpit/core/platform"
 	"github.com/cuihairu/cockpit/internal/protocol"
 )
 
@@ -150,6 +151,32 @@ func TestPlatformMachineIDNilHost(t *testing.T) {
 type fakePlatformHost struct{}
 
 func (fakePlatformHost) MachineID() string { return "fake-id" }
+
+func (fakePlatformHost) Paths() platform.Paths { return platform.Paths{} }
+
+// Signals 返回空集：供 gracefulSignalSet 空-集兜底分支直测
+func (fakePlatformHost) Signals() []os.Signal { return nil }
+
+// gracefulSignalSet 三分支：平台契约直通（linux 测试二进制经 select 装配
+// 得非空集）/ Current nil 兜底 / 平台空集兜底（注入点见 startcmd.go）
+func TestGracefulSignalSetBranches(t *testing.T) {
+	prev := platform.Current()
+	t.Cleanup(func() { platform.Register(prev) })
+
+	if got := gracefulSignalSet(); len(got) == 0 {
+		t.Fatalf("assembled platform set empty: %v", got)
+	}
+
+	platform.Register(nil)
+	if got := gracefulSignalSet(); len(got) != 2 {
+		t.Fatalf("nil host fallback = %v, want unix pair", got)
+	}
+
+	platform.Register(fakePlatformHost{})
+	if got := gracefulSignalSet(); len(got) != 2 {
+		t.Fatalf("empty-signals fallback = %v, want unix pair", got)
+	}
+}
 
 // startedAtOrNow 零值兜底：未走 NewAgent 的构造体 startedAt 为零值时取当下
 func TestStartedAtOrNowZeroValue(t *testing.T) {

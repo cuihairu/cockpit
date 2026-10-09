@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/cuihairu/cockpit/core/platform"
 )
 
 // StartCmd starts a Cockpit agent instance.
@@ -93,6 +95,19 @@ func (c *StartCmd) BuildConfig() (Config, error) {
 	}, nil
 }
 
+// gracefulSignalSet 优雅退出信号集（平台契约注入点，同 machineIDFn 范式）：
+// 走 core/platform Host.Signals——linux/darwin SIGTERM+INT，windows 仅 INT
+// （SCM Stop 无信号量，服务路径走 RunService stop 通道）。Current 为 nil
+// 或信号集为空时兜底回归 unix 全集。
+var gracefulSignalSet = func() []os.Signal {
+	if h := platform.Current(); h != nil {
+		if s := h.Signals(); len(s) > 0 {
+			return s
+		}
+	}
+	return []os.Signal{syscall.SIGTERM, os.Interrupt}
+}
+
 // Run starts the Cockpit agent.
 func (c *StartCmd) Run() error {
 	cfg, err := c.BuildConfig()
@@ -102,10 +117,10 @@ func (c *StartCmd) Run() error {
 
 	a := NewAgent(cfg)
 
-	// SIGTERM/SIGINT 优雅退出：systemd/容器停止时发 SIGTERM，Stop 取消
+	// 优雅退出：平台信号集（见 gracefulSignalSet）触发 a.Stop，取消
 	// agent 内部上下文，Start 随之返回 nil，进程以 0 正常退出
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, os.Interrupt)
+	signal.Notify(sigCh, gracefulSignalSet()...)
 	defer signal.Stop(sigCh)
 	go func() {
 		<-sigCh
