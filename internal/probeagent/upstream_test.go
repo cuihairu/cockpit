@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -495,6 +496,25 @@ func TestUpstreamWriteFailQueueFullClosures(t *testing.T) {
 	u.reconnecting.Store(false)
 }
 
+// lockedBuf 并发安全日志缓冲：reportWorker goroutine 写、测试 goroutine 读，
+// bytes.Buffer 裸用会撞 race detector。
+type lockedBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // TestUpstreamReportWorkerEnqueueFailQueueFull reportWorker 全量上报入队
 // 失败分支的确定性补盖：不起消费循环（upstream.Run/reportWorker 之外全部
 // 不启动），测试直灌 outbound 至满，兜底 tick 的 Enqueue 必走队满错误。
@@ -510,7 +530,7 @@ func TestUpstreamReportWorkerEnqueueFailQueueFull(t *testing.T) {
 	}, "test")
 	u.fallbackInterval = time.Millisecond
 
-	var buf bytes.Buffer
+	var buf lockedBuf
 	log.SetOutput(&buf)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 
