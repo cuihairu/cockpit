@@ -78,11 +78,11 @@ cmd/cockpit-agent/main.go:68,69	redirectServiceStart 命中 SCM 上下文后的 
 # TestWorkflowRunTransportErrors），删除登记；其余按新行号迁移。
 
 internal/server/api_jobs.go:185,186	4. 带登录态的用户分支（handler 单测无 auth middleware，Actor 恒 unknown；真名分支由登录流程整链覆盖）
-internal/server/api_jobs.go:216,217	3. dispatchJobAsync UpdateJob(running) 失败仅降级 log（后台 goroutine 中途失败，单行主键更新不可构造失败；同 dispatchJobAsync 尾态回写 `_ =` 吞错口径）
-internal/server/api_jobs.go:258,260	3. CancelJob 失败 500（GetJob 先行成功，主键 UPDATE 无现实失败面）
-internal/server/api_jobs.go:264,265	4. cancel 带登录态的用户分支（同 185,186 口径）
-internal/server/api_jobs.go:272,274	3. cancel 后重读 GetJob 失败 500（同 handler 入口 GetJob 先行成功，SELECT 不可致错）
-internal/server/api_jobs.go:335,335	3. intField `case int`（JSON 数字解码恒 float64，int 直调进不来）
+internal/server/api_jobs.go:220,221	3. dispatchJobAsync UpdateJob(running) 失败仅降级 log（后台 goroutine 中途失败，单行主键更新不可构造失败；同 dispatchJobAsync 尾态回写 `_ =` 吞错口径）
+internal/server/api_jobs.go:262,264	3. CancelJob 失败 500（GetJob 先行成功，主键 UPDATE 无现实失败面）
+internal/server/api_jobs.go:268,269	4. cancel 带登录态的用户分支（同 185,186 口径）
+internal/server/api_jobs.go:276,278	3. cancel 后重读 GetJob 失败 500（同 handler 入口 GetJob 先行成功，SELECT 不可致错）
+internal/server/api_jobs.go:339,339	3. intField `case int`（JSON 数字解码恒 float64，int 直调进不来）
 
 # ---------- 7. Workflow 线性编排 M1（docs/guide/workflow-design.md）：死防御与测试惯例（44 语句） ----------
 

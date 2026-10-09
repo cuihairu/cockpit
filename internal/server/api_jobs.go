@@ -200,10 +200,14 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 视图在派发前取定：goroutine 会原地改 job 状态（pending→running→终态），
+	// 先快照保证 201 响应体恒为 pending（W1 契约），并与后台写互不竞争
+	view := toJobView(job)
+
 	// 后台派发：终态回写 + 审计在 goroutine 内完成（HTTP 请求即时返回）
 	go s.dispatchJobAsync(job, payload, username)
 
-	s.writeJSON(w, http.StatusCreated, toJobView(job))
+	s.writeJSON(w, http.StatusCreated, view)
 }
 
 // dispatchJobAsync 后台派发单条 Job：pending → running → 终态回写 + 审计
