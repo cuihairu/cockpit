@@ -832,7 +832,7 @@
 
 14. ✅ **M3 移动端三页收口（2026-10-01）**：SMART/NAS/组网观测只读三页（`smart_page`/`nas_page`/`overlay_page`）已交付 b5d15a6，20 个 widget 测试通过（smart/nas/overlay_page_test 三文件），agents_page 动作单入口已对齐。移动端剩余均为真机验收项（挂起待验）与 iOS 侧（按 2026-10-05 口径低优先级填空）。**mobile-design.md:86 「待做」标记已过时**，已补账见 mobile M3 收口节。
     - **踩坑（复用价值）**：chromedp/headless-shell 镜像 entrypoint 自带 socat 抢占 `0.0.0.0:9222`（DevTools 退绑 `[::1]`、新端口 9223）——显式换 `--remote-debugging-port=9224` 避开；CDP `Runtime.evaluate` 返回 boolean 时不可反序列化到 Go string（`interface{}` + `fmt.Sprintf("%v")`）；antd 恰两汉字按钮自动插空格（「连 接」「登 录」）——按钮匹配两端去空白；`os.Exit` 跳过 defer → CDP tab 泄漏拖僵 headless 渲染（开场全清）；重建 web dist 后 Chrome disk cache 仍跑旧 bundle（CDP `Network.clearBrowserCache` + `setCacheDisabled`）；guacd 侧考据直接读 guacamole-server 1.5.5 源码（`/tmp/guacamole-server-1.5.5`）：剪贴板入站指令首参是流号非 mimetype（`__guac_handle_clipboard` atoi(argv[0])）、粘贴键是大写 V(0x56)+Ctrl 或右键弹起、1.5.5 无 OSC52（远端→浏览器唯一路径是终端拖选）。
-    - 验收边界：RDP/VNC 目标为验收自建容器（xrdp/Xvnc）——本机无真实 Windows 主机与物理 VNC 桌面，链路 + 图形流 + 浏览器建连层面验讫并如实注明；grdp 路线去留维持挂起（用户拍板项）；移动端不动。
+    - 验收边界：RDP/VNC 目标为验收自建容器（xrdp/Xvnc）——本机无真实 Windows 主机与物理 VNC 桌面，链路 + 图形流 + 浏览器建连层面验讫并如实注明；grdp 路线去留已拍（2026-10-10 复确认：维持 2026-09-24 原判——保留兜底、与 Guacamole 并存，不删不迁）；移动端不动。
 
 ## Docker 镜像与 docker 部署（2026-09-25）
 
