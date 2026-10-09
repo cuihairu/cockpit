@@ -1,8 +1,10 @@
 package probeagent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -491,6 +493,49 @@ func TestUpstreamWriteFailQueueFullClosures(t *testing.T) {
 	u.reconnecting.Store(true)
 	u.reconnect()
 	u.reconnecting.Store(false)
+}
+
+// TestUpstreamReportWorkerEnqueueFailQueueFull reportWorker 全量上报入队
+// 失败分支的确定性补盖：不起消费循环（upstream.Run/reportWorker 之外全部
+// 不启动），测试直灌 outbound 至满，兜底 tick 的 Enqueue 必走队满错误。
+// TestUpstreamWriteFailQueueFullClosures 对该分支的触达依赖断连竞态窗口
+// （注册门关死与 ticker 灌满的时间赛跑），CI 慢机上时序漂移致漏盖——此处
+// 队满状态由测试构造并保持，首个 tick 必败，并以日志内容断言分支真实执行。
+func TestUpstreamReportWorkerEnqueueFailQueueFull(t *testing.T) {
+	a, _ := newProbeTestAgent(t)
+
+	u := NewUpstream(a, &Config{
+		Server:   "ws://127.0.0.1:1/ws",
+		Interval: Duration(time.Second),
+	}, "test")
+	u.fallbackInterval = time.Millisecond
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	// 消费循环不启动：满状态恒保持，无竞态面
+	for len(u.outbound) < cap(u.outbound) {
+		u.outbound <- protocol.NewMessage(protocol.MessageTypeProbeReport, nil)
+	}
+
+	done := make(chan struct{})
+	go func() { u.reportWorker(); close(done) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(buf.String(), "probe upstream report") {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !strings.Contains(buf.String(), "probe upstream report") {
+		t.Fatalf("reportWorker never logged enqueue failure, log = %q", buf.String())
+	}
+
+	u.Stop()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reportWorker did not return after Stop")
+	}
 }
 
 // TestUpstreamRegisterReadRespNilConn 注册应答读在连接缺失时报错不读：
