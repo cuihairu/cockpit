@@ -34,6 +34,23 @@ func TestGuardUnknownToHealthy(t *testing.T) {
 	}
 }
 
+// TestNewGuardClampsThresholds 阈值 0/负钳位按 1：首轮失败即定性 Faulty、
+// 首轮成功即定性 Healthy（钳位的直接行为证据）。
+func TestNewGuardClampsThresholds(t *testing.T) {
+	g := NewGuard("t", 0, -1, nil)
+	if g.faultThreshold != 1 || g.recoverThreshold != 1 {
+		t.Fatalf("thresholds = %d/%d, want clamped to 1/1", g.faultThreshold, g.recoverThreshold)
+	}
+	g.Record(errors.New("x"), base)
+	if s := g.Snapshot(); s.State != StateFaulty || s.Open == nil {
+		t.Fatalf("state=%s open=%v, want faulty on first fail (clamp)", s.State, s.Open)
+	}
+	g.Record(nil, base.Add(time.Second))
+	if s := g.Snapshot(); s.State != StateHealthy {
+		t.Fatalf("state=%s, want healthy on first ok (clamp)", s.State)
+	}
+}
+
 // TestGuardFirstFailThresholdOne 阈值 1 首轮失败即 Faulty 且开窗口。
 func TestGuardFirstFailThresholdOne(t *testing.T) {
 	onEv, cb := events()

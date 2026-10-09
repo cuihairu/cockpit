@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func writeCfg(t *testing.T, content string) string {
@@ -82,5 +84,16 @@ func TestLoadConfigErrors(t *testing.T) {
 				t.Fatalf("bad duration err = %v", err)
 			}
 		})
+	}
+}
+
+// TestDurationUnmarshalRejectsNonScalar 非标量节点触发 node.Decode(string)
+// 错误分支（yaml.v3 把整数标量宽松解码进 string，整数走的是 ParseDuration
+// 分支，故须用序列节点）。
+func TestDurationUnmarshalRejectsNonScalar(t *testing.T) {
+	var c Config
+	err := yaml.Unmarshal([]byte("interval:\n  - 30\n"), &c)
+	if err == nil || !strings.Contains(err.Error(), "duration must be string") {
+		t.Fatalf("err = %v, want duration literal error", err)
 	}
 }
