@@ -44,6 +44,11 @@ jobs:
 
       - name: Run tests with coverage
         run: |
+          # testlog.txt "file too large" 第 5 次复发：前 4 次红在集成测试步
+          # （缓解见下方 Test RPC handlers 步注释），本次红在本步的
+          # internal/agent/rpc（run 37934963613，用例全 PASS 仍 FAIL）——
+          # RLIMIT_FSIZE soft 提到 hard，同款缓解；若 hard 受限报错不中断
+          ulimit -f unlimited || true
           go test -short ./internal/agent/... ./cmd/cockpit-agent/... -coverprofile=coverage.out -covermode=atomic -v -timeout 600s
 
       - name: Check coverage threshold (100%)
