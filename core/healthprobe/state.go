@@ -1,6 +1,7 @@
 package healthprobe
 
 import (
+	"sync"
 	"time"
 )
 
@@ -36,8 +37,12 @@ type Snapshot struct {
 
 // Guard 单目标防抖状态机：连续失败 ≥ faultThreshold 判故障、连续成功 ≥
 // recoverThreshold 判恢复（结果与倾向相异即清零重计）。窗口开合与事件
-// 回调只发生在状态定性迁移处。零业务零平台，可独立复用。
+// 回调只发生在状态定性迁移处。Record（单写者）与 Snapshot（report 面
+// 并发读）经 mu 互斥；onEvent 在锁内回调——出口实现须避免同步回锁
+// Guard。零业务零平台，可独立复用。
 type Guard struct {
+	mu sync.Mutex
+
 	name             string
 	faultThreshold   int
 	recoverThreshold int
@@ -72,6 +77,8 @@ func NewGuard(name string, faultThreshold, recoverThreshold int, onEvent func(Tr
 // Record 记一次探测结果：err==nil 成功。now 由调用方注入（测试确定性，
 // 生产传 time.Now()）。
 func (g *Guard) Record(err error, now time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.lastCheck = now
 	if err != nil {
 		g.recordFailure(err.Error(), now)
@@ -123,6 +130,8 @@ func (g *Guard) transition(to State, now time.Time, lastErr string) {
 
 // Snapshot 当前观测面（防御性拷贝，调用方改动不影响内部状态）。
 func (g *Guard) Snapshot() Snapshot {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	s := Snapshot{
 		Target:      g.name,
 		State:       g.state,
