@@ -44,11 +44,14 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          # testlog.txt "file too large" 第 5 次复发：前 4 次红在集成测试步
-          # （缓解见下方 Test RPC handlers 步注释），本次红在本步的
-          # internal/agent/rpc（run 37934963613，用例全 PASS 仍 FAIL）——
-          # RLIMIT_FSIZE soft 提到 hard，同款缓解；若 hard 受限报错不中断
+          # testlog.txt "file too large" 防复发（第 5 次红在本步 internal/agent/
+          # rpc，run 37934963613，用例全 PASS 仍 FAIL）：先以 root 把
+          # RLIMIT_FSIZE soft+hard 双提到 unlimited（runner 若压低 hard，
+          # 普通用户 ulimit 提不动 soft 高过 hard，第 6 次复发 run 37950067121
+          # 实证 ulimit 静默成功仍 EFBIG），失败不中断；打印双限留诊断证据
+          sudo -n prlimit --fsize=unlimited --pid $$ 2>/dev/null || true
           ulimit -f unlimited || true
+          echo "fsize soft=$(ulimit -Sf) hard=$(ulimit -Hf)"
           go test -short ./internal/agent/... ./cmd/cockpit-agent/... -coverprofile=coverage.out -covermode=atomic -v -timeout 600s
 
       - name: Check coverage threshold (100%)
@@ -119,10 +122,14 @@ jobs:
 
       - name: Test RPC handlers
         run: |
-          # testlog.txt "file too large" 已第 4 次复发（4bed8f8/fe47204/b57298a/
-          # 3a3873a，均红在本步的 internal/agent/rpc）——按批次 17 门槛动作把
-          # RLIMIT_FSIZE soft 提到 hard；若 hard 本身受限此命令会报错但不中断
+          # testlog.txt "file too large" 已 6 次复发（4bed8f8/fe47204/b57298a/
+          # 3a3873a/37934963613/37950067121，均红在本步的 internal/agent/rpc）
+          # ——普通用户 ulimit 只能把 soft 提到 hard，第 6 次实证 hard 受限时
+          # ulimit 静默成功仍 EFBIG，改 root prlimit 双提 soft+hard；失败不
+          # 中断，打印双限留诊断证据
+          sudo -n prlimit --fsize=unlimited --pid $$ 2>/dev/null || true
           ulimit -f unlimited || true
+          echo "fsize soft=$(ulimit -Sf) hard=$(ulimit -Hf)"
           go test ./internal/agent/rpc/... -v
 
   # 单元测试覆盖检查
