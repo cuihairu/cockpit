@@ -6,34 +6,25 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/cuihairu/cockpit/core/platform/darwin"
 )
 
 // ============ macOS launchd 服务管理 Provider（service-design.md D10）============
 //
-// 只管 system 域 LaunchDaemons（agent 以 root 运行前提与 systemd 侧同）：
-// launchctl list + plist 目录扫描合并观测，launchctl 现代动词执行动作
-// （bootout 即 stop、kickstart -k 即 restart、enable/disable 写 disabled DB）。
-
-// launchdDaemonDirs 扫描的 LaunchDaemons 目录（D10.1：不含用户域 LaunchAgents）
-var launchdDaemonDirs = []string{
-	"/Library/LaunchDaemons",
-	"/System/Library/LaunchDaemons",
-}
+// launchctl argv 直调与 LaunchDaemons 目录读取在 core/platform/darwin，本
+// 文件只做动作分发、plist/launchctl list 输出解析与 ServiceUnit 观测映射
+// （纯函数见 service_launchd_model.go，无 build tag Linux CI 可测）。只管
+// system 域 LaunchDaemons；launchctl 现代动词执行动作（bootout 即 stop、
+// kickstart -k 即 restart、enable/disable 写 disabled DB）。
 
 // LaunchdServiceProvider launchd 服务管理 Provider
-type LaunchdServiceProvider struct {
-	run Commander
-}
+type LaunchdServiceProvider struct{}
 
-func NewLaunchdServiceProvider(run Commander) *LaunchdServiceProvider {
-	if run == nil {
-		run = defaultCommander
-	}
-	return &LaunchdServiceProvider{run: run}
+func NewLaunchdServiceProvider() *LaunchdServiceProvider {
+	return &LaunchdServiceProvider{}
 }
 
 func (p *LaunchdServiceProvider) Type() string { return "service" }
@@ -51,13 +42,32 @@ func (p *LaunchdServiceProvider) Call(action string, params map[string]interface
 	}
 }
 
+// scanPlistDaemons 平台层枚举读取 + plist 轻量解析：单文件解析失败跳过
+// （log），无 Label 的 plist 无法操作跳过
+func (p *LaunchdServiceProvider) scanPlistDaemons() []LaunchdService {
+	var out []LaunchdService
+	for _, pl := range darwin.DaemonPlists() {
+		svc, err := parsePlistDaemon(pl.Data)
+		if err != nil {
+			log.Printf("launchd scan: parse %s: %v", pl.Path, err)
+			continue
+		}
+		if svc.Label == "" {
+			continue // 无 Label 的 plist 无法操作，跳过
+		}
+		svc.Path = pl.Path
+		out = append(out, svc)
+	}
+	return out
+}
+
 // List 观测：launchctl list（运行态）+ LaunchDaemons 目录扫描（安装项 +
 // RunAtLoad/Disabled）按 Label 合并；仅出现在 launchctl list 的为 launchd
 // 内置服务（无 plist），Path 留空照常保留
 func (p *LaunchdServiceProvider) List() (interface{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), serviceActionTimeout)
 	defer cancel()
-	out, stderr, err := p.run(ctx, "launchctl", "list")
+	out, stderr, err := darwin.Run(ctx, "list")
 	if err != nil {
 		return nil, fmt.Errorf("launchctl list: %s", commandErrSummary(stderr, err))
 	}
@@ -79,40 +89,6 @@ func (p *LaunchdServiceProvider) List() (interface{}, error) {
 	}
 	sort.Slice(units, func(i, j int) bool { return units[i].Name < units[j].Name })
 	return map[string]interface{}{"services": units}, nil
-}
-
-// scanPlistDaemons 扫 LaunchDaemons 目录解析安装项：单文件解析失败跳过
-// （log），目录不存在忽略（防御 /System 缺失的非常规环境）
-func (p *LaunchdServiceProvider) scanPlistDaemons() []LaunchdService {
-	var out []LaunchdService
-	for _, dir := range launchdDaemonDirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".plist") {
-				continue
-			}
-			path := filepath.Join(dir, e.Name())
-			data, err := os.ReadFile(path)
-			if err != nil {
-				log.Printf("launchd scan: read %s: %v", path, err)
-				continue
-			}
-			svc, err := parsePlistDaemon(data)
-			if err != nil {
-				log.Printf("launchd scan: parse %s: %v", path, err)
-				continue
-			}
-			if svc.Label == "" {
-				continue // 无 Label 的 plist 无法操作，跳过
-			}
-			svc.Path = path
-			out = append(out, svc)
-		}
-	}
-	return out
 }
 
 // Status 概览：launchd 无全局状态概念（PID 1 恒在），systemState 恒 unknown
@@ -157,7 +133,7 @@ func (p *LaunchdServiceProvider) DoAction(name, action string) (interface{}, err
 	defer cancel()
 
 	runLaunch := func(args ...string) error {
-		_, stderr, err := p.run(ctx, "launchctl", args...)
+		_, stderr, err := darwin.Run(ctx, args...)
 		if err != nil {
 			return fmt.Errorf("launchctl %s: %s", strings.Join(args, " "), commandErrSummary(stderr, err))
 		}

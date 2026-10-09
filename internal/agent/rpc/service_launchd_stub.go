@@ -9,7 +9,7 @@ import "fmt"
 // 根本不会注册本 provider，Call 是防御层显式报错。
 type LaunchdServiceProvider struct{}
 
-func NewLaunchdServiceProvider(run Commander) *LaunchdServiceProvider {
+func NewLaunchdServiceProvider() *LaunchdServiceProvider {
 	return &LaunchdServiceProvider{}
 }
 

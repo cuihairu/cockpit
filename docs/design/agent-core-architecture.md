@@ -144,7 +144,7 @@ cmd/cockpit-agent/           # main 薄壳：core 零件装配 + 平台层接线
 
 ## 8. 已知边界（诚实清单）
 
-- **双路径过渡期**：P1–P4 期间 core/ 与 internal/ 并存（存量平台文件白名单：`machineid_*`、`rpc/file_stat_*`、`rpc/job_provider_*`、`rpc/backup_hook_*`、`rpc/service_launchd_*`、`rpc/service_windows_*`），以批次消灭，不做一次性大迁移。
+- **双路径过渡期**：P1–P4 期间 core/ 与 internal/ 并存（存量平台文件白名单：`rpc/file_stat_*`、`rpc/job_provider_*`、`rpc/backup_hook_*`、`rpc/service_{windows,launchd}_{model,stub}.go`——P4 后余量（`machineid_*`、`rpc/service_windows_scm.go`、`rpc/service_launchd_darwin.go` 已收编 core/platform，模型/stub 与插件内平台文件按 §批次映射就地保留）。
 - core 依赖 `internal/protocol` 是白名单例外（协议一份的代价）；若未来 core 要脱离本仓复用，protocol 升 top-level 另批执行。
 - `logx` 引入 slog 是新选型（标准库）：存量 `log.Printf` 不强迁，新代码用 logx，全量替换不做目标。
 - 百行纪律对 `platform/windows`（SCM 401 行收编）这类装配密集包可能破线：破线需在提交说明拆分层（SCM 交互与服务动词分文件），不当死数字硬拆。

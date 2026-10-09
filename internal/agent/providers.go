@@ -129,7 +129,7 @@ func (a *Agent) setupProviders() {
 			case "windows-scm":
 				a.rpc.RegisterProvider(rpc.NewWindowsServiceProvider())
 			case "launchd":
-				a.rpc.RegisterProvider(rpc.NewLaunchdServiceProvider(nil))
+				a.rpc.RegisterProvider(rpc.NewLaunchdServiceProvider())
 			default:
 				a.rpc.RegisterProvider(rpc.NewServiceProvider(nil))
 			}
