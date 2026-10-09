@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cuihairu/cockpit/core/backoff"
 	"github.com/cuihairu/cockpit/internal/agent/detector"
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
 	"github.com/cuihairu/cockpit/internal/protocol"
@@ -748,26 +749,23 @@ func (a *Agent) reconnect() {
 
 	a.closeCurrentConn()
 
-	// 等待后重连
-	time.Sleep(reconnectDelay)
-
+	// 等待后重连：首等 reconnectDelay，失败恒按 reconnectRetryDelay
+	// 重试（core/backoff 统一旋钮，Initial/Max 同语义映射——序列
+	// 5s,10s,10s… 与原两段固定计时一致）；等待可被 ctx 中断
+	it := backoff.Start(backoff.Policy{Initial: reconnectDelay, Max: reconnectRetryDelay})
 	for {
-		select {
-		case <-a.ctx.Done():
+		if !backoff.Wait(a.ctx, it.Next()) {
 			return
-		default:
 		}
 
 		if err := a.connect(); err != nil {
 			log.Printf("Reconnect failed: %v", err)
-			time.Sleep(reconnectRetryDelay)
 			continue
 		}
 
 		if err := a.register(); err != nil {
 			log.Printf("Re-register failed: %v", err)
 			a.closeCurrentConn()
-			time.Sleep(reconnectRetryDelay)
 			continue
 		}
 
