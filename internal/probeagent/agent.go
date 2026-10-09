@@ -115,7 +115,20 @@ func (a *Agent) loop(ctx context.Context, wg *sync.WaitGroup, i int) {
 func (a *Agent) probe(ctx context.Context, i int) {
 	pctx, cancel := context.WithTimeout(ctx, a.targets[i].Timeout.D())
 	defer cancel()
-	a.guards[i].Record(a.checkers[i].Check(pctx), time.Now())
+	err := a.checkers[i].Check(pctx)
+	if ctx.Err() != nil {
+		// 停机取消的在途探测不计服务故障——这是 agent 自身关闭的观测
+		// 伪影，不是目标状态变化（TestRunGracefulShutdown 语义锚点）。
+		return
+	}
+	a.guards[i].Record(err, time.Now())
+}
+
+// ProbeAll 同步探测全部 target 各一次（-once 模式与测试用）。
+func (a *Agent) ProbeAll(ctx context.Context) {
+	for i := range a.targets {
+		a.probe(ctx, i)
+	}
 }
 
 // Snapshots 全部 target 当前观测面（上行/状态文件消费）。

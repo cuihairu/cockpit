@@ -8,7 +8,9 @@ import (
 )
 
 // Alerter 告警出口（herald 留位，简档 §4.4）：状态定性迁移即调，同步
-// 语义；推送通道对接另批实现。
+// 语义；推送通道对接另批实现。Alert 在探测 goroutine 上被 Guard 锁内
+// 回调链同步调用（core/healthprobe/state.go 契约），实现不得同步回读
+// Agent/Guard 状态——会自死锁；需要快照时经 channel 交异步 goroutine。
 type Alerter interface {
 	Alert(tr healthprobe.Transition)
 }
