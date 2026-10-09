@@ -14,6 +14,7 @@ import (
 	"github.com/cuihairu/cockpit/core/backoff"
 	"github.com/cuihairu/cockpit/core/heartbeat"
 	"github.com/cuihairu/cockpit/core/metrics"
+	"github.com/cuihairu/cockpit/core/platform"
 	"github.com/cuihairu/cockpit/core/register"
 	"github.com/cuihairu/cockpit/core/report"
 	"github.com/cuihairu/cockpit/internal/agent/detector"
@@ -85,6 +86,15 @@ var (
 // t.Parallel），注入前后用 defer 恢复，无数据竞争。
 var goos = runtime.GOOS
 
+// machineIDFn 机器标识读取（core/platform 编译期装配后的间接层；包级
+// var 供既有测试注入，同 machineIDPath/goos 先例）
+var machineIDFn = func() string {
+	if h := platform.Current(); h != nil {
+		return h.MachineID()
+	}
+	return ""
+}
+
 // Config Agent 配置
 type Config struct {
 	ServerURL string                 `json:"server_url"`
@@ -146,7 +156,7 @@ func NewAgent(cfg Config) *Agent {
 			Version:  cfg.Version,
 		},
 		register.Facts{
-			MachineID:      func() string { return machineID() },
+			MachineID:      func() string { return machineIDFn() },
 			PublicIP:       func() string { return publicIP() },
 			LocalIPs:       func() []string { return localIPs() },
 			Virtualization: func() interface{} { return DetectVirtualization() },

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -56,9 +55,10 @@ func TestCovRegisterManualBias(t *testing.T) {
 func TestCovRegisterAutoFallbackBias(t *testing.T) {
 	setPublicIPEndpoints(t, []string{"http://127.0.0.1:1/"})
 
-	saved := machineIDPath
-	machineIDPath = filepath.Join(t.TempDir(), "missing-machine-id")
-	t.Cleanup(func() { machineIDPath = saved })
+	// platform 收编后 machineID 读取走 core/platform 装配，注入点移至 machineIDFn
+	saved := machineIDFn
+	machineIDFn = func() string { return "" }
+	t.Cleanup(func() { machineIDFn = saved })
 
 	a := NewAgent(Config{ServerURL: "ws://127.0.0.1:1", Bias: 3, Region: "r", Zone: "z"})
 	defer a.Stop()
@@ -72,32 +72,6 @@ func TestCovRegisterAutoFallbackBias(t *testing.T) {
 	}
 	if !strings.HasSuffix(a.agentID, "-3") {
 		t.Errorf("agentID = %q, want bias suffix %q", a.agentID, "-3")
-	}
-}
-
-// TestCovMachineIDBranches 覆盖 machineID 的读取失败与空内容分支
-// （machineIDPath 注入点，见 machineid_linux.go）
-func TestCovMachineIDBranches(t *testing.T) {
-	saved := machineIDPath
-	t.Cleanup(func() { machineIDPath = saved })
-
-	machineIDPath = filepath.Join(t.TempDir(), "missing")
-	if got := machineID(); got != "" {
-		t.Errorf("machineID() missing file = %q, want empty", got)
-	}
-
-	empty := filepath.Join(t.TempDir(), "empty")
-	os.WriteFile(empty, []byte("   \n"), 0644)
-	machineIDPath = empty
-	if got := machineID(); got != "" {
-		t.Errorf("machineID() blank file = %q, want empty", got)
-	}
-
-	normal := filepath.Join(t.TempDir(), "normal")
-	os.WriteFile(normal, []byte("  0123456789abcdef  \n"), 0644)
-	machineIDPath = normal
-	if got := machineID(); got != "0123456789abcdef" {
-		t.Errorf("machineID() = %q, want trimmed id", got)
 	}
 }
 
