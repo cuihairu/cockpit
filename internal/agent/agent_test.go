@@ -1,11 +1,9 @@
 package agent
 
 import (
-	"os"
 	"testing"
 	"time"
 
-	"github.com/cuihairu/cockpit/internal/protocol"
 )
 
 func TestNewAgent(t *testing.T) {
@@ -64,83 +62,6 @@ func TestNewAgentDefaults(t *testing.T) {
 
 	if agent.capabilities == nil {
 		t.Error("expected capabilities to be initialized")
-	}
-}
-
-func TestDetectLocation(t *testing.T) {
-	tests := []struct {
-		name     string
-		config   *Config
-		env      map[string]string
-		expected protocol.Location
-	}{
-		{
-			name: "from config",
-			config: &Config{
-				Region: "us-west",
-				Zone:   "zone-a",
-			},
-			expected: protocol.Location{
-				Region: "us-west",
-				Zone:   "zone-a",
-			},
-		},
-		{
-			name:   "from env",
-			config: &Config{},
-			env: map[string]string{
-				"COCKPIT_REGION": "eu-central",
-				"COCKPIT_ZONE":   "zone-b",
-			},
-			expected: protocol.Location{
-				Region: "eu-central",
-				Zone:   "zone-b",
-			},
-		},
-		{
-			name:   "default unknown",
-			config: &Config{},
-			expected: protocol.Location{
-				Region: "unknown",
-				Zone:   "unknown",
-			},
-		},
-		{
-			name: "config overrides env",
-			config: &Config{
-				Region: "us-west",
-				Zone:   "zone-a",
-			},
-			env: map[string]string{
-				"COCKPIT_REGION": "eu-central",
-				"COCKPIT_ZONE":   "zone-b",
-			},
-			expected: protocol.Location{
-				Region: "us-west",
-				Zone:   "zone-a",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Set env vars
-			for k, v := range tt.env {
-				os.Setenv(k, v)
-				defer os.Unsetenv(k)
-			}
-
-			agent := &Agent{config: tt.config}
-			result := agent.detectLocation()
-
-			if result.Region != tt.expected.Region {
-				t.Errorf("expected Region %s, got %s", tt.expected.Region, result.Region)
-			}
-
-			if result.Zone != tt.expected.Zone {
-				t.Errorf("expected Zone %s, got %s", tt.expected.Zone, result.Zone)
-			}
-		})
 	}
 }
 
@@ -356,29 +277,6 @@ func TestAgentServerURL(t *testing.T) {
 				t.Errorf("expected %s, got %s", tt.expected, agent.serverURL)
 			}
 		})
-	}
-}
-
-func TestLocationDefaultValues(t *testing.T) {
-	agent := &Agent{config: &Config{}}
-	loc := agent.detectLocation()
-
-	if loc.Region != "unknown" {
-		t.Errorf("expected Region 'unknown', got '%s'", loc.Region)
-	}
-
-	if loc.Zone != "unknown" {
-		t.Errorf("expected Zone 'unknown', got '%s'", loc.Zone)
-	}
-}
-
-func TestNilConfigHandling(t *testing.T) {
-	agent := &Agent{config: nil}
-	loc := agent.detectLocation()
-
-	// Should not panic and return defaults
-	if loc.Region != "unknown" {
-		t.Errorf("expected Region 'unknown', got '%s'", loc.Region)
 	}
 }
 

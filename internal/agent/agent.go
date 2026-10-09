@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
-	"os"
 	"runtime"
 	"sort"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/core/backoff"
+	"github.com/cuihairu/cockpit/core/register"
 	"github.com/cuihairu/cockpit/core/report"
 	"github.com/cuihairu/cockpit/internal/agent/detector"
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
@@ -30,7 +30,8 @@ type Agent struct {
 	collector    *Collector     // 系统信息采集器
 	proxyHandler *proxy.Handler // 代理处理器
 	outbound     chan *protocol.Message
-	upstream     *report.Upstream // 统一上行（core/report：队列消费/放行门/串行写出）
+	upstream     *report.Upstream    // 统一上行（core/report：队列消费/放行门/串行写出）
+	registrar    *register.Registrar // 注册上线（core/register：ID 派生/报文/握手）
 
 	// 注册信息
 	agentID      string
@@ -128,6 +129,38 @@ func NewAgent(cfg Config) *Agent {
 			a.registered.Store(false)
 			go a.reconnect()
 		})
+	// 注册上线装配（core/register）：平台事实（machine-id/IP/虚拟化）
+	// 与传输注入，ID 派生/报文/握手在 core
+	a.registrar = register.New(
+		register.Config{
+			AgentID:  cfg.AgentID,
+			Bias:     cfg.Bias,
+			Secret:   cfg.Secret,
+			Region:   cfg.Region,
+			Zone:     cfg.Zone,
+			Labels:   cfg.Labels,
+			Metadata: cfg.Metadata,
+			Version:  cfg.Version,
+		},
+		register.Facts{
+			MachineID:      func() string { return machineID() },
+			PublicIP:       func() string { return publicIP() },
+			LocalIPs:       func() []string { return localIPs() },
+			Virtualization: func() interface{} { return DetectVirtualization() },
+		},
+		func(m *protocol.Message) error { return a.upstream.WriteNow(m) },
+		func() (*protocol.Message, error) {
+			// 锁内快照 conn：Stop/reconnect 可并发把它置 nil，
+			// 裸读会把 nil 传进 ReadMessage 导致空指针 panic（CI race 实测）
+			a.mu.RLock()
+			conn := a.conn
+			a.mu.RUnlock()
+			if conn == nil {
+				return nil, fmt.Errorf("agent not connected")
+			}
+			return a.codec.ReadMessage(conn)
+		},
+		func() { a.registered.Store(true) })
 	return a
 }
 
@@ -461,127 +494,14 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 	return capabilities
 }
 
-// register 注册到 Server
+// register 注册到 Server（core/register：ID 派生/报文/握手；ID 与位置
+// 落回 Agent 字段供心跳复用——心跳受 registered 门控，仅在成功后读取）
 func (a *Agent) register() error {
-	// 确定 Agent ID
-	if a.config.AgentID != "" {
-		// 手动指定：直接使用，bias 追加后缀
-		a.agentID = a.config.AgentID
-		if a.config.Bias > 0 {
-			a.agentID = fmt.Sprintf("%s-%d", a.agentID, a.config.Bias)
-		}
-	} else {
-		// 自动模式：基于 machine-id 生成稳定 ID，重启不变
-		hostname, _ := os.Hostname()
-		mid := machineID()
-		if mid != "" {
-			// 取 machine-id 前 8 字符，可读且足够区分
-			if len(mid) > 8 {
-				mid = mid[:8]
-			}
-			a.agentID = fmt.Sprintf("agent-%s-%s", hostname, mid)
-		} else {
-			// fallback：无 machine-id 的平台用 hostname + random（每次重启变化）
-			a.agentID = protocol.GenerateIDWithPrefix("agent-" + hostname)
-		}
-		if a.config.Bias > 0 {
-			a.agentID = fmt.Sprintf("%s-%d", a.agentID, a.config.Bias)
-		}
-	}
-
-	// 确定位置
-	a.location = protocol.Location{
-		Region: a.config.Region,
-		Zone:   a.config.Zone,
-	}
-
-	// 如果配置没有指定，尝试自动检测
-	if a.location.Region == "" {
-		a.location = a.detectLocation()
-	}
-
-	// 构建注册消息
-	hostname, _ := os.Hostname()
-
-	payload := map[string]any{
-		"agentId":        a.agentID,
-		"secret":         a.config.Secret,
-		"location":       a.location,
-		"capabilities":   a.capabilities,
-		"hostname":       hostname,
-		"ip":             publicIP(),
-		"localIps":       localIPs(),
-		"virtualization": DetectVirtualization(),
-		"labels":         a.config.Labels,
-		"metadata":       a.config.Metadata,
-		// 版本 / 进程启动时刻 / 服务面：主机列表的元信息列与协议入口
-		// 数据源（此前只在 capabilities 里带一份启动时快照，运行期开服务
-		// 不会反映）
-		"version":   a.config.Version,
-		"startedAt": a.startedAtOrNow().Unix(),
-		"services":  a.cachedServices(),
-	}
-
-	// 发送注册消息
-	msg := protocol.NewMessage(protocol.MessageTypeRegister, payload)
-
-	if err := a.writeToConn(msg); err != nil {
-		return err
-	}
-
-	log.Printf("Registered as agent: %s at %s/%s", a.agentID, a.location.Region, a.location.Zone)
-
-	// 等待响应（锁内快照 conn：Stop/reconnect 可并发把它置 nil，
-	// 裸读会把 nil 传进 ReadMessage 导致空指针 panic——CI race 实测）
-	a.mu.RLock()
-	conn := a.conn
-	a.mu.RUnlock()
-	if conn == nil {
-		return fmt.Errorf("agent not connected")
-	}
-	resp, err := a.codec.ReadMessage(conn)
-	if err != nil {
-		return err
-	}
-
-	if resp.Type != protocol.MessageTypeRegister {
-		return fmt.Errorf("expected register response, got: %s", resp.Type)
-	}
-
-	a.registered.Store(true)
-	log.Printf("Registration accepted")
-	return nil
-}
-
-// detectLocation 检测位置信息
-func (a *Agent) detectLocation() protocol.Location {
-	// 默认位置
-	loc := protocol.Location{
-		Region: "unknown",
-		Zone:   "unknown",
-	}
-
-	// 从配置读取
-	if a.config != nil && a.config.Region != "" {
-		loc.Region = a.config.Region
-	}
-	if a.config != nil && a.config.Zone != "" {
-		loc.Zone = a.config.Zone
-	}
-
-	// 从环境变量读取
-	if loc.Region == "unknown" {
-		if region := os.Getenv("COCKPIT_REGION"); region != "" {
-			loc.Region = region
-		}
-	}
-	if loc.Zone == "unknown" {
-		if zone := os.Getenv("COCKPIT_ZONE"); zone != "" {
-			loc.Zone = zone
-		}
-	}
-
-	return loc
+	id, loc, err := a.registrar.Register(a.startedAtOrNow(), a.capabilities, a.cachedServices())
+	// ID/位置即使失败也已派生落定（原语义：首包直写前即赋值，失败后仍可读）
+	a.agentID = id
+	a.location = loc
+	return err
 }
 
 // heartbeatLoop 心跳循环
