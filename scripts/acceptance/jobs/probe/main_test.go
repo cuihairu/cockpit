@@ -346,3 +346,77 @@ func TestOrphanAlive(t *testing.T) {
 	}
 	_ = time.Now
 }
+
+// ---------- awaitJob（W1 异步化后的终态轮询） ----------
+
+func TestIsJobTerminalAndPendingStatus(t *testing.T) {
+	resetGlobals(t)
+	for _, s := range []string{"success", "failed", "cancelled"} {
+		if !isJobTerminal(s) {
+			t.Fatalf("isJobTerminal(%q) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"pending", "running", "", "ok"} {
+		if isJobTerminal(s) {
+			t.Fatalf("isJobTerminal(%q) = true, want false", s)
+		}
+	}
+	if got := pendingStatus(nil, fmt.Errorf("bad")); got != "<unparsed>" {
+		t.Fatalf("pendingStatus err = %q", got)
+	}
+	v := &jobView{ID: "j1", Status: "pending"}
+	if got := pendingStatus(v, nil); got != "pending" {
+		t.Fatalf("pendingStatus = %q, want pending", got)
+	}
+}
+
+func TestAwaitJobTransitionsAndTimeout(t *testing.T) {
+	resetGlobals(t)
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/jobs/jx" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		n++
+		status := "running"
+		if n >= 3 {
+			status = "success"
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"id":"jx","status":%q,"exitCode":0}`, status)
+	}))
+	defer srv.Close()
+	*apiBase = srv.URL
+
+	v, err := awaitJob("jx", 5*time.Second)
+	if err != nil || v.Status != "success" || v.ExitCode != 0 {
+		t.Fatalf("awaitJob: v=%+v err=%v", v, err)
+	}
+	if n < 2 {
+		t.Fatalf("poll count = %d, want >=2 (pending→running→success)", n)
+	}
+
+	// 超时：恒 running，返回最后视图并带回错误信息
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"id":"jy","status":"running"}`)
+	}))
+	defer srv2.Close()
+	*apiBase = srv2.URL
+
+	v, err = awaitJob("jy", 700*time.Millisecond)
+	if err == nil || v == nil || v.Status != "running" {
+		t.Fatalf("timeout: v=%+v err=%v", v, err)
+	}
+	if !strings.Contains(err.Error(), "running") {
+		t.Fatalf("timeout err should carry last status: %v", err)
+	}
+
+	// 探活失败 + 超时：nil 视图
+	*apiBase = "http://127.0.0.1:1"
+	v, err = awaitJob("jz", 400*time.Millisecond)
+	if err == nil || v != nil {
+		t.Fatalf("dead api: v=%+v err=%v", v, err)
+	}
+}

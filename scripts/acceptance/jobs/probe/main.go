@@ -2,8 +2,9 @@
 // 执行」节）。以面板用户身份走真实链路（REST + agent RPC + 审计/权限面）：
 //
 //	J0  前置：登录；目标 agent 在线；台账可读（基线计数）
-//	J1  创建执行（uptime）→ success/exit 0/输出非空；台账新增（倒序首位）
-//	    与单条详情一致；parameters 往返；startedAt/finishedAt 落定
+//	J1  创建执行（uptime）→ 201 pending（W1 异步化契约）→ 轮询
+//	    success/exit 0/输出非空；台账新增（倒序首位）与单条详情一致；
+//	    parameters 往返；startedAt/finishedAt 落定
 //	J2  非零退出（exit 3）→ failed、exit_code=3、输出仍带回（D4）、error 空
 //	J3  超时（sleep 297，timeout_s=1）→ failed、exit_code=-1、error 含
 //	    "timed out after 1s"、墙钟 <10s；pgrep 复核无孤儿 sleep（进程组
@@ -227,6 +228,43 @@ func parseJob(raw []byte) (*jobView, error) {
 	return &v, nil
 }
 
+// pendingStatus 错误信息里安全取创建响应状态（parseJob 失败时回退占位）
+func pendingStatus(v *jobView, err error) string {
+	if err != nil || v == nil {
+		return "<unparsed>"
+	}
+	return v.Status
+}
+
+func isJobTerminal(status string) bool {
+	return status == "success" || status == "failed" || status == "cancelled"
+}
+
+// awaitJob 轮询单条 Job 到终态（workflow-design W1 异步化后创建响应恒
+// pending，终态经台账轮询取得；300ms 间隔）
+func awaitJob(id string, timeout time.Duration) (*jobView, error) {
+	deadline := time.Now().Add(timeout)
+	var last *jobView
+	for {
+		code, raw := reqJSON(http.MethodGet, *apiBase+"/api/jobs/"+id, nil)
+		if code == 200 {
+			if v, err := parseJob(raw); err == nil {
+				last = v
+				if isJobTerminal(v.Status) {
+					return v, nil
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			if last != nil {
+				return last, fmt.Errorf("job %s 未在 %s 内到终态（最后 status=%s）", id, timeout, last.Status)
+			}
+			return nil, fmt.Errorf("job %s 未在 %s 内到终态", id, timeout)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
 // countJobsByTarget 台账中目标为指定 agent 的条数（J5 幽灵记录对照）
 func countJobsByTarget(jobs []jobView, target string) int {
 	n := 0
@@ -347,7 +385,7 @@ func main() {
 
 	// ---- J1 创建执行成功链路 ----
 	func() {
-		name := "J1 创建执行 uptime → success/exit 0/输出非空/台账新增"
+		name := "J1 创建执行 uptime → 201 pending→success/exit 0/输出非空/台账新增"
 		cmd := "echo J1-OUTPUT-MARK && uptime"
 		start := time.Now()
 		code, raw := reqJSON(http.MethodPost, *apiBase+"/api/jobs", map[string]interface{}{
@@ -355,13 +393,23 @@ func main() {
 			"parameters": map[string]interface{}{"command": cmd},
 		})
 		saveEV("create-J1.json", raw)
-		if code != 200 {
-			check(name, false, fmt.Sprintf("HTTP %d: %s", code, truncate(string(raw), 200)))
+		if code != http.StatusCreated {
+			check(name, false, fmt.Sprintf("HTTP %d（want 201）: %s", code, truncate(string(raw), 200)))
 			return
 		}
-		v, err := parseJob(raw)
+		pending, err := parseJob(raw)
 		if err != nil {
 			check(name, false, err.Error())
+			return
+		}
+		// W1 异步化契约：创建即返回 pending 视图，终态经台账轮询
+		if pending.Status != "pending" {
+			check(name, false, fmt.Sprintf("创建契约: status=%q（want pending）", pending.Status))
+			return
+		}
+		v, err := awaitJob(pending.ID, 30*time.Second)
+		if err != nil {
+			check(name, false, "轮询终态: "+err.Error())
 			return
 		}
 		created["J1"] = v
@@ -396,13 +444,18 @@ func main() {
 			"parameters": map[string]interface{}{"command": "echo J2-BEFORE-OUT; exit 3"},
 		})
 		saveEV("create-J2.json", raw)
-		if code != 200 {
-			check(name, false, fmt.Sprintf("HTTP %d: %s", code, truncate(string(raw), 200)))
+		if code != http.StatusCreated {
+			check(name, false, fmt.Sprintf("HTTP %d（want 201）: %s", code, truncate(string(raw), 200)))
 			return
 		}
-		v, err := parseJob(raw)
+		pending, err := parseJob(raw)
+		if err != nil || pending.Status != "pending" {
+			check(name, false, fmt.Sprintf("创建契约: err=%v status=%q", err, pendingStatus(pending, err)))
+			return
+		}
+		v, err := awaitJob(pending.ID, 30*time.Second)
 		if err != nil {
-			check(name, false, err.Error())
+			check(name, false, "轮询终态: "+err.Error())
 			return
 		}
 		created["J2"] = v
@@ -422,15 +475,20 @@ func main() {
 			"type": "agent.exec", "target": *agentA1,
 			"parameters": map[string]interface{}{"command": "sleep 297", "timeout_s": 1},
 		})
-		elapsed := time.Since(start)
 		saveEV("create-J3.json", raw)
-		if code != 200 {
-			check(name, false, fmt.Sprintf("HTTP %d: %s", code, truncate(string(raw), 200)))
+		if code != http.StatusCreated {
+			check(name, false, fmt.Sprintf("HTTP %d（want 201）: %s", code, truncate(string(raw), 200)))
 			return
 		}
-		v, err := parseJob(raw)
+		pending, err := parseJob(raw)
+		if err != nil || pending.Status != "pending" {
+			check(name, false, fmt.Sprintf("创建契约: err=%v status=%q", err, pendingStatus(pending, err)))
+			return
+		}
+		v, err := awaitJob(pending.ID, 30*time.Second)
+		elapsed := time.Since(start)
 		if err != nil {
-			check(name, false, err.Error())
+			check(name, false, "轮询终态: "+err.Error())
 			return
 		}
 		created["J3"] = v
@@ -450,13 +508,18 @@ func main() {
 			"parameters": map[string]interface{}{"command": "seq 1 20000"},
 		})
 		saveEV("create-J4.json", raw)
-		if code != 200 {
-			check(name, false, fmt.Sprintf("HTTP %d: %s", code, truncate(string(raw), 200)))
+		if code != http.StatusCreated {
+			check(name, false, fmt.Sprintf("HTTP %d（want 201）: %s", code, truncate(string(raw), 200)))
 			return
 		}
-		v, err := parseJob(raw)
+		pending, err := parseJob(raw)
+		if err != nil || pending.Status != "pending" {
+			check(name, false, fmt.Sprintf("创建契约: err=%v status=%q", err, pendingStatus(pending, err)))
+			return
+		}
+		v, err := awaitJob(pending.ID, 30*time.Second)
 		if err != nil {
-			check(name, false, err.Error())
+			check(name, false, "轮询终态: "+err.Error())
 			return
 		}
 		created["J4"] = v

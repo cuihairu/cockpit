@@ -288,18 +288,45 @@
 ## Workflow 编排（M1：异步 Job + 线性链）
 
 设计：[workflow-design](./workflow-design.md)。前置：一台在线 Linux agent（同 Job 节）。
-M1 已实现（2026-10-09），下列为未验收态——探针四场景 + 真机编排一轮（探针规划
-`scripts/acceptance/workflows/`，对齐 jobs 探针五件套口径）。
+M1 已实现并验收（2026-10-09）：探针 `scripts/acceptance/workflows/`（W0-W9，四件套 +
+Go probe，对齐 jobs 探针口径）真机 9/9 PASS（端口 20010，agent `workflows-acc-a1`，
+证据 `.acceptance/workflows/evidence/` + `probe.log`）。
 
-- [ ] 异步创建：`POST /api/jobs` 立即 201 返回 pending，台账轮询内见终态；pending 行「取消」可见可点（W1/W3）
-- [ ] 成功链：两步 Workflow run 全步 success，run 台账每步 jobId 可点开看输出/退出码（W5）
-- [ ] 失败停：中间步失败（非零退出）→ run failed、第三步不执行、断点在快照可读（W7）
-- [ ] 重试：首试失败重试成功（retry=2）→ 步骤 attempts=2、每次尝试独立 Job 行进台账（W4）
-- [ ] 取消 run：在途步骤自然结束后 run cancelled、后续步骤不推进；再次取消 409（W3）
-- [ ] 重入与冻结：同定义重复 run 409；active run 期间定义更新/删除 409，终态后恢复（W8）
-- [ ] 离线目标：步骤目标含离线 agent → 503 不建 run（与单条 Job 同口径）
-- [ ] 权限与审计：无 `workflows:write` 不见运行/新建入口；`workflow_create/workflow_run/workflow_cancel` 审计留痕
-- [ ] 真机编排一轮：对真实 agent 跑一条「uptime → df -h」两步链并核对台账/审计/run 快照
+- [x] 异步创建：`POST /api/jobs` 立即 201 返回 pending，台账轮询内见终态；pending 行「取消」可见可点（W1/W9）
+  证据：W1 `uptime` → 201 status=pending（W1 契约，0d065a1 race fix 后确定性）→ 台账轮询
+  success/exit 0/输出标记/params 往返/起止落定；pending 行取消 Web 在位 `Jobs/index.tsx:159`
+  （pending 行「取消」按钮 → `cancelJob`），running 取消被拒 409 `only pending`（W9）
+- [x] 成功链：两步 Workflow run 全步 success，run 台账每步 jobId 可点开看输出/退出码（W2）
+  证据：W2 两步链（uptime → df -h）run success；步骤快照 success 落 run.steps；
+  Job 台账 2 条 actor=workflow、`/api/jobs?workflow_run_id=` 命中；Web run 详情
+  jobId「查看」按钮复用台账 Job 视角（`Workflows/index.tsx:538` openJob）
+- [x] 失败停：中间步失败（非零退出）→ run failed、第三步不执行、断点在快照可读（W3）
+  证据：W3 三步链第 2 步 `exit 3` → run failed；快照 [success/failed/pending] 断点可读；
+  Job 台账恰 2 条（第三步无 Job，未派发）
+- [x] 重试：首试失败重试成功（retry=1）→ 步骤 attempts=2、每次尝试独立 Job 行进台账（W4）
+  证据：W4 marker 文件首试 `cat` 失败（exit 1）、retry=1 重试成功 → steps[0].attempts=2、
+  尝试 2 success 含输出标记、尝试 1 failed exit=1 独立成行；两条 Job 间隔实测 ∈[4s,10s]
+  （workflowRetryInterval=5s 语义）
+- [x] 取消 run：在途步骤自然结束后 run cancelled、后续步骤不推进；再次取消 409（W5）
+  证据：W5 sleep 12 在途 → cancel 200 → run cancelled+finishedAt；12s 后步骤 2 仍无
+  Job（不推进）、台账 1 条；再次 cancel 409 `run is not running`；Web 取消按钮仅
+  running 可见（`Workflows/index.tsx:496`）
+- [x] 重入与冻结：同定义重复 run 409；active run 期间定义更新/删除 409（W6）
+  证据：W6 active run 窗口内（8s/12s sleep 期间）触发第二次 run 409、PUT 定义 409、
+  DELETE 定义 409（三 409 冻结面）；cancel 置终态后 DELETE 200 可清（W7 尾段）
+- [x] 离线目标：步骤目标含离线 agent → 503 不建 run（与单条 Job 同口径）（W7）
+  证据：W7 目标 `workflows-acc-ghost`（从未注册，与「曾在线后掉线」同 registry.Get 分支）
+  → 503 含 `agent offline`、run 台账 0 条（不落幽灵）；同口径单条 Job 见 J5
+- [x] 权限与审计：无 `workflows:write` 不见运行/新建入口；`workflow_create/workflow_run/workflow_cancel` 审计留痕（W8）
+  证据：W8 viewer（workflows:read）列表 200/run 详情 200、建/触发/取消全 403；仅
+  `dns:read` 自定义角色全 403（rbac `{"/api/workflows","workflows",""}` 路由层）；
+  审计 create/run/cancel 三动作留痕 resource=workflow；Web 入口 PermGuard
+  `workflows:write`（`Workflows/index.tsx:307,315,334`）+ 菜单 `workflows:read`
+  （`App.tsx:222`）
+- [x] 真机编排一轮：对真实 agent 跑一条「uptime → df -h」两步链并核对台账/审计/run 快照（W2）
+  证据：本机实例（:20010）+ agent `workflows-acc-a1` 真机执行；run success、两步快照
+  均含输出、Job 台账 2 条 actor=workflow、审计 workflow_run resource_id=run id；
+  证据文件 run-W2/final-W2/jobs-W2/audit-workflow.json（`.acceptance/workflows/evidence/`）
 
 ## 移动端（Flutter，iOS + Android）
 
