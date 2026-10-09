@@ -1,6 +1,7 @@
 // cockpit-probe-agent 服务检测 agent（docs/design/service-detect-agent.md）：
-// 探测目标清单轮询 + 防抖状态机 + 故障窗口，standalone 本地模式；server
-// 上行待 B5 接线。main 薄壳，逻辑在 probeagent 包。
+// 探测目标清单轮询 + 防抖状态机 + 故障窗口；standalone 本地模式，配置
+// server 后注册/心跳/probe_report 全链上行（B5）。main 薄壳，逻辑在
+// probeagent 包。
 package main
 
 import (
@@ -45,10 +46,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "load config:", err)
 		return 1
 	}
-	if cfg.Server != "" {
-		// B5 接线前降级提示：本地模式照常探测
-		fmt.Fprintln(stderr, "note: server reporting not wired yet (B5), running local-only")
-	}
 
 	a, err := probeagent.New(cfg)
 	if err != nil {
@@ -69,17 +66,37 @@ func run(args []string, stdout, stderr io.Writer) int {
 		cancel()
 	}()
 
+	// 上行链（B5）：server 配置即注册/心跳/probe_report 全链；-once 本地
+	// 快照模式不装配。迁移即发经 Notify 交 worker（Guard 锁内回调契约：
+	// 只入队信号不回读，兜底 10×interval 由 worker 自转）。
+	var upstream *probeagent.Upstream
+	if cfg.Server != "" && !*once {
+		upstream = probeagent.NewUpstream(a, cfg, version)
+		go func() { _ = upstream.Run() }()
+		defer upstream.Stop()
+	}
+
 	// 状态文件：启动写一次 + 每次定性迁移重写 + 退出终态。落盘走异步
 	// writer——Guard 在锁内回调 onEvent（core/healthprobe/state.go 契约），
 	// 出口同步回读 Agent 状态会自死锁，故迁移事件经 channel 交写盘 goroutine。
+	// 双出口（写盘+上行）合入同一 Alerter：迁移事件均非阻塞分发，写盘
+	// 终态与上行兜底各自兜底丢失窗口。
 	var transitions chan healthprobe.Transition
 	var written chan struct{}
+	a.SetAlerter(alerterFunc(func(tr healthprobe.Transition) {
+		if transitions != nil {
+			select {
+			case transitions <- tr:
+			default:
+			}
+		}
+		if upstream != nil {
+			upstream.Notify()
+		}
+	}))
 	if *statusFile != "" {
 		transitions = make(chan healthprobe.Transition, 8)
 		written = make(chan struct{})
-		a.SetAlerter(alerterFunc(func(tr healthprobe.Transition) {
-			transitions <- tr
-		}))
 		go func() {
 			defer close(written)
 			for range transitions {

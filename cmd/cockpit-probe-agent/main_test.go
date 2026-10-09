@@ -16,6 +16,8 @@ import (
 
 	"github.com/cuihairu/cockpit/core/healthprobe"
 	"github.com/cuihairu/cockpit/core/platform"
+	"github.com/cuihairu/cockpit/internal/protocol"
+	"github.com/gorilla/websocket"
 )
 
 // TestMain 子进程覆盖入口：守卫环境变量命中时以注入参数调 main()，覆盖
@@ -183,15 +185,16 @@ func TestRunFlagParseError(t *testing.T) {
 	}
 }
 
-// TestRunServerNote server 字段非空打 B5 降级提示，本地模式照常探测退出 0。
-func TestRunServerNote(t *testing.T) {
+// TestRunOnceIgnoresServer -once + server 配置：不装配上行链，纯本地探测
+// 退出 0（快照模式契约）。
+func TestRunOnceIgnoresServer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
 
 	cfgPath := filepath.Join(t.TempDir(), "probe.yaml")
-	cfgYaml := "server: 127.0.0.1:9999\nthreshold: 1\nrecovery: 1\ntargets:\n" +
+	cfgYaml := "server: ws://127.0.0.1:1/ws\nthreshold: 1\nrecovery: 1\ntargets:\n" +
 		"  - name: live-http\n    type: http\n    url: " + srv.URL + "\n"
 	if err := os.WriteFile(cfgPath, []byte(cfgYaml), 0o644); err != nil {
 		t.Fatal(err)
@@ -200,8 +203,107 @@ func TestRunServerNote(t *testing.T) {
 	if code := run([]string{"-config", cfgPath, "-once"}, &out, &errOut); code != 0 {
 		t.Fatalf("code = %d, err = %q", code, errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "not wired yet") {
-		t.Fatalf("stderr = %q, want downgrade note", errOut.String())
+}
+
+// probeUpstreamStub 命令级 e2e 桩：收注册回 accepted，后续消息转发给用例。
+type probeUpstreamStub struct {
+	upgrader websocket.Upgrader
+	regCh    chan struct{}
+	msgs     chan *protocol.Message
+}
+
+func newProbeUpstreamStub() *probeUpstreamStub {
+	return &probeUpstreamStub{
+		regCh: make(chan struct{}, 4),
+		msgs:  make(chan *protocol.Message, 16),
+	}
+}
+
+func (s *probeUpstreamStub) handler(w http.ResponseWriter, r *http.Request) {
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	codec := protocol.NewCodec()
+	msg, err := codec.ReadMessage(conn)
+	if err != nil || msg.Type != protocol.MessageTypeRegister {
+		return
+	}
+	s.regCh <- struct{}{}
+	_ = codec.WriteMessage(conn, protocol.NewMessage(protocol.MessageTypeRegister, map[string]interface{}{
+		"status":     "accepted",
+		"serverTime": time.Now().Unix(),
+	}))
+	for {
+		m, err := codec.ReadMessage(conn)
+		if err != nil {
+			return
+		}
+		select {
+		case s.msgs <- m:
+		default:
+		}
+	}
+}
+
+// TestRunDaemonUpstreamE2E 常驻模式命令级全链：装配上行链 → 注册 → 首轮
+// 定性迁移触发 probe_report 上行 → SIGTERM 优雅退出 0。
+func TestRunDaemonUpstreamE2E(t *testing.T) {
+	stub := newProbeUpstreamStub()
+	wsrv := httptest.NewServer(http.HandlerFunc(stub.handler))
+	defer wsrv.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer target.Close()
+
+	cfgPath := filepath.Join(t.TempDir(), "probe.yaml")
+	cfgYaml := "server: ws" + strings.TrimPrefix(wsrv.URL, "http") + "/ws\n" +
+		"interval: 50ms\nthreshold: 1\nrecovery: 1\ntargets:\n" +
+		"  - name: live-http\n    type: http\n    url: " + target.URL + "\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgYaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		done <- run([]string{"-config", cfgPath}, io.Discard, io.Discard)
+	}()
+
+	select {
+	case <-stub.regCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("register never arrived")
+	}
+
+	// 迁移即发：unknown→healthy 定性后 probe_report 应到达
+	deadline := time.Now().Add(5 * time.Second)
+	gotReport := false
+	for time.Now().Before(deadline) && !gotReport {
+		select {
+		case m := <-stub.msgs:
+			if m.Type == protocol.MessageTypeProbeReport {
+				gotReport = true
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	if !gotReport {
+		t.Fatal("probe_report never arrived after transition")
+	}
+
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("code = %d, want 0 on graceful stop", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not return on SIGTERM")
 	}
 }
 
@@ -227,14 +329,16 @@ func TestRunGracefulShutdown(t *testing.T) {
 		done <- run([]string{"-config", cfgPath, "-status-file", statusPath}, io.Discard, io.Discard)
 	}()
 
-	// 轮询至首份状态落盘（此时信号 handler 已注册——注册先于状态写出）
+	// 轮询至状态文件定性 healthy（首探完成、迁移落盘）再发 SIGTERM——只看
+	// 文件存在会竞态在首探前发信号，终态落成 unknown（启动写初态为 unknown）
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := os.Stat(statusPath); err == nil {
+		b, err := os.ReadFile(statusPath)
+		if err == nil && bytes.Contains(b, []byte("healthy")) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("status file never written")
+			t.Fatalf("status never became healthy: %s", string(b))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

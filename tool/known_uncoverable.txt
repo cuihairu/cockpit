@@ -64,7 +64,7 @@ scripts/acceptance/agent-backup/probe/main.go:573,575	3. writeEvilTar gz.Close �
 # ---------- 4. 新增 Agent 服务面/启动时刻字段的测试回退路径（4 语句） ----------
 
 internal/probeagent/report.go:93,94	3. WriteStatusFile json.MarshalIndent(Snapshot) 失败防御（Snapshot 仅字符串/时间/窗口嵌套字段，无 chan/func/环引用，契约上不可失败）
-cmd/cockpit-probe-agent/main.go:55,57	3. run() 内 probeagent.New(cfg) 失败防御（LoadConfig resolve 恒回填 ≥1 个合法 target，契约上不可达；保留防契约漂移）
+cmd/cockpit-probe-agent/main.go:52,54	3. run() 内 probeagent.New(cfg) 失败防御（LoadConfig resolve 恒回填 ≥1 个合法 target，契约上不可达；保留防契约漂移）
 
 
 
