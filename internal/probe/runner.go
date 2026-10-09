@@ -314,6 +314,12 @@ func (r *Runner) maybePruneHistory() {
 	} else if n > 0 {
 		log.Printf("[probe] Pruned %d probe history rows older than %s", n, cutoff.Format("2006-01-02"))
 	}
+	// 探针 agent 故障窗口同节奏清理（服务检测 agent B5）
+	if n, err := r.db.DeleteProbeWindowsOlderThan(cutoff); err != nil {
+		log.Printf("[probe] Window prune failed: %v", err)
+	} else if n > 0 {
+		log.Printf("[probe] Pruned %d probe windows older than %s", n, cutoff.Format("2006-01-02"))
+	}
 }
 
 // checkDomains 探测所有域名

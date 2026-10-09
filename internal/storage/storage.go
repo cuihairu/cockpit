@@ -114,6 +114,8 @@ func (d *DB) migrate() error {
 		&BackupConfig{},
 		&BackupRun{},
 		&ProbeResult{},
+		&ProbeTargetSnapshot{},
+		&ProbeWindow{},
 		&TerminalRecording{},
 		&DDNSConfig{},
 		&AcmeAccount{},

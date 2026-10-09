@@ -141,12 +141,23 @@ func TestMaybePruneHistory(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed history: %v", err)
 	}
+	// 探针 agent 故障窗口同节奏清理（B5）：过期窗口随首清删除
+	if err := db.UpsertProbeWindows("probe-a", []storage.ProbeWindow{
+		{Target: "blog", StartedAt: old},
+		{Target: "pg", StartedAt: fresh},
+	}); err != nil {
+		t.Fatalf("seed windows: %v", err)
+	}
 
 	// lastPrune 零值 → 首次调用即清理
 	r.maybePruneHistory()
 	rest, _ := db.ListProbeResults("service", "x", 10)
 	if len(rest) != 1 {
 		t.Fatalf("prune should remove rows older than retention, got %d rows", len(rest))
+	}
+	windows, _ := db.ListProbeWindows("probe-a", "", 10)
+	if len(windows) != 1 || windows[0].Target != "pg" {
+		t.Fatalf("window prune should remove expired rows, got %+v", windows)
 	}
 
 	// 24h 内不重复清理：再插一条过期行，lastPrune 刚刚 → 不清

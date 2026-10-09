@@ -59,6 +59,18 @@ func (s *Server) handleProbeAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.handleProbeHistory(w, r)
+	case "/api/probe/targets":
+		if r.Method != http.MethodGet {
+			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.handleProbeTargets(w, r)
+	case "/api/probe/windows":
+		if r.Method != http.MethodGet {
+			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.handleProbeWindows(w, r)
 	default:
 		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 	}
@@ -227,6 +239,40 @@ func (s *Server) handleProbeHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	// gorm Find 空表恒返回非 nil 空 slice，无需兜底
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"results": results})
+}
+
+// handleProbeTargets 探针目标快照回查（服务检测 agent B5）：全部 agent 的
+// 目标最新观测（unknown/healthy/faulty + 最近探测时刻/错误）。
+func (s *Server) handleProbeTargets(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.ListProbeTargets()
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to load probe targets")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"targets": rows})
+}
+
+// handleProbeWindows 故障窗口回查（服务检测 agent B5）：agent_id/target
+// 可选过滤，started_at 倒序，limit 默认 50 上限 200。
+func (s *Server) handleProbeWindows(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	agentID := q.Get("agent_id")
+	target := q.Get("target")
+	limit := probeHistoryDefaultLimit
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 || n > probeHistoryMaxLimit {
+			s.handleError(w, r, http.StatusBadRequest, "limit must be in [1, 200]")
+			return
+		}
+		limit = n
+	}
+	rows, err := s.db.ListProbeWindows(agentID, target, limit)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to load probe windows")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"windows": rows})
 }
 
 func (s *Server) handleNotificationAPI(w http.ResponseWriter, r *http.Request) {

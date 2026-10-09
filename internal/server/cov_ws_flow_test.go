@@ -315,6 +315,7 @@ func TestCovHandleMessageDispatch(t *testing.T) {
 		protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{"proxyId": "p1", "connId": "c1", "data": "aGk="}),
 		protocol.NewMessage(protocol.MessageTypeProxyClose, map[string]interface{}{"proxyId": "p1", "connId": "c1", "reason": "done"}),
 		protocol.NewMessage(protocol.MessageTypeProxyError, map[string]interface{}{"proxyId": "p1", "error": "boom"}),
+		protocol.NewMessage(protocol.MessageTypeProbeReport, nil), // 探针上报分发（空负载合法）
 		protocol.NewMessage(protocol.MessageType("unknown-type"), nil),
 	}
 	for i, msg := range cases {

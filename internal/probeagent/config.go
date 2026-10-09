@@ -58,8 +58,10 @@ type TargetConfig struct {
 
 // Config 探测 agent 配置文件（简档 §1 目标格式）。
 type Config struct {
-	Server    string         `yaml:"server"`
-	Secret    string         `yaml:"secret"`
+	Server string `yaml:"server"` // 可选；缺省纯本地模式
+	Secret string `yaml:"secret"` // 可选，注册认证
+	// AgentID 显式探针 ID（可选）；缺省派生 probe-<hostname>[-<machine-id 前 8>]
+	AgentID   string         `yaml:"agent_id"`
 	Interval  Duration       `yaml:"interval"`
 	Timeout   Duration       `yaml:"timeout"`
 	Threshold int            `yaml:"threshold"`

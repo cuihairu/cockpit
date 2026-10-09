@@ -10,8 +10,9 @@ const (
 	MessageTypeRegister    MessageType = "register"
 	MessageTypeHeartbeat   MessageType = "heartbeat"
 	MessageTypeRPCResponse MessageType = "rpc_response"
-	MessageTypeProxyClose  MessageType = "proxy_close" // 关闭代理连接
-	MessageTypeProxyError  MessageType = "proxy_error" // 代理错误
+	MessageTypeProxyClose  MessageType = "proxy_close"  // 关闭代理连接
+	MessageTypeProxyError  MessageType = "proxy_error"  // 代理错误
+	MessageTypeProbeReport MessageType = "probe_report" // 探针 agent 观测上报（服务检测 agent B5）
 
 	// Server → Agent
 	MessageTypeRPCRequest MessageType = "rpc_request"
