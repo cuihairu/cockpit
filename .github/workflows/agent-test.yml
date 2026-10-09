@@ -44,11 +44,10 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          # testlog.txt "file too large" 防复发（第 5 次红在本步 internal/agent/
-          # rpc，run 37934963613，用例全 PASS 仍 FAIL）：先以 root 把
-          # RLIMIT_FSIZE soft+hard 双提到 unlimited（runner 若压低 hard，
-          # 普通用户 ulimit 提不动 soft 高过 hard，第 6 次复发 run 37950067121
-          # 实证 ulimit 静默成功仍 EFBIG），失败不中断；打印双限留诊断证据
+          # testlog.txt "file too large" 已 8 次复发（末次 run 37997368667，
+          # 第 8 次实证 os.Truncate 截 0 不复位框架写偏移、shrinkTestLog 无效）。
+          # 现由测试侧 fsizeWindowLimit 动态取窗口软限（testlog 大小 +1MB），
+          # 本步 ulimit/prlimit 保留作 runner 侧兜底与诊断证据
           sudo -n prlimit --fsize=unlimited --pid $$ 2>/dev/null || true
           ulimit -f unlimited || true
           echo "fsize soft=$(ulimit -Sf) hard=$(ulimit -Hf)"
@@ -122,11 +121,12 @@ jobs:
 
       - name: Test RPC handlers
         run: |
-          # testlog.txt "file too large" 已 7 次复发（4bed8f8/fe47204/b57298a/
-          # 3a3873a/37934963613/37950067121/37952757780，均红在本步的
-          # internal/agent/rpc）。第 7 次实证 shell 层 soft/hard 已 unlimited
-          # 仍红——真因是 rpc 两个 fsize 测试进程内 Setrlimit 窗口打到框架
-          # testlog 追加写，已在测试侧 shrinkTestLog 截 0 治理；本步
+          # testlog.txt "file too large" 已 8 次复发（4bed8f8/fe47204/b57298a/
+          # 3a3873a/37934963613/37950067121/37952757780/37997368667，均红在本
+          # 步的 internal/agent/rpc）。真因：rpc 两个 fsize 测试的进程内
+          # Setrlimit 窗口压过框架 testlog 写偏移，窗口内 bufio 刷盘即 EFBIG
+          # （截 0 不复位偏移，第 8 次实证 shrinkTestLog 无效）。现由测试侧
+          # fsizeWindowLimit 动态取窗口软限（testlog 大小 +1MB）；本步
           # ulimit/prlimit 保留作 runner 侧兜底与诊断证据
           sudo -n prlimit --fsize=unlimited --pid $$ 2>/dev/null || true
           ulimit -f unlimited || true

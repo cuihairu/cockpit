@@ -266,28 +266,22 @@ func TestCovPctPlistSkipErr(t *testing.T) {
 }
 
 // TestCovPctAtomicWriteFileSizeLimit atomicWriteFile 的 tmp.Write 失败分支
-// （L305）：把 RLIMIT_FSIZE 压到 1KB 后写入 4KB 数据 → EFBIG → 原子写失败
-// 且目标不落盘；恢复 rlimit 后窗口外零影响。无法设置则 Skip。
+// （L305）：把 RLIMIT_FSIZE 压到框架 testlog 偏移 +1MB（见 cov_io_errors_test.go
+// fsizeWindowLimit，固定 1KB 窗口撞框架日志追加是 CI 第 5-8 次复发真因）
+// 后写入超软限数据 → EFBIG → 原子写失败且目标不落盘；恢复 rlimit 后窗口
+// 外零影响。无法设置则 Skip。
 func TestCovPctAtomicWriteFileSizeLimit(t *testing.T) {
-	// 1KB 窗口最易撞框架 testlog 追加（CI 第 5-7 次复发真因），窗口前截 0
-	shrinkTestLog(t)
-
-	var old syscall.Rlimit
-	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &old); err != nil {
-		t.Skipf("getrlimit 不可用: %v", err)
+	cur, old, ok := fsizeWindowLimit(t)
+	if !ok {
+		t.Skipf("fsize 软限需求超出硬限 %d，无法安全收窄", old.Max)
 	}
-	if old.Max < 4096 {
-		t.Skip("硬上限过小，无法安全收窄软限制")
-	}
-	lim := old
-	lim.Cur = 1024
-	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &lim); err != nil {
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: cur, Max: old.Max}); err != nil {
 		t.Skipf("setrlimit 不可用: %v", err)
 	}
 	defer func() { _ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &old) }()
 
 	path := filepath.Join(t.TempDir(), "unit.conf")
-	err := atomicWriteFile(path, make([]byte, 4096), 0o600)
+	err := atomicWriteFile(path, make([]byte, cur+(1<<20)), 0o600)
 	if err == nil || !strings.Contains(err.Error(), "file too large") {
 		t.Fatalf("超 FSIZE 写入应报 file too large, got %v", err)
 	}

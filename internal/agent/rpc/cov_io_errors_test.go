@@ -18,21 +18,39 @@ import (
 	"testing"
 )
 
-// shrinkTestLog RLIMIT_FSIZE 窗口前把 go test 框架的 testlog.txt 截为 0。
-// 框架对进程内每次文件操作向该文件即时追加一行，窗口内测试体自身的文件
-// 操作（fsize 类测试正是要写文件）也照样追加——文件已超窗口软限（如
-// 1KB）时追加即 EFBIG，错误拖到进程末尾以 "testing: can't write
-// testlog.txt: file too large" 报出并整包 FAIL（CI 第 5-7 次复发真因，
-// run 37934963613/37950067121/37952757780；shell 层 fsize 已 unlimited，
-// 与 ulimit/prlimit 无关）。截 0 后窗口内增量为 KB 级，不再撞限；丢失的
-// 条目只影响 go test 缓存键，无碍正确性。
-func shrinkTestLog(t *testing.T) {
+// fsizeWindowLimit 返回 fsize 窗口可安全设置的 RLIMIT_FSIZE 软限与原始
+// rlimit（cur, old, ok）。go test 框架以非 append 模式持有 testlog.txt 的
+// 写偏移，对进程内每次文件操作即时追加一行；窗口软限必须压过该偏移，
+// 否则窗口内任何一次刷盘（bufio 满 4KB）或部分越限的短写都以 EFBIG /
+// ErrShortWrite 粘住缓冲，进程收尾以 "testing: can't write testlog.txt"
+// 报错整包 FAIL——CI 第 5-8 次复发真因（run 37934963613 / 37950067121 /
+// 37952757780 / 37997368667）。os.Truncate 截 0 不复位偏移（截后首笔写
+// 仍在原偏移落笔、稀洞补零），shrinkTestLog 截 0 治理因此无效（第 8 次
+// 复发实证）。软限取日志当前大小 + 1MB 余量：覆盖未刷缓冲（≤4KB）与
+// 窗口内框架增量（数百字节级），固定小软限（1KB/1MB）随包日志体量增长
+// 必然复发。载荷取软限 +1MB 保证必撞限；硬限放不下时 ok=false 调用方
+// Skip。丢失的缓存键条目无碍正确性。
+func fsizeWindowLimit(t *testing.T) (cur uint64, old syscall.Rlimit, ok bool) {
 	t.Helper()
+	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &old); err != nil {
+		return 0, old, false
+	}
+	var logSize uint64
 	if f := flag.Lookup("test.testlogfile"); f != nil {
 		if path := f.Value.String(); path != "" {
-			_ = os.Truncate(path, 0)
+			if st, err := os.Stat(path); err == nil {
+				logSize = uint64(st.Size())
+			}
 		}
 	}
+	cur = logSize + 1<<20
+	if cur < 1<<20 { // testlogfile 为空（无框架日志）时按 0 处理
+		cur = 1 << 20
+	}
+	if old.Max != ^uint64(0) && cur > old.Max {
+		return 0, old, false
+	}
+	return cur, old, true
 }
 
 // ============ backup.read 的 seek / read 失败 ============
@@ -178,20 +196,16 @@ func TestCovLogsQueryBadPayload(t *testing.T) {
 func TestCovCronWriteViaFileFsize(t *testing.T) {
 	p := NewCronProvider(nil)
 
-	// 窗口内测试体文件操作仍会追加框架 testlog，先截 0 防撞限（见 helper 注释）
-	shrinkTestLog(t)
-
-	var old syscall.Rlimit
-	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &old); err != nil {
-		t.Skipf("getrlimit: %v", err)
+	// 软限压过框架 testlog 偏移（见 helper 注释），载荷再 +1MB 必撞限；
+	// Go 运行时默认丢弃 SIGXFSZ，write 以错误返回
+	cur, old, ok := fsizeWindowLimit(t)
+	if !ok {
+		t.Skipf("fsize 软限需求超出硬限 %d，无法安全收窄", old.Max)
 	}
-	// 配额 1MB、内容 2MB：写入必得 EFBIG。窗口内进程其他文件写入
-	// （测试输出 / 覆盖率落盘）单次均远小于 1MB，不受影响；Go 运行时
-	// 默认丢弃 SIGXFSZ，write 以错误返回
-	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 1 << 20, Max: old.Max}); err != nil {
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: cur, Max: old.Max}); err != nil {
 		t.Skipf("setrlimit: %v", err)
 	}
-	err := p.writeViaFile(strings.Repeat("# cockpit cov fsize\n", 128*1024), "")
+	err := p.writeViaFile(strings.Repeat("# cockpit cov fsize\n", int(cur/20)+(1<<20)/20), "")
 	_ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &old)
 	if err == nil || !strings.Contains(err.Error(), "write temp file") {
 		t.Fatalf("fsize err = %v", err)
