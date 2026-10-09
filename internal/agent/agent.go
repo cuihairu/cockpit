@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/core/backoff"
+	"github.com/cuihairu/cockpit/core/report"
 	"github.com/cuihairu/cockpit/internal/agent/detector"
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
 	"github.com/cuihairu/cockpit/internal/protocol"
@@ -29,6 +30,7 @@ type Agent struct {
 	collector    *Collector     // 系统信息采集器
 	proxyHandler *proxy.Handler // 代理处理器
 	outbound     chan *protocol.Message
+	upstream     *report.Upstream // 统一上行（core/report：队列消费/放行门/串行写出）
 
 	// 注册信息
 	agentID      string
@@ -99,7 +101,7 @@ type Config struct {
 func NewAgent(cfg Config) *Agent {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &Agent{
+	a := &Agent{
 		serverURL:    cfg.ServerURL,
 		codec:        protocol.NewCodec(),
 		rpc:          rpc.NewHandler(),
@@ -112,6 +114,21 @@ func NewAgent(cfg Config) *Agent {
 		cancel:       cancel,
 		config:       &cfg,
 	}
+	// 统一上行装配（core/report）：队列仍由 Agent 持有（测试可观测），
+	// 连接事实/注册门/写失败处置注入
+	a.upstream = report.New(ctx, a.outbound, a.codec,
+		func() *websocket.Conn {
+			a.mu.RLock()
+			defer a.mu.RUnlock()
+			return a.conn
+		},
+		&a.writeMu,
+		func() bool { return a.registered.Load() },
+		func() {
+			a.registered.Store(false)
+			go a.reconnect()
+		})
+	return a
 }
 
 // startedAtOrNow 进程启动时刻（零值兜底为此刻，供未走 NewAgent 的测试构造体用）
@@ -277,65 +294,25 @@ func (a *Agent) closeCurrentConn() {
 	}
 }
 
-// sendMessage 将业务消息放入统一发送队列。
+// sendMessage 将业务消息放入统一发送队列（core/report）。
 // Gorilla WebSocket 不允许同一连接上并发 writer，所有 Agent 子模块写入都必须走 writeLoop。
 func (a *Agent) sendMessage(msg *protocol.Message) error {
-	select {
-	case a.outbound <- msg:
-		return nil
-	case <-a.ctx.Done():
-		return fmt.Errorf("agent stopped")
-	default:
-		return fmt.Errorf("agent outbound queue full")
-	}
+	return a.upstream.Enqueue(msg)
 }
 
+// writeToConn 不经队列直写（注册首包），core/report 串行化
 func (a *Agent) writeToConn(msg *protocol.Message) error {
-	a.mu.RLock()
-	conn := a.conn
-	a.mu.RUnlock()
-	if conn == nil {
-		return fmt.Errorf("agent not connected")
-	}
-
-	a.writeMu.Lock()
-	defer a.writeMu.Unlock()
-
-	return a.codec.WriteMessage(conn, msg)
+	return a.upstream.WriteNow(msg)
 }
 
+// writeLoop 统一上行消费循环（core/report：放行门 + 串行写出 + 写失败重连）
 func (a *Agent) writeLoop() {
-	for {
-		select {
-		case <-a.ctx.Done():
-			return
-		case msg := <-a.outbound:
-			if err := a.waitRegistered(); err != nil {
-				return
-			}
-			if err := a.writeToConn(msg); err != nil {
-				log.Printf("Send message failed: %v", err)
-				a.registered.Store(false)
-				go a.reconnect()
-			}
-		}
-	}
+	a.upstream.Run()
 }
 
+// waitRegistered 注册放行门（core/report 100ms 轮询）
 func (a *Agent) waitRegistered() error {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		if a.registered.Load() {
-			return nil
-		}
-		select {
-		case <-a.ctx.Done():
-			return fmt.Errorf("agent stopped")
-		case <-ticker.C:
-		}
-	}
+	return report.WaitRegistered(a.ctx, func() bool { return a.registered.Load() })
 }
 
 // detectCapabilities 检测能力
