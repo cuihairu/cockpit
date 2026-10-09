@@ -17,7 +17,7 @@ import axios from 'axios'
 // jsdom 的 location 不可直接赋 href，整体替换为可写对象
 const locationStub = { href: '' }
 vi.stubGlobal('location', locationStub)
-import { createJob, getJob, listJobs } from './jobs'
+import { cancelJob, createJob, getJob, listJobs } from './jobs'
 
 const mockInstance = axios.create() as unknown as Record<'get' | 'post', ReturnType<typeof vi.fn>>
 
@@ -46,13 +46,16 @@ describe('jobs 服务', () => {
     localStorage.clear()
   })
 
-  it('listJobs 解包 jobs 数组', async () => {
+  it('listJobs 解包 jobs 数组，过滤参数走 query', async () => {
     mockInstance.get.mockResolvedValue({ jobs: [{ id: 'j1', status: 'success' }] })
     await expect(listJobs()).resolves.toEqual([{ id: 'j1', status: 'success' }])
-    expect(mockInstance.get).toHaveBeenCalledWith('')
+    expect(mockInstance.get).toHaveBeenCalledWith('', { params: undefined })
     // 空数据也回退空数组
     mockInstance.get.mockResolvedValue({})
     await expect(listJobs()).resolves.toEqual([])
+    // 状态过滤透传
+    await listJobs({ status: 'cancelled' })
+    expect(mockInstance.get).toHaveBeenCalledWith('', { params: { status: 'cancelled' } })
   })
 
   it('createJob 透传 type/target/parameters', async () => {
@@ -74,6 +77,13 @@ describe('jobs 服务', () => {
     mockInstance.get.mockResolvedValue({ id: 'j1' })
     await getJob('j1')
     expect(mockInstance.get).toHaveBeenCalledWith('/j1')
+  })
+
+  it('cancelJob POST cancel 路径（W3：pending 可撤）', async () => {
+    mockInstance.post.mockResolvedValue({ id: 'j1', status: 'cancelled' })
+    const job = await cancelJob('j1')
+    expect(mockInstance.post).toHaveBeenCalledWith('/j1/cancel')
+    expect(job.status).toBe('cancelled')
   })
 })
 

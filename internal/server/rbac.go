@@ -52,6 +52,8 @@ var resourceRules = []resourceRule{
 	{"/api/alerts", "alerts", ""},
 	{"/api/agent-tags", "inventory", ""}, // 标签挂服务器，与 /agents/{id}/tags 同归 inventory
 	{"/api/jobs", "jobs", ""},            // 执行 Job 路由层校验（jobs-design D8：GET=台账 read、POST=执行 write）
+	{"/api/workflows", "workflows", ""},  // Workflow 编排（workflow-design W9：定义 CRUD/run/cancel；GET=read、写=write）
+	{"/api/workflow-runs", "workflows", ""}, // run 详情/取消同归 workflows 面
 	{"/api/agents", "inventory", ""},
 }
 

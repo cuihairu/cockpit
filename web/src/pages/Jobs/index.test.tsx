@@ -27,10 +27,12 @@ vi.mock('@/contexts/useUser', () => ({
 const jobsMock = vi.hoisted(() => ({
   listJobs: vi.fn(),
   createJob: vi.fn(),
+  cancelJob: vi.fn(),
 }))
 vi.mock('@/services/jobs', () => ({
   listJobs: jobsMock.listJobs,
   createJob: jobsMock.createJob,
+  cancelJob: jobsMock.cancelJob,
 }))
 
 process.on('unhandledRejection', () => {})
@@ -103,6 +105,7 @@ describe('Jobs', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     jobsMock.createJob.mockResolvedValue({ ...jobs[0], id: 'job-new' })
+    jobsMock.cancelJob.mockResolvedValue({ ...jobs[0], status: 'cancelled' })
   })
   afterEach(() => {
     document.body.innerHTML = '' // Modal/下拉弹层挂 body，跨用例清理
@@ -246,6 +249,48 @@ describe('Jobs', () => {
     // 详情弹窗：exitCode undefined → 退出码回退 '-'
     await waitFor(() => expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(1))
     expect(screen.getByText('退出码')).toBeInTheDocument()
+  })
+
+  it('pending 行取消按钮：cancelJob 调用并刷新（W3 派发前可撤）', async () => {
+    renderPage([
+      {
+        id: 'job-p',
+        type: 'agent.exec',
+        target: 'a1',
+        actor: 'cui',
+        status: 'pending',
+        createdAt: '2026-10-04T12:05:00Z',
+      },
+    ])
+    expect(await screen.findByText('排队中')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('取消'))
+    await waitFor(() => expect(jobsMock.cancelJob).toHaveBeenCalledWith('job-p'))
+    expect(msgSuccess).toHaveBeenCalled()
+  })
+
+  it('状态过滤：选择「失败」后 listJobs 收到 status 过滤', async () => {
+    renderPage()
+    expect(await screen.findByText('uptime')).toBeInTheDocument()
+    const filter = document.querySelector('.ant-card .ant-select') as HTMLElement
+    await pickOption(filter, '失败')
+    await waitFor(() => expect(jobsMock.listJobs).toHaveBeenCalledWith({ status: 'failed' }))
+  })
+
+  it('取消失败：服务端报错进 message.error', async () => {
+    jobsMock.cancelJob.mockRejectedValue({ response: { data: { error: 'only pending jobs can be cancelled' } } })
+    renderPage([
+      {
+        id: 'job-p',
+        type: 'agent.exec',
+        target: 'a1',
+        actor: 'cui',
+        status: 'pending',
+        createdAt: '2026-10-04T12:05:00Z',
+      },
+    ])
+    expect(await screen.findByText('排队中')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('取消'))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('only pending jobs can be cancelled'))
   })
 
   it('弹窗关闭：创建取消与详情关闭都能退出', async () => {

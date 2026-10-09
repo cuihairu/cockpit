@@ -21,8 +21,13 @@ P1 的同步 RPC 模型（POST 即等待终态）有两个天花板：
 
 ## 实现状态
 
-- **未实现**。本文为立项设计，按里程碑推进：M1（异步 Job + 线性 Workflow）
-  待拍板后实现；M2+ 各项在「边界（明确不做）」。
+- **M1 已实现（2026-10-09）**：异步 Job（W1/W2/W3 单条语义）+ 线性 Workflow
+  （W4-W9）+ 取消 + 台账过滤 + 权限/审计，全链 `internal/storage/workflow.go`、
+  `internal/server/api_workflow.go`、`web/src/pages/Workflows/`、
+  `web/src/services/workflows.ts`；POST /api/jobs 全异步化（W1）为破坏性语义
+  变更（原同步等待删除，消费者仅 web 一处）。真机验收按「验收清单」Workflow
+  节推进（探针四场景：成功链/失败停/重试/取消）。
+- M2+ 各项在「边界（明确不做）」；未实现项以本文设计为准。
 - P1 已实现部分不受影响：`agent.exec` 类型、job provider、权限点原样保留，
   本设计只改「server 侧何时返回」与「谁在等待」。
 

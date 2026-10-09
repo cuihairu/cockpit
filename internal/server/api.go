@@ -50,6 +50,10 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	case path == "/jobs" || strings.HasPrefix(path, "/jobs/"):
 		// 执行 Job（见 api_jobs.go，jobs-design.md）
 		s.handleJobsAPI(w, r, path)
+	case path == "/workflows" || strings.HasPrefix(path, "/workflows/") ||
+		path == "/workflow-runs" || strings.HasPrefix(path, "/workflow-runs/"):
+		// Workflow 编排（见 api_workflow.go，workflow-design.md）
+		s.handleWorkflowAPI(w, r, path)
 	case path == "/inventory/consistency":
 		// CMDB 一致性（见 api_inventory.go，drift-design.md M6 D28/D30）
 		s.handleInventoryConsistency(w, r)

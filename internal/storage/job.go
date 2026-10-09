@@ -15,10 +15,11 @@ import (
 // 输出与退出码在完成后回写；Parameters/Output 只存尾部，防表膨胀
 // （输出上限 JobMaxOutput）。
 const (
-	JobStatusPending = "pending"
-	JobStatusRunning = "running"
-	JobStatusSuccess = "success"
-	JobStatusFailed  = "failed"
+	JobStatusPending   = "pending"
+	JobStatusRunning   = "running"
+	JobStatusSuccess   = "success"
+	JobStatusFailed    = "failed"
+	JobStatusCancelled = "cancelled"
 
 	// JobMaxOutput 输出保留上限（字节）：执行输出只留尾部
 	JobMaxOutput = 64 * 1024
@@ -26,18 +27,20 @@ const (
 
 // Job 一次执行的持久化记录
 type Job struct {
-	ID         string     `gorm:"primaryKey" json:"id"`
-	Type       string     `gorm:"index" json:"type"`
-	Target     string     `gorm:"index" json:"target"` // agent id
-	Actor      string     `json:"actor"`
-	Parameters string     `json:"-"`    // JSON 串入参（读取时在 API 层解析回对象）
-	Status     string     `gorm:"index" json:"status"`
-	ExitCode   int        `json:"exitCode,omitempty"`
-	Output     string     `json:"output,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	StartedAt  *time.Time `json:"startedAt,omitempty"`
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	ID         string `gorm:"primaryKey" json:"id"`
+	Type       string `gorm:"index" json:"type"`
+	Target     string `gorm:"index" json:"target"` // agent id
+	Actor      string `json:"actor"`
+	Parameters string `json:"-"` // JSON 串入参（读取时在 API 层解析回对象）
+	Status     string `gorm:"index" json:"status"`
+	ExitCode   int    `json:"exitCode,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Error      string `json:"error,omitempty"`
+	// WorkflowRunID 所属 Workflow run（空 = 独立 Job）；workflow-design W5
+	WorkflowRunID string     `gorm:"index;default:''" json:"workflowRunId,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	StartedAt     *time.Time `json:"startedAt,omitempty"`
+	FinishedAt    *time.Time `json:"finishedAt,omitempty"`
 }
 
 // CreateJob 新建 Job（调用方负责填充 ID/Type/Target/Actor/Status）
@@ -69,4 +72,10 @@ func (d *DB) ListJobs(limit int) ([]Job, error) {
 // UpdateJob 回写执行结果（状态/退出码/输出/错误/时间戳）
 func (d *DB) UpdateJob(job *Job) error {
 	return d.db.Model(job).Save(job).Error
+}
+
+// CancelJob 终态回写 cancelled（仅 pending 未派发 Job 可撤；调用方已校验状态）
+func (d *DB) CancelJob(id string, finished time.Time) error {
+	return d.db.Model(&Job{}).Where("id = ?", id).
+		Updates(map[string]interface{}{"status": JobStatusCancelled, "finished_at": finished}).Error
 }

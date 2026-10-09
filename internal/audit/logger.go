@@ -57,6 +57,14 @@ const (
 	ActionServiceAction = "service_action"
 	// 执行 Job（见 docs/guide/jobs-design.md）：创建即执行，终态回写同记一条
 	ActionJobRun = "job_run"
+	// Job 取消（workflow-design W2/W3：pending 未派发可撤）
+	ActionJobCancel = "job_cancel"
+	// Workflow 定义变更与运行（见 docs/guide/workflow-design.md）
+	ActionWorkflowCreate = "workflow_create"
+	ActionWorkflowUpdate = "workflow_update"
+	ActionWorkflowDelete = "workflow_delete"
+	ActionWorkflowRun    = "workflow_run"
+	ActionWorkflowCancel = "workflow_cancel"
 	// 防漂移检测：手动登记基线「以当前为准」（见 docs/guide/drift-design.md M4）
 	ActionDriftRecord = "drift_record"
 )
@@ -100,6 +108,9 @@ const ResourceCronJob = "cron_job"
 
 // ResourceJob 执行 Job 资源类型（见 docs/guide/jobs-design.md）
 const ResourceJob = "job"
+
+// ResourceWorkflow Workflow 编排资源类型（定义与 run 共用，见 workflow-design.md）
+const ResourceWorkflow = "workflow"
 
 // ResourceService systemd 服务资源类型（见 docs/guide/service-design.md）
 const ResourceService = "service"
@@ -316,9 +327,9 @@ type RemoteSessionDetails struct {
 	Host       string `json:"host"`
 	Port       int    `json:"port"`
 	Session    string `json:"session_id"`
-	Egress     string `json:"egress,omitempty"`    // 命中的出口策略摘要
-	Duration   string `json:"duration,omitempty"`  // 仅 end 事件
-	Reason     string `json:"reason,omitempty"`    // 仅 end 事件
+	Egress     string `json:"egress,omitempty"`      // 命中的出口策略摘要
+	Duration   string `json:"duration,omitempty"`    // 仅 end 事件
+	Reason     string `json:"reason,omitempty"`      // 仅 end 事件
 	AuthSource string `json:"auth_source,omitempty"` // 凭据来源：saved（保险箱）/ user（现场输入）；空 = 无凭据（如 VNC 匿名、agent 默认密钥）
 }
 

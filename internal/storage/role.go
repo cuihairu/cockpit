@@ -56,6 +56,8 @@ var resourceActions = map[string][]string{
 	// 执行 Job（jobs-design.md）：读写均为执行态操作（write=创建执行，
 	// read=查看列表/详情）
 	"jobs": {"read", "write"},
+	// Workflow 编排（workflow-design.md W9）：read=定义/run 台账，write=CRUD/run/cancel
+	"workflows": {"read", "write"},
 }
 
 // PermissionValid 权限点是否落在 D3 清单内
@@ -80,7 +82,7 @@ func allPermissions() []string {
 		"inventory", "files", "logs", "terminal", "docker", "stack", "cron",
 		"backup", "acme", "dns", "ddns", "proxy", "overlay", "drift", "nas",
 		"alerts", "audit", "users", "roles", "settings",
-		"services", "smart", "recordings", "jobs", "firewall",
+		"services", "smart", "recordings", "jobs", "workflows", "firewall",
 	} {
 		for _, a := range resourceActions[res] {
 			out = append(out, res+":"+a)

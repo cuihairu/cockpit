@@ -15,8 +15,12 @@
   Jobs 页（全机台账 15s 轮询 + 创建即执行弹窗 + 终态详情）；权限点
   `jobs:read`/`jobs:write`（PermGuard 控制创建入口）。
 - **未实现**（按本文「边界（明确不做）」节，立项时再设计，不写进当前能力）：
-  异步执行/取消（`cancelled` 与独立 `timeout` 终态）、Workflow/定时触发、
   输出流式、Action/Event 抽象与 AI 接线（P5）。
+- **已由 P2 落地（2026-10-09，[workflow-design](./workflow-design.md) M1）**：
+  异步执行/取消（`cancelled` 终态、pending 可撤、台账过滤）与 Workflow 编排；
+  `POST /api/jobs` 语义随之改为「创建即 201 返回 pending，后台派发」（原同步
+  等待删除），timeout 仍按设计保持 `failed`（不设独立终态）。Workflow/定时
+  触发中，定时部分仍不做（workflow-design W11 约定）。
 - **真机验收**（2026-10-05，探针 `scripts/acceptance/jobs/` 五件套 9/9 PASS，
   acceptance-checklist「统一 Job 执行」节七项全勾）：执行链路（82ms 成功回执 /
   exit 3 输出带回 / 超时 1.078s 按时返回且 `pgrep` 无孤儿 / 截尾恰 64KB 尾部保留）、

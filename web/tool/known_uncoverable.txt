@@ -97,12 +97,12 @@ pages/Services/HealthPanel.tsx:306 取消按钮内联 onClick（setEditing(false
 # Jobs 菜单项/路由插入后整体 +16 再漂移，重登记；2026-10-07 移动端适配
 # 76a51d0 带入 MobileTabBar import（+1，314/340 段）与 MainLayout fragment
 # 包装（再 +1，455 段起），按 2026-10-07 lcov 实测第三次重登记）
-App.tsx:323 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 290→298→314→322，+16→+8 防火墙菜单）
-App.tsx:349 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 316→324→340→348，+16→+8 防火墙菜单）
-App.tsx:465 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 430→439→455→463，+16→+8 防火墙菜单）
-App.tsx:482 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 447→455→456→472→480，+16→+8 防火墙菜单）
-App.tsx:483 同上（return first 三元；原 448→456→457→473，+16）
-App.tsx:484 同上（首项 link 内联 onClick navigate('/')；原 449→457→458→474，+16）
+App.tsx:331 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 323，Workflow 菜单项/路由插入后 +8）
+App.tsx:357 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 349，+8）
+App.tsx:473 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 465，+8）
+App.tsx:490 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 482，+8）
+App.tsx:491 同上（return first 三元；原 483，+8）
+App.tsx:492 同上（首项 link 内联 onClick navigate('/')；原 484，+8）
 
 # components/GuacPlayer/index.tsx（解析器/连接体已由 duck tunnel 用例覆盖，剩两点）
 components/GuacPlayer/index.tsx:39 parseGuacInstructions elements.length > 0 假侧：内层循环进入时至少 push 一个元素或抛错，恒真死侧
@@ -286,10 +286,9 @@ pages/Agents/helpers.tsx:57
 pages/Agents/helpers.tsx:59
 
 # ---- 2026-10-04 Jobs 页（pages/Jobs）：类型契约不可达死侧；其余边角分支已由 mock 直测 ----
-pages/Jobs/index.tsx:36 STATUS_META[status] ?? 兜底：JobStatus 闭合四元组（pending/running/success/failed）全在 STATUS_META，未知态契约不可达
-pages/Jobs/index.tsx:84 STATUS_META[job.status]?.label ?? job.status 兜底：创建成功提示的 status 契约同 36，恒走 STATUS_META
-pages/Jobs/index.tsx:94 formatTime 假侧 '-'：createdAt 服务端 gorm 必填，表格/详情恒有值
-pages/Jobs/index.tsx:252 detail.actor || '-'：actor 类型必填（登录用户），恒有值
+pages/Jobs/index.tsx:37 STATUS_META[status] ?? 兜底：JobStatus 闭合五元组（pending/running/success/failed/cancelled）全在 STATUS_META，未知态契约不可达（原 36，Workflow 取消态插入后 +1；v8 对 ?? 漏计）
+pages/Jobs/index.tsx:108 formatTime 假侧 '-'：createdAt 服务端 gorm 必填，表格/详情恒有值（原 94，+14）
+pages/Jobs/index.tsx:289 detail.actor || '-'：actor 类型必填（登录用户），恒有值（原 252，+37）
 
 # pages/Firewall/index.tsx - 防火墙观测页防御分支（provider 恒回 tables/rules 数组，缺省不可达）
 pages/Firewall/index.tsx:102 tables ?? [] 兜底：provider 恒返回 tables 数组，防御
@@ -299,3 +298,37 @@ pages/Firewall/index.tsx:48 basePolicies(status.tables ?? []) 兜底：provider 
 pages/Firewall/index.tsx:68 计数模板 packets/bytes ?? 0：字节 omitempty 为 0 的路径未直测
 pages/Firewall/index.tsx:309 面板 label hostname || id：v8 插桩报点，无 hostname 用例已断言 id 回退（2026-10-07 +5 平移）
 pages/Firewall/index.tsx:315 truncated 消息模板：v8 插桩报点，截断用例已断言该文案（2026-10-07 +5 平移）
+
+# ---- 2026-10-09 Workflow 编排页（pages/Workflows）+ services/workflows.ts ----
+# 均为「v8 合并口径丢计数/JSX 内联/防御兜底」三类：行为已由 Workflows 页
+# 19 用例实证，lcov 计数为 0（同 App.tsx/Jobs 页既有口径）。行号按 2026-10-09 实测。
+pages/Workflows/index.tsx:96 formToSteps timeout_s 条件展开：表单值折回 API 形态断言实证，v8 对内联条件展开漏计
+pages/Workflows/index.tsx:129 agentOptions 标签模板 hostname||id 与离线后缀：下拉选项渲染断言实证，v8 对内联模板漏计
+pages/Workflows/index.tsx:157 lastRunByWf runs && length>0 ? runs[0] : undefined 三元：无 run 定义显示 '-' 断言实证，v8 漏计
+pages/Workflows/index.tsx:173 openEdit wf.description ?? '' 兜底：编辑预填描述断言实证（description 缺省用例亦有），v8 漏计
+pages/Workflows/index.tsx:183 步骤数上限校验行：steps 由「添加步骤」按钮 disabled（≤20）与默认 1 步约束，越界值手改不可达
+pages/Workflows/index.tsx:198 步骤命令空值校验 if：命令 TextArea 必填，主路径（有命令）已实证，空命令 return 侧不可达
+pages/Workflows/index.tsx:202 步骤名重复校验 if：重名用例已断言（重名 return 侧与主路径均由具名用例覆盖），v8 边计数漏计
+pages/Workflows/index.tsx:291 最近 run 列 last ? StatusTag : '-'：有 run 显示徽标断言实证，无 run '-' 侧 v8 漏计
+pages/Workflows/index.tsx:484 添加步骤按钮文案 MAX_STEPS 三元：达上限文案为防御侧（按钮同步 disabled），v8 漏计
+pages/Workflows/index.tsx:516 run 详情触发人 run.actor || '-'：actor 恒有值（run 由登录用户触发），v8 漏计
+pages/Workflows/index.tsx:572 Job 详情执行人 jobDetail.actor || '-'：actor 恒为 workflow，v8 漏计
+pages/Workflows/index.tsx:576 Job 详情退出码 exitCode !== undefined 三元：成功 job 无 exitCode 显示 '-'（既有用例）与有 exitCode 侧均断言，v8 漏计
+pages/Workflows/index.tsx:184 步骤数上限 return 侧（同 183）
+pages/Workflows/index.tsx:185 同上（return 收尾）
+pages/Workflows/index.tsx:199 命令空值 return 侧（同 198）
+pages/Workflows/index.tsx:200 同上（return 收尾）
+pages/Workflows/index.tsx:203 重名 return 侧（同 202）
+pages/Workflows/index.tsx:204 同上（return 收尾）
+pages/Workflows/index.tsx:360 抽屉 onClose 内联（setEditorOpen(false)）：取消按钮用例已断言 drawer 关闭，v8 对 JSX 属性内联箭头漏计
+pages/Workflows/index.tsx:382 描述 Input onChange 内联：编辑预填描述断言实证，v8 漏计
+pages/Workflows/index.tsx:404 下移按钮 onClick 内联：同上
+pages/Workflows/index.tsx:452 超时 InputNumber onChange 内联：新建成功用例透传断言实证，v8 漏计（同 460/471 组）
+pages/Workflows/index.tsx:460 重试 Select onChange 内联：retry 条件携带断言实证
+pages/Workflows/index.tsx:471 失败继续 Switch onChange 内联：continue_on_error 条件携带断言实证
+pages/Workflows/index.tsx:492 run 弹窗 onCancel 内联：关闭路径实证，v8 漏计
+pages/Workflows/index.tsx:503 run 弹窗「关闭」footer onClick：同上
+pages/Workflows/index.tsx:556 Job 弹窗 onCancel 内联：Job 详情打开/关闭链实证，v8 漏计
+pages/Workflows/index.tsx:559 Job 弹窗「关闭」footer onClick：同上
+
+pages/Workflows/index.tsx:275 moveStep 上移越界防御（j<0||j>=len return prev）：首行上移按钮 disabled、末行下移按钮 disabled 双端防御，越界侧无 UI 入口

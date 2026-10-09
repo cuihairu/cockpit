@@ -72,14 +72,33 @@ internal/agent/agent.go:155,155	3. servicesRefreshLoop 取消上下文退出分�
 
 cmd/cockpit-agent/main.go:68,69	redirectServiceStart 命中 SCM 上下文后的 return 0（linux stub 恒 false；真 Windows 由 nightly 走查覆盖）
 
-# ---------- 6. Job 模型最小闭环（docs/guide/jobs-design.md）：防御分支与测试惯例（10 语句） ----------
+# ---------- 6. Job 模型最小闭环（docs/guide/jobs-design.md）：防御分支与测试惯例（13 语句） ----------
+# P2 异步化（2026-10-09）后原 92/187/210/243/247 与 storage/job.go:64 由
+# closed-db 与传输面错误测试覆盖（TestWorkflowAPIDBErrorBranches /
+# TestWorkflowRunTransportErrors），删除登记；其余按新行号迁移。
 
-internal/server/api_jobs.go:92,92	3. handleJobsList 查询失败 500（SQLite 已迁移表上 SELECT 不可致错，单测不可构造）
-internal/server/api_jobs.go:172,172	4. 带登录态的用户分支（handler 单测无 auth middleware，Actor 恒 unknown；真名分支由登录流程整链覆盖）
-internal/server/api_jobs.go:187,187	3. CreateJob 失败 500（AutoMigrate 建表后刚插入恒成功，仅磁盘/IO 级故障可触发）
-internal/server/api_jobs.go:196,196	3. UpdateJob(running) 失败仅降级 log（同 CreateJob：单行主键更新不可构造失败）
-internal/server/api_jobs.go:210,210	3. 终态 UpdateJob 失败 500（job 已执行完成，失败面仅 IO；同 187 根因）
-internal/server/api_jobs.go:243,243	3. dispatchJob CallAgent 错误（离线已在 handleJobCreate 先经 registry 判空 503，此处不可达）
-internal/server/api_jobs.go:247,247	3. DecodeRPCResponse 失败（RPC 响应恒为协议消息形态，无畸形面）
-internal/server/api_jobs.go:284,284	3. intField `case int`（JSON 数字解码恒 float64，int 直调进不来）
-internal/storage/job.go:64,64	3. ListJobs 查询失败（SQLite 已迁移表 SELECT 不可致错）
+internal/server/api_jobs.go:185,186	4. 带登录态的用户分支（handler 单测无 auth middleware，Actor 恒 unknown；真名分支由登录流程整链覆盖）
+internal/server/api_jobs.go:216,217	3. dispatchJobAsync UpdateJob(running) 失败仅降级 log（后台 goroutine 中途失败，单行主键更新不可构造失败；同 dispatchJobAsync 尾态回写 `_ =` 吞错口径）
+internal/server/api_jobs.go:258,260	3. CancelJob 失败 500（GetJob 先行成功，主键 UPDATE 无现实失败面）
+internal/server/api_jobs.go:264,265	4. cancel 带登录态的用户分支（同 185,186 口径）
+internal/server/api_jobs.go:272,274	3. cancel 后重读 GetJob 失败 500（同 handler 入口 GetJob 先行成功，SELECT 不可致错）
+internal/server/api_jobs.go:335,335	3. intField `case int`（JSON 数字解码恒 float64，int 直调进不来）
+
+# ---------- 7. Workflow 线性编排 M1（docs/guide/workflow-design.md）：死防御与测试惯例（44 语句） ----------
+
+internal/server/api_workflow.go:96,96	3. handleWorkflowsAPI 兜底 404（serveAPI 分发保证 path 为 /workflows 前缀，default 不可达）
+internal/server/api_workflow.go:331,333	3. update ActiveWorkflowRun 检查失败 500（GetWorkflow 先行成功，SQLite 同进程 SELECT 不可致错）
+internal/server/api_workflow.go:344,346	3. UpdateWorkflow 失败 500（读链先行成功，单行主键更新不可构造失败）
+internal/server/api_workflow.go:360,362	3. delete ActiveWorkflowRun 检查失败 500（同 331,333 根因）
+internal/server/api_workflow.go:367,369	3. DeleteWorkflow 失败 500（GetWorkflow/Active 先行成功，主键删除无现实失败面）
+internal/server/api_workflow.go:384,386	3. run ActiveWorkflowRun 检查失败 500（GetWorkflow 先行成功）
+internal/server/api_workflow.go:424,426	3. CreateWorkflowRun 失败 500（前置读链全成功，INSERT 不可构造失败）
+internal/server/api_workflow.go:457,459	3. advance 循环重载 run 失败防御（后台编排 goroutine 中途 db 失败，run 创建即在本循环前成功；构造需注入竞态，SQLite 同进程无现实失败面）
+internal/server/api_workflow.go:500,501	3. 步骤 Job 创建失败降级 continue（goroutine 中途 INSERT 失败，同 457,459 根因）
+internal/server/api_workflow.go:538,540	3. recordStepResult 重载 run 失败防御（goroutine 中途，同 457,459 根因）
+internal/server/api_workflow.go:562,564	3. finishWorkflowRun 重载 run 失败防御（goroutine 中途，同 457,459 根因）
+internal/server/api_workflow.go:569,571	3. finishWorkflowRun 终态回写失败防御（goroutine 中途 UPDATE，同 457,459 根因）
+internal/server/api_workflow.go:592,594	3. runs 台账 ListWorkflowRuns 失败 500（GetWorkflow 先行成功）
+internal/server/api_workflow.go:628,630	3. cancel UpdateWorkflowRun 失败 500（GetWorkflowRun 先行成功，主键更新无现实失败面）
+internal/server/api_workflow.go:641,642	3. actorName nil 分支（调用面恒传非 nil *http.Request；后台编排走 finishWorkflowRun 的 actor 字符串参数，不经此分支）
+internal/server/api_workflow.go:644,645	4. actorName 带登录态分支（handler 单测无 auth middleware；真名分支由登录流程整链覆盖，同 jobs 185,186 口径）

@@ -16,10 +16,10 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import { PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
-import { createJob, listJobs } from '@/services/jobs'
+import { cancelJob, createJob, listJobs } from '@/services/jobs'
 import type { Job, JobStatus } from '@/services/jobs'
 import { getApiErrorMessage } from '@/utils/apiError'
 import { PermGuard } from '@/components/PermGuard'
@@ -30,6 +30,7 @@ const STATUS_META: Record<JobStatus, { color: string; label: string }> = {
   running: { color: 'processing', label: '执行中' },
   success: { color: 'success', label: '成功' },
   failed: { color: 'error', label: '失败' },
+  cancelled: { color: 'warning', label: '已取消' },
 }
 
 const JobStatusTag = ({ status }: { status: JobStatus }) => {
@@ -37,18 +38,21 @@ const JobStatusTag = ({ status }: { status: JobStatus }) => {
   return <Tag color={meta.color}>{meta.label}</Tag>
 }
 
-// Job 执行（docs/guide/jobs-design.md）：统一执行台账。创建即执行
-// （同步 RPC 下发，返回即终态）；列表为全机 Job 倒序台账。
+// Job 执行（docs/guide/jobs-design.md + workflow-design.md W1）：统一执行
+// 台账。创建异步——提交即返回 pending，后台派发，台账轮询见终态；pending
+// 行可取消（W3），列表支持状态过滤。
 const Jobs = () => {
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [detail, setDetail] = useState<Job | null>(null)
+  const [statusFilter, setStatusFilter] = useState<JobStatus | undefined>()
 
   const { data: jobs, isLoading } = useQuery({
-    queryKey: ['jobs'],
-    queryFn: listJobs,
-    refetchInterval: 15000,
+    queryKey: ['jobs', statusFilter],
+    queryFn: () => listJobs(statusFilter ? { status: statusFilter } : undefined),
+    // 异步派发：pending/running 行需较快刷新见终态
+    refetchInterval: 5000,
   })
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['jobs'] })
@@ -80,14 +84,24 @@ const Jobs = () => {
     try {
       const params: { command: string; timeout_s?: number } = { command: raw.command }
       if (raw.timeout_s) params.timeout_s = raw.timeout_s
-      const job = await createJob({ type: 'agent.exec', target: raw.target, parameters: params })
-      message.success(`Job 已执行（${STATUS_META[job.status]?.label ?? job.status}）`)
+      await createJob({ type: 'agent.exec', target: raw.target, parameters: params })
+      message.success('已提交，可在台账查看执行结果')
       setCreateOpen(false)
       refresh()
     } catch (e) {
       message.error(getApiErrorMessage(e, 'Job 创建失败'))
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handleCancel = async (id: string) => {
+    try {
+      await cancelJob(id)
+      message.success('已取消')
+      refresh()
+    } catch (e) {
+      message.error(getApiErrorMessage(e, '取消失败'))
     }
   }
 
@@ -142,6 +156,18 @@ const Jobs = () => {
           <Button type="link" size="small" onClick={() => setDetail(r)}>
             查看
           </Button>
+        ) : r.status === 'pending' ? (
+          <PermGuard perm="jobs:write">
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<StopOutlined />}
+              onClick={() => handleCancel(r.id)}
+            >
+              取消
+            </Button>
+          </PermGuard>
         ) : (
           '-'
         ),
@@ -165,6 +191,17 @@ const Jobs = () => {
         title="Job 执行"
         extra={
           <Space>
+            <Select
+              allowClear
+              placeholder="状态过滤"
+              style={{ width: 120 }}
+              value={statusFilter}
+              onChange={(v) => setStatusFilter(v)}
+              options={(Object.keys(STATUS_META) as JobStatus[]).map((k) => ({
+                value: k,
+                label: STATUS_META[k].label,
+              }))}
+            />
             <Button icon={<ReloadOutlined />} onClick={refresh} />
             <PermGuard perm="jobs:write">
               <Button type="primary" icon={<PlayCircleOutlined />} onClick={openCreate}>

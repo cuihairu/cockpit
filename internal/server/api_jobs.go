@@ -14,15 +14,16 @@ import (
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
-// 执行 Job API（设计见 docs/guide/jobs-design.md）。
+// 执行 Job API（设计见 docs/guide/jobs-design.md；异步化见 workflow-design.md W1）。
 //
-//	POST /api/jobs         创建并执行（{type, target, parameters}）
-//	GET  /api/jobs         最近 Job 列表（倒序，limit 50）
-//	GET  /api/jobs/{id}    单条详情（含输出）
+//	POST /api/jobs             创建 Job，后台执行，立即 201 返回 pending 视图
+//	GET  /api/jobs             最近 Job 列表（倒序，limit 50；支持过滤）
+//	GET  /api/jobs/{id}        单条详情（含输出）
+//	POST /api/jobs/{id}/cancel 取消 pending Job（workflow-design W3）
 //
-// 执行流：校验 → 建 Job(pending) → CallAgent(job.exec)（同步下发，
-// 复用既有 RPC 通道）→ 终态 success/failed 回写 + 审计 job_run。
-// 目标 agent 离线一律 503（先查 registry，与 cron 同口径）。
+// 执行流：校验 → 建 Job(pending) → 后台 goroutine CallAgent(job.exec) →
+// 终态 success/failed 回写 + 审计 job_run。目标 agent 离线一律 503（先查
+// registry，与 cron 同口径）。
 type jobCreatePayload struct {
 	Type       string                 `json:"type"`
 	Target     string                 `json:"target"`
@@ -35,7 +36,7 @@ var jobTypes = map[string]string{
 	"agent.exec": "job.exec",
 }
 
-// handleJobsAPI 分发 /api/jobs[/{id}]
+// handleJobsAPI 分发 /api/jobs[/{id}[/cancel]]
 func (s *Server) handleJobsAPI(w http.ResponseWriter, r *http.Request, path string) {
 	switch {
 	case path == "/jobs" && r.Method == http.MethodGet:
@@ -43,13 +44,22 @@ func (s *Server) handleJobsAPI(w http.ResponseWriter, r *http.Request, path stri
 	case path == "/jobs" && r.Method == http.MethodPost:
 		s.handleJobCreate(w, r)
 	case strings.HasPrefix(path, "/jobs/"):
-		id := strings.TrimPrefix(path, "/jobs/")
-		if id == "" {
+		rest := strings.TrimPrefix(path, "/jobs/")
+		if rest == "" {
 			s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 			return
 		}
+		// POST /api/jobs/{id}/cancel：pending 未派发可撤（workflow-design W3）
+		if id, ok := strings.CutSuffix(rest, "/cancel"); ok && id != "" {
+			if r.Method != http.MethodPost {
+				s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			s.handleJobCancel(w, r, id)
+			return
+		}
 		if r.Method == http.MethodGet {
-			s.handleJobGet(w, r, id)
+			s.handleJobGet(w, r, rest)
 			return
 		}
 		s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
@@ -85,9 +95,11 @@ func validateJobPayload(p *jobCreatePayload) error {
 	return nil
 }
 
-// handleJobsList 最近 Job 列表（倒序）
+// handleJobsList 最近 Job 列表（倒序；status/target/type/workflow_run_id 过滤）
 func (s *Server) handleJobsList(w http.ResponseWriter, r *http.Request) {
-	jobs, err := s.db.ListJobs(50)
+	q := r.URL.Query()
+	jobs, err := s.db.ListJobsFiltered(
+		q.Get("status"), q.Get("target"), q.Get("type"), q.Get("workflow_run_id"), 50)
 	if err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "failed to list jobs")
 		return
@@ -149,7 +161,8 @@ func (s *Server) handleJobGet(w http.ResponseWriter, r *http.Request, id string)
 	s.writeJSON(w, http.StatusOK, toJobView(job))
 }
 
-// handleJobCreate 创建并执行 Job
+// handleJobCreate 创建 Job，后台执行（workflow-design W1：创建即返回 pending，
+// dispatch 转 goroutine；消费方经台账/详情轮询终态）
 func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 	var payload jobCreatePayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -173,7 +186,6 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	paramsJSON, _ := json.Marshal(payload.Parameters)
-	now := time.Now()
 	job := &storage.Job{
 		ID:         protocol.GenerateID(),
 		Type:       payload.Type,
@@ -181,14 +193,22 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		Actor:      username,
 		Parameters: string(paramsJSON),
 		Status:     storage.JobStatusPending,
-		CreatedAt:  now,
+		CreatedAt:  time.Now(),
 	}
 	if err := s.db.CreateJob(job); err != nil {
 		s.handleError(w, r, http.StatusInternalServerError, "failed to create job")
 		return
 	}
 
-	// 同步下发：pending → running → 终态（RPC 为请求/响应语义，单次调用完成）
+	// 后台派发：终态回写 + 审计在 goroutine 内完成（HTTP 请求即时返回）
+	go s.dispatchJobAsync(job, payload, username)
+
+	s.writeJSON(w, http.StatusCreated, toJobView(job))
+}
+
+// dispatchJobAsync 后台派发单条 Job：pending → running → 终态回写 + 审计
+func (s *Server) dispatchJobAsync(job *storage.Job, payload jobCreatePayload, actor string) {
+	now := time.Now()
 	job.Status = storage.JobStatusRunning
 	job.StartedAt = &now
 	if err := s.db.UpdateJob(job); err != nil {
@@ -207,8 +227,7 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		job.Status = storage.JobStatusFailed
 	}
 	if err := s.db.UpdateJob(job); err != nil {
-		s.handleError(w, r, http.StatusInternalServerError, "job executed but state update failed")
-		return
+		log.Printf("jobs: update final state failed: %v", err)
 	}
 
 	// 审计：命令入参进 details（与 cron_apply 同口径），不涉及凭据
@@ -218,10 +237,42 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		"status": job.Status,
 		"params": payload.Parameters,
 	}
-	s.audit.LogResource(username, audit.ActionJobRun, audit.ResourceJob, job.ID,
-		details, s.getClientIP(r), r.UserAgent())
+	s.audit.LogResource(actor, audit.ActionJobRun, audit.ResourceJob, job.ID,
+		details, "", "")
+}
 
-	s.writeJSON(w, http.StatusOK, toJobView(job))
+// handleJobCancel 取消 pending Job（workflow-design W3：派发前可撤；
+// running 已在途——RPC 无取消帧，job.exec 上限 300s 会自然结束，如实拒绝）
+func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request, id string) {
+	job, err := s.db.GetJob(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusNotFound, "job not found")
+		return
+	}
+	if job.Status != storage.JobStatusPending {
+		s.handleError(w, r, http.StatusConflict,
+			"only pending jobs can be cancelled; running jobs finish on their own (max 300s)")
+		return
+	}
+	if err := s.db.CancelJob(id, time.Now()); err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "failed to cancel job")
+		return
+	}
+
+	username := "unknown"
+	if userInfo, ok := auth.GetUserFromContext(r); ok {
+		username = userInfo.Username
+	}
+	s.audit.LogResource(username, audit.ActionJobCancel, audit.ResourceJob, id,
+		map[string]interface{}{"type": job.Type, "target": job.Target},
+		s.getClientIP(r), r.UserAgent())
+
+	updated, err := s.db.GetJob(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "failed to load job")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, toJobView(updated))
 }
 
 // jobExecError RPC 执行结果（成功性 + 输出/退出码/错误讯息）

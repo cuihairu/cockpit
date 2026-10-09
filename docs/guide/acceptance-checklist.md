@@ -285,6 +285,22 @@
   → RBAC governed=false 整体放行，viewer 也能执行（与 agent-tags 补规则前同类）；
   修为 `rbac.go` 补 `{"/api/jobs", "jobs", ""}` + 三角色矩阵 7 例（rbac_test.go）
 
+## Workflow 编排（M1：异步 Job + 线性链）
+
+设计：[workflow-design](./workflow-design.md)。前置：一台在线 Linux agent（同 Job 节）。
+M1 已实现（2026-10-09），下列为未验收态——探针四场景 + 真机编排一轮（探针规划
+`scripts/acceptance/workflows/`，对齐 jobs 探针五件套口径）。
+
+- [ ] 异步创建：`POST /api/jobs` 立即 201 返回 pending，台账轮询内见终态；pending 行「取消」可见可点（W1/W3）
+- [ ] 成功链：两步 Workflow run 全步 success，run 台账每步 jobId 可点开看输出/退出码（W5）
+- [ ] 失败停：中间步失败（非零退出）→ run failed、第三步不执行、断点在快照可读（W7）
+- [ ] 重试：首试失败重试成功（retry=2）→ 步骤 attempts=2、每次尝试独立 Job 行进台账（W4）
+- [ ] 取消 run：在途步骤自然结束后 run cancelled、后续步骤不推进；再次取消 409（W3）
+- [ ] 重入与冻结：同定义重复 run 409；active run 期间定义更新/删除 409，终态后恢复（W8）
+- [ ] 离线目标：步骤目标含离线 agent → 503 不建 run（与单条 Job 同口径）
+- [ ] 权限与审计：无 `workflows:write` 不见运行/新建入口；`workflow_create/workflow_run/workflow_cancel` 审计留痕
+- [ ] 真机编排一轮：对真实 agent 跑一条「uptime → df -h」两步链并核对台账/审计/run 快照
+
 ## 移动端（Flutter，iOS + Android）
 
 设计：[mobile-design](./mobile-design.md)。前置：Android 真机（或模拟器）安装 debug APK（CI `Mobile` workflow artifact 或本地 `flutter build apk --debug`）；server 可达（公网或同网段）。iOS 编译验证已闭环到 CI macOS runner（`Mobile` workflow build-ios job，无签名 debug 构建，见 D8）；iOS 真机安装与上架签名仍需自有 Mac/账号，下述清单 iOS 侧暂以 Android 真机为准。
