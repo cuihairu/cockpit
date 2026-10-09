@@ -46,7 +46,6 @@ scripts/acceptance/logs/probe/main.go:75,78	2. systemdRunCmd 默认闭包体（�
 scripts/acceptance/logs/probe/main.go:79,82	2. journalCtlCmd 默认闭包体（需真 journalctl）
 scripts/acceptance/jobs/probe/main.go:66,68	2. pgrepCmd 默认闭包体（需真 pgrep；单测恒注入桩）
 scripts/acceptance/server-backup/probe/main.go:84,86	2. sqlite3Cmd 默认闭包体（需真 sqlite3；单测恒注入桩）
-internal/agent/detector/firewall.go:18,19	2. firewallRunVersion 默认闭包体（需真执行 <bin> --version；探测测试恒注入桩——同 journalCtlCmd 真机命令则）
 
 # ---------- 3. 死防御（2 语句） ----------
 
@@ -64,15 +63,11 @@ scripts/acceptance/agent-backup/probe/main.go:573,575	3. writeEvilTar gz.Close �
 
 # ---------- 4. 新增 Agent 服务面/启动时刻字段的测试回退路径（4 语句） ----------
 
-internal/agent/agent.go:95,95	3. machineIDFn 兜底分支（platform.Current() 生产恒非 nil——select_<goos>.go 编译期装配且四互斥全覆盖 GOOS；测试二进制同样装配，nil 兜底不可触发）
-internal/agent/agent.go:199,200	3. startedAtOrNow 零值兜底分支（仅未走 NewAgent 的测试构造体触发；正常路径 startedAt 在 NewAgent 初始化时已设；P2 heartbeat 装配 +18、P4 machineIDFn 接线 +11，2026-10-09 校准）
-internal/agent/agent.go:235,235	3. servicesRefreshLoop 取消上下文退出分支（需完整 Agent 生命周期触发 ctx.Done()，单测无真实后台循环难以确定性构造；P3 metrics 迁出 +1、P4 machineIDFn 接线 +10，2026-10-09 校准）
 
 
 
 # ---------- 5. Windows agent 服务化（service_windows.go 平台分支，linux 侧不可达） ----------
 
-cmd/cockpit-agent/main.go:68,69	redirectServiceStart 命中 SCM 上下文后的 return 0（linux stub 恒 false；真 Windows 由 nightly 走查覆盖）
 
 # ---------- 6. Job 模型最小闭环（docs/guide/jobs-design.md）：防御分支与测试惯例（13 语句） ----------
 # P2 异步化（2026-10-09）后原 92/187/210/243/247 与 storage/job.go:64 由

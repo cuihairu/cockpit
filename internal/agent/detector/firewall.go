@@ -14,10 +14,14 @@ func init() {
 var (
 	firewallLookPath = exec.LookPath
 	// firewallRunVersion 运行 `<bin> --version` 验证可执行
-	firewallRunVersion = func(bin string) error {
-		return exec.Command(bin, "--version").Run()
-	}
+	firewallRunVersion = runFirewallVersion
 )
+
+// runFirewallVersion firewallRunVersion 默认实现。独立成具名函数使其可被
+// 直接测试覆盖（真二进制缺失的环境也能覆盖本分支）。
+func runFirewallVersion(bin string) error {
+	return exec.Command(bin, "--version").Run()
+}
 
 // FirewallDetector 防火墙工具检测器（见 docs/guide/firewall-design.md D1）
 type FirewallDetector struct{}

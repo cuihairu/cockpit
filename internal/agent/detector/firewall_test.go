@@ -3,6 +3,7 @@ package detector
 import (
 	"errors"
 	"os/exec"
+	"runtime"
 	"testing"
 )
 
@@ -81,5 +82,19 @@ func TestFirewallDetectorVersionRunFails(t *testing.T) {
 	}
 	if cap != nil {
 		t.Errorf("cap = %+v, want nil (version check failed)", cap)
+	}
+}
+
+// runFirewallVersion 默认实现直测（unix true(1) 对任意参数退出 0；真二进制
+// 缺失的环境 CI/本地都能覆盖，同 journalCtlCmd 真机命令则的对位解法）
+func TestRunFirewallVersion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix true(1) 语义，windows 无此环境")
+	}
+	if err := runFirewallVersion("/bin/true"); err != nil {
+		t.Fatalf("runFirewallVersion(/bin/true) = %v", err)
+	}
+	if err := runFirewallVersion("/nonexistent-cockpit-bin"); err == nil {
+		t.Fatal("missing binary should error")
 	}
 }

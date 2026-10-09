@@ -89,10 +89,17 @@ var goos = runtime.GOOS
 // machineIDFn 机器标识读取（core/platform 编译期装配后的间接层；包级
 // var 供既有测试注入，同 machineIDPath/goos 先例）
 var machineIDFn = func() string {
-	if h := platform.Current(); h != nil {
-		return h.MachineID()
+	return platformMachineID(platform.Current())
+}
+
+// platformMachineID 平台实现缺省（未装配）返回空串，调用方回退
+// hostname+random（同 machineID 空串语义）。独立成函数使 nil 分支可直测
+// ——select_<goos>.go 编译期装配后 Current() 生产与测试二进制恒非 nil。
+func platformMachineID(h platform.Host) string {
+	if h == nil {
+		return ""
 	}
-	return ""
+	return h.MachineID()
 }
 
 // Config Agent 配置
@@ -217,10 +224,16 @@ func (a *Agent) setServices(services []protocol.RemoteServicePayload) {
 	a.servicesMu.Unlock()
 }
 
+// detectServicesFn 服务面探测（包级 var 供测试注入，同 goos/machineIDFn
+// 先例：真探测有秒级 SSH 握手耗时，测试注入即时桩保证确定性）
+var detectServicesFn = func() []protocol.RemoteServicePayload {
+	return detector.NewRemoteServiceDetector().DetectServices()
+}
+
 // refreshServices 重探测本机服务面并更新缓存。探测有秒级耗时（SSH 认证
 // 方式握手），故后台循环里跑，不阻塞心跳。
 func (a *Agent) refreshServices() {
-	services := detector.NewRemoteServiceDetector().DetectServices()
+	services := detectServicesFn()
 	a.setServices(services)
 	log.Printf("Remote services refreshed: %d protocol(s) open", len(services))
 }

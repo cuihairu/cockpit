@@ -5,6 +5,7 @@ package agent
 // machineid 的错误路径（后两者经包级注入点，见各源文件注释）。
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -12,6 +13,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/cuihairu/cockpit/internal/protocol"
 )
 
 // setPublicIPEndpoints 注入 publicIP 探测端点并注册恢复（注入点见 localip.go）
@@ -129,5 +133,68 @@ func TestCovPublicIPBranches(t *testing.T) {
 	setPublicIPEndpoints(t, []string{ok.URL})
 	if got := publicIP(); got != "203.0.113.7" {
 		t.Errorf("publicIP() = %q, want %q", got, "203.0.113.7")
+	}
+}
+
+// platformMachineID 平台实现缺省返回空串（select 装配后 Current() 生产与
+// 测试二进制恒非 nil，nil 分支只能直测；注入点见 agent.go machineIDFn 注释）
+func TestPlatformMachineIDNilHost(t *testing.T) {
+	if got := platformMachineID(nil); got != "" {
+		t.Errorf("platformMachineID(nil) = %q, want empty", got)
+	}
+	if got := platformMachineID(fakePlatformHost{}); got != "fake-id" {
+		t.Errorf("platformMachineID(fake) = %q, want fake-id", got)
+	}
+}
+
+type fakePlatformHost struct{}
+
+func (fakePlatformHost) MachineID() string { return "fake-id" }
+
+// startedAtOrNow 零值兜底：未走 NewAgent 的构造体 startedAt 为零值时取当下
+func TestStartedAtOrNowZeroValue(t *testing.T) {
+	now := (&Agent{}).startedAtOrNow()
+	if now.IsZero() || time.Since(now) > time.Minute {
+		t.Fatalf("startedAtOrNow zero-value = %v, want ~now", now)
+	}
+}
+
+// servicesRefreshLoop 双分支：注入 5ms 间隔让 ticker 分支确定触发
+// （detectServicesFn 即时桩 + 信号通道），取消上下文覆盖退出分支
+func TestServicesRefreshLoopTickAndDone(t *testing.T) {
+	savedInterval := servicesRefreshInterval
+	servicesRefreshInterval = 5 * time.Millisecond
+	t.Cleanup(func() { servicesRefreshInterval = savedInterval })
+
+	savedDetect := detectServicesFn
+	refreshed := make(chan struct{}, 4)
+	detectServicesFn = func() []protocol.RemoteServicePayload {
+		select {
+		case refreshed <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	t.Cleanup(func() { detectServicesFn = savedDetect })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a := &Agent{ctx: ctx}
+
+	done := make(chan struct{})
+	go func() { a.servicesRefreshLoop(); close(done) }()
+
+	// ticker 分支：等待至少一次 refresh 进入
+	select {
+	case <-refreshed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refreshServices not triggered within 2s")
+	}
+	// ctx.Done 分支：取消后循环退出
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("servicesRefreshLoop did not exit on canceled ctx")
 	}
 }

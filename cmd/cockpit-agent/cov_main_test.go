@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 )
@@ -54,5 +55,18 @@ func TestCovHandleStartConnectRefused(t *testing.T) {
 	code, _ := covRun("start", "-server", "ws://127.0.0.1:1/ws")
 	if code != 1 {
 		t.Fatalf("expected 1, got %d", code)
+	}
+}
+
+// SCM 拦截命中（Windows 服务直挂形态，linux stub 恒 false，注入 true 覆盖
+// 命中分支；注入点见 main.go serviceRedirect 注释）
+func TestCovHandleStartServiceRedirect(t *testing.T) {
+	saved := serviceRedirect
+	serviceRedirect = func(args []string, stdout io.Writer) bool { return true }
+	t.Cleanup(func() { serviceRedirect = saved })
+
+	var buf bytes.Buffer
+	if code := handleStart([]string{"start"}, &buf); code != 0 {
+		t.Fatalf("code = %d, want 0", code)
 	}
 }

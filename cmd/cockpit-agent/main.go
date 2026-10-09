@@ -59,12 +59,16 @@ func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "Cockpit Agent v%s\n", version)
 }
 
+// serviceRedirect SCM start 拦截决策（包级 var 供测试注入，同 goos 先例：
+// 非 Windows 平台 redirectServiceStart 恒 false，注入 true 才能覆盖命中分支）
+var serviceRedirect = redirectServiceStart
+
 // handleStart `cockpit-agent start [-server ws://...]`
 func handleStart(args []string, stdout io.Writer) int {
 	// Windows SCM 直挂形态（install.ps1 的 New-Service 把 `start -server ...`
 	// 注册为服务）：必须走 StartServiceCtrlDispatcher，否则 30 秒后被 SCM
 	// 判定无响应杀死。控制台运行时该拦截恒为 false。
-	if redirectServiceStart(args, stdout) {
+	if serviceRedirect(args, stdout) {
 		return 0
 	}
 
