@@ -51,6 +51,14 @@ export default defineConfig({
           ]
         }
       ],
+      '/design/': [
+        {
+          text: '设计',
+          items: [
+            { text: 'agent-core 三层架构（core/平台层/插件）', link: '/design/agent-core-architecture' }
+          ]
+        }
+      ],
       '/operations/': [
         {
           text: '运维',
