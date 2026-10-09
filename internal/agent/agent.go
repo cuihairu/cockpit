@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/core/backoff"
+	"github.com/cuihairu/cockpit/core/heartbeat"
 	"github.com/cuihairu/cockpit/core/register"
 	"github.com/cuihairu/cockpit/core/report"
 	"github.com/cuihairu/cockpit/internal/agent/detector"
@@ -32,6 +33,7 @@ type Agent struct {
 	outbound     chan *protocol.Message
 	upstream     *report.Upstream    // 统一上行（core/report：队列消费/放行门/串行写出）
 	registrar    *register.Registrar // 注册上线（core/register：ID 派生/报文/握手）
+	heartbeats   *heartbeat.Loop     // 心跳与存活（core/heartbeat：周期组包上行）
 
 	// 注册信息
 	agentID      string
@@ -161,6 +163,22 @@ func NewAgent(cfg Config) *Agent {
 			return a.codec.ReadMessage(conn)
 		},
 		func() { a.registered.Store(true) })
+	// 心跳装配（core/heartbeat）：快照事实注入，间隔在 Run 时读包级
+	// var（测试注入惯例不变）
+	a.heartbeats = heartbeat.New(ctx, heartbeat.Options{
+		AgentID:   func() string { return a.agentID },
+		StartedAt: a.startedAtOrNow,
+		Services:  a.cachedServices,
+		SystemInfo: func() interface{} {
+			if a.collector == nil {
+				return nil
+			}
+			return a.collector.CollectBasic()
+		},
+		Registered: func() bool { return a.registered.Load() },
+		Send:       a.upstream.Enqueue,
+		OnSendFail: func() { go a.reconnect() },
+	})
 	return a
 }
 
@@ -504,48 +522,14 @@ func (a *Agent) register() error {
 	return err
 }
 
-// heartbeatLoop 心跳循环
+// heartbeatLoop 心跳循环（core/heartbeat：间隔在 Run 时读包级 var）
 func (a *Agent) heartbeatLoop() {
-	ticker := time.NewTicker(heartbeatInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			a.sendHeartbeat()
-		case <-a.ctx.Done():
-			return
-		}
-	}
+	a.heartbeats.Run(heartbeatInterval)
 }
 
-// sendHeartbeat 发送心跳
+// sendHeartbeat 发送心跳（core/heartbeat：未注册静默跳过，失败触发重连）
 func (a *Agent) sendHeartbeat() {
-	if !a.registered.Load() {
-		return
-	}
-
-	payload := map[string]any{
-		"agentId":   a.agentID,
-		"status":    "online",
-		"startedAt": a.startedAtOrNow().Unix(),
-		// 服务面回带缓存（后台每 5 分钟重探测，这里不发探测请求）
-		"services": a.cachedServices(),
-	}
-
-	// 采集系统信息（不阻塞，快速采样）
-	if a.collector != nil {
-		systemInfo := a.collector.CollectBasic()
-		payload["systemInfo"] = systemInfo
-	}
-
-	msg := protocol.NewMessage(protocol.MessageTypeHeartbeat, payload)
-
-	if err := a.sendMessage(msg); err != nil {
-		log.Printf("Send heartbeat failed: %v", err)
-		// 尝试重连
-		go a.reconnect()
-	}
+	a.heartbeats.Beat()
 }
 
 // messageLoop 消息循环

@@ -311,6 +311,29 @@ func TestCovSendHeartbeatQueueFullTriggersReconnect(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
+// TestCovSendHeartbeatNilCollector 覆盖 SystemInfo 闭包的 collector-nil
+// 分支（NewAgent 恒非 nil，这里显式置空）：心跳照发但不带 systemInfo 字段。
+func TestCovSendHeartbeatNilCollector(t *testing.T) {
+	a := NewAgent(Config{ServerURL: "ws://127.0.0.1:1"})
+	defer a.Stop()
+
+	a.collector = nil
+	a.registered.Store(true)
+	a.sendHeartbeat()
+
+	select {
+	case msg := <-a.outbound:
+		if msg.Type != protocol.MessageTypeHeartbeat {
+			t.Errorf("type = %q", msg.Type)
+		}
+		if _, ok := msg.Payload["systemInfo"]; ok {
+			t.Error("nil collector must omit systemInfo")
+		}
+	default:
+		t.Fatal("heartbeat not enqueued")
+	}
+}
+
 // ============ messageLoop / handlers ============
 
 func TestCovMessageLoopWithoutConn(t *testing.T) {
