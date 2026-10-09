@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cuihairu/cockpit/core/healthprobe"
 )
 
 // ============ 服务健康探针与自愈（服务管理面·策略层）============
@@ -279,35 +280,21 @@ func newServiceHealthEngine(sp *ServiceProvider) *serviceHealthEngine {
 var healthHTTPClient = &http.Client{}
 
 // defaultProbe 默认探针执行器（D4，全部只读）：
-//   - http：GET target，状态码精确等于 expectStatus（僵死探测的关键——
-//     cloudflared /ready 隧道连通才回 200，进程活着但隧道死时非 200）
-//   - tcp：DialContext 连通即活（「进程监听还在」类）
+//   - http/tcp：core/healthprobe Checker（状态码精确匹配/连通即活，
+//     僵死探测的关键——cloudflared /ready 隧道连通才回 200，进程活着但
+//     隧道死时非 200）
 //   - systemd：is-active 输出 active（systemd 自己能看见的挂，兜底用）
 func (e *serviceHealthEngine) defaultProbe(sp *ServiceProvider) func(context.Context, HealthProbe) error {
 	return func(ctx context.Context, p HealthProbe) error {
 		switch p.Type {
 		case "http":
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.Target, nil)
-			if err != nil {
-				return err
-			}
-			resp, err := healthHTTPClient.Do(req)
-			if err != nil {
-				return err
-			}
-			defer resp.Body.Close()
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, healthBodyDrain))
-			if resp.StatusCode != p.ExpectStatus {
-				return fmt.Errorf("HTTP %d (expect %d)", resp.StatusCode, p.ExpectStatus)
-			}
-			return nil
+			return healthprobe.HTTPChecker{
+				URL:          p.Target,
+				ExpectStatus: p.ExpectStatus,
+				Client:       healthHTTPClient,
+			}.Check(ctx)
 		case "tcp":
-			var d net.Dialer
-			conn, err := d.DialContext(ctx, "tcp", p.Target)
-			if err != nil {
-				return err
-			}
-			return conn.Close()
+			return healthprobe.TCPChecker{Addr: p.Target}.Check(ctx)
 		case "systemd":
 			out, err := sp.systemctlRun("is-active", p.Target)
 			if err != nil {
