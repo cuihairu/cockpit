@@ -1,20 +1,23 @@
-//go:build windows
-
 package rpc
 
 import (
 	"fmt"
 	"sort"
 
-	"github.com/cuihairu/cockpit/core/platform/windows"
+	"github.com/cuihairu/cockpit/core/platform"
 )
 
 // ============ Windows SCM 服务管理 Provider（service-design.md D9）============
 //
-// SCM 原生交互在 core/platform/windows（svc/mgr 直连、幂等、等待），本文件
-// 只做动作分发与 ServiceUnit 观测映射（映射/校验纯函数见
-// service_windows_model.go，无 build tag Linux CI 可测）。动作限 5 动词
-// 白名单（reload 不支持）。
+// SCM 原生交互经 Host 服务挂约（P7b）：platform.Current().Services() 在
+// windows 返回 SCM 实现（svc/mgr 枚举/幂等/等待在 core/platform/windows），
+// 其余 GOOS 恒 nil。本文件因此无 build tag，Linux CI 全链可测（原非
+// Windows stub 退役——防御语义由 nil 挂约路径承担，报错文案不变）。动作限
+// 5 动词白名单（reload 不支持）；映射/校验纯函数见 service_windows_model.go
+// （无 build tag Linux CI 可测）。
+
+// serviceWindowsMgr 服务管理面取用（测试注入点；生产恒走 Host 挂约）
+var serviceWindowsMgr = func() platform.ServiceManager { return platform.Current().Services() }
 
 // WindowsServiceProvider Windows SCM 服务管理 Provider
 type WindowsServiceProvider struct{}
@@ -36,9 +39,13 @@ func (p *WindowsServiceProvider) Call(action string, params map[string]interface
 	}
 }
 
-// listWinServices SCM 交互层观测 → rpc 采集 DTO（字符串口径逐字段搬运）
+// listWinServices 挂约实体观测 → rpc 采集 DTO（字符串口径逐字段搬运）
 func listWinServices() ([]WinService, error) {
-	svcs, err := windows.List()
+	mgr := serviceWindowsMgr()
+	if mgr == nil {
+		return nil, fmt.Errorf("windows-scm service backend requires a windows agent build")
+	}
+	svcs, err := mgr.List()
 	if err != nil {
 		return nil, err
 	}
@@ -93,15 +100,17 @@ func (p *WindowsServiceProvider) Status() (interface{}, error) {
 	}, nil
 }
 
-// DoAction 校验后走 SCM 动作（幂等/等待语义在 core/platform/windows）
+// DoAction 校验后走挂约动作（幂等/等待语义在 core/platform/windows SCM 层）
 func (p *WindowsServiceProvider) DoAction(name, action string) (interface{}, error) {
+	// 动词白名单（含 reload 拒绝）在 validateWindowsServiceUnit 内，此处不重复
 	if err := validateWindowsServiceUnit(name, action); err != nil {
 		return nil, err
 	}
-	if action == "reload" {
-		return nil, fmt.Errorf("reload is not supported on windows-scm backend")
+	mgr := serviceWindowsMgr()
+	if mgr == nil {
+		return nil, fmt.Errorf("windows-scm service backend requires a windows agent build")
 	}
-	if err := windows.Action(name, action, serviceActionTimeout); err != nil {
+	if err := mgr.Action(name, action, serviceActionTimeout); err != nil {
 		return nil, err
 	}
 	return map[string]interface{}{"name": name, "action": action}, nil

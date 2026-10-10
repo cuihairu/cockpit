@@ -155,6 +155,8 @@ func (fakeHost) MachineID() string     { return "" }
 func (fakeHost) Paths() platform.Paths { return platform.Paths{} }
 func (fakeHost) Signals() []os.Signal  { return nil }
 
+func (fakeHost) Services() platform.ServiceManager { return nil }
+
 // TestGracefulSignalsFallback Current 为 nil 或信号集为空 → unix 兜底全集；
 // ConfigDir 为空 → 裸配置名兜底。
 func TestGracefulSignalsFallback(t *testing.T) {

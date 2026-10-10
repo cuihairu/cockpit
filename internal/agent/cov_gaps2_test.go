@@ -157,6 +157,8 @@ func (fakePlatformHost) Paths() platform.Paths { return platform.Paths{} }
 // Signals 返回空集：供 gracefulSignalSet 空-集兜底分支直测
 func (fakePlatformHost) Signals() []os.Signal { return nil }
 
+func (fakePlatformHost) Services() platform.ServiceManager { return nil }
+
 // gracefulSignalSet 三分支：平台契约直通（linux 测试二进制经 select 装配
 // 得非空集）/ Current nil 兜底 / 平台空集兜底（注入点见 startcmd.go）
 func TestGracefulSignalSetBranches(t *testing.T) {

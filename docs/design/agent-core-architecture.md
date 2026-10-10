@@ -63,9 +63,11 @@ cmd/cockpit-agent → internal/agent(插件) → core/* → internal/protocol
 // core/platform/host.go（契约示意，百行内）
 type Host interface {
     Paths() Paths          // 配置/日志/数据目录（linux /etc/cockpit,~/.config；windows ProgramData；darwin ~/Library）
-    Service() Service      // 服务注册/注销/启停/状态/SCM-run 入口
     MachineID() string     // 机器标识派生（收编 machineid_*.go）
-    Signals() Signals      // 信号/退出码约定（对齐 windows-agent-design 已定稿的进程内看护语义）
+    Signals() []os.Signal  // 信号/退出码约定（对齐 windows-agent-design 已定稿的进程内看护语义）
+    Services() ServiceManager // 服务管理面挂约（P7b）：windows 返回 SCM 实现；
+                              // darwin/linux 恒 nil（launchd/systemd 走业务
+                              // 插件通道，非平台事实），调用方回落自有通道
 }
 ```
 

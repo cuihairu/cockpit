@@ -259,16 +259,18 @@ capability 由 `systemd` 更名为 `service`，后端差异放 metadata：
 
 ### D9.5 实现组织（跨平台编译）
 
-三平台 CI 矩阵下所有 agent 代码全平台编译，Windows-only 代码用 build tag 隔离：
+三平台 CI 矩阵下所有 agent 代码全平台编译。P7b 后 Windows SCM 交互经 Host
+服务挂约（platform.Current().Services()），原 build tag 双文件（scm 实现 +
+!windows stub）收拢为无 tag 单文件，Linux CI 全链可测：
 
 ```
 service_provider.go        无 tag：systemd 实现（现有，不改逻辑）
 service_windows_model.go   无 tag：WinService DTO → ServiceUnit 映射纯函数 +
                                    validateWindowsServiceUnit（Linux CI 可测）
-service_windows_scm.go     //go:build windows：mgr.Connect 采集 + 动作真实现
-service_windows_stub.go    //go:build !windows：NewWindowsServiceProvider 返回
-                                   stub，Call 显式报错（防御层：非 Windows
-                                   平台探测门控根本不会注册它）
+service_windows_scm.go     无 tag：挂约取用 + 映射/校验/计数编排；非 Windows
+                                   GOOS 挂约恒 nil，三动作显式报错（原 stub
+                                   防御语义由 nil 路径承担，报错文案不变）
+core/platform/windows      //go:build windows：SCM 采集 + 动作真实现（leaf）
 ```
 
 `x/sys` 已在依赖树（indirect），实现后转直接依赖。采集规模：SCM 本地 RPC

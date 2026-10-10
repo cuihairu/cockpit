@@ -9,8 +9,9 @@ import (
 	"sync"
 )
 
-// Host 平台事实契约：机器标识/路径/信号。P4 只落 MachineID，P7a 补齐
-// Paths/Signals（Service 服务集成挂约见 P7b，留位）。
+// Host 平台事实契约：机器标识/路径/信号/原生服务管理。P4 落 MachineID，
+// P7a 补齐 Paths/Signals，P7b 挂约 Services（SCM 实现挂约，launchd/systemd
+// 的诚实边界见方法注释）。
 type Host interface {
 	// MachineID 系统级稳定机器标识（systemd machine-id / Windows
 	// MachineGuid / macOS IOPlatformUUID），重启不变；不可得返回空串，
@@ -30,6 +31,15 @@ type Host interface {
 	// windows 仅 os.Interrupt——SCM Stop 不产生信号量（svc handler 走
 	// RunService stop 通道），控制台运行仍需 Ctrl+C 优雅停。
 	Signals() []os.Signal
+
+	// Services 平台原生服务管理面挂约（P7b）：windows 返回 SCM 实现
+	// （枚举/五动词幂等/等待在 core/platform/windows）。darwin 恒 nil——
+	// launchd 交互在 leaf 是 launchctl argv + plist 目录原语，解析留业务层
+	// 保 Linux CI 可测，且 launchctl 动词语义（bootout/kickstart）与 SCM
+	// 五动词不同构，不硬套本接口；linux 恒 nil——systemd 服务管理是
+	// systemctl argv 业务插件通道（Commander 注入可测），非平台事实。
+	// nil 返回=无原生面，调用方回落自有通道（同 Current() nil 兜底语义）。
+	Services() ServiceManager
 }
 
 // Paths 平台标准目录三元组。

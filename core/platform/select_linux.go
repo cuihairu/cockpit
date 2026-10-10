@@ -20,4 +20,8 @@ func (host) Paths() Paths {
 	return Paths{ConfigDir: c, DataDir: d, LogDir: l}
 }
 
+// Services 服务挂约（P7b）：恒 nil——systemd 服务管理是 systemctl argv
+// 业务插件通道（Commander 注入 Linux CI 可测），非平台事实。
+func (host) Services() ServiceManager { return nil }
+
 func (host) Signals() []os.Signal { return linux.GracefulSignals() }

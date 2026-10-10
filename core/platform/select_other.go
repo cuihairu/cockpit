@@ -20,4 +20,7 @@ func (host) Paths() Paths {
 	return Paths{ConfigDir: c, DataDir: d, LogDir: l}
 }
 
+// Services 服务挂约（P7b）：恒 nil——无原生服务管理面。
+func (host) Services() ServiceManager { return nil }
+
 func (host) Signals() []os.Signal { return other.GracefulSignals() }

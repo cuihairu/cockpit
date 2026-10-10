@@ -26,7 +26,8 @@ func TestRegisterAndCurrent(t *testing.T) {
 
 // TestSelectAssembly 本测试二进制含 select_<goos>.go：编译期装配后
 // Current 恒非 nil（四互斥全覆盖 GOOS），且 Paths/Signals 由平台实现
-// 填充（生产事实非空）。
+// 填充（生产事实非空）。Services 挂约（P7b）在 linux 恒 nil——systemd
+// 走业务插件通道，非平台原生面。
 func TestSelectAssembly(t *testing.T) {
 	h := Current()
 	if h == nil {
@@ -39,6 +40,9 @@ func TestSelectAssembly(t *testing.T) {
 	if len(h.Signals()) == 0 {
 		t.Fatal("assembled Signals should not be empty")
 	}
+	if h.Services() != nil {
+		t.Fatal("assembled Services should be nil on non-windows GOOS")
+	}
 }
 
 type fakeHost struct{}
@@ -48,3 +52,5 @@ func (fakeHost) MachineID() string { return "fake-id" }
 func (fakeHost) Paths() Paths { return Paths{ConfigDir: "c", DataDir: "d", LogDir: "l"} }
 
 func (fakeHost) Signals() []os.Signal { return []os.Signal{os.Interrupt} }
+
+func (fakeHost) Services() ServiceManager { return nil }

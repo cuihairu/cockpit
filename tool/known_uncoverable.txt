@@ -13,8 +13,8 @@
 #   1. 场景编排 main() —— 验收探针主流程。真机验收（起 server/agent/容器/
 #      浏览器/远控会话）才有意义，进程内单测只能造出「假真机」；真机证据落
 #      .acceptance/ 各目录 probe.log。与 internal/agent/rpc/service_launchd_
-#      stub.go、service_windows_stub.go 同属结构性边界（guac/probe 收口先例，
-#      见 todo 2026-10-01 覆盖率规则 b）。
+#      stub.go 同属结构性边界（guac/probe 收口先例，见 todo 2026-10-01 覆盖
+#      率规则 b）。
 #   2. 真机命令默认闭包 —— 注入点（*Cmd/osExit）的默认实现本身要真跑
 #      systemctl/docker/sudo/systemd-run，单测恒注入桩覆盖分支，默认闭包体
 #      在测试进程内不可达。
@@ -39,13 +39,14 @@ scripts/acceptance/server-backup/probe/main.go:315,606	1. main() 场景编排（
 scripts/acceptance/agent-backup/probe/main.go:662,1157	1. main() 场景编排（K0-K11 真机 server/agent 打包恢复/分块下载/调度 tick 停机重启/webhook 实收 + .acceptance 证据）
 scripts/acceptance/notify/probe/main.go:270,399	1. main() 场景编排（N0-N4 真机 server/webhook 接收器实收/审计面 + .acceptance 证据）
 
-# ---------- 2. 真机命令默认闭包（13 语句） ----------
+# ---------- 2. 真机命令默认闭包（14 语句） ----------
 
 scripts/acceptance/guac/probe/main.go:94,97	2. dockerExecCmd 默认闭包体（需真 docker exec；单测恒注入桩）
 scripts/acceptance/logs/probe/main.go:75,78	2. systemdRunCmd 默认闭包体（需真 sudo systemd-run）
 scripts/acceptance/logs/probe/main.go:79,82	2. journalCtlCmd 默认闭包体（需真 journalctl）
 scripts/acceptance/jobs/probe/main.go:66,68	2. pgrepCmd 默认闭包体（需真 pgrep；单测恒注入桩）
 scripts/acceptance/server-backup/probe/main.go:84,86	2. sqlite3Cmd 默认闭包体（需真 sqlite3；单测恒注入桩）
+internal/agent/rpc/service_windows_scm.go:20,20	2. serviceWindowsMgr 默认闭包体（生产恒走 Host 挂约 platform.Current().Services()；单测恒注入假 ServiceManager，默认闭包体在测试进程内不可达）
 
 # ---------- 3. 死防御（2 语句） ----------
 

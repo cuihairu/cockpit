@@ -20,4 +20,9 @@ func (host) Paths() Paths {
 	return Paths{ConfigDir: c, DataDir: d, LogDir: l}
 }
 
+// Services 服务挂约（P7b）：恒 nil——launchd 交互在 leaf 是 launchctl argv
+// + plist 目录原语，解析留业务层保 Linux CI 可测；launchctl 动词语义
+// （bootout/kickstart）与 SCM 五动词不同构，不硬套 ServiceManager。
+func (host) Services() ServiceManager { return nil }
+
 func (host) Signals() []os.Signal { return darwin.GracefulSignals() }
