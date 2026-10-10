@@ -43,7 +43,13 @@ import {
   runWorkflow,
   updateWorkflow,
 } from '@/services/workflows'
-import type { WorkflowDef, WorkflowRun, WorkflowRunStep, WorkflowStep } from '@/services/workflows'
+import type {
+  WorkflowDef,
+  WorkflowRun,
+  WorkflowRunStep,
+  WorkflowRunStepTarget,
+  WorkflowStep,
+} from '@/services/workflows'
 import { getApiErrorMessage } from '@/utils/apiError'
 import { PermGuard } from '@/components/PermGuard'
 import dayjs from 'dayjs'
@@ -66,10 +72,11 @@ const StatusTag = ({ status }: { status: string }) => {
 
 const MAX_STEPS = 20
 
-/** 编辑态步骤（表单字段平铺，提交时折回 API 形态） */
+/** 编辑态步骤（表单字段平铺，提交时折回 API 形态）；目标统一多选形态，
+ * 单台折回 target、多台折成 targets（M2b F1） */
 interface StepFormValue {
   name: string
-  target: string
+  targets: string[]
   command: string
   timeout_s?: number
   continue_on_error?: boolean
@@ -79,7 +86,7 @@ interface StepFormValue {
 const stepsToForm = (steps: WorkflowStep[]): StepFormValue[] =>
   steps.map((s) => ({
     name: s.parameters.name,
-    target: s.target,
+    targets: s.target ? [s.target] : (s.targets ?? []),
     command: s.parameters.command,
     timeout_s: s.parameters.timeout_s,
     continue_on_error: s.parameters.continue_on_error,
@@ -89,7 +96,7 @@ const stepsToForm = (steps: WorkflowStep[]): StepFormValue[] =>
 const formToSteps = (vals: StepFormValue[]): WorkflowStep[] =>
   vals.map((v) => ({
     type: 'agent.exec',
-    target: v.target,
+    ...(v.targets.length === 1 ? { target: v.targets[0] } : { targets: v.targets }),
     parameters: {
       name: v.name,
       command: v.command,
@@ -163,7 +170,7 @@ const Workflows = () => {
     setEditing(null)
     setWfName('')
     setWfDesc('')
-    setSteps([{ name: '', target: '', command: '' }])
+    setSteps([{ name: '', targets: [], command: '' }])
     setEditorOpen(true)
   }
 
@@ -191,8 +198,8 @@ const Workflows = () => {
         message.error(`${where}：请输入步骤名`)
         return
       }
-      if (!s.target) {
-        message.error(`${where}：请选择目标主机`)
+      if (s.targets.length === 0) {
+        message.error(`${where}：请选择目标主机（可多选=扇出）`)
         return
       }
       if (!s.command) {
@@ -423,14 +430,15 @@ const Workflows = () => {
                     onChange={(e) => updateStep(i, { name: e.target.value })}
                   />
                 </Form.Item>
-                <Form.Item label="目标主机" style={{ width: 220 }} required>
+                <Form.Item label="目标主机（多选=扇出）" style={{ width: 260 }} required>
                   <Select
-                    value={s.target || undefined}
+                    mode="multiple"
+                    value={s.targets.length ? s.targets : undefined}
                     options={agentOptions}
                     placeholder="选择在线主机"
                     showSearch
                     optionFilterProp="label"
-                    onChange={(v) => updateStep(i, { target: v })}
+                    onChange={(vs) => updateStep(i, { targets: vs ?? [] })}
                   />
                 </Form.Item>
               </Space>
@@ -479,7 +487,7 @@ const Workflows = () => {
           block
           icon={<PlusOutlined />}
           disabled={steps.length >= MAX_STEPS}
-          onClick={() => setSteps((prev) => [...prev, { name: '', target: '', command: '' }])}
+          onClick={() => setSteps((prev) => [...prev, { name: '', targets: [], command: '' }])}
         >
           添加步骤{steps.length >= MAX_STEPS ? '（已达上限 20）' : ''}
         </Button>
@@ -524,10 +532,47 @@ const Workflows = () => {
               dataSource={run.steps}
               pagination={false}
               size="small"
+              expandable={{
+                rowExpandable: (r) => !!r.targets?.length,
+                expandedRowRender: (r) => (
+                  <Table<WorkflowRunStepTarget>
+                    rowKey={(t) => t.agentId}
+                    dataSource={r.targets ?? []}
+                    pagination={false}
+                    size="small"
+                    columns={[
+                      { title: '目标', dataIndex: 'agentId', key: 'agentId', ellipsis: true,
+                        render: (v: string) => <Typography.Text code>{v}</Typography.Text> },
+                      { title: '状态', dataIndex: 'status', key: 'status', width: 90, render: (v: string) => <StatusTag status={v} /> },
+                      { title: '尝试', dataIndex: 'attempts', key: 'attempts', width: 60 },
+                      { title: '说明', dataIndex: 'stopReason', key: 'stopReason', ellipsis: true,
+                        render: (v: string) => v || '-' },
+                      {
+                        title: '输出',
+                        key: 'job',
+                        width: 80,
+                        render: (_, t) =>
+                          t.jobId ? (
+                            <Button type="link" size="small" onClick={() => openJob(t.jobId as string)}>
+                              查看
+                            </Button>
+                          ) : (
+                            '-'
+                          ),
+                      },
+                    ]}
+                  />
+                ),
+              }}
               columns={[
                 { title: '步骤', dataIndex: 'name', key: 'name', ellipsis: true },
-                { title: '目标', dataIndex: 'target', key: 'target', width: 110, ellipsis: true,
-                  render: (v: string) => <Typography.Text code>{v}</Typography.Text> },
+                { title: '目标', key: 'target', width: 110, ellipsis: true,
+                  render: (_, r) =>
+                    r.targets?.length ? (
+                      <Typography.Text code>{r.targets.length} 台</Typography.Text>
+                    ) : (
+                      <Typography.Text code>{r.target}</Typography.Text>
+                    ) },
                 { title: '状态', dataIndex: 'status', key: 'status', width: 90, render: (v: string) => <StatusTag status={v} /> },
                 { title: '尝试', dataIndex: 'attempts', key: 'attempts', width: 60 },
                 {

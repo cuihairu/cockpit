@@ -301,34 +301,38 @@ pages/Firewall/index.tsx:315 truncated 消息模板：v8 插桩报点，截断�
 
 # ---- 2026-10-09 Workflow 编排页（pages/Workflows）+ services/workflows.ts ----
 # 均为「v8 合并口径丢计数/JSX 内联/防御兜底」三类：行为已由 Workflows 页
-# 19 用例实证，lcov 计数为 0（同 App.tsx/Jobs 页既有口径）。行号按 2026-10-09 实测。
-pages/Workflows/index.tsx:96 formToSteps timeout_s 条件展开：表单值折回 API 形态断言实证，v8 对内联条件展开漏计
-pages/Workflows/index.tsx:129 agentOptions 标签模板 hostname||id 与离线后缀：下拉选项渲染断言实证，v8 对内联模板漏计
-pages/Workflows/index.tsx:157 lastRunByWf runs && length>0 ? runs[0] : undefined 三元：无 run 定义显示 '-' 断言实证，v8 漏计
-pages/Workflows/index.tsx:173 openEdit wf.description ?? '' 兜底：编辑预填描述断言实证（description 缺省用例亦有），v8 漏计
-pages/Workflows/index.tsx:183 步骤数上限校验行：steps 由「添加步骤」按钮 disabled（≤20）与默认 1 步约束，越界值手改不可达
-pages/Workflows/index.tsx:198 步骤命令空值校验 if：命令 TextArea 必填，主路径（有命令）已实证，空命令 return 侧不可达
-pages/Workflows/index.tsx:202 步骤名重复校验 if：重名用例已断言（重名 return 侧与主路径均由具名用例覆盖），v8 边计数漏计
-pages/Workflows/index.tsx:291 最近 run 列 last ? StatusTag : '-'：有 run 显示徽标断言实证，无 run '-' 侧 v8 漏计
-pages/Workflows/index.tsx:484 添加步骤按钮文案 MAX_STEPS 三元：达上限文案为防御侧（按钮同步 disabled），v8 漏计
-pages/Workflows/index.tsx:516 run 详情触发人 run.actor || '-'：actor 恒有值（run 由登录用户触发），v8 漏计
-pages/Workflows/index.tsx:572 Job 详情执行人 jobDetail.actor || '-'：actor 恒为 workflow，v8 漏计
-pages/Workflows/index.tsx:576 Job 详情退出码 exitCode !== undefined 三元：成功 job 无 exitCode 显示 '-'（既有用例）与有 exitCode 侧均断言，v8 漏计
-pages/Workflows/index.tsx:184 步骤数上限 return 侧（同 183）
-pages/Workflows/index.tsx:185 同上（return 收尾）
-pages/Workflows/index.tsx:199 命令空值 return 侧（同 198）
-pages/Workflows/index.tsx:200 同上（return 收尾）
-pages/Workflows/index.tsx:203 重名 return 侧（同 202）
-pages/Workflows/index.tsx:204 同上（return 收尾）
-pages/Workflows/index.tsx:360 抽屉 onClose 内联（setEditorOpen(false)）：取消按钮用例已断言 drawer 关闭，v8 对 JSX 属性内联箭头漏计
-pages/Workflows/index.tsx:382 描述 Input onChange 内联：编辑预填描述断言实证，v8 漏计
-pages/Workflows/index.tsx:404 下移按钮 onClick 内联：同上
-pages/Workflows/index.tsx:452 超时 InputNumber onChange 内联：新建成功用例透传断言实证，v8 漏计（同 460/471 组）
-pages/Workflows/index.tsx:460 重试 Select onChange 内联：retry 条件携带断言实证
-pages/Workflows/index.tsx:471 失败继续 Switch onChange 内联：continue_on_error 条件携带断言实证
-pages/Workflows/index.tsx:492 run 弹窗 onCancel 内联：关闭路径实证，v8 漏计
-pages/Workflows/index.tsx:503 run 弹窗「关闭」footer onClick：同上
-pages/Workflows/index.tsx:556 Job 弹窗 onCancel 内联：Job 详情打开/关闭链实证，v8 漏计
-pages/Workflows/index.tsx:559 Job 弹窗「关闭」footer onClick：同上
-
-pages/Workflows/index.tsx:275 moveStep 上移越界防御（j<0||j>=len return prev）：首行上移按钮 disabled、末行下移按钮 disabled 双端防御，越界侧无 UI 入口
+# 用例实证，lcov 计数为 0（同 App.tsx/Jobs 页既有口径）。
+# 行号按 2026-10-10 M2b 扇出步改造后实测（2026-10-09 表随 import/展开行/时间线
+# 扩展三处改动整体平移：436 前 +7、479 前 +8、534 起 +45）。
+pages/Workflows/index.tsx:89 stepsToForm s.targets ?? [] 兜底：server 强制 target/targets 互斥必有其一，双空不可达（M2b）
+pages/Workflows/index.tsx:103 formToSteps timeout_s 条件展开有值侧：无用例经表单设置超时（超时控件未触发），v8 计 0
+pages/Workflows/index.tsx:136 agentOptions 标签模板 hostname||id 回退侧：agent 列表 hostname 恒有值，v8 对内联模板漏计
+pages/Workflows/index.tsx:164 lastRunByWf runs && length>0 ? runs[0] : undefined 三元：无 run 定义显示 '-' 断言实证，runs[0] 侧无用例为列表 mock 非空 runs（run 数据经详情弹窗断言），v8 漏计
+pages/Workflows/index.tsx:180 openEdit wf.description ?? '' 兜底：编辑用例的定义均有 description，缺省侧不可达，v8 漏计
+pages/Workflows/index.tsx:190 步骤数上限校验行：steps 由「添加步骤」按钮 disabled（≤20）与默认 1 步约束，越界值手改不可达
+pages/Workflows/index.tsx:191 步骤数上限 message（同 190）
+pages/Workflows/index.tsx:192 步骤数上限 return 收尾（同 190）
+pages/Workflows/index.tsx:205 步骤命令空值校验 if：命令 TextArea 必填，主路径（有命令）已实证，空命令 return 侧不可达
+pages/Workflows/index.tsx:206 命令空值 message（同 205）
+pages/Workflows/index.tsx:207 命令空值 return 收尾（同 205）
+pages/Workflows/index.tsx:209 步骤名重复校验 if：重名用例已断言（重名 return 侧与主路径均由具名用例覆盖），v8 边计数漏计
+pages/Workflows/index.tsx:210 重名 message（同 209）
+pages/Workflows/index.tsx:211 重名 return 收尾（同 209）
+pages/Workflows/index.tsx:282 moveStep 上移越界防御（j<0||j>=len return prev）：首行上移按钮 disabled、末行下移按钮 disabled 双端防御，越界侧无 UI 入口
+pages/Workflows/index.tsx:298 最近 run 列 last ? StatusTag : '-'：无 run 显示 '-' 断言实证，有 run 徽标侧无用例为列表 mock 非空 runs，v8 漏计
+pages/Workflows/index.tsx:367 抽屉 onClose 内联（setEditorOpen(false)）：取消按钮用例已断言 drawer 关闭，v8 对 JSX 属性内联箭头漏计
+pages/Workflows/index.tsx:389 描述 Input onChange 内联：编辑预填描述断言实证，v8 漏计
+pages/Workflows/index.tsx:411 下移按钮 onClick 内联：同上
+pages/Workflows/index.tsx:441 targets Select onChange vs ?? [] 兜底：antd multiple 恒传数组（清空给 []），null 不可达（M2b）
+pages/Workflows/index.tsx:460 超时 InputNumber onChange 内联：无用例触发该控件
+pages/Workflows/index.tsx:468 失败重试 Select onChange 内联：无用例触发该控件
+pages/Workflows/index.tsx:479 失败继续 Switch onChange 内联：无用例触发该控件
+pages/Workflows/index.tsx:492 添加步骤按钮文案 MAX_STEPS 三元：达上限文案为防御侧（按钮同步 disabled），v8 漏计
+pages/Workflows/index.tsx:500 run 弹窗 onCancel 内联：关闭路径实证，v8 漏计
+pages/Workflows/index.tsx:511 run 弹窗「关闭」footer onClick：同上
+pages/Workflows/index.tsx:524 run 详情触发人 run.actor || '-'：actor 恒有值（run 由登录用户触发），v8 漏计
+pages/Workflows/index.tsx:540 expandedRowRender dataSource r.targets ?? [] 兜底：rowExpandable 已保证展开行 targets 非空（M2b）
+pages/Workflows/index.tsx:601 Job 弹窗 onCancel 内联：Job 详情打开/关闭链实证，v8 漏计
+pages/Workflows/index.tsx:604 Job 弹窗「关闭」footer onClick：同上
+pages/Workflows/index.tsx:617 Job 详情执行人 jobDetail.actor || '-'：actor 恒为 workflow，v8 漏计
+pages/Workflows/index.tsx:621 Job 详情退出码 exitCode !== undefined 三元：成功 job 无 exitCode 显示 '-'（既有用例），有 exitCode 侧无专用用例，v8 漏计

@@ -31,7 +31,7 @@ const wfMock = vi.hoisted(() => ({
   updateWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
   runWorkflow: vi.fn(),
-  listWorkflowRuns: vi.fn(),
+  listWorkflowRuns: vi.fn().mockResolvedValue({ runs: [] }),
   getWorkflowRun: vi.fn(),
   cancelWorkflowRun: vi.fn(),
 }))
@@ -89,8 +89,8 @@ const run: WorkflowRun = {
   finishedAt: '2026-10-09T01:00:10Z',
 }
 
-const renderPage = (list: WorkflowDef[] = [wf]) => {
-  apiMock.getAgents.mockResolvedValue(agents)
+const renderPage = (list: WorkflowDef[] = [wf], agentList = agents) => {
+  apiMock.getAgents.mockResolvedValue(agentList)
   wfMock.listWorkflows.mockResolvedValue(list)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -185,7 +185,7 @@ describe('Workflows', () => {
     const nameInputs = screen.getAllByPlaceholderText('同一 Workflow 内唯一')
     fireEvent.change(nameInputs[1], { target: { value: 's1' } })
     fireEvent.click(drawerFooterSave())
-    await waitFor(() => expect(msgError).toHaveBeenCalledWith('步骤 1：请选择目标主机'))
+    await waitFor(() => expect(msgError).toHaveBeenCalledWith('步骤 1：请选择目标主机（可多选=扇出）'))
   })
 
   it('新建成功：表单值折回 API 形态（retry/continue_on_error 条件携带）', async () => {
@@ -390,5 +390,117 @@ describe('Workflows', () => {
     await screen.findByText('Run：upgrade chain')
     fireEvent.click(screen.getAllByText('查看')[0])
     await waitFor(() => expect(msgError).toHaveBeenCalledWith('job not found'))
+  })
+
+  it('新建扇出：多选目标折成 targets 提交（M2b F1）', async () => {
+    // 双目标须在线（离线 agent 在下拉中禁用；默认夹具 a2 离线，此处传在线副本）
+    const agentsOnline = [
+      { id: 'a1', hostname: 'web-1', status: 'online', capabilities: [] },
+      { id: 'a2', hostname: 'db-1', status: 'online', capabilities: [] },
+    ]
+    renderPage([wf], agentsOnline)
+    fireEvent.click(await screen.findByText('新建 Workflow'))
+    await screen.findByText('新建 Workflow', { selector: '.ant-drawer-title' })
+    fireEvent.change(screen.getByPlaceholderText('例如：停机 → 备份 → 升级 → 起机'), {
+      target: { value: 'fanout wf' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('同一 Workflow 内唯一'), {
+      target: { value: 'fan' },
+    })
+    const drawerSelects = document.querySelectorAll('.ant-drawer .ant-select')
+    // 多选形态：下拉保持打开，连续点两项（重复 mouseDown 会关掉）
+    fireEvent.mouseDown(drawerSelects[0].querySelector('.ant-select-selector') as Element)
+    const pickByLabel = async (label: string) => {
+      const opt = await waitFor(() => {
+        const found = Array.from(document.querySelectorAll('.ant-select-item-option')).find(
+          (o) => o.textContent === label,
+        )
+        if (!found) throw new Error('option not ready')
+        return found
+      })
+      fireEvent.click(opt)
+    }
+    await pickByLabel('web-1')
+    await pickByLabel('db-1')
+    fireEvent.change(screen.getByPlaceholderText('shell 命令'), { target: { value: 'uptime' } })
+
+    fireEvent.click(drawerFooterSave())
+    await waitFor(() =>
+      expect(wfMock.createWorkflow).toHaveBeenCalledWith({
+        name: 'fanout wf',
+        description: undefined,
+        steps: [
+          {
+            type: 'agent.exec',
+            targets: ['a1', 'a2'],
+            parameters: { name: 'fan', command: 'uptime' },
+          },
+        ],
+      }),
+    )
+  })
+
+  it('编辑扇出定义：targets 展开多选、回存折回原形态', async () => {
+    const wfFan: WorkflowDef = {
+      ...wf,
+      id: 'wf-fan',
+      name: 'fan def',
+      steps: [
+        {
+          type: 'agent.exec',
+          targets: ['a1', 'a2'],
+          parameters: { name: 'fan', command: 'uptime' },
+        },
+      ],
+    }
+    renderPage([wfFan])
+    fireEvent.click((await screen.findAllByText('编辑'))[0])
+    await screen.findByText('编辑 Workflow：fan def', undefined, { timeout: 3000 })
+    fireEvent.click(drawerFooterSave())
+    await waitFor(() => {
+      expect(wfMock.updateWorkflow).toHaveBeenCalledWith('wf-fan', {
+        name: 'fan def',
+        description: 'stop → backup → upgrade',
+        steps: wfFan.steps,
+      })
+    })
+  })
+
+  it('run 时间线扇出步：目标聚合 N 台 + 展开逐台明细（M2b F6）', async () => {
+    const runFan: WorkflowRun = {
+      ...run,
+      id: 'r-fan',
+      steps: [
+        {
+          name: 'fan',
+          type: 'agent.exec',
+          target: '',
+          targets: [
+            { agentId: 'a1', status: 'success', jobId: 'j-1', attempts: 1 },
+            { agentId: 'a2', status: 'cancelled', attempts: 0, stopReason: 'run cancelled' },
+          ],
+          status: 'cancelled',
+          attempts: 1,
+        },
+      ],
+    }
+    wfMock.getWorkflowRun.mockResolvedValue(runFan)
+    renderPage()
+    fireEvent.click((await screen.findAllByText('运行'))[0])
+    expect(await screen.findByText('Run：upgrade chain')).toBeInTheDocument()
+    // 聚合目标列
+    expect(screen.getByText('2 台')).toBeInTheDocument()
+    // 展开行：逐台明细（agentId/状态/未跑原因/输出入口回退）
+    const expandIcon = document.querySelector(
+      '.ant-table-row-expand-icon',
+    ) as HTMLButtonElement
+    expect(expandIcon).toBeTruthy()
+    fireEvent.click(expandIcon)
+    expect(await screen.findByText('a2')).toBeInTheDocument()
+    expect(screen.getByText('run cancelled')).toBeInTheDocument()
+    expect(screen.getByText('a1')).toBeInTheDocument()
+    // 逐台输出入口：a1 带 jobId →「查看」打开 Job 详情（a2 无 jobId 显示 '-'）
+    fireEvent.click(screen.getByText('查看'))
+    expect(await screen.findByText('backup done')).toBeInTheDocument()
   })
 })

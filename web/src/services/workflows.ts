@@ -7,7 +7,10 @@ import { logger } from '@/utils/logger'
 
 export interface WorkflowStep {
   type: 'agent.exec'
-  target: string
+  /** 单目标主机（与 targets 互斥，二选一） */
+  target?: string
+  /** 多目标扇出（M2b：逐台完整执行，≤20 台，与 target 互斥） */
+  targets?: string[]
   parameters: {
     /** 步骤名，同一 workflow 内唯一（≤64） */
     name: string
@@ -32,10 +35,21 @@ export interface WorkflowDef {
   updatedAt: string
 }
 
+/** 扇出步单台结果（M2b F6）：Status 同 JobStatus 词表 */
+export interface WorkflowRunStepTarget {
+  agentId: string
+  status: string
+  jobId?: string
+  attempts: number
+  stopReason?: string
+}
+
 export interface WorkflowRunStep {
   name: string
   type: string
   target: string
+  /** 扇出步逐台结果（M2b）；单目标步无此键 */
+  targets?: WorkflowRunStepTarget[]
   status: string
   jobId?: string
   attempts: number
