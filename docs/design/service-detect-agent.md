@@ -6,7 +6,8 @@ title: 服务检测 agent——healthprobe 独立探测面（目标格式+状态
 
 ## 状态
 
-- 状态: **Active（用户令 2026-10-09：基于 core/healthprobe 做正式探测 agent，先简档后写码）**。
+- 状态: **Active——B1-B6 全部落地（2026-10-10，B6 web 面板块见 Services 页 ProbePanel）**。
+  用户令 2026-10-09 立项：基于 core/healthprobe 做正式探测 agent，先简档后写码。
 - 定位：独立小 agent（探测专用产物）——同一份 core 零件 + 平台层 + 探测业务插件，三层架构纪律同
   [agent-core](agent-core-architecture.md)。standalone（无 server）只做本地状态；配置 server 后经
   register/heartbeat/report 全链上行。

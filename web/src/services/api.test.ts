@@ -441,6 +441,18 @@ describe('ApiService 默认参数与可选分支', () => {
     expect(mockInstance.get).toHaveBeenCalledWith('/backups/configs/3/runs?limit=50')
   })
 
+  it('探针 agent 目标探活：targets 直取、windows 查询串按参拼装', async () => {
+    await api.getProbeTargets()
+    expect(mockInstance.get).toHaveBeenLastCalledWith('/probe/targets')
+    await api.getProbeWindows()
+    expect(mockInstance.get).toHaveBeenLastCalledWith('/probe/windows')
+    await api.getProbeWindows({})
+    expect(mockInstance.get).toHaveBeenLastCalledWith('/probe/windows')
+    await api.getProbeWindows({ agentId: 'ag 1', target: 'pg/tcp', limit: 20 })
+    expect(mockInstance.get).toHaveBeenLastCalledWith(
+      '/probe/windows?agent_id=ag%201&target=pg%2Ftcp&limit=20')
+  })
+
   it('writeFile/searchFiles 省略可选参走默认值', async () => {
     await api.writeFile('ag', '/p/a.txt', 'ZGF0YQ==')
     expect(mockInstance.post).toHaveBeenCalledWith(

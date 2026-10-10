@@ -513,6 +513,30 @@ export interface ProbeResult {
   checkedAt: string
 }
 
+// 探针 agent（cockpit-probe-agent）目标观测快照（服务检测 agent B5/B6）：
+// 每 agent+target 最新值，state 三态与 core/healthprobe 一致
+export interface ProbeTargetSnapshot {
+  id: string
+  agentId: string
+  target: string
+  state: string // unknown（冷区）/ healthy / faulty
+  since: string
+  lastChecked: string
+  lastError: string
+  updatedAt: string
+}
+
+// 探针 agent 上报的故障窗口：endedAt 为 null 表示仍在故障中
+export interface ProbeWindow {
+  id: string
+  agentId: string
+  target: string
+  startedAt: string
+  endedAt: string | null
+  lastError: string
+  updatedAt: string
+}
+
 // 远程日志查询（见 docs/guide/logs-design.md）
 export interface LogsStatus {
   journalctl: boolean

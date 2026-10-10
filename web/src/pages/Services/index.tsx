@@ -9,6 +9,7 @@ import { getApiErrorMessage } from '@/utils/apiError'
 import { usePerm } from '@/hooks/usePerm'
 import LogsPanel from '@/workbench/LogsPanel'
 import HealthPanel from './HealthPanel'
+import ProbePanel from './ProbePanel'
 
 // 服务管理（见 docs/guide/service-design.md）：systemd 与 Windows SCM 双后端
 // 统一观测 + 动作操作（capability type=service，metadata.backend 区分）。
@@ -465,6 +466,9 @@ const Services = () => {
           </Space>
         )}
       </Card>
+      {/* 目标探活面板（服务检测 agent B6）：探针 agent 全局视图，与服务
+          自愈（上方 HealthPanel）分区呈现——两套探测语义并存不混用 */}
+      <ProbePanel />
       {/* unit 文件编辑（D13）：等宽编辑器展示 systemctl cat 有效全文 */}
       <Modal
         title={`编辑 unit 文件：${editUnit ?? ''}`}

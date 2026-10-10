@@ -32,6 +32,8 @@ import type {
   StackDeployment,
   ProbeConfig,
   ProbeResult,
+  ProbeTargetSnapshot,
+  ProbeWindow,
   LogsStatus,
   LogsSources,
   LogsQuery,
@@ -578,6 +580,24 @@ class ApiService {
     return this.client.get<unknown, { results: ProbeResult[] }>(
       `/probe/history?resource_type=${encodeURIComponent(resourceType)}&resource_id=${encodeURIComponent(resourceId)}&limit=${limit}`,
     )
+  }
+
+  // ========== 探针 agent 目标探活（服务检测 agent B5/B6） ==========
+  // 全部探针 agent 的目标观测快照（unknown/healthy/faulty 最新值）
+  async getProbeTargets(): Promise<{ targets: ProbeTargetSnapshot[] }> {
+    return this.client.get<unknown, { targets: ProbeTargetSnapshot[] }>('/probe/targets')
+  }
+
+  // 故障窗口回查：agent/target 可选过滤，started_at 倒序
+  async getProbeWindows(
+    params?: { agentId?: string; target?: string; limit?: number },
+  ): Promise<{ windows: ProbeWindow[] }> {
+    const parts: string[] = []
+    if (params?.agentId) parts.push(`agent_id=${encodeURIComponent(params.agentId)}`)
+    if (params?.target) parts.push(`target=${encodeURIComponent(params.target)}`)
+    if (params?.limit) parts.push(`limit=${params.limit}`)
+    const qs = parts.length ? `?${parts.join('&')}` : ''
+    return this.client.get<unknown, { windows: ProbeWindow[] }>(`/probe/windows${qs}`)
   }
 
   // 通知服务状态（渠道摘要 + 事件开关，不含凭据）

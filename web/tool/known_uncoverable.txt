@@ -8,10 +8,10 @@
 pages/Proxy/index.tsx:131 selectedAgent 防御早退：操作入口仅在选中 agent 后渲染，空 agent 不可达
 pages/Proxy/index.tsx:167 同上（applyProxySite 前置防御）
 pages/Proxy/index.tsx:178 同上（删除前防御）
-pages/Services/index.tsx:126 同上（保存 unit 前防御；原 125 漂移）
-pages/Services/index.tsx:134 同上（daemon-reload 前防御；原 133 漂移）
-pages/Services/index.tsx:150 同上（打开 unit 文件前防御；原 149 漂移）
-pages/Services/index.tsx:166 同上（保存 unit 文件前防御，!editUnit 复合防御；原 165 漂移）
+pages/Services/index.tsx:127 同上（保存 unit 前防御；原 126 漂移）
+pages/Services/index.tsx:135 同上（daemon-reload 前防御；原 134 漂移）
+pages/Services/index.tsx:151 同上（打开 unit 文件前防御；原 150 漂移）
+pages/Services/index.tsx:167 同上（保存 unit 文件前防御，!editUnit 复合防御；原 166 漂移）
 pages/Cron/index.tsx:172 selectedAgent 防御早退（saveJob）
 pages/Cron/index.tsx:199 同上（toggleEnabled）
 pages/Cron/index.tsx:210 同上（deleteJob）
@@ -253,13 +253,13 @@ pages/Workbench/index.tsx:255
 # services/api.ts - 标签/心跳新增 API 端点，拦截器主路径已测，新端点暂无专项测试
 # （cleanupAgents 插入使行号 +1 漂移：2026-10-03 校准；凭据保险箱 vault
 # 类型再 +1 漂移：2026-10-07 校准）
-services/api.ts:327
-services/api.ts:331
-services/api.ts:335
-services/api.ts:339
-services/api.ts:343
+services/api.ts:329
+services/api.ts:333
+services/api.ts:337
+services/api.ts:341
+services/api.ts:345
 # getFirewallStatus：防火墙观测新端点，页面经 mock 测，方法体与同族端点同批
-services/api.ts:1234
+services/api.ts:1254
 
 # workbench/AgentSidebar.tsx - AgentSidebar 新增标签/心跳列，渲染主路径已测，条件渲染分支暂无直测
 workbench/AgentSidebar.tsx:38

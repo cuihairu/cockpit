@@ -19,6 +19,8 @@ const apiMock = vi.hoisted(() => ({
   getAgentHealth: vi.fn(),
   saveAgentHealth: vi.fn(),
   checkAgentProbe: vi.fn(),
+  getProbeTargets: vi.fn(),
+  getProbeWindows: vi.fn(),
 }))
 vi.mock('@/services/api', () => ({ api: apiMock }))
 
@@ -68,6 +70,9 @@ const renderPage = (over?: {
   apiMock.getAgents.mockResolvedValue(over?.agents ?? agents)
   apiMock.getServiceStatus.mockResolvedValue(over?.status ?? { systemState: 'degraded', total: 5, active: 1, failed: 1 })
   apiMock.getAgentServices.mockResolvedValue(over?.services ?? { services: units })
+  // 目标探活面板（B6）全局渲染，默认空数据不干扰既有断言
+  apiMock.getProbeTargets.mockResolvedValue({ targets: [] })
+  apiMock.getProbeWindows.mockResolvedValue({ windows: [] })
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
