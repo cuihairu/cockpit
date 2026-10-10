@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -475,5 +476,114 @@ func TestAgentReconnectsAfterServerDrop(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Start() did not return after Stop()")
+	}
+}
+
+// TestAgentConcurrentRPCCancelWhileExecRunning M2c C2 集成：messageLoop 并发
+// 派发 RPC——job.exec 阻塞期间（sleep）job.cancel 帧能被读取并处理，
+// 击杀在途命令；若读循环仍串行，cancel 要等 exec 自然结束才被读，
+// 本测试会超时。
+func TestAgentConcurrentRPCCancelWhileExecRunning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows: no reliable sleep builtin for cancel test")
+	}
+	fs := newFakeServer()
+	srv := httptest.NewServer(http.HandlerFunc(fs.handler))
+	defer srv.Close()
+
+	a := NewAgent(Config{ServerURL: wsURL(srv), AgentID: "agent-cancel-ws"})
+	defer a.Stop()
+	codec := protocol.NewCodec()
+
+	serverHold := make(chan struct{})
+	serverDone := make(chan *websocket.Conn, 1)
+	go func() {
+		select {
+		case conn := <-fs.connCh:
+			t.Cleanup(func() { conn.Close() })
+			reg := readUntil(t, conn, 30*time.Second, func(m *protocol.Message) bool {
+				return m.Type == protocol.MessageTypeRegister
+			})
+			if reg == nil {
+				serverDone <- nil
+				<-serverHold
+				return
+			}
+			conn.WriteMessage(websocket.TextMessage, []byte(`{"id":"reg-ok","type":"register","payload":{"status":"ok"}}`))
+			serverDone <- conn
+			<-serverHold
+		case <-time.After(30 * time.Second):
+			serverDone <- nil
+		}
+	}()
+	defer close(serverHold)
+
+	startErr := make(chan error, 1)
+	go func() { startErr <- a.Start() }()
+
+	conn := <-serverDone
+	if conn == nil {
+		t.Fatal("fake server did not accept connection")
+	}
+
+	// 1. server 下发 job.exec（sleep 阻塞在途）
+	execReq := protocol.NewMessage(protocol.MessageTypeRPCRequest, map[string]any{
+		"method": "job.exec",
+		"params": map[string]any{"command": "sleep 30", "timeout_s": 60, "id": "cancel-ws-1"},
+	})
+	execReq.ID = "exec-1"
+	if err := codec.WriteMessage(conn, execReq); err != nil {
+		t.Fatalf("write exec request: %v", err)
+	}
+
+	// 2. 给 exec 一点启动时间，然后下发 job.cancel——若读循环串行，
+	//    cancel 会排在 exec 后面（sleep 结束才被读），断言必然超时
+	time.Sleep(300 * time.Millisecond)
+	cancelReq := protocol.NewMessage(protocol.MessageTypeRPCRequest, map[string]any{
+		"method": "job.cancel",
+		"params": map[string]any{"id": "cancel-ws-1"},
+	})
+	cancelReq.ID = "cancel-1"
+	if err := codec.WriteMessage(conn, cancelReq); err != nil {
+		t.Fatalf("write cancel request: %v", err)
+	}
+
+	// 3. 读回两路响应：cancel 幂等成功 + exec 被击杀提前返回
+	gotCancel, gotExec := false, false
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && (!gotCancel || !gotExec) {
+		msg := readUntil(t, conn, deadline.Sub(time.Now()), func(m *protocol.Message) bool {
+			return m.Type == protocol.MessageTypeRPCResponse &&
+				(m.ID == "exec-1" || m.ID == "cancel-1")
+		})
+		if msg == nil {
+			return // readUntil 已报错
+		}
+		switch msg.ID {
+		case "cancel-1":
+			gotCancel = true
+			if msg.Payload["status"] != "success" {
+				t.Errorf("cancel response status = %v, want success", msg.Payload["status"])
+			}
+		case "exec-1":
+			gotExec = true
+			if msg.Payload["status"] != "success" {
+				t.Errorf("exec response status = %v, want success (killed exec still returns a result map)", msg.Payload["status"])
+			}
+			data, _ := msg.Payload["data"].(map[string]any)
+			if data == nil {
+				t.Errorf("exec response data missing: %v", msg.Payload)
+				continue
+			}
+			if code, _ := data["exit_code"].(float64); code == 0 {
+				t.Errorf("killed exec exit_code = %v, want non-zero", data["exit_code"])
+			}
+		}
+	}
+	if !gotCancel {
+		t.Errorf("cancel response not received")
+	}
+	if !gotExec {
+		t.Errorf("exec response not received after cancel")
 	}
 }

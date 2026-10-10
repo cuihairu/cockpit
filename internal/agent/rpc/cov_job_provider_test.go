@@ -4,6 +4,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 平台无关的内置命令（sh -c / cmd /C 都直接支持）
@@ -163,4 +164,117 @@ func stringField(m map[string]interface{}, key string) string {
 		return v
 	}
 	return ""
+}
+
+// —— M2c 取消信号测试（C1-C5）——
+
+// TestJobCancelKillsRunningExec：exec 在途时 cancel 触发 ctx 取消（进程组
+// SIGKILL），CombinedOutput 提前返回；error 带 "timed out"（ctx 取消走
+// DeadlineExceeded/Canceled 同分支）
+func TestJobCancelKillsRunningExec(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows: no reliable sleep builtin for cancel test")
+	}
+	p := NewJobProvider()
+	cmd := map[string]interface{}{"command": testExecSleep, "timeout_s": 60, "id": "job-cancel-1"}
+
+	done := make(chan interface{}, 1)
+	go func() {
+		res, err := p.Call("exec", cmd)
+		if err != nil {
+			t.Errorf("exec error: %v", err)
+			return
+		}
+		done <- res
+	}()
+
+	// 等待 exec 启动（sleep 30 会阻塞 CombinedOutput）
+	time.Sleep(200 * time.Millisecond)
+
+	// 下发取消
+	res, err := p.Call("cancel", map[string]interface{}{"id": "job-cancel-1"})
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	m := res.(map[string]interface{})
+	if c, _ := m["cancelled"].(bool); !c {
+		t.Fatalf("cancel should report cancelled=true, got %v", m)
+	}
+
+	// exec 应提前返回（被击杀）
+	select {
+	case execRes := <-done:
+		em := execRes.(map[string]interface{})
+		if code := intField(em, "exit_code"); code == 0 {
+			t.Fatalf("killed exec should have non-zero exit_code, got %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("exec did not return after cancel")
+	}
+}
+
+// TestJobCancelUnknownId：未知 ID 幂等成功（不报错，cancelled=false）
+func TestJobCancelUnknownId(t *testing.T) {
+	p := NewJobProvider()
+	res, err := p.Call("cancel", map[string]interface{}{"id": "nonexistent"})
+	if err != nil {
+		t.Fatalf("cancel unknown id: %v", err)
+	}
+	m := res.(map[string]interface{})
+	if c, _ := m["cancelled"].(bool); c {
+		t.Fatalf("cancel of unknown id should report cancelled=false, got %v", m)
+	}
+}
+
+// TestJobCancelEmptyId：无 ID 的 cancel 参数幂等成功
+func TestJobCancelEmptyId(t *testing.T) {
+	p := NewJobProvider()
+	res, err := p.Call("cancel", map[string]interface{}{"id": ""})
+	if err != nil {
+		t.Fatalf("cancel empty id: %v", err)
+	}
+	m := res.(map[string]interface{})
+	if c, _ := m["cancelled"].(bool); c {
+		t.Fatalf("cancel of empty id should report cancelled=false, got %v", m)
+	}
+}
+
+// TestJobExecWithoutId：无 ID 的 exec 不注册句柄，cancel 幂等空操作
+func TestJobExecWithoutId(t *testing.T) {
+	p := NewJobProvider()
+	// 无 id 的 exec 应正常执行
+	res, err := p.Call("exec", map[string]interface{}{"command": testExecHello})
+	if err != nil {
+		t.Fatalf("exec without id: %v", err)
+	}
+	m := res.(map[string]interface{})
+	if code := intField(m, "exit_code"); code != 0 {
+		t.Fatalf("exec without id exit_code = %d", code)
+	}
+	// 对任意 ID cancel 都应幂等成功（句柄表中无此条目）
+	res2, err := p.Call("cancel", map[string]interface{}{"id": "any-id"})
+	if err != nil {
+		t.Fatalf("cancel after exec without id: %v", err)
+	}
+	m2 := res2.(map[string]interface{})
+	if c, _ := m2["cancelled"].(bool); c {
+		t.Fatalf("cancel after id-less exec should report cancelled=false, got %v", m2)
+	}
+}
+
+// TestJobCancelAfterExecDone：exec 自然结束后 cancel 幂等（句柄已注销）
+func TestJobCancelAfterExecDone(t *testing.T) {
+	p := NewJobProvider()
+	_, err := p.Call("exec", map[string]interface{}{"command": testExecHello, "id": "job-done-1"})
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	res, err := p.Call("cancel", map[string]interface{}{"id": "job-done-1"})
+	if err != nil {
+		t.Fatalf("cancel after done: %v", err)
+	}
+	m := res.(map[string]interface{})
+	if c, _ := m["cancelled"].(bool); c {
+		t.Fatalf("cancel after exec done should report cancelled=false, got %v", m)
+	}
 }

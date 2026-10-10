@@ -593,7 +593,11 @@ func (a *Agent) handleMessage(msg *protocol.Message) {
 	case protocol.MessageTypePing:
 		a.handlePing(msg)
 	case protocol.MessageTypeRPCRequest:
-		a.handleRPCRequest(msg)
+		// 并发派发（M2c C2）：messageLoop 单 goroutine 串行——job.exec 阻塞期间
+		// （最长 300s）任何后续帧（含 job.cancel）都读不到。RPC 响应按消息 ID
+		// 相关（pending response map 互不干扰），sendMessage→upstream.Enqueue
+		// 已 goroutine 安全（writeLoop 串行写出），并发派发不破坏既有契约。
+		go a.handleRPCRequest(msg)
 	case protocol.MessageTypeHeartbeat:
 		// 心跳响应
 		log.Printf("Heartbeat acknowledged")
