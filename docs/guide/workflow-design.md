@@ -29,8 +29,10 @@ P1 的同步 RPC 模型（POST 即等待终态）有两个天花板：
   节推进（探针四场景：成功链/失败停/重试/取消）。
 - **M2a 已实现（2026-10-10）**：步骤变量传递（M2 候选清单第一项），设计见
   「M2 立项：步骤变量传递」节，824eb88 立项、97696ad 落地（含连带修复：
-  dispatchJob 改传解析后参数，见 V3）。M2 其余候选（取消信号/扇出/DAG/
-  审批门/SSE）仍为候选，未排期。
+  dispatchJob 改传解析后参数，见 V3）。
+- **M2b 立项（2026-10-10）**：多目标扇出（M2 候选第二项），设计见「M2 立项：
+  多目标扇出」节——server 侧顺序扇出、agent 零改动；剩余候选（取消信号/
+  DAG/审批门/SSE）仍为候选，未排期。
 - M2+ 其余各项在「边界（明确不做）」；未实现项以本文设计为准。
 - P1 已实现部分不受影响：`agent.exec` 类型、job provider、权限点原样保留，
   本设计只改「server 侧何时返回」与「谁在等待」。
@@ -198,6 +200,51 @@ schema 变更，是 M2 候选里最小的高价值增量。
   非 <span v-pre>`{{steps.*.output}}`</span> 的 <span v-pre>`{{...}}`</span> 原样保留；替换后超 16KB 步骤直接
   failed 且无 Job 派发；引用失败步（continue_on_error）取错误输出。
 - 全部可达，无新增 known_uncoverable 登记（预计）。
+
+## M2 立项：多目标扇出（M2b，2026-10-10）
+
+单步只能打一台 agent，N 台同构操作（全机升级/批量重启/全量巡检）只能复制
+步骤或裸跑 N 次。扇出让一个步骤对 N 台 agent 各建真实 Job——server 侧编排
+增强，agent 零改动、协议零新增（与 M2a 同款边界）。选中它而非取消信号/
+DAG/审批门/SSE 的依据：logs M3 已验证过「server 并行扇出 + 降级归因」模式
+（agent 零改动），本批把它带进变更面编排；取消信号要动 RPC 协议面（跨端
+契约，风险最大）；DAG 被 W4 明确压后；审批门有 server 重启孤儿 run 问题
+（等待态 goroutine 不可复活）；SSE 与全仓轮询模式冲突。
+
+### 关键决策
+
+| # | 决策 | 选择 | 理由 |
+|---|------|------|------|
+| F1 | 语法 | 步骤级可选 `targets: []string`（仅 workflow steps；standalone Job API 的单 `target` 不动）；`target` 与 `targets` 互斥（同现 400）；条目 trim 后非空、去重、≤20 台 | 单目标仍是绝大多数场景，保持主形态；数组直白；20 台=个人 infra 规模上限（WorkflowMaxSteps 同量级的 sanity 闸） |
+| F2 | 执行序 | **顺序扇出**：逐台完整跑（含各自重试周期），非并行 | 编排 goroutine 同步模型不变、零并发协调；变更面（exec 写操作）与 logs M3 查询面不同，并行扇出放大器在写路径不可接受；N 台最坏 N×(retry+1)×300s 可控 |
+| F3 | 失败策略 | 无 continue_on_error：首台失败即停步（后续目标不跑）；带 continue_on_error：跑完全部目标，步状态=失败但链继续 | 与 W5 失败停/继续语义同构，target 维度复用同一开关，无新概念 |
+| F4 | 重试 | 按目标独立完整重试周期；每次 attempt 仍是独立 Job 行 | W4「尝试历史进台账」逐台保留 |
+| F5 | 取消 | 目标边界检查取消（与既有步骤边界同机制，查 run.Status）；未跑目标记 `cancelled` + stopReason=`run cancelled` | W3「停止推进后续步骤」在更细粒度如实兑现；cancelled 是既有真实态 |
+| F6 | 快照 | 步骤行加 `targets[]`（agentId/status/jobId/attempts/stopReason，omitempty）；步级 Status=聚合（全成功才 success，否则 failed）；单目标步快照形状不变（Target/JobID 仍在步级） | 存量 run JSON 向前兼容（omitempty）；聚合态让时间线不改也自洽；run 详情展开按目标明细 |
+| F7 | 输出 | 扇出步**不提供**步骤输出：`{{steps.NAME.output}}` 解析为空串 | 多台输出拼接是伪精度；按目标取输出（per-target refs）等真实需求再立项；空串与 M2a「缺名取空串」同语义 |
+| F8 | 在线校验 | 建 run 前逐台校验 targets 全在线（既有幽灵防线同口径），缺一 503 并指明 steps[i] 的缺席者 | 与单目标 `registry.Get` 同款，扇出只是 N 次 |
+
+### 不变式
+
+- 定义文件存 `targets` 原文；每台 attempt 落独立 Job 行（快照即事实 W6）。
+- 单目标路径（`target` 字段）行为逐字节不变——既有 run/探针场景零感知。
+- agent 零改动：每台收到的仍是自己的 `job.exec`。
+
+### 前端
+
+- 步骤编辑器：目标主机 Select 加多选切换（选多台即扇出形态，提交折成
+  `targets`）；单选仍提交 `target`。
+- run 详情时间线：扇出步行内「目标」列显示聚合（如 `3 台`），展开行按
+  目标列明细（agentId/状态/尝试/输出入口）。
+
+### 测试
+
+- server（`cov_workflow` 系）：targets 校验矩阵（互斥/空/重复/超 20/空条目）；
+  两台顺序扇出成功聚合 success；首台失败停步（第二台无 Job）；continue_on_error
+  跑完全部且步 failed 链继续；按目标重试（首台 retry 后成功）；目标边界取消
+  （第二台记 cancelled）；建 run 在线校验缺一 503；扇出步输出引用解析空串；
+  单目标步快照形状回归（无 targets 键）。
+- web：编辑器双形态折返（target/targets）、时间线扇出步展开渲染。
 
 ## 边界自检（战略评审两问）
 
