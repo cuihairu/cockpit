@@ -13,7 +13,8 @@ export default defineConfig({
 
     nav: [
       { text: '指南', link: '/guide/introduction' },
-      { text: '架构', link: '/guide/architecture' }
+      { text: '架构', link: '/guide/architecture' },
+      { text: '调研', link: '/research/ops-oss-survey' }
     ],
 
     sidebar: {
@@ -64,6 +65,14 @@ export default defineConfig({
           text: '运维',
           items: [
             { text: 'Docker 部署', link: '/operations/deploy-docker' }
+          ]
+        }
+      ],
+      '/research/': [
+        {
+          text: '调研',
+          items: [
+            { text: '运维开源方案调研', link: '/research/ops-oss-survey' }
           ]
         }
       ]

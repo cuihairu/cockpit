@@ -133,6 +133,7 @@ Full installation details (one-line installer internals / platform matrix / buil
 - [Architecture and Boundaries](https://cuihairu.github.io/cockpit/guide/architecture)
 - [Protocol and API Boundaries](https://cuihairu.github.io/cockpit/guide/protocol)
 - [Docker Deployment](https://cuihairu.github.io/cockpit/operations/deploy-docker)
+- [Open-Source Ops Panels Survey](https://cuihairu.github.io/cockpit/research/ops-oss-survey)
 - Agent manual deployment and service unit examples: [deployments/README.md](deployments/README.md)
 
 ## Foundations

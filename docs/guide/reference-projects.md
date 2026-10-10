@@ -11,6 +11,8 @@ Cockpit 的定位是**个人混合基础设施控制台**，四条主线：
 
 按能力域选取 7 个对标项目。每个项目给出优缺点，并区分**可参考**（直接照做的具体做法）与**可借鉴**（吸收的设计理念）。
 
+2026-10 的延伸调研（监控面板六家 + 探活采集路线裁决，含真机截图）见 [运维开源方案调研](/research/ops-oss-survey)。
+
 ## 监控域：Beszel
 
 [henrygd/beszel](https://github.com/henrygd/beszel) — MIT 协议，Go 编写，hub + agent 架构，与 Cockpit 的 Server + Agent 同构。2026 年已是 homelab / 小型 VPS 集群监控的主流选择。
