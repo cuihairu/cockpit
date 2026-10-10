@@ -654,54 +654,18 @@ func TestCovPctBackupFileSyncRemoteRoute(t *testing.T) {
 	covWantCode(t, "sync-remote via route 503", rec, http.StatusServiceUnavailable)
 }
 
-// TestCovPctBackupCreateRcloneAgentMissing 覆盖 requireAgentRclone 的
-// agent 缺失放行分支（api_backups.go L183-185）：create 前置的存在性
-// Get 与 requireAgentRclone 内的第二次 Get 背靠背，只有 toggle goroutine
-// 在两次 Get 之间恰好 Unregister 才能进入放行 return true（创建成功
-// 200）。toggle 周期性 Register/Unregister 同一 agent，主 goroutine
-// 轮询 create 请求直至命中（15s deadline，与 cov_pct2 竞态手法同源）。
-func TestCovPctBackupCreateRcloneAgentMissing(t *testing.T) {
+// TestCovPctRequireAgentRcloneMissingPassthrough 覆盖 requireAgentRclone 的
+// agent 缺失放行分支（api_backups.go L184-185）：agent 不在 registry 时
+// 直接放行（存在性报错由调用方负责）。直调构造，不走 handler——handler 层
+// 该分支需要 create 的存在性 Get 与 requireAgentRclone 的第二次 Get 之间
+// 恰好 Unregister 的微秒竞态窗口，CI 慢机不可确定性命中（曾以 toggle
+// goroutine 轮询覆盖，2026-10-10 CI 上 201 判据被注册态放行满足、分支
+// 未执行致门禁红，改为本确定性直调）。
+func TestCovPctRequireAgentRcloneMissingPassthrough(t *testing.T) {
 	s := newBackupTestServer(t)
-
-	const agentID = "bak-race-rclone"
-	stop := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			agent := NewAgent(agentID, nil)
-			agent.Capabilities = []protocol.Capability{{
-				Type:     "backup",
-				Metadata: map[string]interface{}{"rclone": true},
-			}}
-			if err := s.registry.Register(agent); err != nil {
-				continue
-			}
-			s.registry.Unregister(agentID)
-		}
-	}()
-	deadline := time.Now().Add(15 * time.Second)
-	hit := false
-	for n := 0; !hit && time.Now().Before(deadline); n++ {
-		body := fmt.Sprintf(`{"agent_id":%q,"name":"bak-%d","sources":["/etc"],"dest_dir":"/b","schedule":"manual","remote_dest":"r:bak"}`,
-			agentID, n)
-		rec := covRec()
-		s.handleBackupsAPI(rec, covReq(http.MethodPost, "/api/backups/configs",
-			strings.NewReader(body)))
-		if rec.Code == http.StatusCreated {
-			hit = true
-		}
-	}
-	close(stop)
-	wg.Wait()
-	if !hit {
-		t.Fatalf("requireAgentRclone missing-agent pass-through not observed within deadline")
+	rec := covRec()
+	if !s.requireAgentRclone(rec, covReq(http.MethodPost, "/api/backups/configs", nil), "bak-ghost") {
+		t.Fatal("missing agent should pass through (caller owns the existence error)")
 	}
 }
 
