@@ -815,13 +815,11 @@ func (s *Server) finishWorkflowRun(run *storage.WorkflowRun, status string, fail
 		log.Printf("workflow: load run for finish failed: %v", err)
 		return
 	}
-	run.Status = status
-	finished := time.Now()
-	run.FinishedAt = &finished
-	if err := s.db.UpdateWorkflowRun(run); err != nil {
-		log.Printf("workflow: update run final state failed: %v", err)
-		return
-	}
+	// 审计写先于终态 UPDATE：UPDATE 必须是编排 goroutine 的最后一个 DB 写。
+	// 原顺序（UPDATE 后审计）下，测试轮询观察到终态时 goroutine 还有一次
+	// 不可观测的审计插入，TempDir 清理与之并发即「directory not empty」
+	// （CI 实锤 TestWorkflowFanoutOutputEmpty；TestCovTerminalAgentClose 同类）。
+	// 观察终态 ⟹ 无后续写，对成功/失败停/取消各路径确定成立。
 	details := map[string]interface{}{
 		"workflow":  run.WorkflowName,
 		"status":    status,
@@ -832,6 +830,13 @@ func (s *Server) finishWorkflowRun(run *storage.WorkflowRun, status string, fail
 	}
 	s.audit.LogResource(actor, audit.ActionWorkflowRun, audit.ResourceWorkflow, run.ID,
 		details, "", "")
+	run.Status = status
+	finished := time.Now()
+	run.FinishedAt = &finished
+	if err := s.db.UpdateWorkflowRun(run); err != nil {
+		log.Printf("workflow: update run final state failed: %v", err)
+		return
+	}
 }
 
 // handleWorkflowRunsList 某定义的 run 台账
