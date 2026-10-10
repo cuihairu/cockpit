@@ -159,9 +159,10 @@ type WorkflowRun struct {
 - **M1（本设计）**：异步 Job + 线性 Workflow + 取消（pending 语义）+
   台账过滤 + 权限/审计。验收：探针跑通成功链/失败停/重试/取消四场景 +
   真机连一台 agent 编排一轮。
-- **M2（候选，另行立项）**：步骤变量传递（见下节 M2a 立项）、agent 侧取消
-  信号（RPC 加 cancel 帧 + provider 监听）、多目标扇出（同步骤跑 N 台
-  agent）、DAG 依赖、审批门、SSE 推送。
+- **M2（候选，另行立项）**：步骤变量传递（见下节 M2a 立项）、多目标扇出
+  （见 M2b 立项）、取消信号（见 M2c 立项）、DAG 依赖、审批门、SSE 推送。
+  已开工 M2a/M2b/M2c；DAG 维持 W4 压后等真实并行需求，审批门因孤儿 run
+  问题未解不开工，SSE 与全仓轮询模式冲突拍不做。
 - **不做**：定时触发器（W11 约定）、输出实时流（P1 边界节留远控域统一设计）、
   Workflow 嵌套 Workflow（递归执行面先不碰）。
 
@@ -209,9 +210,11 @@ schema 变更，是 M2 候选里最小的高价值增量。
 步骤或裸跑 N 次。扇出让一个步骤对 N 台 agent 各建真实 Job——server 侧编排
 增强，agent 零改动、协议零新增（与 M2a 同款边界）。选中它而非取消信号/
 DAG/审批门/SSE 的依据：logs M3 已验证过「server 并行扇出 + 降级归因」模式
-（agent 零改动），本批把它带进变更面编排；取消信号要动 RPC 协议面（跨端
-契约，风险最大）；DAG 被 W4 明确压后；审批门有 server 重启孤儿 run 问题
-（等待态 goroutine 不可复活）；SSE 与全仓轮询模式冲突。
+（agent 零改动），本批把它带进变更面编排；取消信号已另立 M2c（C1-C9）
+推进——RPC 协议面无结构新增（复用 rpc_request 帧 + router 点号方法），
+需重构 agent 读循环为并发派发，但 agent/server 同仓同发无兼容包袱；DAG
+被 W4 明确压后等真实并行需求；审批门有 server 重启孤儿 run 问题（等待态
+goroutine 不可复活）未解不开工；SSE 与全仓轮询模式冲突拍不做。
 
 ### 关键决策
 
@@ -247,6 +250,65 @@ DAG/审批门/SSE 的依据：logs M3 已验证过「server 并行扇出 + 降�
   （第二台记 cancelled）；建 run 在线校验缺一 503；扇出步输出引用解析空串；
   单目标步快照形状回归（无 targets 键）。
 - web：编辑器双形态折返（target/targets）、时间线扇出步展开渲染。
+
+## M2 立项：取消信号（M2c，2026-10-10）
+
+W3 的取消只停推进：run 置 cancelled 后编排器在下一步边界停，**在途步骤
+的 Job 不被触碰**——失控命令要跑满 agent 侧超时（上限 300s）才自然结束。
+M2c 把取消做成真信号：server 下发 `job.cancel` RPC，agent 击杀在途进程
+（进程组 SIGKILL，孙进程一并死），Job 落 `cancelled` 终态。选中它而非
+DAG/审批门/SSE 的依据（2026-10-10 巡检拍板）：DAG 维持 W4 压后（等真实
+并行需求）；审批门有 server 重启孤儿 run 问题（等待态 goroutine 不可复活）
+未解不开工；SSE 与全仓轮询模式冲突拍不做。取消信号是 M2 候选里唯一
+「用户可感知的失控止血」增量。
+
+### 关键决策
+
+| # | 决策 | 选择 | 理由 |
+|---|------|------|------|
+| C1 | 信号载体 | `job.cancel` RPC 方法（params `{id}`），复用既有 `rpc_request` 帧，**不新增消息类型** | probe_report（B5）先例是 agent→server 主动上报、无既有通道才加消息类型；取消是 server→agent 指令，`rpc_request` 就是该方向标准载体，router `parseMethod` 已支持点号方法（`job.cancel` → provider=job, action=cancel），零协议结构新增 |
+| C2 | agent 读循环并发化 | `handleRPCRequest` 改 goroutine 派发（`go a.handleRPCRequest(msg)`） | **根本前提**：`messageLoop` 单 goroutine 串行，`job.exec` 阻塞期间（最长 300s）任何后续帧——含 cancel——都读不到。RPC 响应按消息 ID 相关（pending response map 互不干扰），`sendMessage`→`upstream.Enqueue` 已 goroutine 安全（writeLoop 串行写出），并发派发不破坏既有契约 |
+| C3 | agent 句柄表 | `JobProvider` 加 `map[jobID]*jobSession`（ctx cancel + mutex），镜像 logs follow 的 `followState.follows` 模式 | logs_follow 已验证「注册句柄 + 按 ID 查找 + 幂等关闭」；exec 的 ctx cancel 触发 `newJobCmd` 既有 `cmd.Cancel`（进程组 SIGKILL），**复用超时同款击杀路径**，不引入第二套 kill 机制 |
+| C4 | 击杀语义 | unix 进程组 SIGKILL（`Kill(-pid)`）；Windows 直接子进程 | `newJobCmd` 已实现（Setpgid + 组杀），超时路径同款；`sh -c` 派生的孙进程一并死，无孤儿。Windows 无进程组语义，维持既有直接子进程击杀 |
+| C5 | 幂等语义 | 未知/已结束 ID 的 cancel 返回成功空操作（`{cancelled:false}`），镜像 `FollowStop` | cancel 与 exec 完成存在天然竞态（job 恰在 cancel 到达前结束）；报错会让 server 无法区分「已停」与「早已结束」，幂等成功使 server 侧语义单一 |
+| C6 | server 单 Job 取消 | running 可撤：`CallAgent(job.cancel)` → 成功后**条件 UPDATE**（`WHERE status='running'`）落 cancelled；agent 不可达 → 409 如实拒绝。pending 维持 W3（DB-only），终态一律 409 | 「观察终态 ⟹ 状态可信」：只有 agent 确认击杀才落 cancelled，绝不假称已停；条件 UPDATE 防 check-then-update 竞态（GetJob 与 CancelJob 之间 pending→running 翻转窗口） |
+| C7 | 终态回写不覆盖取消 | `dispatchJobAsync` / `runWorkflowStep` 回写前**重读** job，若已 cancelled 则保留 cancelled（仅补 output/exitCode/error） | cancel 写与 exec 回写并发：exec 被击杀后返回 exit -1 / "signal: killed"，若无守卫会把 cancelled 覆盖成 failed；重读收敛竞态，无需加锁串行化 |
+| C8 | run 级取消联动 | `handleWorkflowRunCancel` 除置 run cancelled 外，查在途 step Job（`ListJobsFiltered(status=running, runID)`）逐个走 C6 击杀路径；在途步回写命中 C7 守卫，步骤快照记 cancelled + stopReason=`run cancelled`（F5 同口径） | W3 只停推进、失控命令跑满超时——M2c 的价值就在「真正停掉在途命令」；run 取消是用户最高频的「停下来」入口 |
+| C9 | 步骤 cancelled ⟹ run cancelled | `advanceWorkflow` 单步分支补 cancelled 守卫（镜像扇出分支 F5 的 return）；若 run 仍 running（单 Job 取消场景）则 `finishWorkflowRun(cancelled)` | 步骤 Job 死则链断，run 不得僵尸悬挂（永不落终态）；单 Job 取消传播到 run 是直觉语义——用户杀了某步，期望整条链停 |
+
+### 不变式
+
+- agent 句柄表只在 exec 生命周期内持有（注册→执行→注销）；cancel 不新建
+  状态机，ctx cancel 即全部。注销顺序 **cancel-then-unregister**（LIFO
+  defer），防「已注销未击杀」微秒窗口漏杀。
+- `cancelled` 是 Job 既有真实终态（storage W3 已立）；cancel 写与 exec
+  回写的竞态由条件 UPDATE + 重读收敛，终态以库内为准。
+- run 终态：cancelled run 不再被 `finishWorkflowRun` 改写——advanceWorkflow
+  步骤边界检查 + C9 cancelled 守卫双保险；run 取消处理器自身 audit-then-
+  update（与 finishWorkflowRun 写序不变式同款：观察终态 ⟹ 无后续写）。
+- 审计动作不变（`job_cancel` / `workflow_cancel` 既有）；run 取消联动击杀
+  的 step Job 不另发 cancel 审计（其 exec 回写已有 `job_run` 审计）。
+
+### 前端
+
+- Jobs 页取消按钮对 running job 现真生效（原仅 pending 可点）；按钮/文案
+  零改动——行为升级对 UI 透明。
+- run 时间线：在途步被击杀后显示 cancelled + stopReason `run cancelled`
+  （复用 F5 渲染路径，零新增组件）。
+
+### 测试
+
+- agent（`rpc` 包）：exec 注册句柄 → cancel 击杀在途命令（真 `sleep` +
+  断言提前返回）；未知 ID 幂等成功；exec 自然结束后 cancel 幂等；并发
+  exec+cancel（`-race`）；`job.exec` 无 id 参数（旧调用形态）不注册、
+  cancel 空操作。
+- server（`cov_jobs` / `cov_workflow` 系）：running job cancel → 假 agent
+  收 `job.cancel` → job cancelled + 输出仍回写；agent 不可达 → 409 不落
+  cancelled；exec 回写不覆盖 cancelled（C7 守卫）；pending→running 翻转
+  竞态走条件 UPDATE；run cancel 联动击杀在途 step（C8）；单步 Job 被杀
+  → run 落 cancelled（C9）；扇出步目标 Job 被杀 → 步 cancelled。
+- 全部确定性可达（假 agent handler 按 method 分流 + channel 编排时序），
+  预计无新增 known_uncoverable 登记。
 
 ## 边界自检（战略评审两问）
 
