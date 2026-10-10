@@ -287,10 +287,13 @@
 
 ## Workflow 编排（M1：异步 Job + 线性链）
 
-设计：[workflow-design](./workflow-design.md)。前置：一台在线 Linux agent（同 Job 节）。
+设计：[workflow-design](./workflow-design.md)。前置：一台在线 Linux agent（同 Job 节）；
+M2b 扇出验收需两台（run-server.sh 起 `workflows-acc-a1/a2` 双实例）。
 M1 已实现并验收（2026-10-09）：探针 `scripts/acceptance/workflows/`（W0-W9，四件套 +
 Go probe，对齐 jobs 探针口径）真机 9/9 PASS（端口 20010，agent `workflows-acc-a1`，
 证据 `.acceptance/workflows/evidence/` + `probe.log`）。
+M2b 多目标扇出已实现并验收（2026-10-10）：探针扩至 W10，真机 12/12 PASS
+（双在线 agent + ghost 样本）。
 
 - [x] 异步创建：`POST /api/jobs` 立即 201 返回 pending，台账轮询内见终态；pending 行「取消」可见可点（W1/W9）
   证据：W1 `uptime` → 201 status=pending（W1 契约，0d065a1 race fix 后确定性）→ 台账轮询
@@ -355,3 +358,11 @@ Go probe，对齐 jobs 探针口径）真机 9/9 PASS（端口 20010，agent `wo
 - 每通过一项：勾选本清单 + 在 `todo.md` 对应条目的「剩余」中移除该项，要点补进完成记录
 - 验收发现的缺陷：按既有纪律单独立项修复（一笔一提交，不夹带）
 - 全域通过后在本文件顶部标注「已完成（日期）」并归档到 `docs/archive/`（如适用）
+- [x] 扇出步：`targets` 多目标顺序逐台执行 → run success、逐台快照独立 jobId、台账按台独立（W10，M2b）
+  证据：W10 双台 [a1,a2] `echo FAN-OK && uptime` → 逐台 success、jobId 独立成行、
+  台账 2 条；Web 步骤编辑器多选目标 + run 时间线「N 台」聚合展开逐台明细（vitest 22 用例）
+- [x] 扇出失败停：首台失败 run failed、次台 pending 无 Job（F3 同 W5 停推进口径）（W10b）
+  证据：W10b [a1,a2] `exit 3` → 逐台 [failed/failed, pending]、步级 StopReason=failed、
+  台账 1 条（次台从未派发）
+- [x] 扇出 ghost 混入：任一目标离线 503 不建 run（F8 逐台校验，延伸 W7）（W10c）
+  证据：W10c [a1,ghost] → 503 `agent offline for steps[0]`、run 台账 0 条（不落幽灵 run）

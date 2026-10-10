@@ -20,6 +20,9 @@
 //	    角色全 403；审计 resource=workflow 的 create/run/cancel 齐
 //	W9  Job cancel 语义（workflow-design W3）：running Job 取消 409
 //	    （等自然结束，RPC 无取消帧）、ghost 404、GET /cancel 405
+//	W10 多目标扇出（M2b）：双台顺序执行 run success、逐台快照 success+独立
+//	    jobId、台账按台 2 条；首台失败停（次台 pending 无 Job）；ghost 混入
+//	    503 不建 run（F8 逐台校验延伸 W7）
 //
 // 证据落 .acceptance/workflows/evidence/（probe.log + 场景原始响应）；
 // FAIL → exit 1。
@@ -45,6 +48,7 @@ var (
 	adminPass = flag.String("pass", "e2e-strong-pass-1", "管理员口令")
 	evDir     = flag.String("ev", "", "证据目录（默认 .acceptance/workflows/evidence）")
 	agentA1   = flag.String("a1", "workflows-acc-a1", "在线执行目标 agent")
+	agentA2   = flag.String("a2", "workflows-acc-a2", "第二在线执行目标（W10 扇出）")
 	ghostID   = flag.String("ghost", "workflows-acc-ghost", "从未注册的 agent id（offline 样本）")
 )
 
@@ -292,14 +296,24 @@ func pollJobsByRun(runID string, cond func([]jobView) bool, timeout time.Duratio
 
 // ---------- Workflow 视图与轮询 ----------
 
-type stepRun struct {
-	Name       string `json:"name"`
-	Type       string `json:"type"`
-	Target     string `json:"target"`
+// stepTargetRun 扇出步逐台结果（M2b F6）：Status 同 JobStatus 词表
+type stepTargetRun struct {
+	AgentID    string `json:"agentId"`
 	Status     string `json:"status"`
 	JobID      string `json:"jobId"`
 	Attempts   int    `json:"attempts"`
 	StopReason string `json:"stopReason"`
+}
+
+type stepRun struct {
+	Name       string          `json:"name"`
+	Type       string          `json:"type"`
+	Target     string          `json:"target"`
+	Targets    []stepTargetRun `json:"targets"` // 扇出步逐台（单目标步恒空）
+	Status     string          `json:"status"`
+	JobID      string          `json:"jobId"`
+	Attempts   int             `json:"attempts"`
+	StopReason string          `json:"stopReason"`
 }
 
 type runView struct {
@@ -365,6 +379,17 @@ func step(name, target, command string, extra map[string]interface{}) map[string
 	}
 	return map[string]interface{}{
 		"type": "agent.exec", "target": target, "parameters": params,
+	}
+}
+
+// stepFan 扇出步定义（M2b：targets 多目标，与 target 互斥；其余同 step）
+func stepFan(name string, targets []string, command string, extra map[string]interface{}) map[string]interface{} {
+	params := map[string]interface{}{"name": name, "command": command}
+	for k, v := range extra {
+		params[k] = v
+	}
+	return map[string]interface{}{
+		"type": "agent.exec", "targets": targets, "parameters": params,
 	}
 }
 
@@ -476,6 +501,11 @@ func main() {
 			check(name, false, err.Error())
 			fatal("目标 agent 不在线——先跑 run-server.sh")
 		}
+		online2, err := agentOnline(*agentA2)
+		if err != nil {
+			check(name, false, err.Error())
+			fatal("扇出目标 agent 不在线——先跑 run-server.sh（双台）")
+		}
 		code, raw := reqJSON(http.MethodGet, *apiBase+"/api/workflows", nil)
 		if code != 200 {
 			check(name, false, fmt.Sprintf("GET /api/workflows code=%d %s", code, truncate(string(raw), 120)))
@@ -486,7 +516,7 @@ func main() {
 		}
 		_ = json.Unmarshal(raw, &l)
 		wfBaseline = len(l.Workflows)
-		check(name, true, fmt.Sprintf("agent=%s online=%v 定义基线=%d", *agentA1, online, wfBaseline))
+		check(name, true, fmt.Sprintf("agent=%s/%s online=%v/%v 定义基线=%d", *agentA1, *agentA2, online, online2, wfBaseline))
 	}()
 
 	// ---- W1 异步 Job 契约 ----
@@ -827,6 +857,84 @@ func main() {
 		check(name, cancelOK && codeGhost == 404 && code405 == 405,
 			fmt.Sprintf("running 取消=%d（only pending） ghost=%d GET cancel=%d（job=%s 等 12s 自然结束）",
 				codeC, codeGhost, code405, truncate(v.ID, 12)))
+	}()
+
+	// ---- W10 多目标扇出（M2b）----
+	func() {
+		name := "W10 扇出成功：双台顺序执行 run success/逐台快照/台账按台独立"
+		wfID := wfCreate("wf-acc-fanout-ok", []map[string]interface{}{
+			stepFan("fan-both", []string{*agentA1, *agentA2}, "echo FAN-OK && uptime", nil),
+		})
+		run, raw := wfRun(wfID)
+		saveEV("run-W10.json", raw)
+		final, err := pollRun(run.ID, func(rv *runView) bool { return isRunTerminal(rv.Status) }, 90*time.Second)
+		if err != nil {
+			check(name, false, "轮询 run: "+err.Error())
+			return
+		}
+		saveEV("final-W10.json", mustJSON(final))
+		ok := false
+		detail := ""
+		if len(final.Steps) != 1 {
+			detail = fmt.Sprintf("步数=%d（want 1）", len(final.Steps))
+		} else if len(final.Steps[0].Targets) != 2 {
+			detail = "逐台快照形状异常: " + string(mustJSON(final.Steps[0].Targets))
+		} else {
+			tg := final.Steps[0].Targets
+			jobs, jerr := jobsByRun(run.ID)
+			ok = final.Status == "success" && final.Steps[0].Status == "success" &&
+				tg[0].AgentID == *agentA1 && tg[1].AgentID == *agentA2 &&
+				tg[0].Status == "success" && tg[1].Status == "success" &&
+				tg[0].JobID != "" && tg[1].JobID != "" && tg[0].JobID != tg[1].JobID &&
+				jerr == nil && len(jobs) == 2
+			detail = fmt.Sprintf("status=%s 逐台[%s=%s,%s=%s] 台账=%d 条（jobId 独立=%v）",
+				final.Status, tg[0].AgentID, tg[0].Status, tg[1].AgentID, tg[1].Status,
+				len(jobs), tg[0].JobID != tg[1].JobID)
+		}
+		check(name, ok, detail)
+	}()
+
+	// ---- W10b 扇出失败停（F3）----
+	func() {
+		name := "W10b 扇出失败停：首台 exit 3 → run failed/次台 pending 无 Job"
+		wfID := wfCreate("wf-acc-fanout-fail", []map[string]interface{}{
+			stepFan("fan-fail", []string{*agentA1, *agentA2}, "exit 3", nil),
+		})
+		run, _ := wfRun(wfID)
+		final, err := pollRun(run.ID, func(rv *runView) bool { return isRunTerminal(rv.Status) }, 90*time.Second)
+		if err != nil {
+			check(name, false, "轮询 run: "+err.Error())
+			return
+		}
+		saveEV("final-W10b.json", mustJSON(final))
+		ok := false
+		detail := ""
+		if len(final.Steps) != 1 || len(final.Steps[0].Targets) != 2 {
+			detail = "快照形状异常: " + string(mustJSON(final.Steps))
+		} else {
+			tg := final.Steps[0].Targets
+			jobs, jerr := jobsByRun(run.ID)
+			ok = final.Status == "failed" && final.Steps[0].Status == "failed" &&
+				tg[0].Status == "failed" && tg[0].StopReason == "failed" &&
+				tg[1].Status == "pending" && tg[1].JobID == "" &&
+				jerr == nil && len(jobs) == 1 // 次台从未派发（停推进）
+			detail = fmt.Sprintf("status=%s 逐台[%s/%s,%s] 台账=%d 条（次台无 Job）",
+				final.Status, tg[0].Status, tg[0].StopReason, tg[1].Status, len(jobs))
+		}
+		check(name, ok, detail)
+	}()
+
+	// ---- W10c 扇出 ghost 混入（F8 逐台校验，延伸 W7）----
+	func() {
+		name := "W10c 扇出 ghost 混入：503 不建 run"
+		wfID := wfCreate("wf-acc-fanout-ghost", []map[string]interface{}{
+			stepFan("fan-ghost", []string{*agentA1, *ghostID}, "echo never", nil),
+		})
+		code, raw := reqJSON(http.MethodPost, *apiBase+"/api/workflows/"+wfID+"/run", nil)
+		n, cerr := wfRunsCount(wfID)
+		check(name, code == http.StatusServiceUnavailable && cerr == nil && n == 0,
+			fmt.Sprintf("run=%d（want 503）台账=%d 条（不落幽灵 run）: %s",
+				code, n, truncate(string(raw), 120)))
 	}()
 
 	ev("=== 汇总：PASS=%d FAIL=%d（%s） ===", passes, fails, time.Now().Format(time.RFC3339))

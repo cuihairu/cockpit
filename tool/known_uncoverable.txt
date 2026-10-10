@@ -34,7 +34,7 @@ scripts/acceptance/logs/probe/main.go:397,713	1. main() 场景编排（T0-T4 真
 scripts/acceptance/services/probe/main.go:307,644	1. main() 场景编排（T0-T5 真机 systemd 动词面/unit 文件编辑/journal 跳转）
 scripts/acceptance/traefik/probe/main.go:362,802	1. main() 场景编排（T1-T10 真机 Traefik file provider 热加载 + 自有 CA 握手）
 scripts/acceptance/jobs/probe/main.go:344,734	1. main() 场景编排（J0-J8 真机 REST/agent 异步契约执行/审计/权限面 + .acceptance 证据）
-scripts/acceptance/workflows/probe/main.go:449,844	1. main() 场景编排（W0-W9 真机两步链/失败停/重试/取消冻结/ghost/RBAC/审计 + .acceptance 证据）
+scripts/acceptance/workflows/probe/main.go:474,945	1. main() 场景编排（W0-W10 真机两步链/失败停/重试/取消冻结/ghost/RBAC/审计/双台扇出 + .acceptance 证据）
 scripts/acceptance/server-backup/probe/main.go:315,606	1. main() 场景编排（B0-B9 真机双实例/定时 tick 等待/sqlite3 产物抽查 + .acceptance 证据）
 scripts/acceptance/agent-backup/probe/main.go:662,1157	1. main() 场景编排（K0-K11 真机 server/agent 打包恢复/分块下载/调度 tick 停机重启/webhook 实收 + .acceptance 证据）
 scripts/acceptance/notify/probe/main.go:270,399	1. main() 场景编排（N0-N4 真机 server/webhook 接收器实收/审计面 + .acceptance 证据）

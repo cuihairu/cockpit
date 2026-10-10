@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Workflow 编排验收：本地 cockpit 实例（端口 20010，单在线 agent）：
+# Workflow 编排验收：本地 cockpit 实例（端口 20010，双在线 agent）：
 #   a1 workflows-acc-a1  在线执行目标（成功链/失败停/重试/取消场景）
+#   a2 workflows-acc-a2  第二在线目标（W10 多目标扇出）
 #   离线样本用从未注册的 ghost id（workflows-acc-ghost）——registry 缺席即
 #   503，与「曾在线后掉线」走同一 registry.Get 分支（jobs 探针同口径注明）
 # 产物（.acceptance/workflows/instance/）：二进制/配置/db/logs/token/各 pid
@@ -11,6 +12,7 @@ WF_DIR="${REPO_ROOT}/.acceptance/workflows"
 WORK_DIR="${WF_DIR}/instance"
 PORT=20010
 A1_ID=workflows-acc-a1
+A2_ID=workflows-acc-a2
 
 ADMIN_USER="${ADMIN_USERNAME:-admin}"
 ADMIN_PASS="${ADMIN_PASSWORD:-e2e-strong-pass-1}"
@@ -57,6 +59,11 @@ echo "== 启动 agent（${A1_ID}）=="
     > "${WORK_DIR}/logs/agent-a1.log" 2>&1 &
 echo $! > "${WORK_DIR}/agent-a1.pid"
 
+echo "== 启动 agent（${A2_ID}）=="
+"${WORK_DIR}/bin/cockpit-agent" start -server "ws://127.0.0.1:${PORT}/ws" -id "${A2_ID}" \
+    > "${WORK_DIR}/logs/agent-a2.log" 2>&1 &
+echo $! > "${WORK_DIR}/agent-a2.pid"
+
 # 等 agent 注册 + 登录拿 token
 TOKEN=""
 for i in $(seq 1 60); do
@@ -67,13 +74,14 @@ for i in $(seq 1 60); do
     if [[ -n "${TOKEN}" ]]; then
         ONLINE=$(curl -sf "http://127.0.0.1:${PORT}/api/agents" -H "Authorization: Bearer ${TOKEN}" \
             | python3 -c 'import json,sys; d=json.load(sys.stdin); a=d.get("agents",d) if isinstance(d,dict) else d; print(sum(1 for x in a if x.get("status")=="online"))' 2>/dev/null) || ONLINE=0
-        [[ "${ONLINE}" == "1" ]] && break
+        [[ "${ONLINE}" == "2" ]] && break
     fi
     sleep 1
 done
 [[ -n "${TOKEN}" ]] || { echo "登录失败"; tail -n 20 "${WORK_DIR}/logs/server.log"; exit 1; }
-[[ "${ONLINE}" == "1" ]] || {
-    echo "agent 未注册在线——检查 agent 日志："; tail -n 5 "${WORK_DIR}/logs/agent-a1.log"; exit 1
+[[ "${ONLINE}" == "2" ]] || {
+    echo "agent 未注册在线（需 2 台）——检查 agent 日志："
+    tail -n 5 "${WORK_DIR}/logs/agent-a1.log" "${WORK_DIR}/logs/agent-a2.log"; exit 1
 }
 echo "${TOKEN}" > "${WORK_DIR}/token"
-echo "agent ${A1_ID} 在线，token 已存 ${WORK_DIR}/token"
+echo "agent ${A1_ID}/${A2_ID} 在线，token 已存 ${WORK_DIR}/token"

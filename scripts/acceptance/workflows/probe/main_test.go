@@ -1,10 +1,10 @@
 // workflows 探针 helpers 单测（覆盖率收口：helpers 全覆盖）。
 //
-// 场景编排 main()（W0-W9 真机 REST/agent/审计/权限面）按验收惯例走真机
+// 场景编排 main()（W0-W10 真机 REST/agent/审计/权限面）按验收惯例走真机
 // 探针 + .acceptance 证据，不在此单测面内（jobs/probe 先例）。本文件覆盖
 // 全部可确定性验证的逻辑：证据层 / REST 层（httptest 假 cockpit）/
 // agent 在线判定双形态 / Job 与 run 与审计响应解析 / 轮询器（假 API 态
-// 迁移与超时）/ 定义与 run 触发装配。
+// 迁移与超时）/ 定义与 run 触发装配 / 扇出步（stepFan + 逐台快照解析）。
 package main
 
 import (
@@ -321,11 +321,20 @@ func TestParseRunAndPoll(t *testing.T) {
 	raw := []byte(`{"id":"r1","workflowId":"wf1","workflowName":"chain","status":"running",
 		"actor":"admin","finishedAt":null,
 		"steps":[{"name":"s1","type":"agent.exec","target":"a1","status":"success",
-			"jobId":"j1","attempts":1},{"name":"s2","status":"pending"}]}`)
+			"jobId":"j1","attempts":1,
+			"targets":[{"agentId":"a1","status":"success","jobId":"j1","attempts":1},
+				{"agentId":"a2","status":"cancelled","attempts":0,"stopReason":"run cancelled"}]},
+			{"name":"s2","status":"pending"}]}`)
 	rv, err := parseRun(raw)
 	if err != nil || rv.ID != "r1" || len(rv.Steps) != 2 ||
 		rv.Steps[0].JobID != "j1" || rv.Steps[1].Status != "pending" {
 		t.Fatalf("parseRun: %+v err=%v", rv, err)
+	}
+	// 扇出步逐台快照（M2b F6）
+	tg := rv.Steps[0].Targets
+	if len(tg) != 2 || tg[0].AgentID != "a1" || tg[0].JobID != "j1" ||
+		tg[1].Status != "cancelled" || tg[1].StopReason != "run cancelled" {
+		t.Fatalf("parseRun targets: %+v", tg)
 	}
 	if _, err := parseRun([]byte("bad")); err == nil {
 		t.Fatal("bad json: want error")
@@ -429,6 +438,19 @@ func TestStepBuilder(t *testing.T) {
 	p2 := s2["parameters"].(map[string]interface{})
 	if p2["retry"] != 1 || p2["timeout_s"] != 60 {
 		t.Fatalf("step extra: %+v", p2)
+	}
+	// stepFan：targets 多目标、无 target 键（M2b 与 target 互斥）；extra 合并进 parameters
+	f := stepFan("sf", []string{"a1", "a2"}, "uptime", map[string]interface{}{"retry": 1})
+	if f["type"] != "agent.exec" || f["target"] != nil {
+		t.Fatalf("stepFan base: %+v", f)
+	}
+	ft, ok := f["targets"].([]string)
+	if !ok || len(ft) != 2 || ft[0] != "a1" || ft[1] != "a2" {
+		t.Fatalf("stepFan targets: %+v", f["targets"])
+	}
+	pf := f["parameters"].(map[string]interface{})
+	if pf["name"] != "sf" || pf["command"] != "uptime" || pf["retry"] != 1 {
+		t.Fatalf("stepFan params: %+v", pf)
 	}
 }
 
