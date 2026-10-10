@@ -657,3 +657,167 @@ func TestWorkflowAPIDBErrorBranches(t *testing.T) {
 		t.Fatalf("job create: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// ============ M2a 步骤变量传递 ============
+
+// TestWorkflowStepRefValidation 定义期引用校验（V2）：未知名/前向/自引用
+// 400，指向更靠前步骤的合法引用 201。
+func TestWorkflowStepRefValidation(t *testing.T) {
+	s := newBackupTestServer(t)
+	stepA := `{"type":"agent.exec","target":"a1","parameters":{"name":"a","command":"x"}}`
+	cases := []struct {
+		name string
+		body string
+		ok   bool
+	}{
+		{"unknown ref", `{"name":"v","steps":[` + stepA + `,` +
+			`{"type":"agent.exec","target":"a1","parameters":{"name":"b","command":"echo {{steps.nope.output}}"}}]}`, false},
+		{"forward ref", `{"name":"v","steps":[` +
+			`{"type":"agent.exec","target":"a1","parameters":{"name":"a","command":"echo {{steps.b.output}}"}},` + stepA + `]}`, false},
+		{"self ref", `{"name":"v","steps":[` +
+			`{"type":"agent.exec","target":"a1","parameters":{"name":"a","command":"echo {{steps.a.output}}"}}]}`, false},
+		{"valid ref", `{"name":"v","steps":[` + stepA + `,` +
+			`{"type":"agent.exec","target":"a1","parameters":{"name":"b","command":"echo {{steps.a.output}}"}}]}`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows", strings.NewReader(c.body)), "/workflows")
+			want := http.StatusCreated
+			if !c.ok {
+				want = http.StatusBadRequest
+			}
+			if rec.Code != want {
+				t.Fatalf("code = %d, want %d, body: %s", rec.Code, want, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestWorkflowStepVariableResolution 两步链解析（V1/V3/V4）：第二步派发的
+// command 是第一步输出替换结果；非 {{steps.*.output}} 形态的 {{...}} 原样
+// 保留；嵌套参数树替换；meta 键不漏到 agent（连带修复 M1 dispatch 传定义
+// 原参数的遗留缺陷）。
+func TestWorkflowStepVariableResolution(t *testing.T) {
+	s := newBackupTestServer(t)
+	var got []map[string]interface{}
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		got = append(got, params)
+		return map[string]interface{}{"exit_code": 0, "output": "scan-out", "error": ""}, ""
+	})
+
+	body := `{"name":"v","steps":[` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"scan","command":"do-scan"}},` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"use","command":"echo {{steps.scan.output}} | keep ${{nothing}} {{ not.a.ref }}","extra":{"inner":"[{{steps.scan.output}}]","list":["{{steps.scan.output}}","raw"]}}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusSuccess {
+		t.Fatalf("run = %+v", run)
+	}
+	if len(got) != 2 {
+		t.Fatalf("dispatched = %d calls", len(got))
+	}
+	for i, p := range got {
+		if _, ok := p["name"]; ok {
+			t.Fatalf("call %d: meta key leaked to agent: %v", i, p)
+		}
+	}
+	want := "echo scan-out | keep ${{nothing}} {{ not.a.ref }}"
+	if c, _ := got[1]["command"].(string); c != want {
+		t.Fatalf("resolved command = %q, want %q", c, want)
+	}
+	// 嵌套参数树替换：Job 行 Parameters 里 extra 已解析（快照即事实）
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	job, err := s.db.GetJob(steps[1].JobID)
+	if err != nil {
+		t.Fatalf("step job: %v", err)
+	}
+	var jp map[string]interface{}
+	json.Unmarshal([]byte(job.Parameters), &jp)
+	extra, _ := jp["extra"].(map[string]interface{})
+	list, _ := extra["list"].([]interface{})
+	if extra["inner"] != "[scan-out]" || len(list) != 2 || list[0] != "scan-out" || list[1] != "raw" {
+		t.Fatalf("nested params = %v", extra)
+	}
+}
+
+// TestWorkflowStepResolutionRejectsOversize 替换后命令超 16KB（V5）：该步
+// 不派发直接 failed，快照 stopReason 记拒绝原因，run failed。
+func TestWorkflowStepResolutionRejectsOversize(t *testing.T) {
+	s := newBackupTestServer(t)
+	calls := 0
+	bigOut := strings.Repeat("x", 20*1024)
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		calls++
+		return map[string]interface{}{"exit_code": 0, "output": bigOut, "error": ""}, ""
+	})
+
+	body := `{"name":"v","steps":[` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"big","command":"gen"}},` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"use","command":"{{steps.big.output}}"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusFailed {
+		t.Fatalf("run = %+v", run)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1 (step 2 must not dispatch)", calls)
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if steps[1].Status != "failed" || steps[1].JobID != "" ||
+		!strings.Contains(steps[1].StopReason, "rejected") {
+		t.Fatalf("step 1 = %+v", steps[1])
+	}
+}
+
+// TestWorkflowStepRefFailedSource 引用失败步（V4 + W4 组合）：continue_on_error
+// 放行的失败步，后步取其已存输出（错误输出照常注入），run success。
+func TestWorkflowStepRefFailedSource(t *testing.T) {
+	s := newBackupTestServer(t)
+	var commands []string
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		cmd, _ := params["command"].(string)
+		commands = append(commands, cmd)
+		if len(commands) == 1 {
+			return map[string]interface{}{"exit_code": 3, "output": "err-out", "error": ""}, ""
+		}
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+
+	body := `{"name":"v","steps":[` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"soft","command":"false","continue_on_error":true}},` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"after","command":"echo {{steps.soft.output}}"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusSuccess {
+		t.Fatalf("run = %+v", run)
+	}
+	if len(commands) != 2 || commands[1] != "echo err-out" {
+		t.Fatalf("commands = %q", commands)
+	}
+}
+
+// TestCovStepOutputOfNil 被引步骤 Job 行未建成（存储错误）时输出按空串
+// 处理（M2a V4：与失败步同语义）。
+func TestCovStepOutputOfNil(t *testing.T) {
+	if stepOutputOf(nil) != "" {
+		t.Fatal("nil job output should be empty")
+	}
+	if stepOutputOf(&storage.Job{Output: "x"}) != "x" {
+		t.Fatal("job output should pass through")
+	}
+}

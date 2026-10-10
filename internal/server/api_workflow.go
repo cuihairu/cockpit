@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -119,9 +120,32 @@ func (s *Server) handleWorkflowRunsAPI(w http.ResponseWriter, r *http.Request, p
 	s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
 }
 
+// stepOutputRefRe 步骤输出引用 {{steps.NAME.output}}（M2a V1）。NAME 为
+// 步骤 name；仅此一种 token 形态参与替换，其余 {{...}} 原样保留（V6）。
+var stepOutputRefRe = regexp.MustCompile(`\{\{steps\.([A-Za-z0-9_-]+)\.output\}\}`)
+
+// collectStepRefs 递归收集参数树 string 值里的输出引用名
+func collectStepRefs(v interface{}, into map[string]bool) {
+	switch t := v.(type) {
+	case string:
+		for _, m := range stepOutputRefRe.FindAllStringSubmatch(t, -1) {
+			into[m[1]] = true
+		}
+	case map[string]interface{}:
+		for _, vv := range t {
+			collectStepRefs(vv, into)
+		}
+	case []interface{}:
+		for _, vv := range t {
+			collectStepRefs(vv, into)
+		}
+	}
+}
+
 // validateWorkflowPayload 定义校验：name ≤64、步骤 1-20 且逐项过 Job 校验
 // （type 白名单/target/command/timeout 沿用 P1 各限，W12）；step.name 同
-// workflow 内唯一
+// workflow 内唯一；输出引用必须指向更靠前的步骤（M2a V2——顺序链语义下
+// 前向/自引用运行期必拿空值，保存期拒绝）
 func validateWorkflowPayload(p *workflowPayload) error {
 	p.Name = strings.TrimSpace(p.Name)
 	if p.Name == "" {
@@ -149,6 +173,13 @@ func validateWorkflowPayload(p *workflowPayload) error {
 		}
 		if seen[name] {
 			return fmt.Errorf("steps[%d]: duplicate step name %q", i, name)
+		}
+		refs := map[string]bool{}
+		collectStepRefs(step.Parameters, refs)
+		for ref := range refs {
+			if !seen[ref] {
+				return fmt.Errorf("steps[%d]: unknown or forward step reference %q", i, ref)
+			}
 		}
 		seen[name] = true
 	}
@@ -443,13 +474,23 @@ func parseWorkflowSteps(wf *storage.Workflow) []jobCreatePayload {
 // backupTrackInterval 惯例）
 var workflowRetryInterval = 5 * time.Second
 
+// stepOutputOf 取步骤最终 attempt 的输出（M2a V4）；Job 行未建成
+// （存储错误）视为空输出，与失败步同语义
+func stepOutputOf(job *storage.Job) string {
+	if job == nil {
+		return ""
+	}
+	return job.Output
+}
+
 // advanceWorkflow 编排器：逐步建 Job → 派发 → 按重试/继续语义推进（W4/W5）。
 // 每个 attempt 都是真实 Job（台账可查）；重试固定间隔 5s。
 func (s *Server) advanceWorkflow(wf *storage.Workflow, run *storage.WorkflowRun, actor string) {
 	steps := parseWorkflowSteps(wf)
+	outputs := make(map[string]string, len(steps)) // 步骤 name → 最终 attempt 输出（M2a V3/V4）
 	for i := range steps {
 		step := &steps[i]
-		opts, _ := stepOptionsFromParams(step)
+		opts, name := stepOptionsFromParams(step)
 
 		// 取消检查：cancelWorkflowRun 已把 run.Steps 停在第 i 步
 		current, err := s.db.GetWorkflowRun(run.ID)
@@ -461,21 +502,30 @@ func (s *Server) advanceWorkflow(wf *storage.Workflow, run *storage.WorkflowRun,
 			return // 已被取消，不再推进
 		}
 
-		job, finalStatus, attempts := s.runWorkflowStep(step, opts, run.ID, actor)
-		s.recordStepResult(run, i, job, finalStatus, attempts)
+		job, finalStatus, attempts, reason := s.runWorkflowStep(step, opts, run.ID, actor, outputs)
+		outputs[name] = stepOutputOf(job)
+		s.recordStepResult(run, i, job, finalStatus, attempts, reason)
 
 		if finalStatus != storage.JobStatusSuccess && !opts.ContinueOnError {
-			s.finishWorkflowRun(run, storage.WorkflowRunStatusFailed, i,
-				fmt.Sprintf("step %d (%s) failed", i, step.Type), actor)
+			if reason == "" {
+				reason = fmt.Sprintf("step %d (%s) failed", i, step.Type)
+			}
+			s.finishWorkflowRun(run, storage.WorkflowRunStatusFailed, i, reason, actor)
 			return
 		}
 	}
 	s.finishWorkflowRun(run, storage.WorkflowRunStatusSuccess, len(steps)-1, "", actor)
 }
 
-// runWorkflowStep 执行单步（含重试）；返回终态 Job、归纳状态与实跑尝试数。
-// 每次尝试建独立 Job 行（尝试历史进台账）。
-func (s *Server) runWorkflowStep(step *jobCreatePayload, opts stepOptions, runID, actor string) (*storage.Job, string, int) {
+// runWorkflowStep 执行单步（含重试）；返回终态 Job、归纳状态、实跑尝试数
+// 与失败原因（"" = 无补充说明，走默认 "failed"）。每次尝试建独立 Job 行
+// （尝试历史进台账）。进入重试循环前先做变量解析与复检（M2a V3/V5）：
+// 注入可能把命令撑过上限，复检不过则不派发、该步直接 failed。
+func (s *Server) runWorkflowStep(step *jobCreatePayload, opts stepOptions, runID, actor string, outputs map[string]string) (*storage.Job, string, int, string) {
+	params := resolveStepParams(sanitizeStepParams(step.Parameters), outputs)
+	if err := validateJobPayload(&jobCreatePayload{Type: step.Type, Target: step.Target, Parameters: params}); err != nil {
+		return nil, storage.JobStatusFailed, 0, fmt.Sprintf("step rejected after variable resolution: %v", err)
+	}
 	maxAttempts := opts.Retry + 1
 	var job *storage.Job
 	status := storage.JobStatusFailed
@@ -483,7 +533,6 @@ func (s *Server) runWorkflowStep(step *jobCreatePayload, opts stepOptions, runID
 		if attempt > 0 {
 			time.Sleep(workflowRetryInterval)
 		}
-		params := sanitizeStepParams(step.Parameters)
 		paramsJSON, _ := json.Marshal(params)
 		now := time.Now()
 		job = &storage.Job{
@@ -505,7 +554,12 @@ func (s *Server) runWorkflowStep(step *jobCreatePayload, opts stepOptions, runID
 		job.StartedAt = &started
 		_ = s.db.UpdateJob(job)
 
-		success, jobErr := s.dispatchJob(job, *step)
+		// 下发解析后的参数（与落库一致）。M1 传定义原参数：meta 键漏到
+		// agent 且模板不解析——M2a 变量传递下 agent 会执行 {{...}} 原文，
+		// 属必须修的遗留缺陷
+		resolved := *step
+		resolved.Parameters = params
+		success, jobErr := s.dispatchJob(job, resolved)
 
 		finished := time.Now()
 		job.FinishedAt = &finished
@@ -524,15 +578,50 @@ func (s *Server) runWorkflowStep(step *jobCreatePayload, opts stepOptions, runID
 			}, "", "")
 
 		if success {
-			return job, storage.JobStatusSuccess, attempt + 1
+			return job, storage.JobStatusSuccess, attempt + 1, ""
 		}
 		status = storage.JobStatusFailed
 	}
-	return job, status, maxAttempts
+	return job, status, maxAttempts, ""
 }
 
-// recordStepResult 回写步骤快照（状态/attempts/jobId）
-func (s *Server) recordStepResult(run *storage.WorkflowRun, idx int, job *storage.Job, status string, attempts int) {
+// resolveStepParams 递归替换参数树 string 值里的步骤输出引用（M2a V1/V4）：
+// {{steps.NAME.output}} → outputs[NAME]。缺名取空串——定义校验（V2）已拦
+// 未知/前向引用，运行期缺名唯一可达来源是被引步骤 Job 行未建成（存储
+// 错误），输出为空与失败步同语义。其余 {{...}} 形态原样保留（V6）。
+func resolveStepParams(params map[string]interface{}, outputs map[string]string) map[string]interface{} {
+	out := make(map[string]interface{}, len(params))
+	for k, v := range params {
+		out[k] = resolveStepValue(v, outputs)
+	}
+	return out
+}
+
+func resolveStepValue(v interface{}, outputs map[string]string) interface{} {
+	switch t := v.(type) {
+	case string:
+		return stepOutputRefRe.ReplaceAllStringFunc(t, func(tok string) string {
+			return outputs[stepOutputRefRe.FindStringSubmatch(tok)[1]]
+		})
+	case map[string]interface{}:
+		m := make(map[string]interface{}, len(t))
+		for k, vv := range t {
+			m[k] = resolveStepValue(vv, outputs)
+		}
+		return m
+	case []interface{}:
+		s := make([]interface{}, len(t))
+		for i, vv := range t {
+			s[i] = resolveStepValue(vv, outputs)
+		}
+		return s
+	default:
+		return v
+	}
+}
+
+// recordStepResult 回写步骤快照（状态/attempts/jobId/stopReason）
+func (s *Server) recordStepResult(run *storage.WorkflowRun, idx int, job *storage.Job, status string, attempts int, stopReason string) {
 	run, err := s.db.GetWorkflowRun(run.ID)
 	if err != nil {
 		log.Printf("workflow: load run for step result failed: %v", err)
@@ -546,7 +635,10 @@ func (s *Server) recordStepResult(run *storage.WorkflowRun, idx int, job *storag
 			steps[idx].JobID = job.ID
 		}
 		if status != storage.JobStatusSuccess {
-			steps[idx].StopReason = "failed"
+			if stopReason == "" {
+				stopReason = "failed"
+			}
+			steps[idx].StopReason = stopReason
 		}
 		if b, err := json.Marshal(steps); err == nil {
 			run.Steps = string(b)
