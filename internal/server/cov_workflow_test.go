@@ -1145,8 +1145,9 @@ func TestWorkflowFanoutOutputEmpty(t *testing.T) {
 }
 
 // TestWorkflowFanoutMidRunCancel 运行中扇出目标边界取消（F5 全链）：a1 在途
-// 时取消 run（handler 内同步取消，确定性无竞态），a1 正常返回 success，
-// a2 目标边界检查记 cancelled，run 保持 cancelled 终态（不走 failed 落终态）。
+// 时取消 run（handler 内同步取消，取消本身确定性），a1 正常返回 success，
+// a2 目标边界检查记 cancelled，run 保持 cancelled 终态（不走 failed 落终态；
+// 断言前等快照逐台行落定，终态早于回写）。
 func TestWorkflowFanoutMidRunCancel(t *testing.T) {
 	s := newBackupTestServer(t)
 	runIDCh := make(chan string, 1)
@@ -1185,6 +1186,34 @@ func TestWorkflowFanoutMidRunCancel(t *testing.T) {
 	run := waitRunTerminal(t, s, rv.ID)
 	if run.Status != storage.WorkflowRunStatusCancelled {
 		t.Fatalf("run = %+v (cancel must not be overwritten by failed)", run)
+	}
+	// 等逐台行全部落定再断言：cancel 只改 run 状态，快照由扇出 runner 在
+	// 目标边界回写（与单目标路径 recordStepResult 同窗口），慢机上轮询可
+	// 抢在回写前读到全 pending 快照（CI 复现：两 target 全 pending）
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		cur, err := s.db.GetWorkflowRun(rv.ID)
+		if err != nil {
+			t.Fatalf("load run: %v", err)
+		}
+		run = cur
+		var settled []workflowStepRun
+		if json.Unmarshal([]byte(run.Steps), &settled) == nil &&
+			len(settled) == 1 && len(settled[0].Targets) == 2 {
+			allFinal := true
+			for _, tg := range settled[0].Targets {
+				if tg.Status == storage.JobStatusPending {
+					allFinal = false
+				}
+			}
+			if allFinal {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("step targets never settled: %+v", run)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	var steps []workflowStepRun
 	json.Unmarshal([]byte(run.Steps), &steps)
