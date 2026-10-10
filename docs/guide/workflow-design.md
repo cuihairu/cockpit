@@ -171,12 +171,12 @@ schema 变更，是 M2 候选里最小的高价值增量。
 
 | # | 决策 | 选择 | 理由 |
 |---|------|------|------|
-| V1 | 语法 | `{{steps.NAME.output}}`，NAME 为步骤 name（`[A-Za-z0-9_-]+`）；仅此一种形态 | 定义校验已保证 name 唯一；按名引用比按序号（原 M2 草案 `steps.N`）抗步骤重排，报错可读。`exit_code` 等其他字段暂不做，需要再加 |
+| V1 | 语法 | <span v-pre>`{{steps.NAME.output}}`</span>，NAME 为步骤 name（`[A-Za-z0-9_-]+`）；仅此一种形态 | 定义校验已保证 name 唯一；按名引用比按序号（原 M2 草案 `steps.N`）抗步骤重排，报错可读。`exit_code` 等其他字段暂不做，需要再加 |
 | V2 | 校验时机 | 定义保存时（`validateWorkflowPayload`）：引用的 name 必须存在于**更靠前**的步骤；未知名/前向引用 400 | 顺序链语义下前向引用必然拿到空值，保存期拒绝比运行期失败诚实；自引用同理 |
-| V3 | 替换时机 | 步骤开始前（进入重试循环前）解析一次，作用于 `sanitizeStepParams` 之后的参数树（递归 map/slice，仅 string 值；编排元键 name/retry/continue_on_error 不参与） | 重试各 attempt 用同一解析结果，语义稳定；目标字段 target 是资源 ID 不做替换 |
+| V3 | 替换时机 | 步骤开始前（进入重试循环前）解析一次，作用于 `sanitizeStepParams` 之后的参数树（递归 map/slice，仅 string 值；编排元键 name/retry/continue_on_error 不参与） | 重试各 attempt 用同一解析结果，语义稳定；目标字段 target 是资源 ID 不做替换。**连带修复 M1 遗留缺陷**：dispatchJob 原先传定义原参数——meta 键漏到 agent 且模板不解析（落库的是 sanitized 版，两处不一致）；现 dispatch 与落库同用解析后参数 |
 | V4 | 取值 | 前步最终 attempt 的 Job.Output 原文（≤64KB，尾部截断存储值）；源步骤失败（continue_on_error 放行）时用其已存输出（可能为空或错误输出）——与 W4 组合语义一致 | 64KB 是 agent 侧既有截断面，不新增上限；「引用失败步」是 continue_on_error 的自然延伸 |
 | V5 | 替换后再校验 | 解析结果过一遍 `validateJobPayload`，不过则该步直接 failed（快照记 stopReason），不派发 | 变量注入可能把命令撑过 16KB 上限；本地拒绝比发到 agent 再失败省一轮 RPC，行为确定 |
-| V6 | 字面量边界 | 仅精确匹配 `{{steps.NAME.output}}` 的 token 参与替换；其余 `{{...}}` 形态原样保留 | shell 里的 `{`、JSON 模板等不受影响；想写引用但名字拼错会在 V2 定义期被拦（unknown name），不会静默变字面量 |
+| V6 | 字面量边界 | 仅精确匹配 <span v-pre>`{{steps.NAME.output}}`</span> 的 token 参与替换；其余 <span v-pre>`{{...}}`</span> 形态原样保留 | shell 里的 `{`、JSON 模板等不受影响；想写引用但名字拼错会在 V2 定义期被拦（unknown name），不会静默变字面量 |
 
 ### 不变式
 
@@ -194,7 +194,7 @@ schema 变更，是 M2 候选里最小的高价值增量。
 
 - server（`cov_workflow` 系）：定义期未知引用/前向引用 400；两步链解析
   （假 provider 断言第二步 Job.Parameters 含第一步输出）；嵌套参数替换；
-  非 `{{steps.*.output}}` 的 `{{...}}` 原样保留；替换后超 16KB 步骤直接
+  非 <span v-pre>`{{steps.*.output}}`</span> 的 <span v-pre>`{{...}}`</span> 原样保留；替换后超 16KB 步骤直接
   failed 且无 Job 派发；引用失败步（continue_on_error）取错误输出。
 - 全部可达，无新增 known_uncoverable 登记（预计）。
 
