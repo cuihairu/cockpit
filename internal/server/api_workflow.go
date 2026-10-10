@@ -34,14 +34,25 @@ type workflowPayload struct {
 
 // workflowStepRun 步骤运行态快照（持久化在 run.Steps JSON 里）
 type workflowStepRun struct {
-	Name            string `json:"name"`
-	Type            string `json:"type"`
-	Target          string `json:"target"`
-	Status          string `json:"status"`
-	JobID           string `json:"jobId,omitempty"`
-	Attempts        int    `json:"attempts"`
-	StopReason      string `json:"stopReason,omitempty"`
-	ContinueOnError bool   `json:"continueOnError,omitempty"`
+	Name            string                  `json:"name"`
+	Type            string                  `json:"type"`
+	Target          string                  `json:"target"`
+	Targets         []workflowStepTargetRun `json:"targets,omitempty"` // 扇出步逐台结果（M2b F6，单目标步恒空）
+	Status          string                  `json:"status"`
+	JobID           string                  `json:"jobId,omitempty"`
+	Attempts        int                     `json:"attempts"`
+	StopReason      string                  `json:"stopReason,omitempty"`
+	ContinueOnError bool                    `json:"continueOnError,omitempty"`
+}
+
+// workflowStepTargetRun 扇出步单台结果（M2b F6）：Status 用 JobStatus* 同款
+// 词表（pending=未跑到，cancelled=run 取消时未跑到的目标）
+type workflowStepTargetRun struct {
+	AgentID    string `json:"agentId"`
+	Status     string `json:"status"`
+	JobID      string `json:"jobId,omitempty"`
+	Attempts   int    `json:"attempts"`
+	StopReason string `json:"stopReason,omitempty"`
 }
 
 type stepOptions struct {
@@ -166,6 +177,9 @@ func validateWorkflowPayload(p *workflowPayload) error {
 		if err := validateJobPayload(step); err != nil {
 			return fmt.Errorf("steps[%d]: %w", i, err)
 		}
+		if err := validateStepTargets(step); err != nil {
+			return fmt.Errorf("steps[%d]: %w", i, err)
+		}
 		// name 提取须类型断言——fmt.Sprint(缺失键) 得 "<nil>" 会漏校验
 		_, name := stepOptionsFromParams(step)
 		if name == "" {
@@ -187,6 +201,36 @@ func validateWorkflowPayload(p *workflowPayload) error {
 }
 
 // stepOptionsFromParams 提取步骤可选参数（timeout_s/continue_on_error/retry/name）
+// workflowMaxTargets 扇出目标数上限（M2b F1）：个人 infra 规模 sanity 闸，
+// 与 WorkflowMaxSteps 同量级的防误用边界
+const workflowMaxTargets = 20
+
+// validateStepTargets 扇出目标数组校验（M2b F1）：与 target 互斥、条目非空、
+// 去重、≤20 台。单目标步（无 targets）恒过。
+func validateStepTargets(step *jobCreatePayload) error {
+	if len(step.Targets) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(step.Target) != "" {
+		return fmt.Errorf("target and targets are mutually exclusive")
+	}
+	if len(step.Targets) > workflowMaxTargets {
+		return fmt.Errorf("too many targets (max %d)", workflowMaxTargets)
+	}
+	seen := make(map[string]bool, len(step.Targets))
+	for i := range step.Targets {
+		step.Targets[i] = strings.TrimSpace(step.Targets[i])
+		if step.Targets[i] == "" {
+			return fmt.Errorf("targets[%d] is empty", i)
+		}
+		if seen[step.Targets[i]] {
+			return fmt.Errorf("duplicate target %q", step.Targets[i])
+		}
+		seen[step.Targets[i]] = true
+	}
+	return nil
+}
+
 func stepOptionsFromParams(p *jobCreatePayload) (stepOptions, string) {
 	opts := stepOptions{}
 	name := ""
@@ -418,14 +462,17 @@ func (s *Server) handleWorkflowRun(w http.ResponseWriter, r *http.Request, id st
 		s.handleError(w, r, http.StatusConflict, "workflow is already running")
 		return
 	}
-	// 步骤目标 agent 全部在线才建 run（与单条 Job 同口径：不建幽灵）
+	// 步骤目标 agent 全部在线才建 run（与单条 Job 同口径：不建幽灵；扇出步
+	// 逐台校验，M2b F8）
 	stepPayloads := parseWorkflowSteps(wf)
 	for i := range stepPayloads {
 		step := &stepPayloads[i]
-		if _, ok := s.registry.Get(step.Target); !ok {
-			s.handleError(w, r, http.StatusServiceUnavailable,
-				fmt.Sprintf("agent offline for steps[%d]: %s", i, step.Target))
-			return
+		for _, tgt := range fanoutTargetsOf(step) {
+			if _, ok := s.registry.Get(tgt); !ok {
+				s.handleError(w, r, http.StatusServiceUnavailable,
+					fmt.Sprintf("agent offline for steps[%d]: %s", i, tgt))
+				return
+			}
 		}
 	}
 
@@ -433,13 +480,21 @@ func (s *Server) handleWorkflowRun(w http.ResponseWriter, r *http.Request, id st
 	var steps []workflowStepRun
 	for _, step := range stepPayloads {
 		opts, name := stepOptionsFromParams(&step)
-		steps = append(steps, workflowStepRun{
+		sr := workflowStepRun{
 			Name:            name,
 			Type:            step.Type,
 			Target:          step.Target,
 			Status:          storage.JobStatusPending,
 			ContinueOnError: opts.ContinueOnError,
-		})
+		}
+		if len(step.Targets) > 0 {
+			// 扇出步：步级 Target 留空（聚合在 Targets），逐台 pending 行
+			sr.Targets = make([]workflowStepTargetRun, 0, len(step.Targets))
+			for _, tgt := range step.Targets {
+				sr.Targets = append(sr.Targets, workflowStepTargetRun{AgentID: tgt, Status: storage.JobStatusPending})
+			}
+		}
+		steps = append(steps, sr)
 	}
 	stepsJSON, _ := json.Marshal(steps)
 	run := &storage.WorkflowRun{
@@ -502,9 +557,24 @@ func (s *Server) advanceWorkflow(wf *storage.Workflow, run *storage.WorkflowRun,
 			return // 已被取消，不再推进
 		}
 
-		job, finalStatus, attempts, reason := s.runWorkflowStep(step, opts, run.ID, actor, outputs)
-		outputs[name] = stepOutputOf(job)
-		s.recordStepResult(run, i, job, finalStatus, attempts, reason)
+		var job *storage.Job
+		var attempts int
+		var finalStatus, reason string
+		if len(step.Targets) > 0 {
+			// 扇出步（M2b F2-F5）：逐台跑、快照整步回写；不提供步骤输出
+			// （F7，{{steps.NAME.output}} 解析空串）
+			var results []workflowStepTargetRun
+			finalStatus, reason, results = s.runWorkflowStepFanout(step, opts, run.ID, actor, outputs)
+			s.recordStepTargets(run, i, results, finalStatus, reason)
+			outputs[name] = ""
+			if finalStatus == storage.JobStatusCancelled {
+				return // run 已被取消，终态由 cancel 流程落
+			}
+		} else {
+			job, finalStatus, attempts, reason = s.runWorkflowStep(step, opts, run.ID, actor, outputs)
+			outputs[name] = stepOutputOf(job)
+			s.recordStepResult(run, i, job, finalStatus, attempts, reason)
+		}
 
 		if finalStatus != storage.JobStatusSuccess && !opts.ContinueOnError {
 			if reason == "" {
@@ -515,6 +585,15 @@ func (s *Server) advanceWorkflow(wf *storage.Workflow, run *storage.WorkflowRun,
 		}
 	}
 	s.finishWorkflowRun(run, storage.WorkflowRunStatusSuccess, len(steps)-1, "", actor)
+}
+
+// fanoutTargetsOf 步骤目标列表（M2b）：targets 扇出形态原样返回，单目标
+// 形态包成单元素——定义校验后二者必居其一
+func fanoutTargetsOf(step *jobCreatePayload) []string {
+	if len(step.Targets) > 0 {
+		return step.Targets
+	}
+	return []string{step.Target}
 }
 
 // runWorkflowStep 执行单步（含重试）；返回终态 Job、归纳状态、实跑尝试数
@@ -638,6 +717,88 @@ func (s *Server) recordStepResult(run *storage.WorkflowRun, idx int, job *storag
 			if stopReason == "" {
 				stopReason = "failed"
 			}
+			steps[idx].StopReason = stopReason
+		}
+		if b, err := json.Marshal(steps); err == nil {
+			run.Steps = string(b)
+			_ = s.db.UpdateWorkflowRun(run)
+		}
+	}
+}
+
+// runWorkflowStepFanout 顺序扇出（M2b F2-F5）：逐台完整重试周期（每台复用
+// runWorkflowStep，仅覆写 Target——agent 零改动）；目标边界查取消（F5）；
+// 失败策略同 W5：无 continue_on_error 首台失败即停，带则跑完全部。返回聚合
+// 状态（全成功才 success，任一失败 failed，取消 cancelled）、失败原因与逐台
+// 结果（未跑目标记 cancelled/pending）。
+func (s *Server) runWorkflowStepFanout(step *jobCreatePayload, opts stepOptions, runID, actor string, outputs map[string]string) (string, string, []workflowStepTargetRun) {
+	status := storage.JobStatusSuccess
+	reason := ""
+	results := make([]workflowStepTargetRun, 0, len(step.Targets))
+	for t := range step.Targets {
+		// 目标边界取消检查（F5，与步骤边界同机制）
+		current, err := s.db.GetWorkflowRun(runID)
+		if err != nil {
+			log.Printf("workflow: load run %s failed: %v", runID, err)
+			break // 同 advanceWorkflow 加载失败口径：不再推进
+		}
+		if current.Status != storage.WorkflowRunStatusRunning {
+			for ; t < len(step.Targets); t++ {
+				results = append(results, workflowStepTargetRun{
+					AgentID:    step.Targets[t],
+					Status:     storage.JobStatusCancelled,
+					StopReason: "run cancelled",
+				})
+			}
+			return storage.JobStatusCancelled, "", results
+		}
+		single := *step
+		single.Target = step.Targets[t]
+		job, finalStatus, attempts, r := s.runWorkflowStep(&single, opts, runID, actor, outputs)
+		if finalStatus != storage.JobStatusSuccess && r == "" {
+			r = "failed" // 与 recordStepResult 同款默认，单台失败可读
+		}
+		results = append(results, workflowStepTargetRun{AgentID: step.Targets[t], Status: finalStatus, JobID: jobIDOf(job), Attempts: attempts, StopReason: r})
+		if finalStatus != storage.JobStatusSuccess {
+			status = storage.JobStatusFailed
+			if reason == "" {
+				reason = r
+			}
+			if !opts.ContinueOnError {
+				break // F3：后续目标不跑（快照保持 pending 行）
+			}
+		}
+	}
+	return status, reason, results
+}
+
+// jobIDOf 取终态 Job 的 ID（Job 行未建成返回空）
+func jobIDOf(job *storage.Job) string {
+	if job == nil {
+		return ""
+	}
+	return job.ID
+}
+
+// recordStepTargets 扇出步快照整步回写（M2b F6）：按索引合并逐台结果
+// （未跑目标保留 init 的 pending 行），步级 Status=聚合 + StopReason
+func (s *Server) recordStepTargets(run *storage.WorkflowRun, idx int, results []workflowStepTargetRun, status, stopReason string) {
+	run, err := s.db.GetWorkflowRun(run.ID)
+	if err != nil {
+		log.Printf("workflow: load run for step targets failed: %v", err)
+		return
+	}
+	var steps []workflowStepRun
+	if json.Unmarshal([]byte(run.Steps), &steps) == nil && idx < len(steps) {
+		steps[idx].Status = status
+		for t := range results {
+			if t < len(steps[idx].Targets) {
+				steps[idx].Targets[t] = results[t]
+			}
+		}
+		if status == storage.JobStatusFailed {
+			// cancelled 不落步级 StopReason（未跑原因在逐台条目里）；failed 的
+			// reason 由扇出 runner 聚合时保证非空（单台失败默认 "failed"）
 			steps[idx].StopReason = stopReason
 		}
 		if b, err := json.Marshal(steps); err == nil {

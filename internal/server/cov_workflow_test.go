@@ -821,3 +821,400 @@ func TestCovStepOutputOfNil(t *testing.T) {
 		t.Fatal("job output should pass through")
 	}
 }
+
+// ============ M2b 多目标扇出 ============
+
+// TestWorkflowFanoutValidation targets 校验矩阵（F1）与 standalone Job 拒收。
+func TestWorkflowFanoutValidation(t *testing.T) {
+	s := newBackupTestServer(t)
+	tg := make([]string, workflowMaxTargets+1)
+	for i := range tg {
+		tg[i] = `"` + strings.Repeat("a", i+1) + `"`
+	}
+	for _, c := range []struct {
+		name string
+		body string
+	}{
+		{"target and targets exclusive", `{"name":"n","steps":[{"type":"agent.exec","target":"a1","targets":["a2"],"parameters":{"name":"s","command":"x"}}]}`},
+		{"empty target entry", `{"name":"n","steps":[{"type":"agent.exec","targets":["a1","  "],"parameters":{"name":"s","command":"x"}}]}`},
+		{"duplicate targets", `{"name":"n","steps":[{"type":"agent.exec","targets":["a1","a1"],"parameters":{"name":"s","command":"x"}}]}`},
+		{"too many targets", `{"name":"n","steps":[{"type":"agent.exec","targets":[` + strings.Join(tg, ",") + `],"parameters":{"name":"s","command":"x"}}]}`},
+		{"empty targets array", `{"name":"n","steps":[{"type":"agent.exec","targets":[],"parameters":{"name":"s","command":"x"}}]}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows", strings.NewReader(c.body)), "/workflows")
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("code = %d, body: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+	// standalone Job 携 targets → 400（扇出仅 workflow steps 合法）
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", strings.NewReader(`{"type":"agent.exec","targets":["a1"],"parameters":{"command":"x"}}`))
+	s.handleJobsAPI(rec, req, "/jobs")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "workflow steps") {
+		t.Fatalf("standalone targets: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestWorkflowFanoutSuccess 两台顺序扇出（F2）：执行序=targets 序，全成功聚合
+// success，逐台 Job 落台账；同 run 的单目标步快照形状不变（无 targets 键）。
+func TestWorkflowFanoutSuccess(t *testing.T) {
+	s := newBackupTestServer(t)
+	var order []string
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		order = append(order, "a1")
+		return map[string]interface{}{"exit_code": 0, "output": "from-a1", "error": ""}, ""
+	})
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		order = append(order, "a2")
+		return map[string]interface{}{"exit_code": 0, "output": "from-a2", "error": ""}, ""
+	})
+
+	body := `{"name":"f","steps":[` +
+		`{"type":"agent.exec","targets":["a2","a1"],"parameters":{"name":"fan","command":"uptime"}},` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"tail","command":"date"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("run code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusSuccess {
+		t.Fatalf("run = %+v", run)
+	}
+	// 顺序扇出：a2 先于 a1，扇出步先于尾步
+	if len(order) != 3 || order[0] != "a2" || order[1] != "a1" || order[2] != "a1" {
+		t.Fatalf("dispatch order = %v", order)
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if len(steps) != 2 {
+		t.Fatalf("steps = %+v", steps)
+	}
+	fan := steps[0]
+	if fan.Status != "success" || fan.Target != "" || fan.JobID != "" || fan.StopReason != "" {
+		t.Fatalf("fan step = %+v", fan)
+	}
+	if len(fan.Targets) != 2 ||
+		fan.Targets[0].AgentID != "a2" || fan.Targets[0].Status != "success" || fan.Targets[0].JobID == "" || fan.Targets[0].Attempts != 1 ||
+		fan.Targets[1].AgentID != "a1" || fan.Targets[1].Status != "success" || fan.Targets[1].JobID == "" {
+		t.Fatalf("fan targets = %+v", fan.Targets)
+	}
+	// 单目标步形状回归：无 targets 键、JobID 仍在步级
+	var raw []map[string]json.RawMessage
+	json.Unmarshal([]byte(run.Steps), &raw)
+	if _, ok := raw[1]["targets"]; ok {
+		t.Fatalf("single-target step should not carry targets key: %s", raw[1])
+	}
+	if steps[1].Status != "success" || steps[1].JobID == "" || steps[1].Target != "a1" {
+		t.Fatalf("tail step = %+v", steps[1])
+	}
+	// 逐台 Job 落台账（3 行：a2 + a1 + 尾步 a1）
+	jobs, _ := s.db.ListJobsFiltered("", "", "", rv.ID, 10)
+	if len(jobs) != 3 {
+		t.Fatalf("jobs = %d, want 3", len(jobs))
+	}
+}
+
+// TestWorkflowFanoutFailStops 首台失败即停（F3）：后续目标不跑（pending）、
+// 下一步不执行、run failed。
+func TestWorkflowFanoutFailStops(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		return map[string]interface{}{"exit_code": 3, "output": "boom", "error": ""}, ""
+	})
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+
+	body := `{"name":"f","steps":[` +
+		`{"type":"agent.exec","targets":["a2","a1"],"parameters":{"name":"fan","command":"uptime"}},` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"never","command":"date"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusFailed {
+		t.Fatalf("run = %+v", run)
+	}
+	jobs, _ := s.db.ListJobsFiltered("", "", "", rv.ID, 10)
+	if len(jobs) != 2 {
+		t.Fatalf("jobs = %d, want 2 (second target not reached)", len(jobs))
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if steps[0].Status != "failed" || steps[0].StopReason != "failed" ||
+		steps[0].Targets[0].Status != "success" || steps[0].Targets[1].Status != "failed" || steps[0].Targets[1].StopReason != "failed" {
+		t.Fatalf("steps = %+v", steps)
+	}
+	if steps[1].Status != "pending" {
+		t.Fatalf("tail step = %+v", steps[1])
+	}
+}
+
+// TestWorkflowFanoutContinueOnError continue_on_error 跑完全部目标（F3）：
+// 步 failed 但链继续，run success。
+func TestWorkflowFanoutContinueOnError(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		return map[string]interface{}{"exit_code": 3, "output": "boom", "error": ""}, ""
+	})
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+
+	body := `{"name":"f","steps":[` +
+		`{"type":"agent.exec","targets":["a1","a2"],"parameters":{"name":"fan","command":"uptime","continue_on_error":true}},` +
+		`{"type":"agent.exec","target":"a2","parameters":{"name":"tail","command":"date"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusSuccess {
+		t.Fatalf("run = %+v", run)
+	}
+	jobs, _ := s.db.ListJobsFiltered("", "", "", rv.ID, 10)
+	if len(jobs) != 3 {
+		t.Fatalf("jobs = %d, want 3 (all targets ran)", len(jobs))
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if steps[0].Status != "failed" || steps[0].Targets[0].Status != "failed" || steps[0].Targets[1].Status != "success" {
+		t.Fatalf("steps = %+v", steps)
+	}
+	if steps[1].Status != "success" {
+		t.Fatalf("tail step = %+v", steps[1])
+	}
+}
+
+// TestWorkflowFanoutRetryPerTarget 按台独立重试周期（F4）：a1 首败 retry 后
+// 成功（attempts 2），a2 一次过（attempts 1）。
+func TestWorkflowFanoutRetryPerTarget(t *testing.T) {
+	saveRetry := workflowRetryInterval
+	workflowRetryInterval = 20 * time.Millisecond
+	t.Cleanup(func() { workflowRetryInterval = saveRetry })
+	s := newBackupTestServer(t)
+	a1Calls := 0
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		a1Calls++
+		if a1Calls == 1 {
+			return map[string]interface{}{"exit_code": 1, "output": "", "error": ""}, ""
+		}
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+
+	body := `{"name":"f","steps":[{"type":"agent.exec","targets":["a1","a2"],"parameters":{"name":"fan","command":"uptime","retry":1}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusSuccess {
+		t.Fatalf("run = %+v", run)
+	}
+	if a1Calls != 2 {
+		t.Fatalf("a1 calls = %d, want 2", a1Calls)
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if steps[0].Status != "success" || steps[0].Targets[0].Attempts != 2 || steps[0].Targets[1].Attempts != 1 {
+		t.Fatalf("steps = %+v", steps)
+	}
+	// 逐台 attempt 独立 Job 行：a1 两条 + a2 一条
+	jobs, _ := s.db.ListJobsFiltered("", "", "", rv.ID, 10)
+	if len(jobs) != 3 {
+		t.Fatalf("jobs = %d, want 3", len(jobs))
+	}
+}
+
+// TestWorkflowFanoutCancelBoundary 目标边界取消（F5）：已取消 run 上扇出，
+// 全部目标记 cancelled（stopReason=run cancelled），零派发；快照整步回写后
+// 步级 cancelled 且无 StopReason（未跑原因在逐台条目）。
+func TestWorkflowFanoutCancelBoundary(t *testing.T) {
+	s := newBackupTestServer(t)
+	calls := 0
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		calls++
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		calls++
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+
+	wf := wfCreate(t, s, `{"name":"c","steps":[{"type":"agent.exec","targets":["a1","a2"],"parameters":{"name":"fan","command":"uptime"}}]}`)
+	stepsJSON := `[{"name":"fan","type":"agent.exec","target":"","targets":[` +
+		`{"agentId":"a1","status":"pending"},{"agentId":"a2","status":"pending"}],"status":"pending"}]`
+	run := &storage.WorkflowRun{
+		ID: "r-cancelled", WorkflowID: wf.ID, WorkflowName: wf.Name,
+		Status: storage.WorkflowRunStatusCancelled, Steps: stepsJSON, CreatedAt: time.Now(),
+	}
+	if err := s.db.CreateWorkflowRun(run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	step := &jobCreatePayload{Type: "agent.exec", Targets: []string{"a1", "a2"},
+		Parameters: map[string]interface{}{"name": "fan", "command": "x"}}
+	status, reason, results := s.runWorkflowStepFanout(step, stepOptions{}, run.ID, "tester", map[string]string{})
+	if status != storage.JobStatusCancelled || reason != "" || len(results) != 2 {
+		t.Fatalf("fanout = %s %q %+v", status, reason, results)
+	}
+	for _, tr := range results {
+		if tr.Status != storage.JobStatusCancelled || tr.StopReason != "run cancelled" || tr.JobID != "" {
+			t.Fatalf("target result = %+v", tr)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("dispatched %d times on cancelled run", calls)
+	}
+
+	// advanceWorkflow 同款回写：快照按索引合并、步级 cancelled
+	s.recordStepTargets(run, 0, results, status, reason)
+	saved, err := s.db.GetWorkflowRun(run.ID)
+	if err != nil {
+		t.Fatalf("reload run: %v", err)
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(saved.Steps), &steps)
+	if steps[0].Status != "cancelled" || steps[0].StopReason != "" ||
+		steps[0].Targets[0].Status != "cancelled" || steps[0].Targets[1].AgentID != "a2" || steps[0].Targets[1].Status != "cancelled" {
+		t.Fatalf("saved steps = %+v", steps)
+	}
+}
+
+// TestWorkflowFanoutOfflineTarget 任一目标离线 → 503 不建 run（F8）。
+func TestWorkflowFanoutOfflineTarget(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeBackupAgent(t, s, "a1", nil)
+
+	body := `{"name":"f","steps":[{"type":"agent.exec","targets":["a1","ghost"],"parameters":{"name":"fan","command":"uptime"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "ghost") {
+		t.Fatalf("code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestWorkflowFanoutOutputEmpty 扇出步不提供步骤输出（F7）：引用解析空串；
+// 单条目 targets 走扇出路径。
+func TestWorkflowFanoutOutputEmpty(t *testing.T) {
+	s := newBackupTestServer(t)
+	var got []map[string]interface{}
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		got = append(got, params)
+		return map[string]interface{}{"exit_code": 0, "output": "fan-out", "error": ""}, ""
+	})
+
+	body := `{"name":"f","steps":[` +
+		`{"type":"agent.exec","targets":["a1"],"parameters":{"name":"fan","command":"uptime"}},` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"use","command":"echo [{{steps.fan.output}}]"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusSuccess {
+		t.Fatalf("run = %+v", run)
+	}
+	if len(got) != 2 {
+		t.Fatalf("dispatched = %d calls", len(got))
+	}
+	if c, _ := got[1]["command"].(string); c != "echo []" {
+		t.Fatalf("resolved command = %q, want %q", c, "echo []")
+	}
+}
+
+// TestWorkflowFanoutMidRunCancel 运行中扇出目标边界取消（F5 全链）：a1 在途
+// 时取消 run（handler 内同步取消，确定性无竞态），a1 正常返回 success，
+// a2 目标边界检查记 cancelled，run 保持 cancelled 终态（不走 failed 落终态）。
+func TestWorkflowFanoutMidRunCancel(t *testing.T) {
+	s := newBackupTestServer(t)
+	runIDCh := make(chan string, 1)
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		// a1 在途：等测试拿到 run ID 后取消 run，再正常返回
+		id := <-runIDCh
+		run, err := s.db.GetWorkflowRun(id)
+		if err != nil {
+			t.Errorf("load run: %v", err)
+		} else {
+			run.Status = storage.WorkflowRunStatusCancelled
+			finished := time.Now()
+			run.FinishedAt = &finished
+			if err := s.db.UpdateWorkflowRun(run); err != nil {
+				t.Errorf("cancel run: %v", err)
+			}
+		}
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+	withFakeBackupAgent(t, s, "a2", func(method string, params map[string]interface{}) (interface{}, string) {
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+
+	body := `{"name":"c","steps":[{"type":"agent.exec","targets":["a1","a2"],"parameters":{"name":"fan","command":"uptime"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("run code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+	runIDCh <- rv.ID
+
+	// run goroutine 推进到 a2 目标边界后落终态
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusCancelled {
+		t.Fatalf("run = %+v (cancel must not be overwritten by failed)", run)
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if len(steps) != 1 || steps[0].Status != "cancelled" ||
+		steps[0].Targets[0].AgentID != "a1" || steps[0].Targets[0].Status != "success" ||
+		steps[0].Targets[1].AgentID != "a2" || steps[0].Targets[1].Status != "cancelled" || steps[0].Targets[1].StopReason != "run cancelled" {
+		t.Fatalf("steps = %+v", steps)
+	}
+}
+
+// TestWorkflowFanoutDBErrors db 失败面：扇出中加载 run 失败即停（同
+// advanceWorkflow 加载失败口径）、快照回写加载失败静默、jobIDOf nil 防御。
+func TestWorkflowFanoutDBErrors(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeBackupAgent(t, s, "a1", nil)
+	if err := s.db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	step := &jobCreatePayload{Type: "agent.exec", Targets: []string{"a1"},
+		Parameters: map[string]interface{}{"name": "fan", "command": "x"}}
+	status, reason, results := s.runWorkflowStepFanout(step, stepOptions{}, "r-x", "tester", map[string]string{})
+	if status != storage.JobStatusSuccess || reason != "" || len(results) != 0 {
+		t.Fatalf("fanout on closed db = %s %q %+v", status, reason, results)
+	}
+	// 快照回写在加载失败时静默返回（与 recordStepResult 同口径）
+	run := &storage.WorkflowRun{ID: "r-x"}
+	s.recordStepTargets(run, 0, results, status, reason)
+	// jobIDOf nil 防御（Job 行未建成）
+	if jobIDOf(nil) != "" {
+		t.Fatal("jobIDOf(nil) should be empty")
+	}
+}

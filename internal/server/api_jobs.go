@@ -27,6 +27,7 @@ import (
 type jobCreatePayload struct {
 	Type       string                 `json:"type"`
 	Target     string                 `json:"target"`
+	Targets    []string               `json:"targets,omitempty"` // 多目标扇出（M2b F1）：仅 workflow steps 合法
 	Parameters map[string]interface{} `json:"parameters"`
 }
 
@@ -77,7 +78,7 @@ func validateJobPayload(p *jobCreatePayload) error {
 		return fmt.Errorf("unsupported job type %q (allowed: agent.exec)", p.Type)
 	}
 	p.Target = strings.TrimSpace(p.Target)
-	if p.Target == "" {
+	if p.Target == "" && len(p.Targets) == 0 {
 		return fmt.Errorf("target (agent id) is required")
 	}
 	if p.Type == "agent.exec" {
@@ -171,6 +172,11 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateJobPayload(&payload); err != nil {
 		s.handleError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	// targets 扇出仅 workflow steps 合法（M2b F1）：standalone Job 单目标语义
+	if len(payload.Targets) > 0 {
+		s.handleError(w, r, http.StatusBadRequest, "targets is only valid in workflow steps")
 		return
 	}
 
