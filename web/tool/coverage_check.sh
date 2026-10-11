@@ -15,6 +15,20 @@ KNOWN=tool/known_uncoverable.txt
 [[ -f "$LCOV" ]] || { echo "缺少 $LCOV（先跑 vitest --coverage）" >&2; exit 1; }
 [[ -f "$KNOWN" ]] || { echo "缺少 $KNOWN" >&2; exit 1; }
 
+# lcov 新鲜度：覆盖结论必须基于本轮源码。沿用上轮残留 lcov（未重跑
+# vitest --coverage）等于把上一版覆盖算成现在——同 Go 端 2026-10-11
+# 假绿（本地残留 coverage.out 校验新仓库，COV_RC=0 假绿推送后 CI 红）。
+# 只比本 lcov 覆盖到的文件（SF 里没有的文件不算过期）。
+stale_src=$(comm -12 \
+  <(find src -type f \( -name '*.ts' -o -name '*.tsx' \) -newer "$LCOV" -printf '%p\n' 2>/dev/null | sort -u) \
+  <(awk -F: '/^SF:/ { print $2 }' "$LCOV" | sort -u))
+if [[ -n "$stale_src" ]]; then
+  echo "失败：lcov 早于以下源文件的改动，覆盖结论不可信（沿用上轮残留 lcov）" >&2
+  printf '%s\n' "$stale_src" | sed 's/^/  /' >&2
+  echo "修复：重跑 pnpm vitest run --coverage.enabled=true --coverage.reporter=lcov --coverage.include='src/**/*.{ts,tsx}' 后再校验" >&2
+  exit 1
+fi
+
 # 未覆盖行（DA:0）与未覆盖分支（BRDA taken 为 0 或 '-'）→ "path:line" 列表
 missed=$(awk -F'[,:]' '
   /^SF:/ { file=$2 }
