@@ -35,6 +35,7 @@ const overview = (over?: Partial<HealthOverview>): HealthOverview => ({
         unit: 'cloudflared.service',
       },
       { id: 'sshd-active', type: 'systemd', target: 'ssh.service' },
+      { id: 'dep-ready', type: 'tcp', target: '127.0.0.1:5432' },
     ],
     whitelist: ['cloudflared.service'],
     updatedAt: 1759000000,
@@ -45,9 +46,59 @@ const overview = (over?: Partial<HealthOverview>): HealthOverview => ({
       status: 'ok',
       lastCheck: 1759000100,
       consecutiveFails: 0,
+      semantics: 'liveness',
+      openWindow: {
+        target: 'cloudflared-ready',
+        semantics: 'liveness',
+        startedAt: '2026-10-11T08:00:00.000Z',
+        endedAt: '0001-01-01T00:00:00Z',
+        lastError: 'HTTP 502',
+      },
+      recentWindows: [
+        {
+          target: 'cloudflared-ready',
+          semantics: 'liveness',
+          startedAt: '2026-10-10T08:00:00.000Z',
+          endedAt: '2026-10-10T08:05:00.000Z',
+          lastError: 'timeout',
+        },
+        {
+          target: 'cloudflared-ready',
+          semantics: 'liveness',
+          startedAt: '2026-10-09T08:00:00.000Z',
+          endedAt: '2026-10-09T08:01:00.000Z',
+        },
+      ],
       lastHeal: { time: 1758990000, unit: 'cloudflared.service', result: 'restarted', detail: 'ok', durationMs: 1200 },
     },
-    'sshd-active': { status: 'fail', lastCheck: 1759000100, consecutiveFails: 3, lastError: 'systemctl is-active: failed' },
+    'sshd-active': {
+      status: 'fail',
+      lastCheck: 1759000100,
+      consecutiveFails: 3,
+      lastError: 'systemctl is-active: failed',
+      semantics: 'readiness',
+      recentWindows: [
+        {
+          target: 'sshd-active',
+          // semantics 缺省：recent 项同样要吃 `?? ''` 兜底侧
+          startedAt: '2026-10-09T08:00:00.000Z',
+          endedAt: '2026-10-09T08:02:00.000Z',
+          lastError: 'systemctl is-active: failed',
+        },
+      ],
+    },
+    'dep-ready': {
+      status: 'fail',
+      lastCheck: 1759000100,
+      consecutiveFails: 1,
+      semantics: 'readiness',
+      openWindow: {
+        target: 'dep-ready',
+        // semantics 缺省：StateWindows 里 `semantics ?? ''` 兜底侧要吃真数据
+        startedAt: '2026-10-11T09:30:00.000Z',
+        endedAt: '0001-01-01T00:00:00Z',
+      },
+    },
   },
   online: true,
   ...over,
@@ -75,7 +126,7 @@ describe('HealthPanel', () => {
     await screen.findByText('cloudflared-ready')
     expect(screen.getByText('sshd-active')).toBeInTheDocument()
     expect(screen.getByText('正常')).toBeInTheDocument()
-    expect(screen.getByText('失败')).toBeInTheDocument()
+    expect(screen.getAllByText('失败')).toHaveLength(2) // sshd-active + dep-ready
     expect(screen.getByText('连续 3 次')).toBeInTheDocument()
     expect(screen.getByText(/已自愈/)).toBeInTheDocument()
     expect(screen.getByText(/自愈目标白名单：cloudflared.service/)).toBeInTheDocument()
@@ -87,6 +138,25 @@ describe('HealthPanel', () => {
     renderPanel()
     expect(await screen.findByText(/主机离线：以下为最近一次归集的状态快照/)).toBeInTheDocument()
     await screen.findByText('cloudflared-ready')
+  })
+
+  it('故障窗口列：开窗红色置顶、已关闭近次摘要（P6 三语义时间线）', async () => {
+    renderPanel()
+    await screen.findByText('cloudflared-ready')
+    // 两个开窗（cloudflared-ready liveness / dep-ready readiness）
+    expect(screen.getAllByText(/故障中/)).toHaveLength(2)
+    // sshd-active 只有已关闭窗口 → 「近 N 次」摘要
+    expect(screen.getByText('近 1 次')).toBeInTheDocument()
+  })
+
+  it('故障窗口列：无窗口数据显示占位且不出现窗口 Tag', async () => {
+    apiMock.getAgentHealth.mockResolvedValue(
+      overview({ states: { 'cloudflared-ready': { status: 'ok', lastCheck: 1759000100 } } }),
+    )
+    renderPanel()
+    await screen.findByText('cloudflared-ready')
+    expect(screen.queryByText(/故障中/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/近 \d+ 次/)).not.toBeInTheDocument()
   })
 
   it('未配置探针：空态保留编辑入口（有写权限时即是配置入口）', async () => {
@@ -134,7 +204,7 @@ describe('HealthPanel', () => {
     })
     await waitFor(() => expect(apiMock.saveAgentHealth).toHaveBeenCalled())
     const body = apiMock.saveAgentHealth.mock.calls[0][1]
-    expect(body.probes).toHaveLength(2)
+    expect(body.probes).toHaveLength(3)
     expect(body.probes[0].id).toBe('cloudflared-ready')
     expect(body.whitelist).toEqual(['cloudflared.service'])
     await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已保存并下发（2 条探针）'))
@@ -177,7 +247,7 @@ describe('HealthPanel', () => {
     await screen.findByText('cloudflared-ready')
     fireEvent.click(screen.getByText('编辑探针'))
     const idInputs = await screen.findAllByPlaceholderText('id（如 cloudflared-ready）')
-    expect(idInputs).toHaveLength(2)
+    expect(idInputs).toHaveLength(3)
     fireEvent.change(idInputs[0], { target: { value: '' } })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
@@ -211,10 +281,10 @@ describe('HealthPanel', () => {
     await screen.findByText('编辑健康探针')
     // 添加：默认 http 类型的新行
     fireEvent.click(screen.getByText('添加探针'))
-    expect(screen.getAllByPlaceholderText('id（如 cloudflared-ready）')).toHaveLength(3)
+    expect(screen.getAllByPlaceholderText('id（如 cloudflared-ready）')).toHaveLength(4)
     // 删除：移除第一行（cloudflared-ready）
     fireEvent.click(screen.getAllByText('删除')[0])
-    expect(screen.getAllByPlaceholderText('id（如 cloudflared-ready）')).toHaveLength(2)
+    expect(screen.getAllByPlaceholderText('id（如 cloudflared-ready）')).toHaveLength(3)
     expect((screen.getAllByPlaceholderText('id（如 cloudflared-ready）')[0] as HTMLInputElement).value).toBe('sshd-active')
   })
 

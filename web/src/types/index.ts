@@ -968,6 +968,17 @@ export interface HealthConfigRecord {
   updatedBy?: string
 }
 
+// 故障窗口（agent 侧 core/healthprobe.Window 镜像，P6 三语义）：startedAt/
+// endedAt 为 RFC3339 串；endedAt 为零值串（0001-01-01T00:00:00Z）⟺ 仍在
+// 故障中（time.Time 的 omitempty 无效，前后端按零值判开合）
+export interface HealthWindow {
+  target: string
+  semantics?: 'liveness' | 'readiness' | 'heartbeat'
+  startedAt: string
+  endedAt?: string
+  lastError?: string
+}
+
 // 最近一次自愈决策
 export interface HealthHealRec {
   time: number
@@ -979,11 +990,14 @@ export interface HealthHealRec {
 
 // 单探针运行态
 export interface HealthStateEntry {
-  status: string // ok / fail / unknown
+  status: string // ok / fail / unknown（最近一次探测结果，非判定态）
+  semantics?: 'liveness' | 'readiness' | 'heartbeat' // 判定语义（P6）
   lastCheck?: number
   consecutiveFails?: number
   lastError?: string
   lastHeal?: HealthHealRec | null
+  openWindow?: HealthWindow | null // 非空 ⟺ 判定期故障中
+  recentWindows?: HealthWindow[] // 近期已关闭故障窗口（agent 侧环形上限 64）
 }
 
 // GET /agents/{id}/health 概览（在线实时拉取，离线回落缓存灰态）

@@ -54,6 +54,51 @@ const PROBE_TYPE_LABELS: Record<HealthProbe['type'], string> = {
   systemd: 'systemd active',
 }
 
+// 故障窗口时间线（P6）：开窗中的窗口红色置顶，已关闭的近几次次之；明细
+// （起止时刻 + 语义 + 最近失败原因）走 Tooltip。endedAt 零值串 ⟺ 仍故障。
+const formatWindowTime = (iso?: string) =>
+  iso && !iso.startsWith('0001-') ? dayjs(iso).format('MM-DD HH:mm') : '?'
+
+const StateWindows = ({ state }: { state: HealthStateEntry }) => {
+  const open = state.openWindow
+  const recent = state.recentWindows ?? []
+  if (!open && recent.length === 0) {
+    return <Typography.Text type="secondary" style={{ fontSize: 12 }}>—</Typography.Text>
+  }
+  const lines = [
+    ...(open
+      ? [
+          `故障中 · ${open.semantics ?? ''} ${formatWindowTime(open.startedAt)} ~ ${formatWindowTime(open.endedAt)}${
+            open.lastError ? `：${open.lastError}` : ''
+          }`,
+        ]
+      : []),
+    ...recent
+      .slice(-3)
+      .reverse()
+      .map(
+        (w) =>
+          `${w.semantics ?? ''} ${formatWindowTime(w.startedAt)} ~ ${formatWindowTime(w.endedAt)}${
+            w.lastError ? `：${w.lastError}` : ''
+          }`,
+      ),
+  ]
+  return (
+    <Tooltip
+      title={
+        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12, maxWidth: 320 }}>
+          {lines.join('\n')}
+        </pre>
+      }
+    >
+      <Space size={4} wrap>
+        {open && <Tag color="red">故障中 {formatWindowTime(open.startedAt)}</Tag>}
+        {!open && recent.length > 0 && <Tag>近 {recent.length} 次</Tag>}
+      </Space>
+    </Tooltip>
+  )
+}
+
 // 表单里的探针行（数值控件可能给 null，提交前归一为 undefined 让 0 缺省
 // 语义在 server 侧生效）
 type ProbeFormRow = Omit<HealthProbe, 'expectStatus' | 'intervalSec' | 'timeoutSec' | 'failThreshold' | 'backoffWindowSec' | 'maxRestartsInWindow'> & {
@@ -200,6 +245,12 @@ const HealthPanel = ({ agentId }: { agentId: string }) => {
           </Space>
         )
       },
+    },
+    {
+      title: '故障窗口',
+      key: 'windows',
+      width: 190,
+      render: (_, r) => <StateWindows state={r.state} />,
     },
     {
       title: '最近检查',
