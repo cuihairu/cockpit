@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -93,7 +94,13 @@ func TestCovAgentMainGracefulExit(t *testing.T) {
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
-	cmd := exec.Command(os.Args[0], "-test.run=^$", "-test.timeout=60s")
+	// 子进程 90s 自杀上限 > 父进程 60s 注册等待：注册超时是父进程判的，
+	// 子进程不能先死（否则 exit code 干扰信号路径断言）。全量套件并发跑
+	// 时子进程启动+注册实测可超 30s（2026-10-11 CI 慢机超时实证），deadline
+	// 留足且失败时带出子进程 stderr 便于定位。
+	cmd := exec.Command(os.Args[0], "-test.run=^$", "-test.timeout=90s")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	cmd.Env = covSubprocEnv("graceful", "COCKPIT_AGENT_MAIN_TEST_WS="+wsURL)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -101,10 +108,10 @@ func TestCovAgentMainGracefulExit(t *testing.T) {
 
 	select {
 	case <-registered:
-	case <-time.After(30 * time.Second):
+	case <-time.After(60 * time.Second):
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		t.Fatal("child agent never registered")
+		t.Fatalf("child agent never registered; stderr:\n%s", stderr.String())
 	}
 
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
