@@ -139,6 +139,24 @@ func TestGuardFaultyUpdatesLastError(t *testing.T) {
 	}
 }
 
+// TestGuardFailsAcrossTransition 连败计数跨迁移累计：故障持续期继续涨
+// （上行读数要真实连败次数），任一次成功即清零。
+func TestGuardFailsAcrossTransition(t *testing.T) {
+	g := NewGuard("t", 3, 1, nil)
+	step(t, g, 3, errors.New("x")) // 判 Faulty
+	if f := g.Snapshot().Fails; f != 3 {
+		t.Fatalf("fails at trip = %d, want 3", f)
+	}
+	step(t, g, 2, errors.New("x"))
+	if f := g.Snapshot().Fails; f != 5 {
+		t.Fatalf("fails during fault = %d, want 5 (kept counting)", f)
+	}
+	g.Record(nil, base.Add(99*time.Second))
+	if f := g.Snapshot().Fails; f != 0 {
+		t.Fatalf("fails after success = %d, want 0", f)
+	}
+}
+
 // TestGuardWindowRing 环形容量：超限丢最旧，保留最近 windowCapacity 个。
 func TestGuardWindowRing(t *testing.T) {
 	g := NewGuard("t", 1, 1, nil)

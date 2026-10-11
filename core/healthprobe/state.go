@@ -34,8 +34,12 @@ type Snapshot struct {
 	LastChecked time.Time `json:"lastChecked"`
 	LastOK      time.Time `json:"lastOk,omitempty"`
 	LastError   string    `json:"lastError,omitempty"`
-	Open        *Window   `json:"open,omitempty"`
-	Recent      []Window  `json:"recent,omitempty"`
+	// Fails 自上次成功以来的连续失败数：跨状态迁移持续累计（迁移只定性
+	// 不清零），故障持续期给上行「已连败几次」读数，成功即清零。心跳
+	// 语义不计数（恒 0）。
+	Fails  int      `json:"fails,omitempty"`
+	Open   *Window  `json:"open,omitempty"`
+	Recent []Window `json:"recent,omitempty"`
 }
 
 // Guard 单目标防抖状态机：连续失败 ≥ faultThreshold 判故障、连续成功 ≥
@@ -138,12 +142,13 @@ func (g *Guard) recordFailure(msg string, now time.Time) {
 	g.transition(StateFaulty, now, msg)
 }
 
-// transition 定性迁移：换态、刷新 since、发事件。
+// transition 定性迁移：换态、刷新 since、发事件。计数不在迁移处清零——
+// recordSuccess/recordFailure 入口互斥清反侧计数，这里清会打断 Fails 的
+// 「跨迁移连续累计」读数语义。
 func (g *Guard) transition(to State, now time.Time, lastErr string) {
 	from := g.state
 	g.state = to
 	g.since = now
-	g.fails, g.oks = 0, 0
 	if g.onEvent != nil {
 		g.onEvent(Transition{Target: g.name, From: from, To: to, At: now, LastError: lastErr})
 	}
@@ -161,6 +166,7 @@ func (g *Guard) Snapshot() Snapshot {
 		LastChecked: g.lastCheck,
 		LastOK:      g.lastOK,
 		LastError:   g.lastErr,
+		Fails:       g.fails,
 	}
 	if g.open != nil {
 		w := *g.open

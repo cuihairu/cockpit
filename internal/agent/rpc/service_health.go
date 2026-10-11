@@ -89,13 +89,19 @@ type HealthConfig struct {
 	Whitelist []string      `json:"whitelist"`
 }
 
-// healthProbeState 单探针运行态（快照进 server 缓存供离线灰态，D8）
+// healthProbeState 单探针运行态（快照进 server 缓存供离线灰态，D8）。
+// 判定层已上收 core/healthprobe.Guard（P6）：语义、连败计数、故障窗口随
+// 每次结果同步进本结构。OpenWindow 非空 ⟺ 判定期 Faulty（Guard 的
+// 不变量：开窗口只在判 Faulty 时，关窗口只在判 Healthy 时）。
 type healthProbeState struct {
-	Status           string         `json:"status"` // ok / fail / unknown
-	LastCheck        int64          `json:"lastCheck"`
-	ConsecutiveFails int            `json:"consecutiveFails"`
-	LastError        string         `json:"lastError,omitempty"`
-	LastHeal         *healthHealRec `json:"lastHeal,omitempty"`
+	Status           string               `json:"status"` // ok / fail / unknown（最近一次探测结果，非判定态）
+	Semantics        string               `json:"semantics,omitempty"`
+	LastCheck        int64                `json:"lastCheck"`
+	ConsecutiveFails int                  `json:"consecutiveFails"`
+	LastError        string               `json:"lastError,omitempty"`
+	LastHeal         *healthHealRec       `json:"lastHeal,omitempty"`
+	OpenWindow       *healthprobe.Window  `json:"openWindow,omitempty"`
+	RecentWindows    []healthprobe.Window `json:"recentWindows,omitempty"`
 }
 
 // healthHealRec 最近一次自愈决策记录（含「没动手」的原因，仪表盘可见）
@@ -238,6 +244,10 @@ type serviceHealthEngine struct {
 	cfg    HealthConfig
 	states map[string]*healthProbeState
 	events []healthEvent
+	// guards probeID -> core 判定状态机（P6：防抖/语义/故障窗口在公共
+	// 探针）。锁序恒 engine.mu → guard.mu：Guard 不挂回调，迁移边沿由
+	// 快照前后对比得出（见 applyResult），不存在反向持锁路径，无 ABBA。
+	guards map[string]*healthprobe.Guard
 	// ledger unit -> 窗口内 restart 时刻（D7：两个探针指向同一 unit 共享额度）
 	ledger map[string][]time.Time
 	// blockedEmitted probeID -> 本轮 down 期已发过 heal_blocked（每期至多一条）
@@ -261,6 +271,7 @@ type serviceHealthEngine struct {
 func newServiceHealthEngine(sp *ServiceProvider) *serviceHealthEngine {
 	e := &serviceHealthEngine{
 		states:         map[string]*healthProbeState{},
+		guards:         map[string]*healthprobe.Guard{},
 		ledger:         map[string][]time.Time{},
 		blockedEmitted: map[string]bool{},
 		backoffEmitted: map[string]time.Time{},
@@ -311,12 +322,14 @@ func (e *serviceHealthEngine) defaultProbe(sp *ServiceProvider) func(context.Con
 
 // SetConfig 全量替换配置（D3）：状态清零（D13，重新攒阈值）、事件环保留
 // （待 server 归集）、退避台账保留（unit 重启史是真实历史，不因改配置清零）。
+// 判定状态机同清（窗口随新配置重新攒）——D13 连带。
 // 首次调用驱动常驻循环。
 func (e *serviceHealthEngine) SetConfig(cfg HealthConfig) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.cfg = cfg
 	e.states = map[string]*healthProbeState{}
+	e.guards = map[string]*healthprobe.Guard{}
 	e.blockedEmitted = map[string]bool{}
 	e.epoch++
 	if !e.started {
@@ -342,6 +355,14 @@ func (e *serviceHealthEngine) snapshot(drain bool) (map[string]healthProbeState,
 		if st.LastHeal != nil {
 			h := *st.LastHeal
 			cp.LastHeal = &h
+		}
+		if st.OpenWindow != nil {
+			w := *st.OpenWindow
+			cp.OpenWindow = &w
+		}
+		if len(st.RecentWindows) > 0 {
+			cp.RecentWindows = make([]healthprobe.Window, len(st.RecentWindows))
+			copy(cp.RecentWindows, st.RecentWindows)
 		}
 		states[id] = cp
 	}
@@ -394,15 +415,42 @@ func (e *serviceHealthEngine) backoffAllows(p *HealthProbe, now time.Time) bool 
 	return len(kept) < p.MaxRestartsInWindow
 }
 
+// semanticsOf 探针语义映射（P6 三语义落位）：heal 探针判的是「受监控服务
+// 自己活没活」（Liveness，故障后果=自愈重启）；非 heal 探针判的是「依赖
+// 就绪没就绪」（Readiness，故障后果=只告警不动手）。两者判定行为一致，
+// 区别只随故障窗口留痕。
+func semanticsOf(p *HealthProbe) healthprobe.Semantics {
+	if p.Heal {
+		return healthprobe.SemLiveness
+	}
+	return healthprobe.SemReadiness
+}
+
+// guardFor 取（或惰建）单探针判定状态机：失败阈值取探针 failThreshold，
+// 恢复阈值恒 1（D5：任一次成功即恢复）。惰建兼作测试直设 cfg 的兼容
+// 路径。调用方持 engine.mu。
+func (e *serviceHealthEngine) guardFor(p *HealthProbe) *healthprobe.Guard {
+	if g := e.guards[p.ID]; g != nil {
+		return g
+	}
+	g := healthprobe.NewGuardSem(p.ID, semanticsOf(p), p.FailThreshold, 1, nil)
+	e.guards[p.ID] = g
+	return g
+}
+
 // healthAction 需要执行的自愈动作（applyResult 在锁内决定，锁外执行）
 type healthAction struct {
 	probe HealthProbe
 }
 
-// applyResult 探针结果入状态机（D5 边沿判定 + D6/D7 自愈决策）：
-//   - 成功且此前在失败 → recovered 事件、计数清零、blocked 期标志复位
-//   - 失败：计数 ++；到达阈值发 down；heal 探针过白名单/退避两道闸后
-//     返回动作（锁外执行 restart，再回 applyHealOutcome 落账）
+// applyResult 探针结果入判定状态机（D5 边沿判定 + D6/D7 自愈决策）。
+// 防抖/迁移/故障窗口全在 core Guard（P6 上收）：引擎持锁序 engine.mu →
+// guard.mu，Guard 不挂回调，迁移边沿由 Record 前后快照对比得出。
+//   - 成功：Guard 判 Faulty→Healthy 才发 recovered（从未判 down 的
+//     亚阈值抖动不发恢复噪音）；blocked 期标志复位
+//   - 失败：Guard 判 Unknown→Faulty 才发 down；heal 探针只要判定期在
+//     Faulty 就过白名单/退避两道闸（故障期内每次失败都尝试再救，直至
+//     台账耗尽——D7 的预算语义，非仅迁移那一刻）
 func (e *serviceHealthEngine) applyResult(p HealthProbe, probeErr error) *healthAction {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -411,27 +459,37 @@ func (e *serviceHealthEngine) applyResult(p HealthProbe, probeErr error) *health
 		st = &healthProbeState{Status: "unknown"}
 		e.states[p.ID] = st
 	}
-	st.LastCheck = time.Now().Unix()
+	now := time.Now()
+	st.LastCheck = now.Unix()
+
+	g := e.guardFor(&p)
+	before := g.Snapshot()
+	g.Record(probeErr, now)
+	after := g.Snapshot()
+
+	st.Semantics = string(after.Semantics)
+	st.ConsecutiveFails = after.Fails
+	st.OpenWindow = after.Open
+	st.RecentWindows = after.Recent
+
 	if probeErr == nil {
-		if st.ConsecutiveFails > 0 {
-			e.emit(healthEventRecovered, p.ID, p.Unit,
-				fmt.Sprintf("recovered after %d consecutive fails", st.ConsecutiveFails))
-		}
 		st.Status = "ok"
-		st.ConsecutiveFails = 0
 		st.LastError = ""
 		delete(e.blockedEmitted, p.ID)
+		if before.State == healthprobe.StateFaulty && after.State == healthprobe.StateHealthy {
+			e.emit(healthEventRecovered, p.ID, p.Unit,
+				fmt.Sprintf("recovered after %d consecutive fails", before.Fails))
+		}
 		return nil
 	}
 
 	st.Status = "fail"
 	st.LastError = clipLine(probeErr.Error(), healthDetailClip)
-	st.ConsecutiveFails++
-	if st.ConsecutiveFails == p.FailThreshold {
+	if before.State != healthprobe.StateFaulty && after.State == healthprobe.StateFaulty {
 		e.emit(healthEventDown, p.ID, p.Unit,
-			fmt.Sprintf("%d consecutive fails: %s", st.ConsecutiveFails, st.LastError))
+			fmt.Sprintf("%d consecutive fails: %s", after.Fails, st.LastError))
 	}
-	if st.ConsecutiveFails < p.FailThreshold || !p.Heal {
+	if after.State != healthprobe.StateFaulty || !p.Heal {
 		return nil
 	}
 
@@ -447,7 +505,6 @@ func (e *serviceHealthEngine) applyResult(p HealthProbe, probeErr error) *health
 		return nil
 	}
 	// 闸二：退避台账（D7；窗口耗尽每窗口至多一条事件）
-	now := time.Now()
 	if !e.backoffAllows(&p, now) {
 		win := time.Duration(p.BackoffWindowSec) * time.Second
 		if last, ok := e.backoffEmitted[p.Unit]; !ok || now.Sub(last) >= win {

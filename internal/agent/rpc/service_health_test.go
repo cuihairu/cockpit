@@ -765,3 +765,64 @@ func TestHealthStatusPeekVsDrain(t *testing.T) {
 		t.Fatalf("non-bool drain should not error: %v", err)
 	}
 }
+
+// TestHealthWindowsAndSemantics P6 判定上收后的窗口与语义留痕：故障窗口
+// 随 Guard 迁移开合并随状态同步进快照；heal 探针标 liveness、纯告警探针
+// 标 readiness；连败计数在故障持续期跨迁移累计（非迁移即清零）。
+func TestHealthWindowsAndSemantics(t *testing.T) {
+	env := newHealthTestEnv(errors.New("connect refused"))
+	p := validHealthProbe() // heal=true → liveness
+	p.FailThreshold = 2
+	rp := validHealthProbe()
+	rp.ID = "rp"
+	rp.FailThreshold = 2
+	rp.Heal = false // → readiness（纯告警探针）
+	env.e.cfg = HealthConfig{Probes: []HealthProbe{p, rp}, Whitelist: []string{p.Unit}}
+
+	// 未定性冷区：一次失败只留结果态，无窗口无事件
+	env.e.applyResult(rp, errors.New("dep down"))
+	states, _ := env.e.snapshot(false)
+	if s := states[rp.ID]; s.OpenWindow != nil || s.Semantics != "readiness" {
+		t.Fatalf("below threshold: open=%v semantics=%q, want no window + readiness", s.OpenWindow, s.Semantics)
+	}
+
+	// 达阈值开窗（liveness 路）：down 事件 + 窗口同步
+	env.e.applyResult(rp, errors.New("dep down"))
+	if got := drainEvents(t, env.e); got[healthEventDown] != 1 {
+		t.Fatalf("readiness probe should emit down once, got %v", got)
+	}
+	states, _ = env.e.snapshot(false)
+	s := states[rp.ID]
+	if s.OpenWindow == nil || s.OpenWindow.Semantics != "readiness" || !s.OpenWindow.EndedAt.IsZero() {
+		t.Fatalf("open window = %+v, want open readiness-tagged", s.OpenWindow)
+	}
+	// 故障持续期连败累计：不因处于 Faulty 而清零
+	if s.ConsecutiveFails != 2 {
+		t.Fatalf("consecutiveFails = %d, want 2", s.ConsecutiveFails)
+	}
+
+	// liveness 路：阈值开窗 + 自愈动作 + 恢复关窗
+	env.e.applyResult(p, errors.New("connect refused"))
+	env.e.applyResult(p, errors.New("connect refused"))
+	states, _ = env.e.snapshot(false)
+	if s := states[p.ID]; s.Semantics != "liveness" || s.OpenWindow == nil ||
+		s.OpenWindow.Semantics != "liveness" || s.OpenWindow.Target != p.ID {
+		t.Fatalf("liveness state = %+v", s)
+	}
+	if act := env.e.applyResult(p, errors.New("connect refused")); act == nil {
+		_ = act // 第三次失败仍在 Faulty：无新事件，但白名单放行动作照给（D7 预算语义）
+	}
+	states, _ = env.e.snapshot(false)
+	if states[p.ID].ConsecutiveFails != 3 {
+		t.Fatalf("fails during fault = %d, want 3", states[p.ID].ConsecutiveFails)
+	}
+	env.e.applyResult(p, nil)
+	states, _ = env.e.snapshot(false)
+	s = states[p.ID]
+	if s.OpenWindow != nil || len(s.RecentWindows) != 1 || s.RecentWindows[0].Semantics != "liveness" {
+		t.Fatalf("after recovery: open=%v recent=%+v, want closed liveness window", s.OpenWindow, s.RecentWindows)
+	}
+	if s.ConsecutiveFails != 0 || s.Status != "ok" {
+		t.Fatalf("after recovery: fails=%d status=%q", s.ConsecutiveFails, s.Status)
+	}
+}
