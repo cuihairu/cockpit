@@ -74,7 +74,7 @@ func TestCovAcmeIssuerEnsureAccountPaths(t *testing.T) {
 
 // TestCovAcmeIssueEntryFailures Issue 入口：未知 CA 目录、closed DB，
 // 以及合法目录下 ensureAccount 之后透出的错误（有外网时走到 dnsProvider
-// 凭据校验，无外网时止步于 Register）
+// 凭据校验，无外网时止步于 Register，中间人掐断 TLS 时止步于 directory）
 func TestCovAcmeIssueEntryFailures(t *testing.T) {
 	db, err := storage.Open(storage.Config{Path: ":memory:"})
 	if err != nil {
@@ -87,8 +87,13 @@ func TestCovAcmeIssueEntryFailures(t *testing.T) {
 		t.Fatalf("expect unknown dir, got %v", err)
 	}
 	_, err = l.Issue(&storage.AcmeCert{CADirectory: "staging", Domains: []string{"a.example.com"}})
-	if err == nil || (!strings.Contains(err.Error(), "acme register") && !strings.Contains(err.Error(), "token not configured")) {
-		t.Fatalf("expect register or dns-provider failure, got %v", err)
+	// 外网可达性决定止步位置：register（连接被拒/超时）→ directory（TLS 被
+	// 中间设备断连，CI 环境实测出现过）→ token not configured（网络通，走到
+	// 凭据校验）。三种都算「未越过入口即失败」，断言放宽到任一
+	if err == nil || (!strings.Contains(err.Error(), "acme register") &&
+		!strings.Contains(err.Error(), "token not configured") &&
+		!strings.Contains(err.Error(), "directory")) {
+		t.Fatalf("expect register, directory or dns-provider failure, got %v", err)
 	}
 	db.Close()
 	if _, err := l.Issue(&storage.AcmeCert{CADirectory: "staging"}); err == nil {
