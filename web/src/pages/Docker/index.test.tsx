@@ -91,9 +91,12 @@ describe('Docker', () => {
     canWrite = true
   })
 
-  // patch 后静态方法的 root 真实渲染：先 destroy 并排干调度再清 body，
-  // 否则残留任务在 jsdom 销毁后触发 window is not defined
+  // patch 后静态方法的 root 真实渲染：antd message 的挂载是异步调度，
+  // destroy 先于挂载跑会让 notice 挂载后再起 3s 关闭定时器——jsdom 销毁
+  // 后触发 window is not defined（CI 实证）。故先排干挂载，再 destroy
+  // 清定时器，再排干卸载。
   afterEach(async () => {
+    await new Promise((r) => setTimeout(r, 10))
     Modal.destroyAll()
     message.destroy()
     await new Promise((r) => setTimeout(r, 10))
