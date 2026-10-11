@@ -23,13 +23,16 @@ type Transition struct {
 	LastError string
 }
 
-// Snapshot 单目标当前观测面：状态、状态起始时刻、最近一次探测结果与
-// 故障窗口（进行中 + 近期已关闭）。
+// Snapshot 单目标当前观测面：语义、状态、状态起始时刻、最近一次探测结果
+// 与故障窗口（进行中 + 近期已关闭）；LastOK 即「最近活体时刻」（心跳语义
+// 的主读数，其余语义下也有用）。
 type Snapshot struct {
 	Target      string    `json:"target"`
+	Semantics   Semantics `json:"semantics,omitempty"`
 	State       State     `json:"state"`
 	Since       time.Time `json:"since"`
 	LastChecked time.Time `json:"lastChecked"`
+	LastOK      time.Time `json:"lastOk,omitempty"`
 	LastError   string    `json:"lastError,omitempty"`
 	Open        *Window   `json:"open,omitempty"`
 	Recent      []Window  `json:"recent,omitempty"`
@@ -44,6 +47,7 @@ type Guard struct {
 	mu sync.Mutex
 
 	name             string
+	semantics        Semantics
 	faultThreshold   int
 	recoverThreshold int
 
@@ -52,13 +56,21 @@ type Guard struct {
 	since      time.Time
 	lastErr    string
 	lastCheck  time.Time
+	lastOK     time.Time
 	open       *Window
 	closed     []Window
 	onEvent    func(Transition)
 }
 
-// NewGuard 建状态机；阈值为 0/负按 1（首轮即定性）。onEvent 可为 nil。
+// NewGuard 建状态机（Liveness 语义：判定 + 窗口留痕）；阈值为 0/负按 1
+// （首轮即定性）。onEvent 可为 nil。
 func NewGuard(name string, faultThreshold, recoverThreshold int, onEvent func(Transition)) *Guard {
+	return NewGuardSem(name, SemLiveness, faultThreshold, recoverThreshold, onEvent)
+}
+
+// NewGuardSem 指定语义建状态机。Liveness/Readiness 判定一致（后果归调用方，
+// 区别只随窗口留痕）；Heartbeat 只打点（阈值不参与判定，仅钳位保留）。
+func NewGuardSem(name string, sem Semantics, faultThreshold, recoverThreshold int, onEvent func(Transition)) *Guard {
 	if faultThreshold < 1 {
 		faultThreshold = 1
 	}
@@ -67,6 +79,7 @@ func NewGuard(name string, faultThreshold, recoverThreshold int, onEvent func(Tr
 	}
 	return &Guard{
 		name:             name,
+		semantics:        sem,
 		faultThreshold:   faultThreshold,
 		recoverThreshold: recoverThreshold,
 		state:            StateUnknown,
@@ -75,16 +88,24 @@ func NewGuard(name string, faultThreshold, recoverThreshold int, onEvent func(Tr
 }
 
 // Record 记一次探测结果：err==nil 成功。now 由调用方注入（测试确定性，
-// 生产传 time.Now()）。
+// 生产传 time.Now()）。Heartbeat 语义只打点：成功刷新 LastOK、失败仅留
+// 最近原因，不进状态机（无迁移无窗口）。
 func (g *Guard) Record(err error, now time.Time) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.lastCheck = now
-	if err != nil {
-		g.recordFailure(err.Error(), now)
+	if err == nil {
+		g.lastOK = now
+		if g.semantics.judging() {
+			g.recordSuccess(now)
+		}
 		return
 	}
-	g.recordSuccess(now)
+	if !g.semantics.judging() {
+		g.lastErr = err.Error()
+		return
+	}
+	g.recordFailure(err.Error(), now)
 }
 
 func (g *Guard) recordSuccess(now time.Time) {
@@ -113,7 +134,7 @@ func (g *Guard) recordFailure(msg string, now time.Time) {
 		g.open.LastError = msg
 		return
 	}
-	g.open = &Window{Target: g.name, StartedAt: now, LastError: msg}
+	g.open = &Window{Target: g.name, Semantics: g.semantics, StartedAt: now, LastError: msg}
 	g.transition(StateFaulty, now, msg)
 }
 
@@ -134,9 +155,11 @@ func (g *Guard) Snapshot() Snapshot {
 	defer g.mu.Unlock()
 	s := Snapshot{
 		Target:      g.name,
+		Semantics:   g.semantics,
 		State:       g.state,
 		Since:       g.since,
 		LastChecked: g.lastCheck,
+		LastOK:      g.lastOK,
 		LastError:   g.lastErr,
 	}
 	if g.open != nil {

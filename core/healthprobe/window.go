@@ -12,6 +12,7 @@ const windowCapacity = 64
 // 服务不可用」的回查答案。
 type Window struct {
 	Target    string    `json:"target"`
+	Semantics Semantics `json:"semantics,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
 	EndedAt   time.Time `json:"endedAt,omitempty"`
 	LastError string    `json:"lastError"`

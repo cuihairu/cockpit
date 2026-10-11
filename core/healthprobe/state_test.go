@@ -165,3 +165,74 @@ func TestGuardSnapshotDefensive(t *testing.T) {
 		t.Fatalf("snapshot not defensive: %+v", again)
 	}
 }
+
+// TestNewGuardDelegatesLiveness NewGuard 即 Liveness 语义：快照与开窗都带
+// liveness 标记（判「受监控系统活没活」的默认口径）。
+func TestNewGuardDelegatesLiveness(t *testing.T) {
+	g := NewGuard("t", 1, 1, nil)
+	g.Record(errors.New("x"), base)
+	g.Record(nil, base.Add(time.Second))
+
+	s := g.Snapshot()
+	if s.Semantics != SemLiveness {
+		t.Fatalf("semantics = %q, want liveness", s.Semantics)
+	}
+	if len(s.Recent) != 1 || s.Recent[0].Semantics != SemLiveness {
+		t.Fatalf("recent = %+v, want window tagged liveness", s.Recent)
+	}
+	if s.LastOK.IsZero() || !s.LastOK.Equal(base.Add(time.Second)) {
+		t.Fatalf("lastOK = %v, want %v", s.LastOK, base.Add(time.Second))
+	}
+}
+
+// TestGuardReadinessTagged Readiness 与 Liveness 判定一致，区别只在窗口
+// 留痕的语义标记（后果归调用方的口径证据）。
+func TestGuardReadinessTagged(t *testing.T) {
+	g := NewGuardSem("t", SemReadiness, 2, 1, nil)
+	g.Record(errors.New("dep down"), base)
+	g.Record(errors.New("dep down"), base.Add(time.Second))
+	g.Record(nil, base.Add(2*time.Second))
+
+	s := g.Snapshot()
+	if s.State != StateHealthy || len(s.Recent) != 1 {
+		t.Fatalf("state=%s recent=%d, want healthy with one closed window", s.State, len(s.Recent))
+	}
+	if s.Recent[0].Semantics != SemReadiness || s.Open != nil {
+		t.Fatalf("window = %+v, want readiness-tagged closed window", s.Recent[0])
+	}
+}
+
+// TestGuardHeartbeatStampsOnly 心跳语义只打点：连续失败不迁移不开窗不发
+// 事件，成功只刷 LastOK（「最近活体时刻」），失败只刷 LastError。
+func TestGuardHeartbeatStampsOnly(t *testing.T) {
+	onEv, cb := events()
+	g := NewGuardSem("t", SemHeartbeat, 1, 1, cb)
+
+	g.Record(errors.New("timeout"), base)
+	s := g.Snapshot()
+	if s.State != StateUnknown || s.Open != nil || !s.LastOK.IsZero() {
+		t.Fatalf("state=%s open=%v lastOK=%v, want untouched by failure", s.State, s.Open, s.LastOK)
+	}
+	if s.LastError != "timeout" || !s.LastChecked.Equal(base) {
+		t.Fatalf("lastError=%q lastChecked=%v, want failure reason and check stamp", s.LastError, s.LastChecked)
+	}
+
+	g.Record(nil, base.Add(time.Second))
+	s = g.Snapshot()
+	if s.State != StateUnknown || !s.LastOK.Equal(base.Add(time.Second)) {
+		t.Fatalf("state=%s lastOK=%v, want heartbeat stays unknown with lastOK stamped", s.State, s.LastOK)
+	}
+
+	step(t, g, 5, errors.New("down"))
+	s = g.Snapshot()
+	if s.State != StateUnknown || s.Open != nil || len(s.Recent) != 0 || len(*onEv) != 0 {
+		t.Fatalf("state=%s open=%v recent=%d events=%d, want no judgment at all",
+			s.State, s.Open, len(s.Recent), len(*onEv))
+	}
+	if s.LastError != "down" {
+		t.Fatalf("lastError = %q, want latest failure reason", s.LastError)
+	}
+	if !s.LastOK.Equal(base.Add(time.Second)) {
+		t.Fatalf("lastOK = %v, want preserved across later failures", s.LastOK)
+	}
+}
