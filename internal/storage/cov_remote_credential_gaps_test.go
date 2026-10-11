@@ -25,20 +25,21 @@ func TestCovUpsertRemoteCredentialEncryptFail(t *testing.T) {
 	db := testDB(t)
 	defer db.Close()
 
-	orig := cryptoRand
-	cryptoRand = failingReader{}
-	t.Cleanup(func() { cryptoRand = orig })
+	// vault core 迁移后注入点随 seam 变量（encryptOptional → vault.Encrypt）
+	orig := vaultEncrypt
+	vaultEncrypt = func(string) (string, error) { return "", errors.New("boom vault encrypt") }
+	t.Cleanup(func() { vaultEncrypt = orig })
 
 	// 口令加密失败（私钥为空走不到第二个 encryptOptional）
 	in := &RemoteCredentialInput{UserID: "u", AgentID: "a", Host: "h", Port: 1, Protocol: "ssh", Password: "p"}
 	if err := db.UpsertRemoteCredential(in); err == nil {
-		t.Error("UpsertRemoteCredential with failing rand (password) should fail")
+		t.Error("UpsertRemoteCredential with failing vault encrypt (password) should fail")
 	}
 
 	// 口令为空跳过、私钥加密失败
 	in2 := &RemoteCredentialInput{UserID: "u", AgentID: "a", Host: "h2", Port: 1, Protocol: "ssh", PrivateKey: "k"}
 	if err := db.UpsertRemoteCredential(in2); err == nil {
-		t.Error("UpsertRemoteCredential with failing rand (private key) should fail")
+		t.Error("UpsertRemoteCredential with failing vault encrypt (private key) should fail")
 	}
 }
 

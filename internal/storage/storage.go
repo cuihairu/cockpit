@@ -92,6 +92,12 @@ func (d *DB) Close() error {
 	return sqlDB.Close()
 }
 
+// Gorm 暴露底层 gorm 句柄（vault 包经同一 sqlite 落 vault_entries 表，
+// vault-design.md V4；不绕过 mu 锁的既有语义，仅限初始化/只读路径使用）。
+func (d *DB) Gorm() *gorm.DB {
+	return d.db
+}
+
 // migrate 执行数据库迁移
 func (d *DB) migrate() error {
 	if err := d.db.AutoMigrate(

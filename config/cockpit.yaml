@@ -121,3 +121,9 @@ dns:
 #     api_token: ""
 #     tailnet: ""  # 空 = "-"，即 token 所属默认 tailnet
 
+
+# 密码箱（vault-design.md：凭据保管抽象，provider 可替换）
+# 密钥不落配置文件：用环境变量 COCKPIT_VAULT_KEY（回退 TOTP_ENCRYPTION_KEY）注入
+# vault:
+#   provider: local       # 默认本地加密实现（零外部依赖）；未知值启动报错
+#   session_ttl: 0        # provider 级解锁会话时长；0 = 进程生命周期

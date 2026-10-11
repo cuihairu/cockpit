@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/vault"
 	"gorm.io/gorm"
 )
 
@@ -142,12 +143,20 @@ func (d *DB) DeleteRemoteCredential(userID, id string) (bool, error) {
 	return res.RowsAffected > 0, nil
 }
 
+// vault 域密文唯一出处 = internal/vault 收敛 crypto core（vault-design.md
+// V6 第一波）：新写入带 v1 版本前缀，读兼容 v0 存量格式（零迁移）。
+// seam 变量供测试注入失败分支（原 cryptoRand 注入点随 core 迁移）。
+var (
+	vaultEncrypt = vault.Encrypt
+	vaultDecrypt = vault.Decrypt
+)
+
 // encryptOptional 空串不加密直存（语义：不保管该字段），非空走 AES-GCM。
 func encryptOptional(plain string) (string, error) {
 	if plain == "" {
 		return "", nil
 	}
-	return Encrypt(plain)
+	return vaultEncrypt(plain)
 }
 
 func decryptRemoteCredential(row *RemoteCredential) (*RemoteCredentialPlain, error) {
@@ -157,12 +166,12 @@ func decryptRemoteCredential(row *RemoteCredential) (*RemoteCredentialPlain, err
 	}
 	var err error
 	if row.PasswordEnc != "" {
-		if plain.Password, err = Decrypt(row.PasswordEnc); err != nil {
+		if plain.Password, err = vaultDecrypt(row.PasswordEnc); err != nil {
 			return nil, err
 		}
 	}
 	if row.PrivateKeyEnc != "" {
-		if plain.PrivateKey, err = Decrypt(row.PrivateKeyEnc); err != nil {
+		if plain.PrivateKey, err = vaultDecrypt(row.PrivateKeyEnc); err != nil {
 			return nil, err
 		}
 	}

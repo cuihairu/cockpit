@@ -25,6 +25,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/proxy/mgr"
 	"github.com/cuihairu/cockpit/internal/storage"
 	inventorysync "github.com/cuihairu/cockpit/internal/sync"
+	"github.com/cuihairu/cockpit/internal/vault"
 	"github.com/gorilla/websocket"
 )
 
@@ -64,6 +65,10 @@ type Server struct {
 	// backupTrackWG 跟踪在途的备份任务跟踪 goroutine（测试注入
 	// backupTrackInterval 前等待其退出，保证恢复默认值不构成数据竞争）
 	backupTrackWG sync.WaitGroup
+
+	// vaultProvider 密码箱 provider（vault-design.md V7；NAS/外部端点
+	// 凭据接入点逐步改走此实例）
+	vaultProvider vault.Provider
 }
 
 // logFatalf 注入点：NewServer 启动防御（坏库路径/弱密码/生产密钥校验）以
@@ -83,6 +88,15 @@ func NewServer(cfg *config.Config) *Server {
 	db, err := storage.Open(storage.Config{Path: cfg.Database.Path})
 	if err != nil {
 		logFatalf("Failed to open database: %v", err)
+	}
+
+	// 审计器（密码箱 provider 钩子与 Server 共用同一实例）
+	auditLogger := audit.NewLogger(db)
+
+	// 密码箱 provider（vault-design.md V4/V7）：默认 local，未知 provider 启动即失败
+	vaultProvider, err := initVault(cfg.Vault, db, auditLogger)
+	if err != nil {
+		logFatalf("Failed to init vault: %v", err)
 	}
 
 	authService := auth.NewService(db, auth.Options{
@@ -114,7 +128,8 @@ func NewServer(cfg *config.Config) *Server {
 		codec:          protocol.NewCodec(),
 		db:             db,
 		auth:           authService,
-		audit:          audit.NewLogger(db),
+		audit:          auditLogger,
+		vaultProvider:  vaultProvider,
 		proxyMgr:       mgr.NewManager(nil, db), // 将在 Start 中设置 ServerInterface
 		notifier:       notifier,
 		remoteSessions: NewRemoteSessionManager(),

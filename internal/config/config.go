@@ -20,6 +20,19 @@ type Config struct {
 	RemoteControl *RemoteControlConfig `yaml:"remote_control,omitempty"`
 	DNS           *DNSConfig           `yaml:"dns,omitempty"`
 	Overlay       *OverlayConfig       `yaml:"overlay,omitempty"`
+	Vault         *VaultConfig         `yaml:"vault,omitempty"`
+}
+
+// VaultConfig 密码箱配置（vault-design.md V4/V5/V7）：provider 选择与
+// 会话口径；密钥不落 yaml，走 env（COCKPIT_VAULT_KEY，回退
+// TOTP_ENCRYPTION_KEY），yaml 中不出现任何密钥字段。
+type VaultConfig struct {
+	// Provider 密码箱提供商：空 = local（默认本地加密实现，零外部依赖）；
+	// 未知值启动即报错（V7 不降级）
+	Provider string `yaml:"provider,omitempty"`
+	// SessionTTL provider 级解锁会话时长；0 = 进程生命周期（自托管
+	// 无人值守重启默认）。用户级重验门（vault token 10min）在 API 层不受此影响
+	SessionTTL time.Duration `yaml:"session_ttl,omitempty"`
 }
 
 // DNSConfig DNS 管理配置（M1：Cloudflare；M2 扩 DNSPod/阿里云——ACME D13，
@@ -328,5 +341,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if v := os.Getenv("TAILSCALE_API_TOKEN"); v != "" {
 		cfg.Overlay.Tailscale.APIToken = v
+	}
+
+	if cfg.Vault == nil {
+		cfg.Vault = &VaultConfig{}
+	}
+	if cfg.Vault.Provider == "" {
+		cfg.Vault.Provider = "local"
 	}
 }
