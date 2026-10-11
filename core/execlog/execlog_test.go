@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -183,10 +184,22 @@ func TestSanitize(t *testing.T) {
 
 // TestRunFlushesAndFinalFlush 周期 Flush 落批 + ctx 取消触发末次 Flush。
 // 长间隔（500ms）保证取消发生在下一个 tick 之前——第二批只能来自末次
-// Flush，断言不靠运气。
+// Flush，断言不靠运气。捕获桩互斥保护：Run goroutine 追加与测试轮询计数
+// 并发（-race 下未同步读写即报 DATA RACE，CI 实锤）。
 func TestRunFlushesAndFinalFlush(t *testing.T) {
+	var mu sync.Mutex
 	var sent []*protocol.Message
-	r := New(8, func(m *protocol.Message) error { sent = append(sent, m); return nil })
+	r := New(8, func(m *protocol.Message) error {
+		mu.Lock()
+		sent = append(sent, m)
+		mu.Unlock()
+		return nil
+	})
+	sentCount := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(sent)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -197,25 +210,25 @@ func TestRunFlushesAndFinalFlush(t *testing.T) {
 
 	r.Record(protocol.ExecLogEntry{ID: "e1", Provider: "job", Action: "run", Status: protocol.ExecStatusSuccess})
 	deadline := time.Now().Add(3 * time.Second)
-	for len(sent) == 0 && time.Now().Before(deadline) {
+	for sentCount() == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if len(sent) == 0 {
+	if sentCount() == 0 {
 		t.Fatal("periodic flush never fired")
 	}
 
-	// 第二条只能走 ctx 取消后的末次 Flush（下一 tick 在 500ms 外）
+	// 第二条只能走 ctx 取消后的末次 Flush（下一 tick 在 500ms 外）；
+	// <-done 后 Run goroutine 已退出，余下读取与写入有 happens-before
 	r.Record(protocol.ExecLogEntry{ID: "e2", Provider: "job", Action: "run", Status: protocol.ExecStatusSuccess})
 	cancel()
 	<-done
-	deadline = time.Now().Add(3 * time.Second)
-	for len(sent) < 2 && time.Now().Before(deadline) {
-		time.Sleep(2 * time.Millisecond)
+	if sentCount() != 2 {
+		t.Fatalf("sent = %d, want 2 (final flush)", sentCount())
 	}
-	if len(sent) != 2 {
-		t.Fatalf("sent = %d, want 2 (final flush)", len(sent))
-	}
-	p, _ := protocol.DecodeExecLog(sent[1])
+	mu.Lock()
+	last := sent[1]
+	mu.Unlock()
+	p, _ := protocol.DecodeExecLog(last)
 	if len(p.Entries) != 1 || p.Entries[0].ID != "e2" {
 		t.Fatalf("final batch = %+v, want [e2]", p.Entries)
 	}
