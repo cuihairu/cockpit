@@ -19,8 +19,9 @@
 - **已由 P2 落地（2026-10-09，[workflow-design](./workflow-design.md) M1）**：
   异步执行/取消（`cancelled` 终态、pending 可撤、台账过滤）与 Workflow 编排；
   `POST /api/jobs` 语义随之改为「创建即 201 返回 pending，后台派发」（原同步
-  等待删除），timeout 仍按设计保持 `failed`（不设独立终态）。Workflow/定时
-  触发中，定时部分仍不做（workflow-design W11 约定）。
+  等待删除），timeout 仍按设计保持 `failed`（不设独立终态）。取消面再由 M2c
+  扩至 running：`POST /api/jobs/{id}/cancel` 经 `job.cancel` RPC 击杀在途进程
+  （2026-10-11）。Workflow/定时触发中，定时部分仍不做（workflow-design W11 约定）。
 - **真机验收**（2026-10-05，探针 `scripts/acceptance/jobs/` 五件套 9/9 PASS，
   acceptance-checklist「统一 Job 执行」节七项全勾）：执行链路（82ms 成功回执 /
   exit 3 输出带回 / 超时 1.078s 按时返回且 `pgrep` 无孤儿 / 截尾恰 64KB 尾部保留）、
@@ -56,7 +57,7 @@
 
 | # | 决策 | 选择 | 理由 |
 |---|------|------|------|
-| D1 | 状态机 | `pending → running → success \| failed`；cancelled/timeout 不设独立态——超时被杀即 failed（error=「timed out after Ns」，exit_code=-1），取消是后续异步化才有的能力 | 同步 RPC 下 running 为瞬态，终态二分已覆盖当下全部路径；状态集合按需扩展 |
+| D1 | 状态机 | `pending → running → success \| failed`；cancelled/timeout 不设独立态——超时被杀即 failed（error=「timed out after Ns」，exit_code=-1），取消是后续异步化才有的能力（**P2 后更新**：`cancelled` 为真实终态——pending DB-only 取消（W3），running 经 RPC 击杀（M2c）；timeout 仍并入 failed 未变） | 同步 RPC 下 running 为瞬态，终态二分已覆盖当下全部路径；状态集合按需扩展 |
 | D2 | 首个类型 | `agent.exec`：目标 agent 本机执行一条 shell 命令（unix `sh -c` / windows `cmd /C`） | Control 域第一块；命令执行是其它一切动作的兜底语义 |
 | D3 | 通道 | 复用既有 RPC：server `CallAgent(target, "job.exec", params)`，agent 端 JobProvider 注册（平台无关，无条件注册） | 与 cron/备份同构，零新基建 |
 | D4 | 退出码语义 | 非零退出码是**业务字段**不是协议错误：RPC 层恒 success，`exit_code`/`output`/`error` 走 data；server 据此落 success/failed（输出仍带回） | 「命令失败」是 Job 的正常产物，不应混入传输层错误 |
@@ -122,9 +123,10 @@ target 非空；exec 需 `parameters.command` 非空且 ≤16KB；`timeout_s` 1-
 
 ## 边界（明确不做）
 
-- **不做异步执行**：创建即同步等待终态。异步化（排队/取消/进度）等 Workflow
-  立项时一并设计，届时 cancelled/timeout 独立状态、`GET /jobs?status=running`
-  过滤、SSE 推送才有真实的消费者；
+- **不做异步执行**（**已由 P2 兑现，见顶部「已由 P2 落地」注记**）：创建即同步
+  等待终态。异步化（排队/取消/进度）等 Workflow 立项时一并设计，届时
+  cancelled/timeout 独立状态、`GET /jobs?status=running` 过滤、SSE 推送才有
+  真实的消费者（落地口径：`cancelled` 终态 + 台账过滤已实现；SSE 仍拍不做）；
 - **不做 Workflow/Action**：Workflow 是「一组 Job 的编排」（依赖/并行/重试），
   Action 是「带语义的幂等操作」，都在 Job 之上，本期只有 Job 本体；
 - **不做定时触发**：Job 与 cron 是两个平面——cron 是 agent 侧调度面（crontab
@@ -137,6 +139,6 @@ target 非空；exec 需 `parameters.command` 非空且 ≤16KB；`timeout_s` 1-
 
 | 优先级 | 方向 | 依赖 |
 |--------|------|------|
-| P2 | Workflow：Job 编排（线性链/重试/取消，DAG/审批留 M2）——已立项设计 [workflow-design](./workflow-design)（2026-10-09） | 本模型 |
+| P2 | Workflow：Job 编排（线性链/重试/取消，DAG/审批留 M2）——已落地（P2 异步化 + M1 编排 2026-10-09；M2a 变量/M2b 扇出/M2c 取消信号 2026-10-11，见 [workflow-design](./workflow-design)） | 本模型 |
 | P0′ | 事件模型：Job 终态事件进统一事件总线 | Event 抽象立项 |
 | P5 | AI 接线：Job API 即 AI 的执行面（agent.exec 之外补结构化类型） | 审计与限额先行 |

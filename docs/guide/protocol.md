@@ -250,13 +250,13 @@ JWT 保护接口：
 - `DELETE /api/remote/vault/credentials/{id}`（同上）
 - `GET|POST /api/jobs`（统一 Job 台账（支持 `status/target/type/workflow_run_id` 过滤）/ 创建 Job，仅 `agent.exec`；创建异步：201 返回 pending，后台派发，终态经台账轮询）
 - `GET /api/jobs/{id}`
-- `POST /api/jobs/{id}/cancel`（取消 pending Job；已派发/终态 409）
+- `POST /api/jobs/{id}/cancel`（取消 Job：pending 直接条件取消（W3），running 经 `job.cancel` RPC 击杀在途进程后落 `cancelled`（M2c C6）；终态一律 409）
 - `GET|POST /api/workflows`（Workflow 编排定义列表 / 创建，线性步骤链 ≤20 步，每步即一条 Job）
 - `GET|PUT|DELETE /api/workflows/{id}`（定义详情 / 更新 / 删除；active run 在途时变更 409）
 - `POST /api/workflows/{id}/run`（创建 run 并后台推进，201 返回 run 视图；同定义重入 409）
 - `GET /api/workflows/{id}/runs`（该定义的 run 台账）
 - `GET /api/workflow-runs/{rid}`（run 详情，含步骤快照）
-- `POST /api/workflow-runs/{rid}/cancel`（取消 run：停止推进后续步骤，在途步骤自然结束）
+- `POST /api/workflow-runs/{rid}/cancel`（取消 run：置 `cancelled` 并经 `job.cancel` 击杀在途步骤 Job、pending 窗口 DB-only 条件取消（M2c C8），后续步骤不推进；已终态 409）
 - `GET /api/admin/audit/logs`
 - `GET /api/admin/audit/stats`
 

@@ -294,11 +294,15 @@ Go probe，对齐 jobs 探针口径）真机 9/9 PASS（端口 20010，agent `wo
 证据 `.acceptance/workflows/evidence/` + `probe.log`）。
 M2b 多目标扇出已实现并验收（2026-10-10）：探针扩至 W10，真机 12/12 PASS
 （双在线 agent + ghost 样本）。
+M2c 取消信号已实现（2026-10-11）：探针 W5/W9 语义翻新至 `job.cancel` 真击杀
+口径、新增 W11 变量传递场景（M2a 端到端面）——编译通过，真机验收待下次
+实机 session；下方 W5/W9 两条为翻新前的历史证据，语义以翻新后探针为准。
 
 - [x] 异步创建：`POST /api/jobs` 立即 201 返回 pending，台账轮询内见终态；pending 行「取消」可见可点（W1/W9）
   证据：W1 `uptime` → 201 status=pending（W1 契约，0d065a1 race fix 后确定性）→ 台账轮询
   success/exit 0/输出标记/params 往返/起止落定；pending 行取消 Web 在位 `Jobs/index.tsx:159`
   （pending 行「取消」按钮 → `cancelJob`），running 取消被拒 409 `only pending`（W9）
+  （M2c 翻新：running 取消改为 RPC 击杀 200 + `cancelled`，W9 已翻新待复核）
 - [x] 成功链：两步 Workflow run 全步 success，run 台账每步 jobId 可点开看输出/退出码（W2）
   证据：W2 两步链（uptime → df -h）run success；步骤快照 success 落 run.steps；
   Job 台账 2 条 actor=workflow、`/api/jobs?workflow_run_id=` 命中；Web run 详情
@@ -314,6 +318,8 @@ M2b 多目标扇出已实现并验收（2026-10-10）：探针扩至 W10，真�
   证据：W5 sleep 12 在途 → cancel 200 → run cancelled+finishedAt；12s 后步骤 2 仍无
   Job（不推进）、台账 1 条；再次 cancel 409 `run is not running`；Web 取消按钮仅
   running 可见（`Workflows/index.tsx:496`）
+  （M2c 翻新：在途步骤改为被 `job.cancel` 真击杀落 `cancelled`+stopReason=`run
+  cancelled`，不再自然跑满——W5 已翻新待复核）
 - [x] 重入与冻结：同定义重复 run 409；active run 期间定义更新/删除 409（W6）
   证据：W6 active run 窗口内（8s/12s sleep 期间）触发第二次 run 409、PUT 定义 409、
   DELETE 定义 409（三 409 冻结面）；cancel 置终态后 DELETE 200 可清（W7 尾段）
