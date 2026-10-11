@@ -49,7 +49,7 @@ cmd/cockpit-agent → internal/agent(插件) → core/* → internal/protocol
 | 6  | 统一上行                 | **已有**     | protocol.Codec + outbound channel；指标/服务面/注册/心跳全部走它——上收为编解码与通道薄封装                                      | `core/report`        |
 | 7  | 配置拉取与热更           | **新建**     | 现状仅启动 flags（docs/agent-config.md），无拉取热更；泛化「版本号轮询→拉取→热生效」通用件（server 侧 inventory.watch 同口径先例） | `core/configsync`    |
 | 8  | 执行审计（execlog）      | **新建**     | 现状执行审计只在 Server 侧 audit 表；agent 侧每次执行留痕（action/入参/结果/耗时）+ 上行，对齐 jobs 审计口径                     | `core/execlog`       |
-| 9  | 探活（system 角色）      | **部分**     | rpc/service_health.go 已有服务探针+自愈策略层，但挂在 service provider 上非公共件；升为公共探针——Liveness/Readiness/Heartbeat 三语义 + 故障窗口时间线，探针记录按受监控 system 建模 | `core/healthprobe`   |
+| 9  | 探活（system 角色）      | **已有（P6 落地）** | `core/healthprobe`：Checker（HTTP/TCP）+ Guard 三语义（Liveness/Readiness/Heartbeat）防抖状态机 + 故障窗口时间线；service_health 策略层已切换（heal→liveness、纯告警→readiness，事件走迁移边沿，窗口随状态上行）；Heartbeat 语义与「探针记录按受监控 system 建模」留待 system 角色批 | `core/healthprobe`   |
 | 10 | 崩溃采集                 | **留位**     | 仅包骨架+接口占位不实现（分级方案届时按调研另批，对标 croupier crash-capture-survey 节奏）                                       | `core/crash`         |
 | 11 | 进程监管/服务集成/路径    | **已有，平台分散** | Windows SCM（service_windows.go 401 行 + svcargs）、darwin launchd（207 行）、openwrt procd（ipk/init.d）、linux systemd（install.sh） | `core/platform/<goos>`（§3） |
 

@@ -76,9 +76,14 @@
   "states": {
     "cloudflared-ready": {
       "status": "fail",
+      "semantics": "liveness",
       "lastCheck": 1759000000,
       "consecutiveFails": 3,
       "lastError": "HTTP 502 (expect 200)",
+      "openWindow": { "target": "cloudflared-ready", "semantics": "liveness",
+                      "startedAt": "2026-09-28T11:59:30+08:00",
+                      "endedAt": "0001-01-01T00:00:00Z",
+                      "lastError": "HTTP 502 (expect 200)" },
       "lastHeal": { "time": 1759000001, "unit": "cloudflared.service",
                     "result": "restarted", "detail": "exit 0", "durationMs": 812 }
     }
@@ -91,9 +96,11 @@
 }
 ```
 
-事件 `kind` ∈ `probe_down / probe_recovered / heal_restarted / heal_failed /
-heal_blocked / heal_backoff`。`states` 全量快照、`events` 为 drain 语义
-（取回即清空）。
+P6 起状态带判定语义与故障窗口：`openWindow` 非空 ⟺ 判定期 Faulty，
+`endedAt` 零值串 ⟺ 仍在故障中；`recentWindows` 为近期已关闭窗口（agent
+侧环形上限 64）。事件 `kind` ∈ `probe_down / probe_recovered /
+heal_restarted / heal_failed / heal_blocked / heal_backoff`。`states` 全量
+快照、`events` 为 drain 语义（取回即清空）。
 
 ## RPC 契约
 
@@ -138,6 +145,31 @@ agent 离线时 PUT 仍成功（配置已落库，注册上线时补推）——
 7. **cron 看门狗退役**：保留兜底 1–2 周，比对期间审计中 cockpit 版自愈
    成功率，确认稳定后移除 cron 条目。
 
+## P6：判定层上收公共探针（三语义 + 故障窗口）
+
+M1–M3 的判定逻辑（防抖阈值、边沿、恢复）原在 `service_health.go` 引擎内
+自持。P6 把它上收 `core/healthprobe.Guard`（与 probeagent 同源的公共件），
+引擎只留策略（事件边沿、自愈两道闸、台账）。
+
+- **语义映射**：`heal=true` 探针判「受监控服务自己活没活」→ Liveness
+  （故障后果=自愈重启）；`heal=false` 判「依赖就绪没就绪」→ Readiness
+  （故障后果=只告警）。两语义判定行为一致，区别只随故障窗口留痕。
+- **锁序**：引擎持 `engine.mu` → `guard.mu`；Guard **不挂回调**，迁移边沿
+  由 `Record` 前后快照对比得出——不存在反向持锁路径，无 ABBA。
+- **连败计数**：`consecutiveFails` 跨状态迁移持续累计（故障期真实连败
+  读数），成功即清零——与 M1 行为一致。
+- **recovered 边沿**：只在 Guard 判 Faulty→Healthy 时发。亚阈值抖动
+  （未达阈值就恢复）不再发恢复事件——D5「任一次成功即恢复」的严格口径。
+- **heal 闸**：判定期在 Faulty 时，**每次失败**都过白名单/退避两道闸
+  （故障期内每周期都尝试再救，直至台账耗尽）——D7 预算语义，非仅迁移
+  那一刻。
+- **wire 新字段**（随状态快照上行，server 镜像透传 web）：`semantics`、
+  `openWindow`、`recentWindows`。`openWindow` 非空 ⟺ 判定期 Faulty；
+  `endedAt` 零值串（`0001-01-01T00:00:00Z`）⟺ 仍在故障中——
+  `time.Time` 的 `omitempty` 对结构体无效，前后端按零值判开合。
+- **web**：状态表新增「故障窗口」列——开窗红色置顶（`故障中 起`），
+  已关闭近几次走「近 N 次」摘要 + Tooltip 明细（起止时刻/语义/最近失败原因）。
+
 ## 实现与测试清单
 
 | 批次 | 内容 | 测试 |
@@ -145,6 +177,7 @@ agent 离线时 PUT 仍成功（配置已落库，注册上线时补推）——
 | M1（agent） | `internal/agent/rpc/service_health.go`：引擎 + 三探针执行器 + 自愈（白名单/退避/事件环）+ provider 三动作接线 | 假 Commander/httptest 注入：三类探针判定、阈值边沿、恢复清零、白名单拦截、退避窗口、事件 drain、整包校验拒绝、非 systemd 平台 heal 拒绝 |
 | M2（server） | `internal/server/api_service_health.go`（API + 校验 + 推送）、`internal/server/service_health_scan.go`（30s 归集循环 + 审计 + 告警 + 通知 + 状态缓存）、注册上线补推钩子、events 常量、RBAC 路由 | API 校验矩阵（非法 target/白名单拒绝）、离线 PUT 落库不推送、归集循环事件→审计/告警/通知、缓存灰态、上线补推 |
 | M3（web） | /services 页「健康探针」面板：探针列表（状态徽标/连续失败/上次自愈）、编辑表单、白名单编辑、立即探测按钮 | vitest 组件测试 |
+| P6（core+agent+server+web） | `core/healthprobe` 三语义 Guard（Liveness/Readiness/Heartbeat + 故障窗口）；`service_health` 引擎判定上收（边沿事件/语义留痕/窗口同步）；server 镜像透传；web 故障窗口列 | 探针窗口开合/恢复断言、语义标记、连败跨迁移累计、server 透传往返、web 窗口列渲染 |
 
 验收边界（留给真机）：真实 cloudflared 僵死注入（上面用例第 5/6 步）、
 跨机多 agent 归集节奏、GB 级无关（本能力无大数据路径）。
