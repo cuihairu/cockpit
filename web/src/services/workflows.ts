@@ -11,6 +11,8 @@ export interface WorkflowStep {
   target?: string
   /** 多目标扇出（M2b：逐台完整执行，≤20 台，与 target 互斥） */
   targets?: string[]
+  /** 依赖门控（M2e：只能引用更靠前的步骤 name；依赖非 success 时本步跳过） */
+  depends_on?: string[]
   parameters: {
     /** 步骤名，同一 workflow 内唯一（≤64） */
     name: string

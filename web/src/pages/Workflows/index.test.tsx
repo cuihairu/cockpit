@@ -231,6 +231,43 @@ describe('Workflows', () => {
     })
   })
 
+  it('编辑依赖：步骤 2 依赖步骤多选折回 depends_on（M2e）', async () => {
+    renderPage()
+    fireEvent.click((await screen.findAllByText('编辑'))[0])
+    await screen.findByText('编辑 Workflow：upgrade chain', undefined, { timeout: 3000 })
+    // 仅步骤 2（i>0）有依赖步骤选择，可选项=更靠前的步骤名
+    const depsItem = screen.getByText('依赖步骤').closest('.ant-form-item') as HTMLElement
+    await pickOption(depsItem.querySelector('.ant-select') as HTMLElement, 'backup')
+    fireEvent.click(drawerFooterSave())
+    await waitFor(() => {
+      expect(wfMock.updateWorkflow).toHaveBeenCalledWith('wf-1', {
+        name: 'upgrade chain',
+        description: 'stop → backup → upgrade',
+        steps: [
+          wf.steps[0],
+          { ...wf.steps[1], depends_on: ['backup'] },
+        ],
+      })
+    })
+  })
+
+  it('时间线 skipped：灰标「已跳过」+ 停因列（M2e）', async () => {
+    wfMock.getWorkflowRun.mockResolvedValue({
+      ...run,
+      steps: [
+        { name: 'backup', type: 'agent.exec', target: 'a1', status: 'failed', jobId: 'j-1', attempts: 1, stopReason: 'exit 9', continueOnError: true },
+        { name: 'upgrade', type: 'agent.exec', target: 'a1', status: 'skipped', attempts: 0, stopReason: 'skipped: dependency backup failed' },
+      ],
+    })
+    renderPage()
+    fireEvent.click((await screen.findAllByText('运行'))[0])
+    expect(await screen.findByText('已跳过')).toBeInTheDocument()
+    expect(screen.getByText('skipped: dependency backup failed')).toBeInTheDocument()
+    // skipped 行无输出入口（antd tbody 首行可能是测量行，按文本定位行）
+    const skippedRow = screen.getByText('upgrade').closest('tr') as HTMLElement
+    expect(skippedRow.textContent).not.toContain('查看')
+  })
+
   it('运行：runWorkflow 后打开 run 时间线；步骤 Job 详情可看输出', async () => {
     renderPage()
     fireEvent.click((await screen.findAllByText('运行'))[0])

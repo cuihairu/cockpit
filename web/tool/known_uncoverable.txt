@@ -34,7 +34,7 @@ pages/Network/index.tsx:621 离开按钮 loading 表达式 change.variables 为 
 pages/Network/index.tsx:791 DaemonCard data.tools ?? [] 兜底边与 792 空数组 return null 边：用例已执行该路径（无 tools 字段响应 + 断言卡不渲染），v8 边计数漏计
 pages/Network/index.tsx:792 同上（tools.length === 0 的 return null 边已被 ag-3 用例执行并断言）
 pages/Network/index.tsx:736 join Modal okButtonProps 表达式行：用例已断言空输入禁用态并成功提交，v8 对 Modal JSX prop 行计数漏计
-pages/Jobs/index.tsx:159 结果列 pending || running 取消入口的 pending true 边：M2c 后两条 pending 行用例已执行该路径（取消按钮渲染并点击断言 15/15 绿），v8 对 || 首条款 true 边计数恒 0（单文件定向跑亦复现；同 791/792 漏计口径）
+pages/Jobs/index.tsx:166 结果列 pending || running 取消入口的 pending true 边：M2c 后两条 pending 行用例已执行该路径（取消按钮渲染并点击断言 15/15 绿），v8 对 || 首条款 true 边计数恒 0（单文件定向跑亦复现；同 791/792 漏计口径）
 
 # ---- 生命周期/时序在 jsdom 下不可注入或与真实语义互斥 ----
 pages/Docker/index.tsx:237 requestAnimationFrame 回调内滚动防御：jsdom rAF 触发时序不稳定，滚动语义属浏览器行为
@@ -95,12 +95,12 @@ pages/Services/HealthPanel.tsx:357 取消按钮内联 onClick（setEditing(false
 # Jobs 菜单项/路由插入后整体 +16 再漂移，重登记；2026-10-07 移动端适配
 # 76a51d0 带入 MobileTabBar import（+1，314/340 段）与 MainLayout fragment
 # 包装（再 +1，455 段起），按 2026-10-07 lcov 实测第三次重登记）
-App.tsx:331 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 323，Workflow 菜单项/路由插入后 +8）
-App.tsx:357 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 349，+8）
-App.tsx:473 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 465，+8）
-App.tsx:490 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 482，+8）
-App.tsx:491 同上（return first 三元；原 483，+8）
-App.tsx:492 同上（首项 link 内联 onClick navigate('/')；原 484，+8）
+App.tsx:339 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 323，Workflow 菜单项/路由插入后 +8）
+App.tsx:365 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 349，+8）
+App.tsx:481 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 465，+8）
+App.tsx:498 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 482，+8）
+App.tsx:499 同上（return first 三元；原 483，+8）
+App.tsx:500 同上（首项 link 内联 onClick navigate('/')；原 484，+8）
 
 # components/GuacPlayer/index.tsx（解析器/连接体已由 duck tunnel 用例覆盖，剩两点）
 components/GuacPlayer/index.tsx:39 parseGuacInstructions elements.length > 0 假侧：内层循环进入时至少 push 一个元素或抛错，恒真死侧
@@ -284,9 +284,9 @@ pages/Agents/helpers.tsx:57
 pages/Agents/helpers.tsx:59
 
 # ---- 2026-10-04 Jobs 页（pages/Jobs）：类型契约不可达死侧；其余边角分支已由 mock 直测 ----
-pages/Jobs/index.tsx:37 STATUS_META[status] ?? 兜底：JobStatus 闭合五元组（pending/running/success/failed/cancelled）全在 STATUS_META，未知态契约不可达（原 36，Workflow 取消态插入后 +1；v8 对 ?? 漏计）
-pages/Jobs/index.tsx:108 formatTime 假侧 '-'：createdAt 服务端 gorm 必填，表格/详情恒有值（原 94，+14）
-pages/Jobs/index.tsx:289 detail.actor || '-'：actor 类型必填（登录用户），恒有值（原 252，+37）
+pages/Jobs/index.tsx:38 STATUS_META[status] ?? 兜底：JobStatus 闭合五元组（pending/running/success/failed/cancelled）全在 STATUS_META，未知态契约不可达（原 36，Workflow 取消态插入后 +1；v8 对 ?? 漏计）
+pages/Jobs/index.tsx:115 formatTime 假侧 '-'：createdAt 服务端 gorm 必填，表格/详情恒有值（原 94，+14）
+pages/Jobs/index.tsx:304 detail.actor || '-'：actor 类型必填（登录用户），恒有值（原 252，+37）
 
 # pages/Firewall/index.tsx - 防火墙观测页防御分支（provider 恒回 tables/rules 数组，缺省不可达）
 pages/Firewall/index.tsx:102 tables ?? [] 兜底：provider 恒返回 tables 数组，防御
@@ -300,37 +300,44 @@ pages/Firewall/index.tsx:315 truncated 消息模板：v8 插桩报点，截断�
 # ---- 2026-10-09 Workflow 编排页（pages/Workflows）+ services/workflows.ts ----
 # 均为「v8 合并口径丢计数/JSX 内联/防御兜底」三类：行为已由 Workflows 页
 # 用例实证，lcov 计数为 0（同 App.tsx/Jobs 页既有口径）。
-# 行号按 2026-10-10 M2b 扇出步改造后实测（2026-10-09 表随 import/展开行/时间线
-# 扩展三处改动整体平移：436 前 +7、479 前 +8、534 起 +45）。
-pages/Workflows/index.tsx:89 stepsToForm s.targets ?? [] 兜底：server 强制 target/targets 互斥必有其一，双空不可达（M2b）
-pages/Workflows/index.tsx:103 formToSteps timeout_s 条件展开有值侧：无用例经表单设置超时（超时控件未触发），v8 计 0
-pages/Workflows/index.tsx:136 agentOptions 标签模板 hostname||id 回退侧：agent 列表 hostname 恒有值，v8 对内联模板漏计
-pages/Workflows/index.tsx:164 lastRunByWf runs && length>0 ? runs[0] : undefined 三元：无 run 定义显示 '-' 断言实证，runs[0] 侧无用例为列表 mock 非空 runs（run 数据经详情弹窗断言），v8 漏计
-pages/Workflows/index.tsx:180 openEdit wf.description ?? '' 兜底：编辑用例的定义均有 description，缺省侧不可达，v8 漏计
-pages/Workflows/index.tsx:190 步骤数上限校验行：steps 由「添加步骤」按钮 disabled（≤20）与默认 1 步约束，越界值手改不可达
-pages/Workflows/index.tsx:191 步骤数上限 message（同 190）
-pages/Workflows/index.tsx:192 步骤数上限 return 收尾（同 190）
-pages/Workflows/index.tsx:205 步骤命令空值校验 if：命令 TextArea 必填，主路径（有命令）已实证，空命令 return 侧不可达
-pages/Workflows/index.tsx:206 命令空值 message（同 205）
-pages/Workflows/index.tsx:207 命令空值 return 收尾（同 205）
-pages/Workflows/index.tsx:209 步骤名重复校验 if：重名用例已断言（重名 return 侧与主路径均由具名用例覆盖），v8 边计数漏计
-pages/Workflows/index.tsx:210 重名 message（同 209）
-pages/Workflows/index.tsx:211 重名 return 收尾（同 209）
-pages/Workflows/index.tsx:282 moveStep 上移越界防御（j<0||j>=len return prev）：首行上移按钮 disabled、末行下移按钮 disabled 双端防御，越界侧无 UI 入口
-pages/Workflows/index.tsx:298 最近 run 列 last ? StatusTag : '-'：无 run 显示 '-' 断言实证，有 run 徽标侧无用例为列表 mock 非空 runs，v8 漏计
-pages/Workflows/index.tsx:367 抽屉 onClose 内联（setEditorOpen(false)）：取消按钮用例已断言 drawer 关闭，v8 对 JSX 属性内联箭头漏计
-pages/Workflows/index.tsx:389 描述 Input onChange 内联：编辑预填描述断言实证，v8 漏计
-pages/Workflows/index.tsx:411 下移按钮 onClick 内联：同上
-pages/Workflows/index.tsx:441 targets Select onChange vs ?? [] 兜底：antd multiple 恒传数组（清空给 []），null 不可达（M2b）
-pages/Workflows/index.tsx:460 超时 InputNumber onChange 内联：无用例触发该控件
-pages/Workflows/index.tsx:468 失败重试 Select onChange 内联：无用例触发该控件
-pages/Workflows/index.tsx:479 失败继续 Switch onChange 内联：无用例触发该控件
-pages/Workflows/index.tsx:492 添加步骤按钮文案 MAX_STEPS 三元：达上限文案为防御侧（按钮同步 disabled），v8 漏计
-pages/Workflows/index.tsx:500 run 弹窗 onCancel 内联：关闭路径实证，v8 漏计
-pages/Workflows/index.tsx:511 run 弹窗「关闭」footer onClick：同上
-pages/Workflows/index.tsx:524 run 详情触发人 run.actor || '-'：actor 恒有值（run 由登录用户触发），v8 漏计
-pages/Workflows/index.tsx:540 expandedRowRender dataSource r.targets ?? [] 兜底：rowExpandable 已保证展开行 targets 非空（M2b）
-pages/Workflows/index.tsx:601 Job 弹窗 onCancel 内联：Job 详情打开/关闭链实证，v8 漏计
-pages/Workflows/index.tsx:604 Job 弹窗「关闭」footer onClick：同上
-pages/Workflows/index.tsx:617 Job 详情执行人 jobDetail.actor || '-'：actor 恒为 workflow，v8 漏计
-pages/Workflows/index.tsx:621 Job 详情退出码 exitCode !== undefined 三元：成功 job 无 exitCode 显示 '-'（既有用例），有 exitCode 侧无专用用例，v8 漏计
+# 行号按 2026-10-12 M2e 依赖编辑器改造后实测（2026-10-10 M2b 表随后续
+# RUN_STATUS_META/StepFormValue/依赖 Form.Item/说明列四处插入平移：
+# 92 前 +2、108 前 +4、446 前 +4、483 前 +5、626 前 +6）。
+pages/Workflows/index.tsx:92 stepsToForm s.targets ?? [] 兜底：server 强制 target/targets 互斥必有其一，双空不可达（M2b）
+pages/Workflows/index.tsx:108 formToSteps timeout_s 条件展开有值侧：无用例经表单设置超时（超时控件未触发），v8 计 0
+pages/Workflows/index.tsx:141 agentOptions 标签模板 hostname||id 回退侧：agent 列表 hostname 恒有值，v8 对内联模板漏计
+pages/Workflows/index.tsx:169 lastRunByWf runs && length>0 ? runs[0] : undefined 三元：无 run 定义显示 '-' 断言实证，runs[0] 侧无用例为列表 mock 非空 runs（run 数据经详情弹窗断言），v8 漏计
+pages/Workflows/index.tsx:185 openEdit wf.description ?? '' 兜底：编辑用例的定义均有 description，缺省侧不可达，v8 漏计
+pages/Workflows/index.tsx:195 步骤数上限校验行：steps 由「添加步骤」按钮 disabled（≤20）与默认 1 步约束，越界值手改不可达
+pages/Workflows/index.tsx:196 步骤数上限 message（同 190）
+pages/Workflows/index.tsx:197 步骤数上限 return 收尾（同 190）
+pages/Workflows/index.tsx:210 步骤命令空值校验 if：命令 TextArea 必填，主路径（有命令）已实证，空命令 return 侧不可达
+pages/Workflows/index.tsx:211 命令空值 message（同 205）
+pages/Workflows/index.tsx:212 命令空值 return 收尾（同 205）
+pages/Workflows/index.tsx:214 步骤名重复校验 if：重名用例已断言（重名 return 侧与主路径均由具名用例覆盖），v8 边计数漏计
+pages/Workflows/index.tsx:215 重名 message（同 209）
+pages/Workflows/index.tsx:216 重名 return 收尾（同 209）
+pages/Workflows/index.tsx:287 moveStep 上移越界防御（j<0||j>=len return prev）：首行上移按钮 disabled、末行下移按钮 disabled 双端防御，越界侧无 UI 入口
+pages/Workflows/index.tsx:303 最近 run 列 last ? StatusTag : '-'：无 run 显示 '-' 断言实证，有 run 徽标侧无用例为列表 mock 非空 runs，v8 漏计
+pages/Workflows/index.tsx:372 抽屉 onClose 内联（setEditorOpen(false)）：取消按钮用例已断言 drawer 关闭，v8 对 JSX 属性内联箭头漏计
+pages/Workflows/index.tsx:394 描述 Input onChange 内联：编辑预填描述断言实证，v8 漏计
+pages/Workflows/index.tsx:416 下移按钮 onClick 内联：同上
+pages/Workflows/index.tsx:446 targets Select onChange vs ?? [] 兜底：antd multiple 恒传数组（清空给 []），null 不可达（M2b）
+pages/Workflows/index.tsx:483 超时 InputNumber onChange 内联：无用例触发该控件
+pages/Workflows/index.tsx:491 失败重试 Select onChange 内联：无用例触发该控件
+pages/Workflows/index.tsx:502 失败继续 Switch onChange 内联：无用例触发该控件
+pages/Workflows/index.tsx:515 添加步骤按钮文案 MAX_STEPS 三元：达上限文案为防御侧（按钮同步 disabled），v8 漏计
+pages/Workflows/index.tsx:523 run 弹窗 onCancel 内联：关闭路径实证，v8 漏计
+pages/Workflows/index.tsx:534 run 弹窗「关闭」footer onClick：同上
+pages/Workflows/index.tsx:547 run 详情触发人 run.actor || '-'：actor 恒有值（run 由登录用户触发），v8 漏计
+pages/Workflows/index.tsx:563 expandedRowRender dataSource r.targets ?? [] 兜底：rowExpandable 已保证展开行 targets 非空（M2b）
+pages/Workflows/index.tsx:626 Job 弹窗 onCancel 内联：Job 详情打开/关闭链实证，v8 漏计
+pages/Workflows/index.tsx:629 Job 弹窗「关闭」footer onClick：同上
+pages/Workflows/index.tsx:642 Job 详情执行人 jobDetail.actor || '-'：actor 恒为 workflow，v8 漏计
+pages/Workflows/index.tsx:646 Job 详情退出码 exitCode !== undefined 三元：成功 job 无 exitCode 显示 '-'（既有用例），有 exitCode 侧无专用用例，v8 漏计
+
+# ---- 2026-10-12 M2d 审批门页 + M2e DAG 依赖编辑器（v8 漏计/防御兜底） ----
+pages/Approvals/index.tsx:34 STATUS_META[status] ?? 兜底：四态闭合（pending/approved/rejected/expired）全在 STATUS_META，未知态契约不可达（同 Jobs 页 STATUS_META 口径；v8 对 ?? 漏计）
+pages/Approvals/index.tsx:57 决策失败 message.error 内联 action 三元的驳回侧：驳回失败无用例（批准失败已断言），v8 对内联三元边漏计
+pages/Approvals/index.tsx:87 summary || '-'：summary 服务端摘要恒非空（agent.exec command 必填、批准门校验前置），'-' 侧不可达，v8 漏计
+pages/Workflows/index.tsx:464 depends_on Select onChange vs ?? [] 兜底：antd multiple 恒传数组（清空给 []），null 不可达（M2e；同 442 targets 口径）

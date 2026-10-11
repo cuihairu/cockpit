@@ -63,6 +63,8 @@ const RUN_STATUS_META: Record<string, { color: string; label: string }> = {
   success: { color: 'success', label: '成功' },
   failed: { color: 'error', label: '失败' },
   cancelled: { color: 'warning', label: '已取消' },
+  // 步级词表新态（M2e G4）：依赖非 success 时整步未跑
+  skipped: { color: 'default', label: '已跳过' },
 }
 
 const StatusTag = ({ status }: { status: string }) => {
@@ -73,7 +75,7 @@ const StatusTag = ({ status }: { status: string }) => {
 const MAX_STEPS = 20
 
 /** 编辑态步骤（表单字段平铺，提交时折回 API 形态）；目标统一多选形态，
- * 单台折回 target、多台折成 targets（M2b F1） */
+ * 单台折回 target、多台折成 targets（M2b F1）；依赖折成 depends_on（M2e G1） */
 interface StepFormValue {
   name: string
   targets: string[]
@@ -81,6 +83,7 @@ interface StepFormValue {
   timeout_s?: number
   continue_on_error?: boolean
   retry?: number
+  depends_on: string[]
 }
 
 const stepsToForm = (steps: WorkflowStep[]): StepFormValue[] =>
@@ -91,12 +94,14 @@ const stepsToForm = (steps: WorkflowStep[]): StepFormValue[] =>
     timeout_s: s.parameters.timeout_s,
     continue_on_error: s.parameters.continue_on_error,
     retry: s.parameters.retry,
+    depends_on: s.depends_on ?? [],
   }))
 
 const formToSteps = (vals: StepFormValue[]): WorkflowStep[] =>
   vals.map((v) => ({
     type: 'agent.exec',
     ...(v.targets.length === 1 ? { target: v.targets[0] } : { targets: v.targets }),
+    ...(v.depends_on.length ? { depends_on: v.depends_on } : {}),
     parameters: {
       name: v.name,
       command: v.command,
@@ -170,7 +175,7 @@ const Workflows = () => {
     setEditing(null)
     setWfName('')
     setWfDesc('')
-    setSteps([{ name: '', targets: [], command: '' }])
+    setSteps([{ name: '', targets: [], command: '', depends_on: [] }])
     setEditorOpen(true)
   }
 
@@ -442,6 +447,24 @@ const Workflows = () => {
                   />
                 </Form.Item>
               </Space>
+              {i > 0 && (
+                <Form.Item
+                  label="依赖步骤"
+                  style={{ width: 340 }}
+                  tooltip="所选步骤全部成功才执行本步；依赖失败或被跳过时本步跳过"
+                >
+                  <Select
+                    mode="multiple"
+                    value={s.depends_on.length ? s.depends_on : undefined}
+                    options={steps.slice(0, i).map((p, j) => ({
+                      value: p.name,
+                      label: p.name || `步骤 ${j + 1}`,
+                    }))}
+                    placeholder="无依赖（可选多个）"
+                    onChange={(vs) => updateStep(i, { depends_on: vs ?? [] })}
+                  />
+                </Form.Item>
+              )}
               <Form.Item label="命令" required>
                 <Input.TextArea
                   rows={2}
@@ -487,7 +510,7 @@ const Workflows = () => {
           block
           icon={<PlusOutlined />}
           disabled={steps.length >= MAX_STEPS}
-          onClick={() => setSteps((prev) => [...prev, { name: '', targets: [], command: '' }])}
+          onClick={() => setSteps((prev) => [...prev, { name: '', targets: [], command: '', depends_on: [] }])}
         >
           添加步骤{steps.length >= MAX_STEPS ? '（已达上限 20）' : ''}
         </Button>
@@ -575,6 +598,8 @@ const Workflows = () => {
                     ) },
                 { title: '状态', dataIndex: 'status', key: 'status', width: 90, render: (v: string) => <StatusTag status={v} /> },
                 { title: '尝试', dataIndex: 'attempts', key: 'attempts', width: 60 },
+                { title: '说明', dataIndex: 'stopReason', key: 'stopReason', ellipsis: true,
+                  render: (v: string) => v || '-' },
                 {
                   title: '输出',
                   key: 'job',
