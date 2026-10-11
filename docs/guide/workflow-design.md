@@ -46,8 +46,13 @@ P1 的同步 RPC 模型（POST 即等待终态）有两个天花板：
 - **M2d 已实现（2026-10-11）**：审批门（M2 候选第四项），设计见「M2 立项：
   审批门」节——前置阻塞点（server 重启孤儿 run）已由 9079b52 重启清扫解掉，
   本批把等待态落库不落 goroutine（D1），高危提交 202 进审批、批准才派发。
-  审批台账页 + Jobs 页「需审批执行」开关同批落地。DAG 维持 W4 压后、SSE 拍
-  不做，M2 清单至此全清。
+  审批台账页 + Jobs 页「需审批执行」开关同批落地。DAG 列 M2 剩余序列末位、
+  SSE 拍不做。
+- **M2e 已实现（2026-10-12）**：DAG 依赖（M2 候选第五项），设计见「M2 立项：
+  DAG 依赖」节——步骤级 `depends_on` 依赖门控（G1-G8）：数组序即拓扑序，
+  依赖失败带 continue_on_error 时下游如实 skipped（步级新态），不引入并行
+  执行（同 F2 写路径决策）；web 依赖多选编辑器 + 时间线「已跳过」灰标 +
+  停因列。
 - M2+ 其余各项在「边界（明确不做）」；未实现项以本文设计为准。
 - P1 已实现部分不受影响：`agent.exec` 类型、job provider、权限点原样保留，
   本设计只改「server 侧何时返回」与「谁在等待」。
@@ -397,6 +402,50 @@ M2d 加一道显式二次确认——提交时可声明 `approval="required"`，
 - 覆盖率：新增分支按 100% 纪律收口，不可达防御按既有格式登记
   `tool/known_uncoverable.txt`（approvals 5 条；jobs 行号随 submitJob 抽取
   迁移）。
+
+## M2 立项：DAG 依赖（M2e，2026-10-11）
+
+W4 拍「线性步骤链非 DAG，等真实并行需求再扩」；2026-10-11 巡检拍板把
+DAG 列入 M2 剩余序列（取消信号→审批门→DAG），本批落地。增量不是并行
+执行（F2 已定顺序扇出，写路径不引入并发协调），而是**依赖门控**：步骤可
+声明 `depends_on`，依赖失败时下游如实跳过，表达「C 需要 A 的成功，但不
+需要 B」的条件分支语义。
+
+### 关键决策
+
+| # | 决策 | 选择 | 理由 |
+|---|------|------|------|
+| G1 | 语法 | 步骤级 `depends_on: []string`（步骤顶层字段，与 `targets` 同级；不进 parameters） | 与 M2b `targets` 同形态；结构字段而非模板文本，保存期可校验 |
+| G2 | 引用方向 | 依赖**只能指向更靠前的步骤**（按定义数组序，须已声明的唯一 name） | 数组序即拓扑序，编排器循环顺序零改动、运行期无需拓扑排序；前向/自引用/未知一律保存期 400（M2a V2 同措辞「unknown or forward step reference」）；环在构造上不可能，无需运行期环检测 |
+| G3 | 执行序 | 保持数组顺序逐格推进（G2 保证这是合法拓扑序）；并行分支不做 | 编排 goroutine 单线程状态机与 F2 顺序扇出同决策面；并行留待真实需求再立 |
+| G4 | 跳过语义 | 任一步骤的依赖终态非 success（failed 或 skipped）→ 该步**跳过**：快照 status=`skipped`（步级新态，非 JobStatus 词表）、stopReason=`skipped: dependency <name> <failed\|skipped>`、attempts=0、无 Job 行；依赖链传递（跳过的步又被依赖 → 再跳过） | skipped 是如实陈述「没跑」，与 pending（还没轮到）区分；空输出与 M2a「缺名取空串」同语义 |
+| G5 | 失败策略交互 | 无 continue_on_error 的依赖失败仍停 run（W5 不变，下游根本不推进）；带 continue_on_error 时 run 继续，依赖它的步按 G4 跳过 | W5「继续的是链，不是对失败的豁免」——依赖声明是显式的输入假设，假设破了下游不跑 |
+| G6 | run 终态 | 语义不变：continue_on_error 的失败步不使 run 失败（W5 既有），跳过步同样不使 run 失败；run=success 但时间线含 skipped 步 | 与现有「run success + 时间线红 failed 步」同构，零新概念 |
+| G7 | 取消 | 不变：取消停在既有步边界；被跳过的步从不执行，无在途物可取消 | skipped 无 Job，与 pending 步同待遇 |
+| G8 | 扇出交互 | 门控在步级：扇出步的依赖不满足整步跳过，满足则逐台照常（目标边界取消/快照不变） | depends_on 与 targets 正交，两个维度各自成立 |
+
+### 不变式
+
+- 定义文件存 `depends_on` 原文（omitempty，无依赖的步骤无此键）；数组序为
+  执行序且为合法拓扑序（G2）。
+- 快照新增 `skipped` 步级状态；既有 JobStatus 词表（pending/running/
+  success/failed/cancelled）不加词。
+- 单目标步、扇出步的既有行为逐字节不变——无 `depends_on` 的 run 零感知。
+- agent 零改动、协议零新增（同 M2a/M2b 边界）。
+
+### 前端
+
+- 步骤编辑器：`依赖步骤` 多选（仅列出当前步之前的 name；空列表不渲染该
+  控件），提交折成 `depends_on`；无依赖提交不带键。
+- run 时间线：`skipped` 灰标签「已跳过」，停因列显示 stopReason。
+
+### 测试
+
+- server（`cov_workflow` 系）：校验矩阵（未知/前向/自引用/重复/空条目/
+  trim）；依赖门控成功；依赖失败无 COE 停 run（下游无 Job）；依赖失败带
+  COE 下游跳过 + run success + 输出空串；传递跳过；扇出步依赖门控；取消
+  边界；快照形状（attempts 0、无 jobId、status skipped）。
+- web：编辑器多选项与折返、时间线 skipped 渲染。
 
 ## 边界自检（战略评审两问）
 
