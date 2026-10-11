@@ -39,8 +39,8 @@ P1 的同步 RPC 模型（POST 即等待终态）有两个天花板：
   取消信号」节——`job.cancel` RPC 真击杀在途进程（C1-C10，含 pending 窗口
   DB-only 条件取消与 fanout 聚合口径修复）；web Jobs 页 running/pending 行
   取消入口同批落地。真机验收探针 W5/W9 语义翻新至击杀口径、新增 W11 变量
-  传递场景（M2a 端到端面，编译通过；真机验收随下次实机 session 一并跑）。
-  DAG 维持 W4 压后、审批门因孤儿 run 未解不开工、SSE 拍不做。
+  传递场景（M2a 端到端面），本机双实例 harness 13/13 PASS。DAG 维持 W4 压后、
+  审批门因孤儿 run 未解不开工、SSE 拍不做。
 - M2+ 其余各项在「边界（明确不做）」；未实现项以本文设计为准。
 - P1 已实现部分不受影响：`agent.exec` 类型、job provider、权限点原样保留，
   本设计只改「server 侧何时返回」与「谁在等待」。
