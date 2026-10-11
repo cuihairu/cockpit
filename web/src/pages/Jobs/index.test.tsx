@@ -27,11 +27,13 @@ vi.mock('@/contexts/useUser', () => ({
 const jobsMock = vi.hoisted(() => ({
   listJobs: vi.fn(),
   createJob: vi.fn(),
+  createJobWithApproval: vi.fn(),
   cancelJob: vi.fn(),
 }))
 vi.mock('@/services/jobs', () => ({
   listJobs: jobsMock.listJobs,
   createJob: jobsMock.createJob,
+  createJobWithApproval: jobsMock.createJobWithApproval,
   cancelJob: jobsMock.cancelJob,
 }))
 
@@ -171,6 +173,30 @@ describe('Jobs', () => {
     })
     fireEvent.click(modalOk())
     await waitFor(() => expect(msgError).toHaveBeenCalledWith('agent offline'))
+  })
+
+  it('创建执行：勾选需审批 → createJobWithApproval，不直接派发', async () => {
+    jobsMock.createJobWithApproval.mockResolvedValue({ id: 'ap-new', status: 'pending' })
+    renderPage()
+    fireEvent.click(await screen.findByText('执行命令'))
+    await screen.findByText('执行命令', { selector: '.ant-modal-title' })
+
+    const selects = document.querySelectorAll('.ant-modal .ant-select')
+    await pickOption(selects[0] as HTMLElement, 'web-1')
+    fireEvent.change(document.querySelector('.ant-modal textarea') as HTMLTextAreaElement, {
+      target: { value: 'reboot-now' },
+    })
+    fireEvent.click(document.querySelector('.ant-modal .ant-switch') as HTMLElement)
+    fireEvent.click(modalOk())
+
+    await waitFor(() =>
+      expect(jobsMock.createJobWithApproval).toHaveBeenCalledWith({
+        target: 'a1',
+        parameters: { command: 'reboot-now', timeout_s: 60 },
+      }),
+    )
+    expect(jobsMock.createJob).not.toHaveBeenCalled()
+    expect(msgSuccess).toHaveBeenCalledWith('已提交审批，批准后开始执行')
   })
 
   it('结果详情：查看弹窗带状态/退出码/输出', async () => {

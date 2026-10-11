@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { logger } from '@/utils/logger'
+import type { Approval } from './approvals'
 
 // 执行 Job API（docs/guide/jobs-design.md + workflow-design.md W1）：创建
 // 异步——POST 立即返回 201 pending 视图，server 后台派发，终态经台账轮询
@@ -91,6 +92,16 @@ export async function createJob(req: JobCreateRequest): Promise<Job> {
     type: req.type,
     target: req.target,
     parameters: req.parameters,
+  })
+}
+
+/** 提交需审批的高危 Job（M2d：202 返回审批视图，批准后才派发） */
+export async function createJobWithApproval(req: Omit<JobCreateRequest, 'type'>): Promise<Approval> {
+  return jobsClient.post<unknown, Approval>('', {
+    type: 'agent.exec',
+    target: req.target,
+    parameters: req.parameters,
+    approval: 'required',
   })
 }
 

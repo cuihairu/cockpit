@@ -31,6 +31,7 @@ import {
   VideoCameraOutlined,
   FileSearchOutlined,
   TeamOutlined,
+  AuditOutlined,
 } from '@ant-design/icons'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
@@ -64,6 +65,7 @@ const Backups = lazy(() => import('./pages/Backups'))
 const Proxy = lazy(() => import('./pages/Proxy'))
 const Cron = lazy(() => import('./pages/Cron'))
 const Jobs = lazy(() => import('./pages/Jobs'))
+const Approvals = lazy(() => import('./pages/Approvals'))
 const Workflows = lazy(() => import('./pages/Workflows'))
 const Services = lazy(() => import('./pages/Services'))
 const Network = lazy(() => import('./pages/Network'))
@@ -214,6 +216,12 @@ const routeConfig: PermRouteItem = {
       name: 'Job 执行',
       icon: <PlayCircleOutlined />,
       perm: 'jobs:read',
+    },
+    {
+      path: '/approvals',
+      name: '审批门',
+      icon: <AuditOutlined />,
+      perm: 'approvals:read',
     },
     {
       path: '/workflows',
@@ -518,6 +526,7 @@ const MainLayout = () => {
               <Route path="/proxy" element={<Proxy />} />
               <Route path="/cron" element={<Cron />} />
               <Route path="/jobs" element={<Jobs />} />
+              <Route path="/approvals" element={<Approvals />} />
               <Route path="/workflows" element={<Workflows />} />
               <Route path="/services" element={<Services />} />
               <Route path="/network" element={<Network />} />

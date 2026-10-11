@@ -11,6 +11,7 @@ import {
   Modal,
   Select,
   Space,
+  Switch,
   Table,
   Tag,
   Typography,
@@ -19,7 +20,7 @@ import {
 import { PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
-import { cancelJob, createJob, listJobs } from '@/services/jobs'
+import { cancelJob, createJob, createJobWithApproval, listJobs } from '@/services/jobs'
 import type { Job, JobStatus } from '@/services/jobs'
 import { getApiErrorMessage } from '@/utils/apiError'
 import { PermGuard } from '@/components/PermGuard'
@@ -84,8 +85,14 @@ const Jobs = () => {
     try {
       const params: { command: string; timeout_s?: number } = { command: raw.command }
       if (raw.timeout_s) params.timeout_s = raw.timeout_s
-      await createJob({ type: 'agent.exec', target: raw.target, parameters: params })
-      message.success('已提交，可在台账查看执行结果')
+      if (raw.approval_required) {
+        // 审批门（workflow-design M2d）：202 返回审批视图，批准后才派发
+        await createJobWithApproval({ target: raw.target, parameters: params })
+        message.success('已提交审批，批准后开始执行')
+      } else {
+        await createJob({ type: 'agent.exec', target: raw.target, parameters: params })
+        message.success('已提交，可在台账查看执行结果')
+      }
       setCreateOpen(false)
       refresh()
     } catch (e) {
@@ -263,6 +270,14 @@ const Jobs = () => {
             rules={[{ type: 'number', min: 1, max: 300, message: '范围 1-300 秒' }]}
           >
             <InputNumber min={1} max={300} style={{ width: 160 }} />
+          </Form.Item>
+          <Form.Item
+            name="approval_required"
+            label="需审批执行"
+            valuePropName="checked"
+            tooltip="高危命令要求审批人二次确认，批准后才开始执行"
+          >
+            <Switch />
           </Form.Item>
         </Form>
       </Modal>
