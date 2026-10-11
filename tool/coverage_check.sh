@@ -64,6 +64,22 @@ awk -v mod='github.com/cuihairu/cockpit/' '
   }
 ' "$PROFILE" | sort -u > "$tmp/profilepaths"
 
+# profile 新鲜度：覆盖结论必须基于本轮源码。沿用上轮残留 profile（未重跑
+# go test -coverprofile）等于把上一版覆盖算成现在——2026-10-11 本地用
+# 08:27 残留 profile 校验探针 main() 扩到 1013 行后的仓库，COV_RC=0
+# 假绿，推送后 CI 语句级门禁红。只比本 profile 覆盖到的文件（子集 profile
+# 不含的文件不算过期），.find 范围限定模块目录，天然排除 .acceptance
+# 快照与 node_modules 里的 .go。
+find cmd core internal scripts -name '*.go' -newer "$PROFILE" \
+  -printf '%p\n' 2>/dev/null | sort -u > "$tmp/newer_go"
+stale_src=$(comm -12 "$tmp/newer_go" "$tmp/profilepaths")
+if [[ -n "$stale_src" ]]; then
+  echo "失败：profile 早于以下源文件的改动，覆盖结论不可信（沿用上轮残留 profile）" >&2
+  printf '%s\n' "$stale_src" | sed 's/^/  /' >&2
+  echo "修复：重跑 go test -short ./... -coverprofile=$PROFILE -covermode=atomic 后再校验" >&2
+  exit 1
+fi
+
 # 登记表 → "path start end"（登记项形如 path:start,end）
 grep -v '^[[:space:]]*#' "$KNOWN" | grep -v '^[[:space:]]*$' \
   | awk '{
