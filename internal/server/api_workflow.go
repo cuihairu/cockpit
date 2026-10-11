@@ -55,6 +55,10 @@ type workflowStepTargetRun struct {
 	StopReason string `json:"stopReason,omitempty"`
 }
 
+// workflowStepStatusSkipped 跳过步快照状态（M2e G4）：步级词表新态——
+// 如实陈述「没跑」，与 pending（还没轮到）区分；JobStatus 词表不加词
+const workflowStepStatusSkipped = "skipped"
+
 type stepOptions struct {
 	TimeoutS        int
 	ContinueOnError bool
@@ -155,8 +159,8 @@ func collectStepRefs(v interface{}, into map[string]bool) {
 
 // validateWorkflowPayload 定义校验：name ≤64、步骤 1-20 且逐项过 Job 校验
 // （type 白名单/target/command/timeout 沿用 P1 各限，W12）；step.name 同
-// workflow 内唯一；输出引用必须指向更靠前的步骤（M2a V2——顺序链语义下
-// 前向/自引用运行期必拿空值，保存期拒绝）
+// workflow 内唯一；输出引用与 depends_on 都必须指向更靠前的步骤（M2a V2/
+// M2e G2——顺序链语义下前向/自引用运行期必拿空值或无意义，保存期拒绝）
 func validateWorkflowPayload(p *workflowPayload) error {
 	p.Name = strings.TrimSpace(p.Name)
 	if p.Name == "" {
@@ -195,6 +199,9 @@ func validateWorkflowPayload(p *workflowPayload) error {
 				return fmt.Errorf("steps[%d]: unknown or forward step reference %q", i, ref)
 			}
 		}
+		if err := validateStepDependsOn(step, seen); err != nil {
+			return fmt.Errorf("steps[%d]: %w", i, err)
+		}
 		seen[name] = true
 	}
 	return nil
@@ -227,6 +234,31 @@ func validateStepTargets(step *jobCreatePayload) error {
 			return fmt.Errorf("duplicate target %q", step.Targets[i])
 		}
 		seen[step.Targets[i]] = true
+	}
+	return nil
+}
+
+// validateStepDependsOn 依赖声明校验（M2e G1/G2）：条目 trim 后非空、列表内
+// 去重、只能指向更靠前已声明的 name（seen 随循环累积，自引用天然不在）——
+// 数组序即拓扑序，编排器循环顺序零改动；前向/未知引用与 M2a V2 输出引用
+// 同措辞拒绝，环在构造上不可能，无需运行期环检测。无 depends_on 恒过。
+func validateStepDependsOn(step *jobCreatePayload, seen map[string]bool) error {
+	if len(step.DependsOn) == 0 {
+		return nil
+	}
+	deps := make(map[string]bool, len(step.DependsOn))
+	for i := range step.DependsOn {
+		step.DependsOn[i] = strings.TrimSpace(step.DependsOn[i])
+		if step.DependsOn[i] == "" {
+			return fmt.Errorf("depends_on[%d] is empty", i)
+		}
+		if deps[step.DependsOn[i]] {
+			return fmt.Errorf("duplicate dependency %q", step.DependsOn[i])
+		}
+		if !seen[step.DependsOn[i]] {
+			return fmt.Errorf("unknown or forward step reference %q", step.DependsOn[i])
+		}
+		deps[step.DependsOn[i]] = true
 	}
 	return nil
 }
@@ -542,7 +574,8 @@ func stepOutputOf(job *storage.Job) string {
 // 每个 attempt 都是真实 Job（台账可查）；重试固定间隔 5s。
 func (s *Server) advanceWorkflow(wf *storage.Workflow, run *storage.WorkflowRun, actor string) {
 	steps := parseWorkflowSteps(wf)
-	outputs := make(map[string]string, len(steps)) // 步骤 name → 最终 attempt 输出（M2a V3/V4）
+	outputs := make(map[string]string, len(steps))  // 步骤 name → 最终 attempt 输出（M2a V3/V4）
+	outcomes := make(map[string]string, len(steps)) // 步骤 name → success/failed/skipped（M2e G4 依赖门控）
 	for i := range steps {
 		step := &steps[i]
 		opts, name := stepOptionsFromParams(step)
@@ -557,6 +590,15 @@ func (s *Server) advanceWorkflow(wf *storage.Workflow, run *storage.WorkflowRun,
 			return // 已被取消，不再推进
 		}
 
+		// 依赖门控（M2e G4/G5）：任一依赖终态非 success 即跳过本步（不建
+		// Job 行）；skipped 依赖同样传递。取消优先于跳过（上面已查）。
+		if dep, state, gated := unmetDependency(step, outcomes); gated {
+			reason := fmt.Sprintf("skipped: dependency %s %s", dep, state)
+			s.recordStepSkipped(run, i, step, reason)
+			outcomes[name] = workflowStepStatusSkipped
+			outputs[name] = "" // M2a V4：{{steps.NAME.output}} 解析空串
+			continue
+		}
 		var job *storage.Job
 		var attempts int
 		var finalStatus, reason string
@@ -592,6 +634,7 @@ func (s *Server) advanceWorkflow(wf *storage.Workflow, run *storage.WorkflowRun,
 				return
 			}
 		}
+		outcomes[name] = finalStatus // M2e G4：依赖门控取这里的状态
 
 		if finalStatus != storage.JobStatusSuccess && !opts.ContinueOnError {
 			if reason == "" {
@@ -611,6 +654,18 @@ func fanoutTargetsOf(step *jobCreatePayload) []string {
 		return step.Targets
 	}
 	return []string{step.Target}
+}
+
+// unmetDependency 依赖门控判定（M2e G4）：返回第一个终态非 success 的依赖
+// 及其状态。G2 校验保证依赖都在 outcomes 里有终态（前序步必已执行或跳过），
+// 缺项视为未满足（防御：不应发生）。
+func unmetDependency(step *jobCreatePayload, outcomes map[string]string) (string, string, bool) {
+	for _, dep := range step.DependsOn {
+		if state := outcomes[dep]; state != storage.JobStatusSuccess {
+			return dep, state, true
+		}
+	}
+	return "", "", false
 }
 
 // runWorkflowStep 执行单步（含重试）；返回终态 Job、归纳状态、实跑尝试数
@@ -755,6 +810,26 @@ func (s *Server) recordStepResult(run *storage.WorkflowRun, idx int, job *storag
 		if b, err := json.Marshal(steps); err == nil {
 			run.Steps = string(b)
 			_ = s.db.UpdateWorkflowRun(run)
+		}
+	}
+}
+
+// recordStepSkipped 跳过步快照回写（M2e G4）：无 Job 行、attempts 0，
+// status=skipped + 停因。db 失败面与 recordStepResult 同口径静默降级
+// （编排不因台账回写失败而中断）。
+func (s *Server) recordStepSkipped(run *storage.WorkflowRun, idx int, step *jobCreatePayload, stopReason string) {
+	current, err := s.db.GetWorkflowRun(run.ID)
+	if err != nil {
+		log.Printf("workflow: load run for step skip failed: %v", err)
+		return
+	}
+	var steps []workflowStepRun
+	if json.Unmarshal([]byte(current.Steps), &steps) == nil && idx < len(steps) {
+		steps[idx].Status = workflowStepStatusSkipped
+		steps[idx].StopReason = stopReason
+		if b, err := json.Marshal(steps); err == nil {
+			current.Steps = string(b)
+			_ = s.db.UpdateWorkflowRun(current)
 		}
 	}
 }

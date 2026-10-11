@@ -1492,3 +1492,207 @@ func TestWorkflowFanoutDBErrors(t *testing.T) {
 		t.Fatal("jobIDOf(nil) should be empty")
 	}
 }
+
+// ============ M2e DAG 依赖门控 ============
+
+// TestWorkflowDependsOnValidation depends_on 校验矩阵（G1/G2）与 standalone
+// Job 拒收：未知/前向/自引用保存期 400（与 M2a V2 同措辞），trim 过合法。
+func TestWorkflowDependsOnValidation(t *testing.T) {
+	s := newBackupTestServer(t)
+	ok := `{"type":"agent.exec","target":"a1","parameters":{"name":"s","command":"x"}}`
+	for _, c := range []struct {
+		name string
+		body string
+	}{
+		{"unknown dep", `{"name":"n","steps":[` + ok + `,` +
+			`{"type":"agent.exec","target":"a1","depends_on":["nope"],"parameters":{"name":"d","command":"x"}}]}`},
+		{"forward dep", `{"name":"n","steps":[` +
+			`{"type":"agent.exec","target":"a1","depends_on":["later"],"parameters":{"name":"d","command":"x"}},` + ok + `]}`},
+		{"self dep", `{"name":"n","steps":[` +
+			`{"type":"agent.exec","target":"a1","depends_on":["d"],"parameters":{"name":"d","command":"x"}}]}`},
+		{"duplicate deps", `{"name":"n","steps":[` + ok + `,` +
+			`{"type":"agent.exec","target":"a1","depends_on":["s","s"],"parameters":{"name":"d","command":"x"}}]}`},
+		{"empty dep entry", `{"name":"n","steps":[` + ok + `,` +
+			`{"type":"agent.exec","target":"a1","depends_on":["  "],"parameters":{"name":"d","command":"x"}}]}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows", strings.NewReader(c.body)), "/workflows")
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("code = %d, body: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+	// trim 后合法引用 → 201
+	rec := httptest.NewRecorder()
+	body := `{"name":"ok","steps":[` + ok + `,` +
+		`{"type":"agent.exec","target":"a1","depends_on":[" s "],"parameters":{"name":"d","command":"x"}}]}`
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows", strings.NewReader(body)), "/workflows")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("valid deps: %d %s", rec.Code, rec.Body.String())
+	}
+	// standalone Job 携 depends_on → 400（依赖门控仅 workflow steps 合法）
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs", strings.NewReader(`{"type":"agent.exec","target":"a1","depends_on":["s"],"parameters":{"command":"x"}}`))
+	s.handleJobsAPI(rec, req, "/jobs")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "workflow steps") {
+		t.Fatalf("standalone depends_on: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestWorkflowDependsOnGateSuccess 依赖全成功照常跑（G3 数组序即拓扑序）：
+// a→c、b→c 两次引用同一步，c 在两个依赖后执行。
+func TestWorkflowDependsOnGateSuccess(t *testing.T) {
+	s := newBackupTestServer(t)
+	calls := 0
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		calls++
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+	body := `{"name":"dag","steps":[` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"a","command":"true"}},` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"b","command":"true"}},` +
+		`{"type":"agent.exec","target":"a1","depends_on":["a","b"],"parameters":{"name":"c","command":"true"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusSuccess || calls != 3 {
+		t.Fatalf("run = %s calls = %d", run.Status, calls)
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if steps[2].Status != "success" || steps[2].JobID == "" {
+		t.Fatalf("gated step = %+v", steps[2])
+	}
+}
+
+// TestWorkflowDependsOnFailStops 依赖失败且无 continue_on_error：run 在失败步
+// 落 failed（W5 不变），下游根本不推进、保持 pending（G5 前半）。
+func TestWorkflowDependsOnFailStops(t *testing.T) {
+	s := newBackupTestServer(t)
+	calls := 0
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		calls++
+		if calls == 2 {
+			return map[string]interface{}{"exit_code": 3, "output": "boom", "error": ""}, ""
+		}
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+	body := `{"name":"f","steps":[` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"ok","command":"true"}},` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"bad","command":"false"}},` +
+		`{"type":"agent.exec","target":"a1","depends_on":["bad"],"parameters":{"name":"never","command":"true"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusFailed || calls != 2 {
+		t.Fatalf("run = %s calls = %d", run.Status, calls)
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if steps[2].Status != "pending" {
+		t.Fatalf("downstream of failed dep = %+v", steps[2])
+	}
+}
+
+// TestWorkflowDependsOnSkipPropagation 依赖失败带 continue_on_error：run 继续，
+// 依赖它的步按 G4 跳过并传递（skipped 又被依赖 → 再跳过），无 Job 行；
+// 无关分支照常跑；跳过步输出解析空串（M2a V4）；run 终态 success（G6，
+// 与「run success + 时间线红步」同构）。
+func TestWorkflowDependsOnSkipPropagation(t *testing.T) {
+	s := newBackupTestServer(t)
+	calls := 0
+	var indepCmd string
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		calls++
+		if v, _ := params["command"].(string); v == "false" {
+			return map[string]interface{}{"exit_code": 9, "output": "", "error": ""}, ""
+		}
+		if v, ok := params["command"].(string); ok && strings.HasPrefix(v, "echo") {
+			indepCmd = v
+		}
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+	body := `{"name":"skip","steps":[` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"soft","command":"false","continue_on_error":true}},` +
+		`{"type":"agent.exec","target":"a1","depends_on":["soft"],"parameters":{"name":"mid","command":"true"}},` +
+		`{"type":"agent.exec","target":"a1","depends_on":["mid"],"parameters":{"name":"leaf","command":"true"}},` +
+		`{"type":"agent.exec","target":"a1","depends_on":["soft","mid"],"parameters":{"name":"both","command":"true"}},` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"indep","command":"echo {{steps.mid.output}}"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusSuccess {
+		t.Fatalf("run = %s steps: %s", run.Status, run.Steps)
+	}
+	if calls != 2 || indepCmd != "echo " {
+		t.Fatalf("calls = %d indepCmd = %q (skipped output must resolve empty)", calls, indepCmd)
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if steps[0].Status != "failed" {
+		t.Fatalf("soft = %+v", steps[0])
+	}
+	for i, want := range map[int]string{1: "mid", 2: "leaf", 3: "both"} {
+		st := steps[i]
+		if st.Status != workflowStepStatusSkipped || st.JobID != "" || st.Attempts != 0 {
+			t.Fatalf("%s = %+v", want, st)
+		}
+	}
+	if !strings.Contains(steps[1].StopReason, "dependency soft failed") ||
+		!strings.Contains(steps[2].StopReason, "dependency mid skipped") ||
+		!strings.Contains(steps[3].StopReason, "dependency soft failed") {
+		t.Fatalf("stop reasons = %q / %q / %q", steps[1].StopReason, steps[2].StopReason, steps[3].StopReason)
+	}
+	if steps[4].Status != "success" {
+		t.Fatalf("independent branch = %+v", steps[4])
+	}
+}
+
+// TestWorkflowDependsOnFanoutSkip 扇出步依赖门控（G8）：依赖不满足整步跳过
+// （无逐台 Job、逐台行保留 init pending），依赖满足则照常扇出。
+func TestWorkflowDependsOnFanoutSkip(t *testing.T) {
+	s := newBackupTestServer(t)
+	calls := 0
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		calls++
+		if calls == 1 {
+			return map[string]interface{}{"exit_code": 7, "output": "", "error": ""}, ""
+		}
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+	body := `{"name":"fs","steps":[` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"soft","command":"false","continue_on_error":true}},` +
+		`{"type":"agent.exec","targets":["a1"],"depends_on":["soft"],"parameters":{"name":"fan","command":"true"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusSuccess || calls != 1 {
+		t.Fatalf("run = %s calls = %d", run.Status, calls)
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if steps[1].Status != workflowStepStatusSkipped || len(steps[1].Targets) != 1 || steps[1].Targets[0].Status != "pending" {
+		t.Fatalf("skipped fanout = %+v", steps[1])
+	}
+	if strings.Contains(run.Steps, `"jobId":"job-`) && strings.Contains(steps[1].StopReason, "dependency") {
+		// skipped 步无 Job 行（JobID 空即已断言），此处仅防快照串位
+		t.Fatalf("skipped fanout must not dispatch: %+v", steps[1])
+	}
+}

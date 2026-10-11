@@ -28,7 +28,8 @@ import (
 type jobCreatePayload struct {
 	Type       string                 `json:"type"`
 	Target     string                 `json:"target"`
-	Targets    []string               `json:"targets,omitempty"` // 多目标扇出（M2b F1）：仅 workflow steps 合法
+	Targets    []string               `json:"targets,omitempty"`   // 多目标扇出（M2b F1）：仅 workflow steps 合法
+	DependsOn  []string               `json:"depends_on,omitempty"` // 依赖门控（M2e G1）：仅 workflow steps 合法
 	Parameters map[string]interface{} `json:"parameters"`
 }
 
@@ -68,6 +69,10 @@ func (s *Server) submitJob(p *jobCreatePayload, actor string) (*jobView, *submit
 	// targets 扇出仅 workflow steps 合法（M2b F1）：standalone Job 单目标语义
 	if len(p.Targets) > 0 {
 		return nil, &submitFail{http.StatusBadRequest, "targets is only valid in workflow steps"}
+	}
+	// depends_on 依赖门控仅 workflow steps 合法（M2e G1）：standalone 无编排语义
+	if len(p.DependsOn) > 0 {
+		return nil, &submitFail{http.StatusBadRequest, "depends_on is only valid in workflow steps"}
 	}
 	if _, ok := s.registry.Get(p.Target); !ok {
 		return nil, &submitFail{http.StatusServiceUnavailable, "agent offline"}
