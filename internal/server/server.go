@@ -233,6 +233,9 @@ func (s *Server) Start() error {
 	go s.nasScanLoop()           // NAS 存储巡检（见 nas-design.md D5）
 	// 启动系统指标清理协程
 	go s.metricsCleanupLoop()
+	// server 重启孤儿清扫：无推进者的 pending/running Job 与 running run
+	// 收敛为 failed（先于 HTTP 接流，见 orphan_run.go）
+	s.recoverOrphanRuns()
 	// 启动备份调度循环
 	s.startBackupLoop()
 	// 启动 server 自身数据库备份循环（见 server-backup-design.md）

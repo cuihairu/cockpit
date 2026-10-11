@@ -133,6 +133,15 @@ func (d *DB) ActiveWorkflowRun(workflowID string) (*WorkflowRun, error) {
 	return &run, nil
 }
 
+// RunningWorkflowRuns 全部进行中的 run（server 重启孤儿清扫用，不按定义过滤）
+func (d *DB) RunningWorkflowRuns() ([]WorkflowRun, error) {
+	var runs []WorkflowRun
+	if err := d.db.Where("status = ?", WorkflowRunStatusRunning).Find(&runs).Error; err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
 // ListJobsFiltered 带过滤的 Job 台账（状态/目标/类型/所属 run；空值不过滤）
 func (d *DB) ListJobsFiltered(status, target, jobType, runID string, limit int) ([]Job, error) {
 	if limit <= 0 {

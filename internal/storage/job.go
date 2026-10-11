@@ -83,6 +83,15 @@ func (d *DB) CancelJob(id, fromStatus string, finished time.Time) (int64, error)
 	return res.RowsAffected, res.Error
 }
 
+// FailJob 条件终态回写 failed（孤儿清扫）：仅当当前状态匹配 fromStatus 时
+// 生效，错误摘要与终态一并落账。server 重启清扫遗留 pending/running 行时
+// 使用，与 CancelJob 同款条件 UPDATE——恢复扫描绝不改写已落终态的行。
+func (d *DB) FailJob(id, fromStatus string, finished time.Time, errMsg string) (int64, error) {
+	res := d.db.Model(&Job{}).Where("id = ? AND status = ?", id, fromStatus).
+		Updates(map[string]interface{}{"status": JobStatusFailed, "error": errMsg, "finished_at": finished})
+	return res.RowsAffected, res.Error
+}
+
 // MarkJobCancelledOutput 在 Job 已落 cancelled 终态时仅回写执行结果（C7 守卫
 // 的终态侧）：exec 被击杀后 dispatchJobAsync 会收到 killed 结果，output/
 // exit_code/error 需补进台账，但 status 必须保持 cancelled。

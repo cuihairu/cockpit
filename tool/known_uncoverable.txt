@@ -117,3 +117,5 @@ internal/server/api_workflow.go:994,995	3. cancelRunJobs 条件 UPDATE 失败仅
 internal/server/api_workflow.go:1002,1003	3. actorName nil 分支（调用面恒传非 nil *http.Request；后台编排走 finishWorkflowRun 的 actor 字符串参数，不经此分支）
 internal/server/api_workflow.go:1005,1006	4. actorName 带登录态分支（handler 单测无 auth middleware；真名分支由登录流程整链覆盖，同 jobs 196,197 口径）
 internal/server/probe_report.go:91,92	3. decodeProbeReport json.Marshal(payload) 失败防御（payload 来自 JSON 解码，值恒为 string/number/bool/nil/map/slice，契约上不可失败）
+internal/server/orphan_run.go:34,35	3. recoverOrphanRuns 单行 FailJob 失败仅降级 log（ListJobsFiltered 先行成功，主键条件 UPDATE 无现实失败面；同 api_workflow 980,981 口径）
+internal/server/orphan_run.go:48,49	3. recoverOrphanRuns 单行 FinishWorkflowRun 失败仅降级 log（RunningWorkflowRuns 先行成功，主键条件 UPDATE 无现实失败面；同 api_workflow 980,981 口径）
