@@ -130,3 +130,4 @@ internal/server/api_approvals.go:89,90	3. createApproval payload Marshal 失败 
 internal/server/api_approvals.go:188,190	3. approve DecideApproval 失败 500（GetApproval 先行成功，单行条件 UPDATE 无现实失败面；同 api_workflow 943,945 口径）
 internal/server/api_approvals.go:216,217	3. SetApprovalJobID 对账回写失败仅降级 log（DecideApproval/CreateJob 先行成功，主键 UPDATE 无现实失败面；同 orphan_run 48,49 口径）
 internal/server/api_approvals.go:236,238	3. reject DecideApproval 失败 500（同 188,190 口径）
+internal/vault/local.go:223,224	3. json.Marshal(map[string]string) 不可能失败，防御分支
