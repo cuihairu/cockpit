@@ -1091,6 +1091,8 @@ M2 剩余候选：取消信号/DAG/审批门/SSE，未排期。
 
 **2026-10-11 巡检续批二：P5b execlog 留痕闭环**：core/execlog 记录器（126b84e）——内存环满丢最旧（DefaultCapacity 256，观测面不反压业务）、Record 缺省补 ID/Time、RecordCall 由 callErr 推导状态+error 摘要截 256+入参 Sanitize（敏感键 `(?i)pass|secret|token|credential|private` 整键剔除同凭据不进留痕口径；标量截 128；复合值只记「…」不展开——嵌套可藏凭据，展开等于绕过键名检查）、Flush 攒批随 exec_log 消息上行且**失败批即弃不重试**（尽力而为契约：执行高峰重试会放大队列压力，server 审计按此口径收）、Run 周期 Flush+ctx 取消末次 Flush（停机不丢已留痕未上行批）。埋点收口 rpc/router.go Handle 单点（SetExecLogger 可缺省 nil=行为零变化；只记真执行，解码失败/未知 provider 不记；service_health 自愈走引擎直调不经此路已有独立审计链不重复记）；agent 装配 execlog.New(DefaultCapacity, upstream.Enqueue)+30s 周期 Flush（执行面低频事件，停机另有末次 Flush）。测试：包内 7 用例全分支（环淘汰/失败批弃/脱敏/两条 Run 失败日志分支确定性构造——tick 路径等 send 被调命中、ctx.Done 路径间隔取小时级保证取消是唯一触发点）+ router 埋点 3 用例（成功落字段+password 剔除、失败 err 原样透传留痕不吞、nil 记录器零变化）+ core/execlog 语句覆盖 100%。
 
+**2026-10-11 巡检续批三：M2 审批门前置——server 重启孤儿清扫**（9079b52）：dispatchJobAsync/advanceWorkflow 都是进程内 goroutine，重启即丢——遗留 pending/running Job 行与 running WorkflowRun 行不再有推进者，继续等待只会永远悬挂。启动期（HTTP 未接流）一次性收敛 failed：storage 加 FailJob（条件 UPDATE 同 CancelJob 口径，error+finished_at 落账）与 RunningWorkflowRuns（不按定义过滤）；recoverOrphanRuns 逐行条件 UPDATE 绝不改写终态行，Job 面与 run 面独立（一面查询失败只记日志继续，不拖住另一面）；先 running 后 pending（pending 含「建行后派发未及翻转」窗口态）。测试：server 侧全链（running/pending/步骤 Job 收敛 failed 带 restart 错误摘要、success/cancelled/failed run 原样保留、空库 no-op、闭库确定性构造两处查询失败分支）+ storage 侧（FailJob 条件命中/终态不命中、RunningWorkflowRuns 只返 running、闭库错误分支）；两条单行 UPDATE 失败降级分支按 api_workflow 980,981 口径登记 known_uncoverable（读链先行成功，主键 UPDATE 无现实失败面）。审批门立项前置已解。
+
 ## 未来路线图（个人云场景功能扩展）
 
 > 2026-07-15 复核，2026-09-14 更新（打勾状态核对 + 按参考项目对比标注方案来源）。针对「个人云基础设施控制台」定位，盘点当前架构已支撑但前端/自动化未覆盖的常见场景，按优先级规划。后端能力储备较充分，多数条目是前端页面 + 自动化逻辑的补齐。
