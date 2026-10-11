@@ -70,13 +70,28 @@ type healthHealRecView struct {
 	DurationMs int64  `json:"durationMs"`
 }
 
-// healthStateEntry 单探针运行态（镜像 agent 侧 healthProbeState）
+// healthWindowView 故障窗口（镜像 agent 侧 core/healthprobe.Window，
+// P6 三语义）：EndedAt 零值表示仍在故障中；[StartedAt, EndedAt] 即
+// 「什么时间段服务不可用」的回查答案，Semantics 留痕判定语义。
+type healthWindowView struct {
+	Target    string    `json:"target"`
+	Semantics string    `json:"semantics"`
+	StartedAt time.Time `json:"startedAt"`
+	EndedAt   time.Time `json:"endedAt"`
+	LastError string    `json:"lastError"`
+}
+
+// healthStateEntry 单探针运行态（镜像 agent 侧 healthProbeState，P6：
+// 判定语义与故障窗口随状态上行——openWindow 非空 ⟺ 判定期 Faulty）
 type healthStateEntry struct {
 	Status           string             `json:"status"`
+	Semantics        string             `json:"semantics"`
 	LastCheck        int64              `json:"lastCheck"`
 	ConsecutiveFails int                `json:"consecutiveFails"`
 	LastError        string             `json:"lastError"`
 	LastHeal         *healthHealRecView `json:"lastHeal"`
+	OpenWindow       *healthWindowView  `json:"openWindow"`
+	RecentWindows    []healthWindowView `json:"recentWindows"`
 }
 
 // healthStateCache 运行态缓存（离线灰态 + GET 回落）

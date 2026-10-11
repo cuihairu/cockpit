@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
@@ -595,5 +596,95 @@ func TestHealthServeAPIRoute(t *testing.T) {
 	rec := callWithAuth(s, s.serveAPI, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("serveAPI health route: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHealthOverviewWindowPassThrough P6 判定上收后的窗口/语义透传：agent
+// 上行的 openWindow/recentWindows/semantics 原样进概览响应（typed 镜像
+// 不丢字段），离线灰态缓存回落同样带窗口。
+func TestHealthOverviewWindowPassThrough(t *testing.T) {
+	agentStates := map[string]interface{}{
+		"cloudflared-ready": map[string]interface{}{
+			"status": "fail", "consecutiveFails": 3, "lastError": "HTTP 502",
+			"semantics": "liveness",
+			"openWindow": map[string]interface{}{
+				"target": "cloudflared-ready", "semantics": "liveness",
+				"startedAt": "2026-10-11T08:00:00Z", "lastError": "HTTP 502"},
+			"recentWindows": []interface{}{
+				map[string]interface{}{
+					"target": "cloudflared-ready", "semantics": "liveness",
+					"startedAt": "2026-10-10T08:00:00Z",
+					"endedAt":   "2026-10-10T08:05:00Z", "lastError": "timeout"}},
+		},
+	}
+	s, _ := newOverlayServer(t, func(method string, params map[string]interface{}) (interface{}, string) {
+		if method == "service.health.status" {
+			return map[string]interface{}{"states": agentStates}, ""
+		}
+		return map[string]interface{}{"applied": 1}, ""
+	})
+
+	if rec := doHealthAPI(s, http.MethodPut, "a1/health", healthAgentBody()); rec.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := doHealthAPI(s, http.MethodGet, "a1/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overview: %d", rec.Code)
+	}
+	var resp struct {
+		States map[string]struct {
+			Status     string `json:"status"`
+			Semantics  string `json:"semantics"`
+			OpenWindow *struct {
+				Target    string `json:"target"`
+				Semantics string `json:"semantics"`
+				StartedAt string `json:"startedAt"`
+				EndedAt   string `json:"endedAt"`
+			} `json:"openWindow"`
+			RecentWindows []struct {
+				Semantics string `json:"semantics"`
+				EndedAt   string `json:"endedAt"`
+			} `json:"recentWindows"`
+		} `json:"states"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("overview body: %v", err)
+	}
+	st := resp.States["cloudflared-ready"]
+	// open 窗口的 endedAt 是零值时间字符串（time.Time 的 omitempty 无效，
+	// 零值 ⟺ 仍在故障中，前后端按此判开合）
+	if st.Semantics != "liveness" || st.OpenWindow == nil || st.OpenWindow.StartedAt == "" ||
+		st.OpenWindow.EndedAt != "0001-01-01T00:00:00Z" {
+		t.Fatalf("open window = %+v, want open liveness window with zero endedAt", st.OpenWindow)
+	}
+	if st.OpenWindow.Target != "cloudflared-ready" || st.OpenWindow.Semantics != "liveness" {
+		t.Fatalf("open window fields = %+v", st.OpenWindow)
+	}
+	if len(st.RecentWindows) != 1 || st.RecentWindows[0].EndedAt == "" || st.RecentWindows[0].Semantics != "liveness" {
+		t.Fatalf("recent windows = %+v, want one closed liveness window", st.RecentWindows)
+	}
+
+	// 离线灰态走同一 typed 结构：序列化往返不丢窗口/语义（loadHealthStateCache
+	// 反解的就是这个结构，往返即契约）
+	cached := healthStateCache{UpdatedAt: 9, States: map[string]healthStateEntry{
+		"cloudflared-ready": {
+			Status: "fail", Semantics: "readiness", LastCheck: 1, ConsecutiveFails: 2, LastError: "x",
+			OpenWindow: &healthWindowView{
+				Target: "cloudflared-ready", Semantics: "readiness",
+				StartedAt: time.Date(2026, 10, 11, 7, 0, 0, 0, time.UTC), LastError: "x"},
+		},
+	}}
+	raw, err := healthJSONMarshal(cached)
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	var back healthStateCache
+	if err := json.Unmarshal([]byte(raw), &back); err != nil {
+		t.Fatalf("unmarshal cache: %v", err)
+	}
+	cs := back.States["cloudflared-ready"]
+	if cs.Semantics != "readiness" || cs.OpenWindow == nil || cs.OpenWindow.Semantics != "readiness" ||
+		cs.OpenWindow.StartedAt.IsZero() || !cs.OpenWindow.EndedAt.IsZero() {
+		t.Fatalf("cached state = %+v, want readiness window preserved through round trip", cs)
 	}
 }
