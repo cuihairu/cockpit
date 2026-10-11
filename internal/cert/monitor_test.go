@@ -96,10 +96,13 @@ func TestInfoGetStatus(t *testing.T) {
 func TestCheckMultiple(t *testing.T) {
 	m := NewMonitor(Config{Timeout: 2 * time.Second})
 
+	// 失败样本用 127.0.0.1（回环 443 无监听 → 连接拒绝，确定性走 CheckDomain
+	// 错误分支）。不能用「不存在的域名」：本机 DNS/代理会对任意域名返回解析
+	// 与证书，错误分支随机盖住/漏盖（2026-10-11 门禁实测）。
 	domains := []string{
 		"localhost",
 		"example.com",
-		"invalid-domain-that-does-not-exist-12345.com",
+		"127.0.0.1",
 	}
 
 	results := m.CheckMultiple(domains)
