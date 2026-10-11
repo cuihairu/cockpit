@@ -133,8 +133,10 @@ describe('Approvals', () => {
     await waitFor(() =>
       expect(msgSuccess).toHaveBeenCalledWith('已批准，任务开始执行'),
     )
-    // 决策后 invalidateQueries → 台账重取
-    await waitFor(() => expect(approvalsMock.listApprovals).toHaveBeenCalledTimes(2))
+    // 决策后 invalidateQueries → 台账重取（5s 轮询叠加，慢机下次数只多不少）
+    await waitFor(() =>
+      expect(approvalsMock.listApprovals.mock.calls.length).toBeGreaterThanOrEqual(2),
+    )
   })
 
   it('驳回：Popconfirm 确认后经 rejectApproval', async () => {

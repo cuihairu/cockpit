@@ -199,12 +199,14 @@ describe('Docker', () => {
     })
     expect(await screen.findByText('确定要停止「nginx」吗？')).toBeInTheDocument()
     expect(apiMock.stopContainer).not.toHaveBeenCalled()
+    // 操作成功后 500ms 防抖刷新容器列表。基线在确认前取：慢机下停调返回与
+    // 基线采集之间可能已隔过 500ms，防抖刷新先落袋会让后置比较恒假（24s+
+    // 负载下复现过的 flake）。页面无轮询，确认后的增量即防抖刷新。
+    const before = apiMock.getContainers.mock.calls.length
     await act(async () => {
       fireEvent.click(document.querySelector('.ant-modal-confirm-btns .ant-btn-primary')!)
     })
     await waitFor(() => expect(apiMock.stopContainer).toHaveBeenCalledWith('ag-docker', 'c-run', 10))
-    // 操作成功后 500ms 防抖刷新容器列表
-    const before = apiMock.getContainers.mock.calls.length
     await waitFor(() => expect(apiMock.getContainers.mock.calls.length).toBeGreaterThan(before))
   })
 

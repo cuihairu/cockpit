@@ -17,7 +17,7 @@ import axios from 'axios'
 // jsdom 的 location 不可直接赋 href，整体替换为可写对象
 const locationStub = { href: '' }
 vi.stubGlobal('location', locationStub)
-import { cancelJob, createJob, getJob, listJobs } from './jobs'
+import { cancelJob, createJob, createJobWithApproval, getJob, listJobs } from './jobs'
 
 const mockInstance = axios.create() as unknown as Record<'get' | 'post', ReturnType<typeof vi.fn>>
 
@@ -71,6 +71,21 @@ describe('jobs 服务', () => {
       parameters: { command: 'uptime', timeout_s: 30 },
     })
     expect(job).toEqual({ id: 'j1', status: 'success' })
+  })
+
+  it('createJobWithApproval 提交审批（202，不直接建 Job）', async () => {
+    mockInstance.post.mockResolvedValue({ id: 'ap1', status: 'pending' })
+    const v = await createJobWithApproval({
+      target: 'a1',
+      parameters: { command: 'reboot-now', timeout_s: 60 },
+    })
+    expect(mockInstance.post).toHaveBeenCalledWith('', {
+      approval: 'required',
+      type: 'agent.exec',
+      target: 'a1',
+      parameters: { command: 'reboot-now', timeout_s: 60 },
+    })
+    expect(v.status).toBe('pending')
   })
 
   it('getJob 按 id 拼路径', async () => {
