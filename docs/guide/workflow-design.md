@@ -273,8 +273,9 @@ DAG/审批门/SSE 的依据（2026-10-10 巡检拍板）：DAG 维持 W4 压后�
 | C5 | 幂等语义 | 未知/已结束 ID 的 cancel 返回成功空操作（`{cancelled:false}`），镜像 `FollowStop` | cancel 与 exec 完成存在天然竞态（job 恰在 cancel 到达前结束）；报错会让 server 无法区分「已停」与「早已结束」，幂等成功使 server 侧语义单一 |
 | C6 | server 单 Job 取消 | running 可撤：`CallAgent(job.cancel)` → 成功后**条件 UPDATE**（`WHERE status='running'`）落 cancelled；agent 不可达 → 409 如实拒绝。pending 维持 W3（DB-only），终态一律 409 | 「观察终态 ⟹ 状态可信」：只有 agent 确认击杀才落 cancelled，绝不假称已停；条件 UPDATE 防 check-then-update 竞态（GetJob 与 CancelJob 之间 pending→running 翻转窗口） |
 | C7 | 终态回写不覆盖取消 | `dispatchJobAsync` / `runWorkflowStep` 回写前**重读** job，若已 cancelled 则保留 cancelled（仅补 output/exitCode/error） | cancel 写与 exec 回写并发：exec 被击杀后返回 exit -1 / "signal: killed"，若无守卫会把 cancelled 覆盖成 failed；重读收敛竞态，无需加锁串行化 |
-| C8 | run 级取消联动 | `handleWorkflowRunCancel` 除置 run cancelled 外，查在途 step Job（`ListJobsFiltered(status=running, runID)`）逐个走 C6 击杀路径；在途步回写命中 C7 守卫，步骤快照记 cancelled + stopReason=`run cancelled`（F5 同口径） | W3 只停推进、失控命令跑满超时——M2c 的价值就在「真正停掉在途命令」；run 取消是用户最高频的「停下来」入口 |
+| C8 | run 级取消联动 | `handleWorkflowRunCancel` 除置 run cancelled 外，查在途 step Job（`ListJobsFiltered` 按 running 与 pending 各查一轮）逐个走 C6 击杀路径；pending（建行未派发微秒窗口）DB-only 条件取消，0 行命中说明已翻转 running 则落到击杀路径兜底；在途步回写命中 C7 守卫，步骤快照记 cancelled + stopReason=`run cancelled`（F5 同口径） | W3 只停推进、失控命令跑满超时——M2c 的价值就在「真正停掉在途命令」；run 取消是用户最高频的「停下来」入口；pending 窗口不取消则台账永久留无终态的孤儿行 |
 | C9 | 步骤 cancelled ⟹ run cancelled | `advanceWorkflow` 单步分支补 cancelled 守卫（镜像扇出分支 F5 的 return）；若 run 仍 running（单 Job 取消场景）则 `finishWorkflowRun(cancelled)` | 步骤 Job 死则链断，run 不得僵尸悬挂（永不落终态）；单 Job 取消传播到 run 是直觉语义——用户杀了某步，期望整条链停 |
+| C10 | run 终态条件写 | `finishWorkflowRun` 与 run 取消处理器共用 `FinishWorkflowRun(id, status, WHERE status='running')` 条件 UPDATE（新增 storage 方法，同 C6 的 Job CancelJob 口径）；命中 0 行 → 取消处理器 409、编排器放弃改写 | C8 引入的杀手锏：击杀输给 exec 收尾时步骤以 failed 收场，`finishWorkflowRun(failed)` 会把已落 cancelled 的终态翻掉；两侧都走条件写后先到先得，后到者如实反馈（409 / 日志放弃），cancelled 与 failed/success 互不覆盖。原 `UpdateWorkflowRun` 全量 Save 保留给快照回写（recordStepResult / recordStepTargets）等非终态面 |
 
 ### 不变式
 
@@ -283,16 +284,20 @@ DAG/审批门/SSE 的依据（2026-10-10 巡检拍板）：DAG 维持 W4 压后�
   defer），防「已注销未击杀」微秒窗口漏杀。
 - `cancelled` 是 Job 既有真实终态（storage W3 已立）；cancel 写与 exec
   回写的竞态由条件 UPDATE + 重读收敛，终态以库内为准。
-- run 终态：cancelled run 不再被 `finishWorkflowRun` 改写——advanceWorkflow
-  步骤边界检查 + C9 cancelled 守卫双保险；run 取消处理器自身 audit-then-
-  update（与 finishWorkflowRun 写序不变式同款：观察终态 ⟹ 无后续写）。
+- run 终态：终态写一律走条件 UPDATE（C10），cancelled 与 failed/success
+  先到先得、互不覆盖——advanceWorkflow 步骤边界检查 + C9 cancelled 守卫
+  是流程面双保险，C10 是写面兜底；run 取消处理器自身 audit-then-update
+  （与 finishWorkflowRun 写序不变式同款：观察终态 ⟹ 无后续写）。
 - 审计动作不变（`job_cancel` / `workflow_cancel` 既有）；run 取消联动击杀
   的 step Job 不另发 cancel 审计（其 exec 回写已有 `job_run` 审计）。
 
 ### 前端
 
-- Jobs 页取消按钮对 running job 现真生效（原仅 pending 可点）；按钮/文案
-  零改动——行为升级对 UI 透明。
+- Jobs 页取消按钮：条件由仅 `pending` 扩到 `pending || running`（原代码
+  只对 pending 渲染按钮，running 行没有入口——不是纯行为升级，需改渲染
+  条件）；按钮形态/文案不变。
+- run 取消文案改口径：原「当前在途步骤将自然结束」（W3 语义）→
+  「在途步骤将被立即终止」（M2c 语义），Popconfirm 与成功提示两处同步。
 - run 时间线：在途步被击杀后显示 cancelled + stopReason `run cancelled`
   （复用 F5 渲染路径，零新增组件）。
 
@@ -305,10 +310,19 @@ DAG/审批门/SSE 的依据（2026-10-10 巡检拍板）：DAG 维持 W4 压后�
 - server（`cov_jobs` / `cov_workflow` 系）：running job cancel → 假 agent
   收 `job.cancel` → job cancelled + 输出仍回写；agent 不可达 → 409 不落
   cancelled；exec 回写不覆盖 cancelled（C7 守卫）；pending→running 翻转
-  竞态走条件 UPDATE；run cancel 联动击杀在途 step（C8）；单步 Job 被杀
-  → run 落 cancelled（C9）；扇出步目标 Job 被杀 → 步 cancelled。
-- 全部确定性可达（假 agent handler 按 method 分流 + channel 编排时序），
-  预计无新增 known_uncoverable 登记。
+  竞态走条件 UPDATE；run cancel 联动击杀在途 step（C8，含 pending 窗口的
+  DB-only 条件取消 + 翻转兜底）；单步 Job 被杀
+  → run 落 cancelled（C9）；扇出步目标 Job 被杀 → 步 cancelled + 后续
+  目标不派发 + run 终态保持 cancelled（聚合 cancelled 与 C10 条件写双防
+  线）；run 已终态后取消 409（C10 条件写 0 行）；陈旧 running 视图的
+  cancel 拒绝（C6「job already finished」）；dispatch 无 params 时 id
+  注入（C1 契约）。
+- storage：`CancelJob` 条件 UPDATE（状态匹配才生效 + 重取消 0 行 +
+  `MarkJobCancelledOutput` 只补执行结果）；`FinishWorkflowRun` 条件终态
+  写（仅 running 生效，已终态 0 行不改写）。
+- 死防御与登录态分支按惯例登记 `tool/known_uncoverable.txt`（jobs 9 条 /
+  workflow 17 条，理由注记各自分支；仅竞态窗口可达的登记口径同 C10
+  0-rows 409 条目）。
 
 ## 边界自检（战略评审两问）
 

@@ -156,7 +156,7 @@ const Jobs = () => {
           <Button type="link" size="small" onClick={() => setDetail(r)}>
             查看
           </Button>
-        ) : r.status === 'pending' ? (
+        ) : r.status === 'pending' || r.status === 'running' ? (
           <PermGuard perm="jobs:write">
             <Button
               type="link"

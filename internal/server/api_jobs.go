@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,7 +20,7 @@ import (
 //	POST /api/jobs             创建 Job，后台执行，立即 201 返回 pending 视图
 //	GET  /api/jobs             最近 Job 列表（倒序，limit 50；支持过滤）
 //	GET  /api/jobs/{id}        单条详情（含输出）
-//	POST /api/jobs/{id}/cancel 取消 pending Job（workflow-design W3）
+//	POST /api/jobs/{id}/cancel 取消 pending/running Job（W3 + M2c C6）
 //
 // 执行流：校验 → 建 Job(pending) → 后台 goroutine CallAgent(job.exec) →
 // 终态 success/failed 回写 + 审计 job_run。目标 agent 离线一律 503（先查
@@ -37,6 +38,10 @@ var jobTypes = map[string]string{
 	"agent.exec": "job.exec",
 }
 
+// jobCancelMethod 取消信号 RPC 方法（M2c C1）：params {id} 按 dispatchJob
+// 下发时带入的 Job ID 定位 agent 侧在途执行
+const jobCancelMethod = "job.cancel"
+
 // handleJobsAPI 分发 /api/jobs[/{id}[/cancel]]
 func (s *Server) handleJobsAPI(w http.ResponseWriter, r *http.Request, path string) {
 	switch {
@@ -50,7 +55,7 @@ func (s *Server) handleJobsAPI(w http.ResponseWriter, r *http.Request, path stri
 			s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 			return
 		}
-		// POST /api/jobs/{id}/cancel：pending 未派发可撤（workflow-design W3）
+		// POST /api/jobs/{id}/cancel：pending 可撤（W3）/ running 可撤（M2c C6）
 		if id, ok := strings.CutSuffix(rest, "/cancel"); ok && id != "" {
 			if r.Method != http.MethodPost {
 				s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
@@ -231,13 +236,24 @@ func (s *Server) dispatchJobAsync(job *storage.Job, payload jobCreatePayload, ac
 	finished := time.Now()
 	job.FinishedAt = &finished
 	job.Output, job.Error, job.ExitCode = jobErr.Output, jobErr.Message, jobErr.ExitCode
-	if success {
-		job.Status = storage.JobStatusSuccess
+
+	// C7 取消守卫：回写前重读，若取消写已落 cancelled（exec 被 job.cancel
+	// 击杀）则保留 cancelled——取消与执行回写的竞态由库内状态收敛，终态
+	// 不被覆盖（output/exit_code/error 补进台账供查）
+	if fresh, err := s.db.GetJob(job.ID); err == nil && fresh.Status == storage.JobStatusCancelled {
+		job.Status = storage.JobStatusCancelled
+		if err := s.db.MarkJobCancelledOutput(job.ID, job.Output, job.Error, job.ExitCode); err != nil {
+			log.Printf("jobs: write cancelled output failed: %v", err)
+		}
 	} else {
-		job.Status = storage.JobStatusFailed
-	}
-	if err := s.db.UpdateJob(job); err != nil {
-		log.Printf("jobs: update final state failed: %v", err)
+		if success {
+			job.Status = storage.JobStatusSuccess
+		} else {
+			job.Status = storage.JobStatusFailed
+		}
+		if err := s.db.UpdateJob(job); err != nil {
+			log.Printf("jobs: update final state failed: %v", err)
+		}
 	}
 
 	// 审计：命令入参进 details（与 cron_apply 同口径），不涉及凭据
@@ -251,21 +267,17 @@ func (s *Server) dispatchJobAsync(job *storage.Job, payload jobCreatePayload, ac
 		details, "", "")
 }
 
-// handleJobCancel 取消 pending Job（workflow-design W3：派发前可撤；
-// running 已在途——RPC 无取消帧，job.exec 上限 300s 会自然结束，如实拒绝）
+// handleJobCancel 取消 Job（W3 pending 可撤；M2c C6 running 可撤：RPC
+// job.cancel 击杀在途进程组，agent 不可达则如实拒绝——绝不假称已停）。
+// 终态一律 409；pending→running 翻转竞态由 cancelJob 内部条件 UPDATE 收敛。
 func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request, id string) {
 	job, err := s.db.GetJob(id)
 	if err != nil {
 		s.handleError(w, r, http.StatusNotFound, "job not found")
 		return
 	}
-	if job.Status != storage.JobStatusPending {
-		s.handleError(w, r, http.StatusConflict,
-			"only pending jobs can be cancelled; running jobs finish on their own (max 300s)")
-		return
-	}
-	if err := s.db.CancelJob(id, time.Now()); err != nil {
-		s.handleError(w, r, http.StatusInternalServerError, "failed to cancel job")
+	if err := s.cancelJob(job); err != nil {
+		s.handleError(w, r, http.StatusConflict, err.Error())
 		return
 	}
 
@@ -285,6 +297,45 @@ func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request, id stri
 	s.writeJSON(w, http.StatusOK, toJobView(updated))
 }
 
+// cancelJob 按 Job 状态落取消（C6）：pending → 条件 UPDATE（DB-only，未派发
+// 无进程可杀）；running → RPC job.cancel 击杀 + 条件 UPDATE；终态 → 拒绝。
+// pending 条件更新 0 行 = 状态已翻转（dispatch 启动）——重读库内新状态重走
+// 一次（状态只前进，递归至多一层不死循环）。返回非 nil 即 409 文案。
+func (s *Server) cancelJob(job *storage.Job) error {
+	switch job.Status {
+	case storage.JobStatusPending:
+		hit, err := s.db.CancelJob(job.ID, storage.JobStatusPending, time.Now())
+		if err != nil {
+			return errors.New("failed to cancel job")
+		}
+		if hit > 0 {
+			return nil
+		}
+		fresh, err := s.db.GetJob(job.ID)
+		if err != nil {
+			return errors.New("job not found")
+		}
+		return s.cancelJob(fresh)
+	case storage.JobStatusRunning:
+		if _, err := s.CallAgent(job.Target, jobCancelMethod,
+			map[string]interface{}{"id": job.ID}); err != nil {
+			return fmt.Errorf("cannot cancel running job: %v", err)
+		}
+		hit, err := s.db.CancelJob(job.ID, storage.JobStatusRunning, time.Now())
+		if err != nil {
+			return errors.New("failed to cancel job")
+		}
+		if hit == 0 {
+			// 击杀与回写竞态：exec 先到把终态落了（success/failed）——
+			// 其真实终态优先，如实拒绝本次取消
+			return errors.New("job already finished")
+		}
+		return nil
+	default:
+		return errors.New("job is not cancellable (already finished)")
+	}
+}
+
 // jobExecError RPC 执行结果（成功性 + 输出/退出码/错误讯息）
 type jobExecError struct {
 	Output   string
@@ -299,7 +350,15 @@ func (s *Server) dispatchJob(job *storage.Job, payload jobCreatePayload) (bool, 
 		return false, jobExecError{Message: msg, ExitCode: -1}
 	}
 
-	resp, err := s.CallAgent(job.Target, method, payload.Parameters)
+	// M2c C1：Job ID 随参数下发——agent 侧据此注册取消句柄（job.cancel 按
+	// id 定位）。原参数其余字段原样透传
+	params := payload.Parameters
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+	params["id"] = job.ID
+
+	resp, err := s.CallAgent(job.Target, method, params)
 	if err != nil {
 		return fail("failed to reach agent: " + err.Error())
 	}

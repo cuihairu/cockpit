@@ -34,6 +34,7 @@ pages/Network/index.tsx:621 离开按钮 loading 表达式 change.variables 为 
 pages/Network/index.tsx:791 DaemonCard data.tools ?? [] 兜底边与 792 空数组 return null 边：用例已执行该路径（无 tools 字段响应 + 断言卡不渲染），v8 边计数漏计
 pages/Network/index.tsx:792 同上（tools.length === 0 的 return null 边已被 ag-3 用例执行并断言）
 pages/Network/index.tsx:736 join Modal okButtonProps 表达式行：用例已断言空输入禁用态并成功提交，v8 对 Modal JSX prop 行计数漏计
+pages/Jobs/index.tsx:159 结果列 pending || running 取消入口的 pending true 边：M2c 后两条 pending 行用例已执行该路径（取消按钮渲染并点击断言 15/15 绿），v8 对 || 首条款 true 边计数恒 0（单文件定向跑亦复现；同 791/792 漏计口径）
 
 # ---- 生命周期/时序在 jsdom 下不可注入或与真实语义互斥 ----
 pages/Docker/index.tsx:237 requestAnimationFrame 回调内滚动防御：jsdom rAF 触发时序不稳定，滚动语义属浏览器行为

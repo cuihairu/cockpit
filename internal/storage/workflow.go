@@ -110,6 +110,15 @@ func (d *DB) UpdateWorkflowRun(run *WorkflowRun) error {
 	return d.db.Model(run).Save(run).Error
 }
 
+// FinishWorkflowRun 条件终态回写（M2c）：仅当 run 仍 running 时生效，返回
+// 实际命中行数。取消（handleWorkflowRunCancel）与步骤自然终态竞态下先落
+// 者胜，后到的 failed/success 不得改写已落终态的 run（同 Job CancelJob 口径）
+func (d *DB) FinishWorkflowRun(id, status string, finished time.Time) (int64, error) {
+	res := d.db.Model(&WorkflowRun{}).Where("id = ? AND status = ?", id, WorkflowRunStatusRunning).
+		Updates(map[string]interface{}{"status": status, "finished_at": finished})
+	return res.RowsAffected, res.Error
+}
+
 // ActiveWorkflowRun 返回该定义进行中的 run（无则 nil，不视为错误）
 func (d *DB) ActiveWorkflowRun(workflowID string) (*WorkflowRun, error) {
 	var run WorkflowRun

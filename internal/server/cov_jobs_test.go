@@ -420,7 +420,9 @@ func TestJobsCancelPending(t *testing.T) {
 	close(release)
 }
 
-// TestJobsCancelTerminalAndRunning 非 pending 拒绝：running/终态 409，404。
+// TestJobsCancelReject 非 pending 拒绝：终态 409、404；running 409 走的是
+// agent 不可达路径（a1 未注册，CallAgent 返 ErrAgentNotFound——C6 绝不假称
+// 已停）。running+agent 在线的取消成功路径见 TestJobsCancelRunning。
 func TestJobsCancelReject(t *testing.T) {
 	s := newBackupTestServer(t)
 	seed := func(id, status string) {
@@ -452,5 +454,224 @@ func TestJobsCancelReject(t *testing.T) {
 	s.handleJobsAPI(rec, httptest.NewRequest(http.MethodGet, "/api/jobs/j-run/cancel", nil), "/jobs/j-run/cancel")
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("405 code = %d", rec.Code)
+	}
+}
+
+// withFakeJobAgent 注册一个 job.* 假 agent（M2c）：job.cancel 一律即时应答
+// cancelled=true（镜像真 agent 的并发派发——exec 阻塞时 cancel 帧仍可被
+// 处理），其余方法（job.exec）走 execHandler，可阻塞。withFakeBackupAgent
+// 的 handler 循环是串行的，exec 堵住后 cancel 会排队，测不了 M2c 语义。
+func withFakeJobAgent(t *testing.T, s *Server, agentID string, execHandler func(params map[string]interface{}) (interface{}, string)) {
+	t.Helper()
+	agent := NewAgent(agentID, nil)
+	agent.Capabilities = []protocol.Capability{{Type: "backup"}}
+	if err := s.registry.Register(agent); err != nil {
+		t.Fatalf("register agent: %v", err)
+	}
+	respond := func(reqMsg *protocol.Message, data interface{}, rpcErr string) {
+		payload := map[string]interface{}{"status": "success", "data": data}
+		if rpcErr != "" {
+			payload = map[string]interface{}{"status": "error", "error": rpcErr}
+		}
+		resp := protocol.NewMessage(protocol.MessageTypeRPCResponse, payload)
+		resp.ID = reqMsg.ID
+		s.handleRPCResponse(resp)
+	}
+	go func() {
+		for reqMsg := range agent.Send {
+			if reqMsg.Type != protocol.MessageTypeRPCRequest {
+				continue
+			}
+			method, _ := reqMsg.Payload["method"].(string)
+			params, _ := reqMsg.Payload["params"].(map[string]interface{})
+			if method == "job.cancel" {
+				respond(reqMsg, map[string]interface{}{"cancelled": true}, "")
+				continue
+			}
+			// job.exec 等其余方法：execHandler 可能阻塞——独立 goroutine 跑，
+			// 让后续 cancel 帧仍能被本循环读取应答
+			go func(reqMsg *protocol.Message, params map[string]interface{}) {
+				var data interface{}
+				var rpcErr string
+				if execHandler != nil {
+					data, rpcErr = execHandler(params)
+				}
+				respond(reqMsg, data, rpcErr)
+			}(reqMsg, params)
+		}
+	}()
+	t.Cleanup(func() { agent.Close() })
+}
+
+// waitJobStatus 轮询 Job 到达期望状态（M2c 测试时序锚点）
+func waitJobStatus(t *testing.T, s *Server, id string, want ...string) *storage.Job {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err := s.db.GetJob(id)
+		if err == nil {
+			for _, w := range want {
+				if job.Status == w {
+					return job
+				}
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("job %s never reached status %v", id, want)
+	return nil
+}
+
+// TestJobsCancelRunning M2c C6 主路径：running Job 经 job.cancel RPC 击杀 →
+// 200 + cancelled 终态
+func TestJobsCancelRunning(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeJobAgent(t, s, "a1", func(params map[string]interface{}) (interface{}, string) {
+		// exec 不会被走到（直接播种 running Job），防御性返回
+		return map[string]interface{}{"exit_code": 0, "output": "x", "error": ""}, ""
+	})
+	if err := s.db.CreateJob(&storage.Job{ID: "j-run-cancel", Type: "agent.exec", Target: "a1",
+		Actor: "u", Parameters: `{"command":"x"}`, Status: storage.JobStatusRunning,
+		CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	s.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/jobs/j-run-cancel/cancel", nil), "/jobs/j-run-cancel/cancel")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel running code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	var view jobView
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if view.Status != storage.JobStatusCancelled {
+		t.Fatalf("view status = %s, want cancelled", view.Status)
+	}
+	job, _ := s.db.GetJob("j-run-cancel")
+	if job.Status != storage.JobStatusCancelled || job.FinishedAt == nil {
+		t.Fatalf("job after cancel = %+v", job)
+	}
+}
+
+// TestJobsCancelPendingRaceFallsToRunning M2c C6 翻转竞态的确定性覆盖：
+// 库内行已是 running，调用方仍持 pending 视图（GetJob 与条件 UPDATE 之间
+// dispatch 启动的窗口）→ 条件 UPDATE 0 行 → 重读按 running 重走 → RPC
+// 击杀成功落 cancelled。直调 cancelJob 构造，不经 handler——handler 层
+// GetJob→cancelJob 之间的微秒竞态不可确定性命中（同 requireAgentRclone
+// 直调先例）。
+func TestJobsCancelPendingRaceFallsToRunning(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeJobAgent(t, s, "a1", nil)
+	seed := &storage.Job{ID: "j-race", Type: "agent.exec", Target: "a1",
+		Actor: "u", Parameters: `{"command":"x"}`, Status: storage.JobStatusRunning,
+		CreatedAt: time.Now()}
+	if err := s.db.CreateJob(seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// stale pending 视图（真实竞态中 handler 手里的旧快照）
+	stale := &storage.Job{ID: "j-race", Type: "agent.exec", Target: "a1",
+		Status: storage.JobStatusPending}
+	if err := s.cancelJob(stale); err != nil {
+		t.Fatalf("cancelJob with stale pending view: %v", err)
+	}
+	job, _ := s.db.GetJob("j-race")
+	if job.Status != storage.JobStatusCancelled {
+		t.Fatalf("job status = %s, want cancelled (race fell through to running path)", job.Status)
+	}
+}
+
+// TestJobsCancelRunningExecOverwriteGuard M2c C7：击杀后 exec 回写不得把
+// cancelled 覆盖成 failed——被杀 exec 的输出补进台账，状态保持 cancelled。
+func TestJobsCancelRunningExecOverwriteGuard(t *testing.T) {
+	s := newBackupTestServer(t)
+	release := make(chan struct{})
+	withFakeJobAgent(t, s, "a1", func(params map[string]interface{}) (interface{}, string) {
+		<-release
+		// 被击杀后的 exec 回程：非零退出 + killed 讯息
+		return map[string]interface{}{"exit_code": -1, "output": "partial output", "error": "signal: killed"}, ""
+	})
+
+	rec := httptest.NewRecorder()
+	s.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/jobs",
+		strings.NewReader(`{"type":"agent.exec","target":"a1","parameters":{"command":"sleep 300"}}`)), "/jobs")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	var created jobView
+	json.Unmarshal(rec.Body.Bytes(), &created)
+
+	// 等 dispatch 把状态推到 running（fake agent 的 exec handler 阻塞中）
+	waitJobStatus(t, s, created.ID, storage.JobStatusRunning)
+
+	// 取消：fake agent 即时应答 cancel，server 落 cancelled
+	rec = httptest.NewRecorder()
+	s.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/jobs/"+created.ID+"/cancel", nil), "/jobs/"+created.ID+"/cancel")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	// 放行 exec 回程（killed 结果）→ dispatchJobAsync 的 C7 守卫应保留 cancelled
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err := s.db.GetJob(created.ID)
+		if err == nil && job.Output != "" {
+			break // MarkJobCancelledOutput 已回写
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	job, _ := s.db.GetJob(created.ID)
+	if job.Status != storage.JobStatusCancelled {
+		t.Fatalf("status = %s, want cancelled (exec overwrite guard)", job.Status)
+	}
+	if job.Output != "partial output" || job.ExitCode != -1 {
+		t.Fatalf("cancelled job output not recorded: %+v", job)
+	}
+}
+
+// TestJobsCancelRunningStaleViewAfterFinish C6 击杀与回写竞态的确定性覆盖：
+// 库内行已是终态（exec 先到落了 success），调用方仍持 running 视图 →
+// RPC 击杀应答成功但条件 UPDATE 0 行 → 如实拒绝（409 文案），不得改写
+// 真实终态。直调 cancelJob 构造，同 TestJobsCancelPendingRaceFallsToRunning。
+func TestJobsCancelRunningStaleViewAfterFinish(t *testing.T) {
+	s := newBackupTestServer(t)
+	withFakeJobAgent(t, s, "a1", nil)
+	seed := &storage.Job{ID: "j-fin", Type: "agent.exec", Target: "a1",
+		Actor: "u", Parameters: `{"command":"x"}`, Status: storage.JobStatusSuccess,
+		CreatedAt: time.Now()}
+	if err := s.db.CreateJob(seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// stale running 视图（真实竞态中 handler 手里的旧快照）
+	stale := &storage.Job{ID: "j-fin", Type: "agent.exec", Target: "a1",
+		Status: storage.JobStatusRunning}
+	if err := s.cancelJob(stale); err == nil {
+		t.Fatal("cancelJob with stale running view should reject (already finished)")
+	}
+	job, _ := s.db.GetJob("j-fin")
+	if job.Status != storage.JobStatusSuccess {
+		t.Fatalf("job status = %s, want success (real terminal state preserved)", job.Status)
+	}
+}
+
+// TestDispatchJobNilParamsInjectsID C1：payload.Parameters 为 nil 时 dispatchJob
+// 仍须注入 Job ID（workflow 步骤参数经校验恒非 nil，standalone 走 handler 校验
+// 亦非 nil；直调构造兜底分支，确认不 panic 且 id 到达 agent）
+func TestDispatchJobNilParamsInjectsID(t *testing.T) {
+	s := newBackupTestServer(t)
+	var gotID string
+	var sawParams bool
+	withFakeJobAgent(t, s, "a1", func(params map[string]interface{}) (interface{}, string) {
+		sawParams = true
+		gotID, _ = params["id"].(string)
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+	job := &storage.Job{ID: "j-nil", Type: "agent.exec", Target: "a1"}
+	ok, jobErr := s.dispatchJob(job, jobCreatePayload{Type: "agent.exec", Target: "a1"})
+	if !ok || jobErr.Message != "" {
+		t.Fatalf("dispatch = %v/%+v, want success", ok, jobErr)
+	}
+	if !sawParams || gotID != "j-nil" {
+		t.Fatalf("agent saw params id=%q (sawParams=%v), want j-nil", gotID, sawParams)
 	}
 }

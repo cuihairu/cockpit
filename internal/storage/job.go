@@ -74,8 +74,19 @@ func (d *DB) UpdateJob(job *Job) error {
 	return d.db.Model(job).Save(job).Error
 }
 
-// CancelJob 终态回写 cancelled（仅 pending 未派发 Job 可撤；调用方已校验状态）
-func (d *DB) CancelJob(id string, finished time.Time) error {
-	return d.db.Model(&Job{}).Where("id = ?", id).
-		Updates(map[string]interface{}{"status": JobStatusCancelled, "finished_at": finished}).Error
+// CancelJob 条件终态回写 cancelled（C6）：仅当当前状态匹配 fromStatus 时生效，
+// 返回实际命中行数。调用方不再依赖先查后改的两步（check-then-update）——
+// pending→running 翻转竞态在 UPDATE 内闭合。
+func (d *DB) CancelJob(id, fromStatus string, finished time.Time) (int64, error) {
+	res := d.db.Model(&Job{}).Where("id = ? AND status = ?", id, fromStatus).
+		Updates(map[string]interface{}{"status": JobStatusCancelled, "finished_at": finished})
+	return res.RowsAffected, res.Error
+}
+
+// MarkJobCancelledOutput 在 Job 已落 cancelled 终态时仅回写执行结果（C7 守卫
+// 的终态侧）：exec 被击杀后 dispatchJobAsync 会收到 killed 结果，output/
+// exit_code/error 需补进台账，但 status 必须保持 cancelled。
+func (d *DB) MarkJobCancelledOutput(id, output, errMsg string, exitCode int) error {
+	return d.db.Model(&Job{}).Where("id = ? AND status = ?", id, JobStatusCancelled).
+		Updates(map[string]interface{}{"output": output, "exit_code": exitCode, "error": errMsg}).Error
 }

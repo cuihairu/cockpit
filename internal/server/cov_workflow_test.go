@@ -367,17 +367,22 @@ func TestWorkflowRunReentryAndMutationLock(t *testing.T) {
 	}
 }
 
-// TestWorkflowRunCancel 取消 run：在途步骤后停止推进，run cancelled。
+// TestWorkflowRunCancel 取消 run：在途步骤联动击杀（M2c C8）+ 停止推进，
+// run cancelled；被击杀 Job 的执行结果经 C7 守卫保留在台账（状态保持
+// cancelled），步骤快照记 cancelled + stopReason（C9）。
 func TestWorkflowRunCancel(t *testing.T) {
 	s := newBackupTestServer(t)
-	// 步骤 1 慢（堵住推进），取消后步骤 2 不得执行
+	// 步骤 1 慢（堵住推进），取消后步骤 2 不得执行。job.cancel 走
+	// withFakeJobAgent 即时应答（镜像真 agent 并发派发——withFakeBackupAgent
+	// 的串行循环会让 C8 的 kill 排在被堵 exec 后面等满 callAgentTimeout）
 	step1Started := make(chan struct{})
 	release := make(chan struct{})
-	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+	withFakeJobAgent(t, s, "a1", func(params map[string]interface{}) (interface{}, string) {
 		if params["command"] == "slow" {
 			close(step1Started)
 			<-release
-			return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+			// 被击杀形态：非零退出码 + 错误讯息（真 agent SIGKILL 同形）
+			return map[string]interface{}{"exit_code": -1, "output": "partial", "error": "signal: killed"}, ""
 		}
 		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
 	})
@@ -401,12 +406,14 @@ func TestWorkflowRunCancel(t *testing.T) {
 	if run.Status != storage.WorkflowRunStatusCancelled {
 		t.Fatalf("run = %+v", run)
 	}
-	// 步骤 2 未执行（fast 只在步骤 2 出现）
+	// C8：在途 step Job 已联动击杀为 cancelled（cancelRunJobs 在 200 前同步
+	// 落库）；步骤 2 未派发（仅 1 条 Job）
 	jobs, _ := s.db.ListJobsFiltered("", "", "", rv.ID, 10)
-	for _, j := range jobs {
-		if strings.Contains(j.Parameters, "fast") {
-			t.Fatalf("step 2 executed after cancel: %+v", j)
-		}
+	if len(jobs) != 1 {
+		t.Fatalf("job count = %d, want 1 (step 2 must not dispatch)", len(jobs))
+	}
+	if jobs[0].Status != storage.JobStatusCancelled {
+		t.Fatalf("step 1 job status = %s, want cancelled", jobs[0].Status)
 	}
 
 	// 终态后再取消 409
@@ -416,17 +423,255 @@ func TestWorkflowRunCancel(t *testing.T) {
 		t.Fatalf("cancel twice code = %d", rec.Code)
 	}
 	close(release)
-	// 等编排器回写步骤快照后再结束（cleanup 关库，避免 goroutine 撞上
-	// closed db 刷错误日志）
+	// 等编排器回写步骤快照（C7 守卫 + recordStepResult）后再结束（cleanup
+	// 关库，避免 goroutine 撞上 closed db 刷错误日志）
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		snap, err := s.db.GetWorkflowRun(rv.ID)
-		if err == nil && strings.Contains(snap.Steps, `"attempts":1`) {
+		if err == nil && strings.Contains(snap.Steps, `"stopReason":"run cancelled"`) {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	time.Sleep(50 * time.Millisecond) // loop-top 取消检查的余量
+	// C7/C9 终态：快照记 cancelled + stopReason；被击杀 Job 保持 cancelled，
+	// 执行结果（output/error/exit_code）进台账
+	snap, err := s.db.GetWorkflowRun(rv.ID)
+	if err != nil {
+		t.Fatalf("reload run: %v", err)
+	}
+	if !strings.Contains(snap.Steps, `"status":"cancelled"`) || !strings.Contains(snap.Steps, `"stopReason":"run cancelled"`) {
+		t.Fatalf("step snapshot not cancelled: %s", snap.Steps)
+	}
+	final, err := s.db.GetJob(jobs[0].ID)
+	if err != nil {
+		t.Fatalf("reload step job: %v", err)
+	}
+	if final.Status != storage.JobStatusCancelled {
+		t.Fatalf("step job status = %s, want cancelled after exec writeback", final.Status)
+	}
+	if final.Output != "partial" || final.Error != "signal: killed" {
+		t.Fatalf("step job output/error = %q/%q, want killed-exec result preserved", final.Output, final.Error)
+	}
+}
+
+// TestWorkflowRunStepJobCancelCancelsRun C9：直接取消在途步骤 Job（不经 run
+// cancel）——run 不得僵尸悬挂：步骤回写命中 C7 守卫 → 步骤记 cancelled →
+// 编排器在 advanceWorkflow 落 run cancelled 终态；步骤 2 不派发。
+func TestWorkflowRunStepJobCancelCancelsRun(t *testing.T) {
+	s := newBackupTestServer(t)
+	step1Started := make(chan struct{})
+	release := make(chan struct{})
+	withFakeJobAgent(t, s, "a1", func(params map[string]interface{}) (interface{}, string) {
+		if params["command"] == "slow" {
+			close(step1Started)
+			<-release
+			return map[string]interface{}{"exit_code": -1, "output": "partial", "error": "signal: killed"}, ""
+		}
+		return map[string]interface{}{"exit_code": 0, "output": "ok", "error": ""}, ""
+	})
+	body := `{"name":"cc9","steps":[` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"slow","command":"slow"}},` +
+		`{"type":"agent.exec","target":"a1","parameters":{"name":"never","command":"fast"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	<-step1Started
+	// 在途 step Job 唯一一条（runWorkflowStep 先落 running 再派发，步骤 2
+	// 未派发）
+	jobs, _ := s.db.ListJobsFiltered(storage.JobStatusRunning, "", "", rv.ID, 10)
+	if len(jobs) != 1 {
+		t.Fatalf("running jobs = %d, want 1", len(jobs))
+	}
+	rec = httptest.NewRecorder()
+	s.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/jobs/"+jobs[0].ID+"/cancel", nil), "/jobs/"+jobs[0].ID+"/cancel")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("job cancel code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	close(release) // 释放被击杀的 exec——C7 守卫保留 cancelled 终态
+
+	run := waitRunTerminal(t, s, rv.ID)
+	if run.Status != storage.WorkflowRunStatusCancelled {
+		t.Fatalf("run = %+v, want cancelled", run)
+	}
+	// 步骤 2 未派发；被击杀 Job 保持 cancelled + 执行结果保留
+	final, err := s.db.GetJob(jobs[0].ID)
+	if err != nil {
+		t.Fatalf("reload job: %v", err)
+	}
+	if final.Status != storage.JobStatusCancelled {
+		t.Fatalf("job status = %s, want cancelled after exec writeback", final.Status)
+	}
+	all, _ := s.db.ListJobsFiltered("", "", "", rv.ID, 10)
+	if len(all) != 1 {
+		t.Fatalf("job count = %d, want 1 (step 2 must not dispatch)", len(all))
+	}
+	// 步骤快照（recordStepResult 先于 run 终态写，此处必含 cancelled）
+	snap, err := s.db.GetWorkflowRun(rv.ID)
+	if err != nil {
+		t.Fatalf("reload run: %v", err)
+	}
+	if !strings.Contains(snap.Steps, `"status":"cancelled"`) || !strings.Contains(snap.Steps, `"stopReason":"run cancelled"`) {
+		t.Fatalf("step snapshot not cancelled: %s", snap.Steps)
+	}
+}
+
+// TestWorkflowRunFanoutCancel C8+C9 扇出形态：run cancel 击杀在途目标 Job →
+// 逐台结果记 cancelled，整步聚合 cancelled（不按 failed 谎报），后续目标不
+// 派发；run 终态保持 cancelled——若聚合误走 failed，finishWorkflowRun 的终
+// 态条件写（C10）也会挡住改写，本测试同时钉住两条防线。
+func TestWorkflowRunFanoutCancel(t *testing.T) {
+	s := newBackupTestServer(t)
+	step1Started := make(chan struct{})
+	release := make(chan struct{})
+	withFakeJobAgent(t, s, "a1", func(params map[string]interface{}) (interface{}, string) {
+		close(step1Started)
+		<-release
+		return map[string]interface{}{"exit_code": -1, "output": "partial", "error": "signal: killed"}, ""
+	})
+	// a2 出现任何调用即失败（取消后后续目标不得派发）
+	withFakeJobAgent(t, s, "a2", func(params map[string]interface{}) (interface{}, string) {
+		t.Error("a2 must not be dispatched after cancel")
+		return map[string]interface{}{"exit_code": 0, "output": "", "error": ""}, ""
+	})
+	body := `{"name":"fc","steps":[{"type":"agent.exec","targets":["a1","a2"],"parameters":{"name":"fan","command":"slow"}}]}`
+	created := wfCreate(t, s, body)
+	rec := httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflows/"+created.ID+"/run", nil), "/workflows/"+created.ID+"/run")
+	var rv workflowRunView
+	json.Unmarshal(rec.Body.Bytes(), &rv)
+
+	<-step1Started
+	rec = httptest.NewRecorder()
+	s.handleWorkflowAPI(rec, httptest.NewRequest(http.MethodPost, "/api/workflow-runs/"+rv.ID+"/cancel", nil), "/workflow-runs/"+rv.ID+"/cancel")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	close(release) // 释放被击杀的 exec——聚合回写在编排器 goroutine
+
+	// 等快照整步落定（recordStepTargets 与 run 终态写同窗口竞速）
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		run, err := s.db.GetWorkflowRun(rv.ID)
+		if err != nil {
+			t.Fatalf("load run: %v", err)
+		}
+		var steps []workflowStepRun
+		if json.Unmarshal([]byte(run.Steps), &steps) == nil && len(steps) == 1 &&
+			steps[0].Status == storage.JobStatusCancelled &&
+			len(steps[0].Targets) == 2 && steps[0].Targets[0].Status == storage.JobStatusCancelled {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fanout snapshot never settled: %+v", run)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond) // 迟到聚合终态的余量
+	run, err := s.db.GetWorkflowRun(rv.ID)
+	if err != nil {
+		t.Fatalf("reload run: %v", err)
+	}
+	if run.Status != storage.WorkflowRunStatusCancelled {
+		t.Fatalf("run = %s, want cancelled (late failed aggregate must not overwrite)", run.Status)
+	}
+	var steps []workflowStepRun
+	json.Unmarshal([]byte(run.Steps), &steps)
+	if steps[0].Status != storage.JobStatusCancelled {
+		t.Fatalf("step status = %s, want cancelled", steps[0].Status)
+	}
+	// a1：cancelled + stopReason；a2：F3 断停，快照保持 pending 行
+	if steps[0].Targets[0].AgentID != "a1" || steps[0].Targets[0].Status != storage.JobStatusCancelled ||
+		steps[0].Targets[0].StopReason != "run cancelled" {
+		t.Fatalf("a1 target = %+v", steps[0].Targets[0])
+	}
+	if steps[0].Targets[1].AgentID != "a2" || steps[0].Targets[1].Status != storage.JobStatusPending {
+		t.Fatalf("a2 target = %+v", steps[0].Targets[1])
+	}
+	// a1 Job 被击杀为 cancelled；a2 无 Job
+	all, _ := s.db.ListJobsFiltered("", "", "", rv.ID, 10)
+	if len(all) != 1 || all[0].Status != storage.JobStatusCancelled {
+		t.Fatalf("jobs = %+v, want 1 cancelled (a2 must not dispatch)", all)
+	}
+}
+
+// TestWorkflowRunCancelCancelsPendingStepJob C8 pending 窗口：取消落在步骤
+// Job「建行未派发」间隙时，DB-only 条件取消也要兑现——台账不得留无终态的
+// 孤儿 pending 行。直调 cancelRunJobs 构造（真实窗口仅微秒，不可经 API 稳定
+// 命中）。
+func TestWorkflowRunCancelCancelsPendingStepJob(t *testing.T) {
+	s := newBackupTestServer(t)
+	created := wfCreate(t, s, `{"name":"pend-kill","steps":[{"type":"agent.exec","target":"a1","parameters":{"name":"x","command":"x"}}]}`)
+	run := &storage.WorkflowRun{
+		ID: protocol.GenerateID(), WorkflowID: created.ID, WorkflowName: "pend-kill",
+		Status: storage.WorkflowRunStatusRunning, Steps: "[]", CreatedAt: time.Now(),
+	}
+	if err := s.db.CreateWorkflowRun(run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	job := &storage.Job{ID: protocol.GenerateID(), Type: "agent.exec", Target: "a1",
+		Status: storage.JobStatusPending, WorkflowRunID: run.ID, CreatedAt: time.Now()}
+	if err := s.db.CreateJob(job); err != nil {
+		t.Fatalf("seed pending step job: %v", err)
+	}
+	s.cancelRunJobs(run.ID)
+	got, err := s.db.GetJob(job.ID)
+	if err != nil {
+		t.Fatalf("reload job: %v", err)
+	}
+	if got.Status != storage.JobStatusCancelled || got.FinishedAt == nil {
+		t.Fatalf("pending step job = %s finished=%v, want cancelled (no orphan pending row)", got.Status, got.FinishedAt)
+	}
+	// 终态 Job 不被触碰
+	done := &storage.Job{ID: protocol.GenerateID(), Type: "agent.exec", Target: "a1",
+		Status: storage.JobStatusSuccess, WorkflowRunID: run.ID, CreatedAt: time.Now()}
+	if err := s.db.CreateJob(done); err != nil {
+		t.Fatalf("seed done job: %v", err)
+	}
+	s.cancelRunJobs(run.ID)
+	kept, err := s.db.GetJob(done.ID)
+	if err != nil {
+		t.Fatalf("reload done job: %v", err)
+	}
+	if kept.Status != storage.JobStatusSuccess {
+		t.Fatalf("terminal job = %s, want untouched success", kept.Status)
+	}
+}
+
+// TestFinishWorkflowRunTerminalGuard M2c 终态条件写：run 已落 cancelled 后，
+// 编排器迟到的 failed/success 终态不得改写（击杀输给 exec 收尾的竞态，
+// FinishWorkflowRun 条件 UPDATE 0 行 → 放弃改写）。直调构造确定性命中
+// hit==0 分支。
+func TestFinishWorkflowRunTerminalGuard(t *testing.T) {
+	s := newBackupTestServer(t)
+	created := wfCreate(t, s, `{"name":"fin-guard","steps":[{"type":"agent.exec","target":"a1","parameters":{"name":"x","command":"x"}}]}`)
+	run := &storage.WorkflowRun{
+		ID: protocol.GenerateID(), WorkflowID: created.ID, WorkflowName: "fin-guard",
+		Status: storage.WorkflowRunStatusRunning, Steps: "[]", CreatedAt: time.Now(),
+	}
+	if err := s.db.CreateWorkflowRun(run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	// 先落 cancelled 终态（模拟取消先到）
+	if _, err := s.db.FinishWorkflowRun(run.ID, storage.WorkflowRunStatusCancelled, time.Now()); err != nil {
+		t.Fatalf("cancel run: %v", err)
+	}
+	// 迟到的 failed 终态（击杀输给 exec 收尾）→ 必须被条件写挡下
+	s.finishWorkflowRun(run, storage.WorkflowRunStatusFailed, 0, "step failed", "workflow")
+	got, err := s.db.GetWorkflowRun(run.ID)
+	if err != nil {
+		t.Fatalf("reload run: %v", err)
+	}
+	if got.Status != storage.WorkflowRunStatusCancelled {
+		t.Fatalf("run status = %s, want cancelled (terminal write guard)", got.Status)
+	}
+	// 仍 running 的 run 正常落终态（条件写命中 1 行）
+	if _, err := s.db.FinishWorkflowRun(run.ID, storage.WorkflowRunStatusFailed, time.Now()); err != nil {
+		t.Fatalf("finish running run: %v", err)
+	}
 }
 
 // TestWorkflowRunsAPIEdges run 详情 404/方法面/未知路径。

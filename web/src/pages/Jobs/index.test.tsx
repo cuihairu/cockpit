@@ -180,7 +180,7 @@ describe('Jobs', () => {
     expect(screen.getByText('退出码')).toBeInTheDocument()
   })
 
-  it('台账边角：running 行结果列回退、无参数命令回退、无完成时间耗时回退', async () => {
+  it('台账边角：running 行取消按钮（M2c running 可撤）、无参数命令回退、无完成时间耗时回退', async () => {
     renderPage([
       {
         id: 'job-3',
@@ -193,10 +193,30 @@ describe('Jobs', () => {
       },
     ])
     expect(await screen.findByText('执行中')).toBeInTheDocument()
-    // 命令列（无 parameters → '-'）、结果列（running → '-'）、耗时列各一个回退
-    await waitFor(() => expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(3))
+    // running 行结果列给出取消入口（M2c：running 可撤，不再回退 '-'）
+    const cancelBtn = await screen.findByText('取消')
+    expect(cancelBtn).toBeInTheDocument()
+    // 命令列（无 parameters → '-'）、耗时列各一个回退
+    expect(screen.getAllByText('-').length).toBe(2)
     // running 非终态无「查看」入口
     expect(screen.queryByText('查看')).not.toBeInTheDocument()
+  })
+
+  it('pending 行同样给出取消按钮（W3 语义保留），点击调 cancel 并刷新', async () => {
+    renderPage([
+      {
+        id: 'job-4',
+        type: 'agent.exec',
+        target: 'a1',
+        actor: 'cui',
+        status: 'pending',
+        createdAt: '2026-10-04T12:03:00Z',
+      },
+    ])
+    expect(await screen.findByText('排队中')).toBeInTheDocument()
+    fireEvent.click(await screen.findByText('取消'))
+    await waitFor(() => expect(jobsMock.cancelJob).toHaveBeenCalledWith('job-4'))
+    expect(msgSuccess).toHaveBeenCalledWith('已取消')
   })
 
   it('创建执行：清空超时则 parameters 不带 timeout_s', async () => {

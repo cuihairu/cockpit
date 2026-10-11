@@ -574,6 +574,23 @@ func (s *Server) advanceWorkflow(wf *storage.Workflow, run *storage.WorkflowRun,
 			job, finalStatus, attempts, reason = s.runWorkflowStep(step, opts, run.ID, actor, outputs)
 			outputs[name] = stepOutputOf(job)
 			s.recordStepResult(run, i, job, finalStatus, attempts, reason)
+			if finalStatus == storage.JobStatusCancelled {
+				// C9：步骤 Job 被取消（run cancel 联动击杀，或单 Job 取消）。
+				// 扇出分支同款 return；run 仍 running（单 Job 取消场景）时
+				// 落 cancelled 终态——run 不得僵尸悬挂
+				current, err := s.db.GetWorkflowRun(run.ID)
+				if err != nil {
+					log.Printf("workflow: load run %s for cancelled step failed: %v", run.ID, err)
+					return
+				}
+				if current.Status == storage.WorkflowRunStatusRunning {
+					if reason == "" {
+						reason = fmt.Sprintf("step %d (%s) cancelled", i, step.Type)
+					}
+					s.finishWorkflowRun(run, storage.WorkflowRunStatusCancelled, i, reason, actor)
+				}
+				return
+			}
 		}
 
 		if finalStatus != storage.JobStatusSuccess && !opts.ContinueOnError {
@@ -643,12 +660,23 @@ func (s *Server) runWorkflowStep(step *jobCreatePayload, opts stepOptions, runID
 		finished := time.Now()
 		job.FinishedAt = &finished
 		job.Output, job.Error, job.ExitCode = jobErr.Output, jobErr.Message, jobErr.ExitCode
+
+		// C7 取消守卫：回写前重读——取消写（run cancel 联动击杀 / 单 Job
+		// 取消）可能已落 cancelled，exec 的 killed 结果不得覆盖终态
+		finalStatus := storage.JobStatusFailed
 		if success {
-			job.Status = storage.JobStatusSuccess
-		} else {
-			job.Status = storage.JobStatusFailed
+			finalStatus = storage.JobStatusSuccess
 		}
-		_ = s.db.UpdateJob(job)
+		if fresh, err := s.db.GetJob(job.ID); err == nil && fresh.Status == storage.JobStatusCancelled {
+			finalStatus = storage.JobStatusCancelled
+			job.Status = storage.JobStatusCancelled
+			if err := s.db.MarkJobCancelledOutput(job.ID, job.Output, job.Error, job.ExitCode); err != nil {
+				log.Printf("workflow: write cancelled step output failed: %v", err)
+			}
+		} else {
+			job.Status = finalStatus
+			_ = s.db.UpdateJob(job)
+		}
 
 		s.audit.LogResource(actor, audit.ActionJobRun, audit.ResourceJob, job.ID,
 			map[string]interface{}{
@@ -656,6 +684,11 @@ func (s *Server) runWorkflowStep(step *jobCreatePayload, opts stepOptions, runID
 				"params": params, "workflow_run_id": runID,
 			}, "", "")
 
+		if finalStatus == storage.JobStatusCancelled {
+			// C9：Job 被取消则重试无意义且 run 终将 cancelled——立即返回，
+			// 不再进入下一 attempt
+			return job, finalStatus, attempt + 1, "run cancelled"
+		}
 		if success {
 			return job, storage.JobStatusSuccess, attempt + 1, ""
 		}
@@ -760,7 +793,13 @@ func (s *Server) runWorkflowStepFanout(step *jobCreatePayload, opts stepOptions,
 		}
 		results = append(results, workflowStepTargetRun{AgentID: step.Targets[t], Status: finalStatus, JobID: jobIDOf(job), Attempts: attempts, StopReason: r})
 		if finalStatus != storage.JobStatusSuccess {
-			status = storage.JobStatusFailed
+			// M2c C9 同款：目标被取消（run cancel 联动击杀在途步）整步聚合
+			// cancelled，不按 failed 谎报
+			if finalStatus == storage.JobStatusCancelled {
+				status = storage.JobStatusCancelled
+			} else {
+				status = storage.JobStatusFailed
+			}
 			if reason == "" {
 				reason = r
 			}
@@ -833,9 +872,16 @@ func (s *Server) finishWorkflowRun(run *storage.WorkflowRun, status string, fail
 	run.Status = status
 	finished := time.Now()
 	run.FinishedAt = &finished
-	if err := s.db.UpdateWorkflowRun(run); err != nil {
+	// 终态条件写（M2c，同 Job CancelJob 口径）：仅当仍 running 生效。取消
+	// 与步骤自然终态竞态可达（击杀输给 exec 收尾，步骤以 failed 收场），
+	// 先落终态者胜——cancelled 不被翻成 failed/success
+	hit, err := s.db.FinishWorkflowRun(run.ID, status, finished)
+	if err != nil {
 		log.Printf("workflow: update run final state failed: %v", err)
 		return
+	}
+	if hit == 0 {
+		log.Printf("workflow: run %s already terminal, skip finish as %s", run.ID, status)
 	}
 }
 
@@ -866,9 +912,11 @@ func (s *Server) handleWorkflowRunGet(w http.ResponseWriter, r *http.Request, id
 	s.writeJSON(w, http.StatusOK, toWorkflowRunView(run))
 }
 
-// handleWorkflowRunCancel 取消 run（W3）：置 cancelled——编排器在下一步推进
-// 前检查该状态即停；当前在途步骤同单条 Job 语义（等它自然结束，结果记
-// cancelled 步骤状态不受影响）
+// handleWorkflowRunCancel 取消 run（W3 停推进 + M2c C8 击杀在途）：置
+// cancelled——编排器在下一步推进前检查该状态即停；在途 step Job 经
+// job.cancel 联动击杀（失控命令不再跑满超时），被击杀 Job 的回写命中
+// runWorkflowStep 的 C7 取消守卫，步骤快照记 cancelled + stopReason
+// "run cancelled"（与 F5 未跑目标同口径）。
 func (s *Server) handleWorkflowRunCancel(w http.ResponseWriter, r *http.Request, id string) {
 	run, err := s.db.GetWorkflowRun(id)
 	if err != nil {
@@ -879,18 +927,73 @@ func (s *Server) handleWorkflowRunCancel(w http.ResponseWriter, r *http.Request,
 		s.handleError(w, r, http.StatusConflict, "run is not running")
 		return
 	}
-	run.Status = storage.WorkflowRunStatusCancelled
-	finished := time.Now()
-	run.FinishedAt = &finished
-	if err := s.db.UpdateWorkflowRun(run); err != nil {
-		s.handleError(w, r, http.StatusInternalServerError, "failed to cancel run")
-		return
-	}
 	username := actorName(r)
+	// 审计写先于终态 UPDATE（写序不变式同 finishWorkflowRun：观察终态 ⟹
+	// 无 run 行后续写——本 handler 不再碰 run 行）
 	s.audit.LogResource(username, audit.ActionWorkflowCancel, audit.ResourceWorkflow, id,
 		map[string]interface{}{"workflow": run.WorkflowName},
 		s.getClientIP(r), r.UserAgent())
+	run.Status = storage.WorkflowRunStatusCancelled
+	finished := time.Now()
+	run.FinishedAt = &finished
+	// 条件终态写（M2c，同 finishWorkflowRun 口径）：仅当仍 running 生效——
+	// 取消与步骤自然终态竞态下先落者胜，后到者如实 409
+	hit, err := s.db.FinishWorkflowRun(id, storage.WorkflowRunStatusCancelled, finished)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "failed to cancel run")
+		return
+	}
+	if hit == 0 {
+		s.handleError(w, r, http.StatusConflict, "run is not running")
+		return
+	}
+	// C8：联动击杀在途 step Job（最佳努力——个别目标不可达仅记日志，
+	// run 已落终态不回滚）
+	s.cancelRunJobs(id)
 	s.writeJSON(w, http.StatusOK, toWorkflowRunView(run))
+}
+
+// cancelRunJobs 击杀 run 的在途 step Job（M2c C8）：running 逐个 job.cancel +
+// 条件 UPDATE 落 cancelled；pending（建行未派发的微秒窗口）DB-only 条件取消，
+// 防取消后台账留无终态的孤儿 pending 行。不另发 cancel 审计（其 exec 回写
+// 已有 job_run 审计）。
+func (s *Server) cancelRunJobs(runID string) {
+	s.cancelRunJobsStatus(runID, storage.JobStatusRunning)
+	s.cancelRunJobsStatus(runID, storage.JobStatusPending)
+}
+
+// cancelRunJobsStatus 击杀 run 的指定在途态 step Job：running 走 job.cancel +
+// 条件 UPDATE（C8 主体）；pending 直接条件取消即可，0 行命中说明恰好翻转为
+// running（取消与 dispatch 竞态）——落到 running 击杀路径兜底（C6 同款
+// fallthrough，agent 侧未知 ID 幂等，最坏 cancel 先于 exec 到达被无操作）。
+func (s *Server) cancelRunJobsStatus(runID, status string) {
+	jobs, err := s.db.ListJobsFiltered(status, "", "", runID, 50)
+	if err != nil {
+		log.Printf("workflow: list %s step jobs for cancel failed: %v", status, err)
+		return
+	}
+	for i := range jobs {
+		job := &jobs[i]
+		if status == storage.JobStatusPending {
+			hit, err := s.db.CancelJob(job.ID, storage.JobStatusPending, time.Now())
+			if err != nil {
+				log.Printf("workflow: mark step job %s cancelled failed: %v", job.ID, err)
+				continue
+			}
+			if hit == 1 {
+				continue
+			}
+			// 已翻转 running → RPC 击杀兜底
+		}
+		if _, err := s.CallAgent(job.Target, jobCancelMethod,
+			map[string]interface{}{"id": job.ID}); err != nil {
+			log.Printf("workflow: kill step job %s failed: %v", job.ID, err)
+			continue
+		}
+		if _, err := s.db.CancelJob(job.ID, storage.JobStatusRunning, time.Now()); err != nil {
+			log.Printf("workflow: mark step job %s cancelled failed: %v", job.ID, err)
+		}
+	}
 }
 
 // actorName 提取请求用户名（无 auth 上下文回退 unknown；后台 goroutine 传 nil）

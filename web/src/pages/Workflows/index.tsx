@@ -255,7 +255,7 @@ const Workflows = () => {
   const handleCancelRun = async (runId: string) => {
     try {
       await cancelWorkflowRun(runId)
-      message.success('已请求取消（当前在途步骤将自然结束）')
+      message.success('已请求取消（在途步骤将被立即终止）')
       queryClient.invalidateQueries({ queryKey: ['workflow-run', runId] })
     } catch (e) {
       message.error(getApiErrorMessage(e, '取消失败'))
@@ -503,7 +503,7 @@ const Workflows = () => {
           <Space>
             {run && run.status === 'running' && (
               <PermGuard perm="workflows:write">
-                <Popconfirm title="取消后不再推进后续步骤，当前在途步骤将自然结束" onConfirm={() => handleCancelRun(run.id)}>
+                <Popconfirm title="取消后不再推进后续步骤，在途步骤将被立即终止" onConfirm={() => handleCancelRun(run.id)}>
                   <Button danger>取消运行</Button>
                 </Popconfirm>
               </PermGuard>

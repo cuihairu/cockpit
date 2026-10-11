@@ -153,12 +153,54 @@ func TestCancelJob(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	fin := time.Now()
-	if err := db.CancelJob("jc", fin); err != nil {
-		t.Fatalf("cancel: %v", err)
+	// 条件 UPDATE（C6）：状态匹配才生效
+	if hit, err := db.CancelJob("jc", JobStatusPending, fin); err != nil || hit != 1 {
+		t.Fatalf("cancel: hit=%d err=%v", hit, err)
 	}
 	got, _ := db.GetJob("jc")
 	if got.Status != JobStatusCancelled || got.FinishedAt == nil {
 		t.Fatalf("cancelled = %+v", got)
+	}
+	// 状态不匹配（已 cancelled）→ 0 行命中，不重复写
+	if hit, err := db.CancelJob("jc", JobStatusPending, time.Now()); err != nil || hit != 0 {
+		t.Fatalf("re-cancel: hit=%d err=%v", hit, err)
+	}
+	// MarkJobCancelledOutput：仅回写执行结果，状态保持 cancelled
+	if err := db.MarkJobCancelledOutput("jc", "partial", "signal: killed", -1); err != nil {
+		t.Fatalf("mark output: %v", err)
+	}
+	got, _ = db.GetJob("jc")
+	if got.Status != JobStatusCancelled || got.Output != "partial" || got.ExitCode != -1 {
+		t.Fatalf("marked = %+v", got)
+	}
+}
+
+// TestFinishWorkflowRun M2c 条件终态写：仅当仍 running 生效（返回命中行数），
+// 已终态 run 的迟到 failed/success 不得改写。
+func TestFinishWorkflowRun(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+
+	run := &WorkflowRun{ID: "run-fin", WorkflowID: "wf-1", WorkflowName: "n",
+		Status: WorkflowRunStatusRunning, CreatedAt: time.Now()}
+	if err := db.CreateWorkflowRun(run); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	fin := time.Now()
+	if hit, err := db.FinishWorkflowRun("run-fin", WorkflowRunStatusCancelled, fin); err != nil || hit != 1 {
+		t.Fatalf("finish: hit=%d err=%v", hit, err)
+	}
+	got, _ := db.GetWorkflowRun("run-fin")
+	if got.Status != WorkflowRunStatusCancelled || got.FinishedAt == nil {
+		t.Fatalf("finished = %+v", got)
+	}
+	// 已终态 → 条件不匹配，0 行命中且终态不变
+	if hit, err := db.FinishWorkflowRun("run-fin", WorkflowRunStatusFailed, time.Now()); err != nil || hit != 0 {
+		t.Fatalf("re-finish: hit=%d err=%v", hit, err)
+	}
+	got, _ = db.GetWorkflowRun("run-fin")
+	if got.Status != WorkflowRunStatusCancelled {
+		t.Fatalf("status = %s, want cancelled (conditional write guard)", got.Status)
 	}
 }
 
