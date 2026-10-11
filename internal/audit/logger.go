@@ -65,6 +65,11 @@ const (
 	ActionWorkflowDelete = "workflow_delete"
 	ActionWorkflowRun    = "workflow_run"
 	ActionWorkflowCancel = "workflow_cancel"
+	// 审批门（workflow-design M2d）：高危 Job 提交待批与批准/驳回。提交与
+	// 执行（job_run）分账——「谁提交」「谁批准」与「谁执行」在审计上可分。
+	ActionApprovalSubmit  = "approval_submit"
+	ActionApprovalApprove = "approval_approve"
+	ActionApprovalReject  = "approval_reject"
 	// 防漂移检测：手动登记基线「以当前为准」（见 docs/guide/drift-design.md M4）
 	ActionDriftRecord = "drift_record"
 	// agent 执行留痕归集（agent-core P5 exec_log；username=cockpit-agent，
@@ -112,6 +117,9 @@ const ResourceCronJob = "cron_job"
 
 // ResourceJob 执行 Job 资源类型（见 docs/guide/jobs-design.md）
 const ResourceJob = "job"
+
+// ResourceApproval 审批门资源类型（见 docs/guide/workflow-design.md M2d）
+const ResourceApproval = "approval"
 
 // ResourceWorkflow Workflow 编排资源类型（定义与 run 共用，见 workflow-design.md）
 const ResourceWorkflow = "workflow"

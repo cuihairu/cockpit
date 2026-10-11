@@ -54,6 +54,9 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		path == "/workflow-runs" || strings.HasPrefix(path, "/workflow-runs/"):
 		// Workflow 编排（见 api_workflow.go，workflow-design.md）
 		s.handleWorkflowAPI(w, r, path)
+	case path == "/approvals" || strings.HasPrefix(path, "/approvals/"):
+		// 审批门（见 api_approvals.go，workflow-design.md M2d）
+		s.handleApprovalsAPI(w, r, path)
 	case path == "/inventory/consistency":
 		// CMDB 一致性（见 api_inventory.go，drift-design.md M6 D28/D30）
 		s.handleInventoryConsistency(w, r)
@@ -490,7 +493,7 @@ func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request, id strin
 // handleAgentsCleanup 清理离线 Agent（RBAC：inventory:write）
 // POST /api/agents/cleanup — body 可带 thresholdMinutes（分钟数，按 last_seen
 // 截断，覆盖 status 残留 online 的死行）；缺省/空体/0 = 清理所有 offline
-//（默认全清）。阈值由前端自由填（N 分钟/小时/天），服务端只认分钟数。
+// （默认全清）。阈值由前端自由填（N 分钟/小时/天），服务端只认分钟数。
 // 先将 DB 中 "online" 但不在内存 registry 的 agent 标记为 offline，再统一清理。
 func (s *Server) handleAgentsCleanup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

@@ -126,6 +126,7 @@ func (d *DB) migrate() error {
 		&Job{},
 		&Workflow{},
 		&WorkflowRun{},
+		&Approval{},
 		&AgentTag{},
 		&AgentTagAssignment{},
 	); err != nil {

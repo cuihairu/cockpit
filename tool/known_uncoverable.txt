@@ -52,7 +52,6 @@ internal/agent/rpc/service_windows_scm.go:20,20	2. serviceWindowsMgr 默认闭�
 
 scripts/acceptance/guac/probe/main.go:351,352	3. parseInstr len(Args)==0 防御（strings.Split 非空串恒 ≥1 段，不可达）
 internal/server/api_guacamole.go:240,241	3. collectGuacRecording 稳定后复 Stat 竞态防御（loop break 与复 Stat 之间无代码；仅外部并发 unlink 的微秒窗口可触发，单测不可确定性构造；复 Stat 取 info.Size() 供元数据，非冗余可删）
-internal/server/server_backup.go:195,195	3. listServerBackups DirEntry.Info() 失败 continue（ReadDir 与 Info 之间备份文件被外部删除的微秒窗口——测试 tempdir 清理与扫描并发偶发盖住，时序型覆盖不可靠；保留防御不删，同 api_guacamole.go:240,241 口径）
 internal/server/guac_relay.go:66,67	3. net.Listen 回环临时端口失败防御（127.0.0.1:0 由内核分配端口，仅 fd 耗尽才失败，进程内单测不可构造）
 internal/server/api_guacamole.go:377,390	3. startGuacRelay listen 失败分支（同 guac_relay.go:66,67 根因，中继起不来即 listen 失败）
 internal/server/api_guacamole.go:491,496	3. relayAddr SplitHostPort 失败防御（恒为 listener.Addr().String() 的 host:port 形态）
@@ -78,16 +77,18 @@ cmd/cockpit-probe-agent/main.go:52,54	3. run() 内 probeagent.New(cfg) 失败防
 # P2 异步化（2026-10-09）后原 92/187/210/243/247 与 storage/job.go:64 由
 # closed-db 与传输面错误测试覆盖（TestWorkflowAPIDBErrorBranches /
 # TestWorkflowRunTransportErrors），删除登记；其余按新行号迁移。
+# M2d 审批门（2026-10-11）submitJob 抽取后行号再迁移（create 区 +46、
+# cancel/dispatch 区 +49）；原 231,232（dispatchJobAsync UpdateJob(running)
+# 降级 log）现由 closed-db 传输面测试命中，删除登记。
 
-internal/server/api_jobs.go:196,197	4. 带登录态的用户分支（handler 单测无 auth middleware，Actor 恒 unknown；真名分支由登录流程整链覆盖）
-internal/server/api_jobs.go:231,232	3. dispatchJobAsync UpdateJob(running) 失败仅降级 log（后台 goroutine 中途失败，单行主键更新不可构造失败；同 dispatchJobAsync 尾态回写 `_ =` 吞错口径）
-internal/server/api_jobs.go:246,247	3. C7 守卫 MarkJobCancelledOutput 失败仅降级 log（后台 goroutine 中途失败，单行主键 UPDATE 不可构造失败；同 231,232 口径）
-internal/server/api_jobs.go:286,287	4. cancel 带登录态的用户分支（同 196,197 口径）
-internal/server/api_jobs.go:294,296	3. cancel 后重读 GetJob 失败 500（同 handler 入口 GetJob 先行成功，SELECT 不可致错）
-internal/server/api_jobs.go:309,310	3. cancelJob pending 条件 UPDATE 失败（GetJob 先行成功，主键 UPDATE 无现实失败面）
-internal/server/api_jobs.go:316,317	3. cancelJob pending 翻转后重读 GetJob 失败（首个 GetJob 先行成功，SELECT 不可致错）
-internal/server/api_jobs.go:326,327	3. cancelJob running 条件 UPDATE 失败（CallAgent 先行成功，主键 UPDATE 无现实失败面）
-internal/server/api_jobs.go:404,404	3. intField `case int`（JSON 数字解码恒 float64，int 直调进不来）
+internal/server/api_jobs.go:240,241	4. 带登录态的用户分支（handler 单测无 auth middleware，Actor 恒 unknown；真名分支由登录流程整链覆盖）
+internal/server/api_jobs.go:295,296	3. C7 守卫 MarkJobCancelledOutput 失败仅降级 log（后台 goroutine 中途失败，单行主键 UPDATE 不可构造失败）
+internal/server/api_jobs.go:335,336	4. cancel 带登录态的用户分支（同 242,243 口径）
+internal/server/api_jobs.go:343,345	3. cancel 后重读 GetJob 失败 500（同 handler 入口 GetJob 先行成功，SELECT 不可致错）
+internal/server/api_jobs.go:358,359	3. cancelJob pending 条件 UPDATE 失败（GetJob 先行成功，主键 UPDATE 无现实失败面）
+internal/server/api_jobs.go:365,366	3. cancelJob pending 翻转后重读 GetJob 失败（首个 GetJob 先行成功，SELECT 不可致错）
+internal/server/api_jobs.go:375,376	3. cancelJob running 条件 UPDATE 失败（CallAgent 先行成功，主键 UPDATE 无现实失败面）
+internal/server/api_jobs.go:453,453	3. intField `case int`（JSON 数字解码恒 float64，int 直调进不来）
 
 # ---------- 7. Workflow 线性编排 M1（docs/guide/workflow-design.md）：死防御与测试惯例（44 语句） ----------
 
@@ -119,3 +120,11 @@ internal/server/api_workflow.go:1005,1006	4. actorName 带登录态分支（hand
 internal/server/probe_report.go:91,92	3. decodeProbeReport json.Marshal(payload) 失败防御（payload 来自 JSON 解码，值恒为 string/number/bool/nil/map/slice，契约上不可失败）
 internal/server/orphan_run.go:34,35	3. recoverOrphanRuns 单行 FailJob 失败仅降级 log（ListJobsFiltered 先行成功，主键条件 UPDATE 无现实失败面；同 api_workflow 980,981 口径）
 internal/server/orphan_run.go:48,49	3. recoverOrphanRuns 单行 FinishWorkflowRun 失败仅降级 log（RunningWorkflowRuns 先行成功，主键条件 UPDATE 无现实失败面；同 api_workflow 980,981 口径）
+
+# ---------- 8. 审批门 M2d（docs/guide/workflow-design.md）：死防御与测试惯例（12 语句） ----------
+
+internal/server/api_approvals.go:75,76	3. approvalSummary 非 agent.exec 分支（jobTypes 当前仅 agent.exec，validateJobPayload 前置校验使其他类型不可达；新增 Job 类型时随验收补测试）
+internal/server/api_approvals.go:89,90	3. createApproval payload Marshal 失败 500（payload 来自 HTTP JSON 解码，值恒为 string/number/bool/map，契约上不可失败；同 probe_report 91,92 口径）
+internal/server/api_approvals.go:188,190	3. approve DecideApproval 失败 500（GetApproval 先行成功，单行条件 UPDATE 无现实失败面；同 api_workflow 943,945 口径）
+internal/server/api_approvals.go:216,217	3. SetApprovalJobID 对账回写失败仅降级 log（DecideApproval/CreateJob 先行成功，主键 UPDATE 无现实失败面；同 orphan_run 48,49 口径）
+internal/server/api_approvals.go:236,238	3. reject DecideApproval 失败 500（同 188,190 口径）

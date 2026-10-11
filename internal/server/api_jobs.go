@@ -42,6 +42,60 @@ var jobTypes = map[string]string{
 // 下发时带入的 Job ID 定位 agent 侧在途执行
 const jobCancelMethod = "job.cancel"
 
+// jobSubmitRequest standalone Job 提交体：payload + 审批门开关（M2d）。
+// Approval 仅 server 侧消费，不进 agent 参数、不进 workflow steps（步骤级
+// 审批会在 advanceWorkflow 造不可复活的等待点，明确不支持）。
+type jobSubmitRequest struct {
+	jobCreatePayload
+	Approval string `json:"approval,omitempty"` // "required" = 先落审批门，待批准后派发
+}
+
+// approvalRequired 审批开关唯一合法取值。
+const approvalRequired = "required"
+
+// submitFail 可写响应的提交失败面（submitJob 供直接创建与批准后派发共用）。
+type submitFail struct {
+	code int
+	msg  string
+}
+
+// submitJob 校验→建行(pending)→后台派发（handleJobCreate 与审批门批准后
+// 共用的收口，M2d）：目标必须在线（离线 503 不建幽灵记录）。
+func (s *Server) submitJob(p *jobCreatePayload, actor string) (*jobView, *submitFail) {
+	if err := validateJobPayload(p); err != nil {
+		return nil, &submitFail{http.StatusBadRequest, err.Error()}
+	}
+	// targets 扇出仅 workflow steps 合法（M2b F1）：standalone Job 单目标语义
+	if len(p.Targets) > 0 {
+		return nil, &submitFail{http.StatusBadRequest, "targets is only valid in workflow steps"}
+	}
+	if _, ok := s.registry.Get(p.Target); !ok {
+		return nil, &submitFail{http.StatusServiceUnavailable, "agent offline"}
+	}
+
+	paramsJSON, _ := json.Marshal(p.Parameters)
+	job := &storage.Job{
+		ID:         protocol.GenerateID(),
+		Type:       p.Type,
+		Target:     p.Target,
+		Actor:      actor,
+		Parameters: string(paramsJSON),
+		Status:     storage.JobStatusPending,
+		CreatedAt:  time.Now(),
+	}
+	if err := s.db.CreateJob(job); err != nil {
+		return nil, &submitFail{http.StatusInternalServerError, "failed to create job"}
+	}
+
+	// 视图在派发前取定：goroutine 会原地改 job 状态（pending→running→终态），
+	// 先快照保证 201 响应体恒为 pending（W1 契约），并与后台写互不竞争
+	view := toJobView(job)
+
+	// 后台派发：终态回写 + 审计在 goroutine 内完成（HTTP 请求即时返回）
+	go s.dispatchJobAsync(job, *p, actor)
+	return &view, nil
+}
+
 // handleJobsAPI 分发 /api/jobs[/{id}[/cancel]]
 func (s *Server) handleJobsAPI(w http.ResponseWriter, r *http.Request, path string) {
 	switch {
@@ -168,26 +222,16 @@ func (s *Server) handleJobGet(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // handleJobCreate 创建 Job，后台执行（workflow-design W1：创建即返回 pending，
-// dispatch 转 goroutine；消费方经台账/详情轮询终态）
+// dispatch 转 goroutine；消费方经台账/详情轮询终态）。approval="required" 时
+// 不建 Job，改落审批记录（M2d），202 返回审批视图。
 func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
-	var payload jobCreatePayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	var req jobSubmitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	if err := validateJobPayload(&payload); err != nil {
-		s.handleError(w, r, http.StatusBadRequest, err.Error())
-		return
-	}
-	// targets 扇出仅 workflow steps 合法（M2b F1）：standalone Job 单目标语义
-	if len(payload.Targets) > 0 {
-		s.handleError(w, r, http.StatusBadRequest, "targets is only valid in workflow steps")
-		return
-	}
-
-	// 目标 agent 必须在线（与 cron 同口径：离线直接 503，不建幽灵记录）
-	if _, ok := s.registry.Get(payload.Target); !ok {
-		s.handleError(w, r, http.StatusServiceUnavailable, "agent offline")
+	if req.Approval != "" && req.Approval != approvalRequired {
+		s.handleError(w, r, http.StatusBadRequest, "unsupported approval value (allowed: required)")
 		return
 	}
 
@@ -196,28 +240,33 @@ func (s *Server) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		username = userInfo.Username
 	}
 
-	paramsJSON, _ := json.Marshal(payload.Parameters)
-	job := &storage.Job{
-		ID:         protocol.GenerateID(),
-		Type:       payload.Type,
-		Target:     payload.Target,
-		Actor:      username,
-		Parameters: string(paramsJSON),
-		Status:     storage.JobStatusPending,
-		CreatedAt:  time.Now(),
-	}
-	if err := s.db.CreateJob(job); err != nil {
-		s.handleError(w, r, http.StatusInternalServerError, "failed to create job")
+	// 审批门：先校验（批准后原样派发，坏 payload 不能进审批），落记录即返
+	if req.Approval == approvalRequired {
+		if err := validateJobPayload(&req.jobCreatePayload); err != nil {
+			s.handleError(w, r, http.StatusBadRequest, err.Error())
+			return
+		}
+		if len(req.jobCreatePayload.Targets) > 0 {
+			s.handleError(w, r, http.StatusBadRequest, "targets is only valid in workflow steps")
+			return
+		}
+		appr, err := s.createApproval(&req.jobCreatePayload, username)
+		if err != nil {
+			s.handleError(w, r, http.StatusInternalServerError, "failed to create approval")
+			return
+		}
+		s.audit.LogResource(username, audit.ActionApprovalSubmit, audit.ResourceApproval, appr.ID,
+			map[string]interface{}{"target": appr.Target, "summary": appr.Summary},
+			s.getClientIP(r), r.UserAgent())
+		s.writeJSON(w, http.StatusAccepted, toApprovalView(appr))
 		return
 	}
 
-	// 视图在派发前取定：goroutine 会原地改 job 状态（pending→running→终态），
-	// 先快照保证 201 响应体恒为 pending（W1 契约），并与后台写互不竞争
-	view := toJobView(job)
-
-	// 后台派发：终态回写 + 审计在 goroutine 内完成（HTTP 请求即时返回）
-	go s.dispatchJobAsync(job, payload, username)
-
+	view, fail := s.submitJob(&req.jobCreatePayload, username)
+	if fail != nil {
+		s.handleError(w, r, fail.code, fail.msg)
+		return
+	}
 	s.writeJSON(w, http.StatusCreated, view)
 }
 
