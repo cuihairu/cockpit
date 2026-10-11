@@ -43,6 +43,11 @@ P1 的同步 RPC 模型（POST 即等待终态）有两个天花板：
   取消入口同批落地。真机验收探针 W5/W9 语义翻新至击杀口径、新增 W11 变量
   传递场景（M2a 端到端面），本机双实例 harness 13/13 PASS。DAG 维持 W4 压后、
   审批门因孤儿 run 未解不开工、SSE 拍不做。
+- **M2d 已实现（2026-10-11）**：审批门（M2 候选第四项），设计见「M2 立项：
+  审批门」节——前置阻塞点（server 重启孤儿 run）已由 9079b52 重启清扫解掉，
+  本批把等待态落库不落 goroutine（D1），高危提交 202 进审批、批准才派发。
+  审批台账页 + Jobs 页「需审批执行」开关同批落地。DAG 维持 W4 压后、SSE 拍
+  不做，M2 清单至此全清。
 - M2+ 其余各项在「边界（明确不做）」；未实现项以本文设计为准。
 - P1 已实现部分不受影响：`agent.exec` 类型、job provider、权限点原样保留，
   本设计只改「server 侧何时返回」与「谁在等待」。
@@ -99,9 +104,16 @@ exit_code/输出」，编排器和单步 dispatcher 都只是 server 侧的 goro
 | `POST /api/workflow-runs/{rid}/cancel` | — | 取消 run（W3 语义） |
 | `GET /api/jobs` | `?status=&target=&type=&workflow_run_id=` | P1 台账加过滤（run 详情页列步骤用） |
 | `POST /api/jobs/{id}/cancel` | — | 取消 pending Job（W3） |
+| `POST /api/jobs`（M2d） | `{..., approval:"required"}` | 高危提交：202 返回审批视图，不建 Job；批准后原样派发 |
+| `GET /api/approvals`（M2d） | `?status=` | 审批台账（惰性过期清扫） |
+| `GET /api/approvals/{id}`（M2d） | — | 单条详情（payload 解析为 parameters） |
+| `POST /api/approvals/{id}/approve`（M2d） | — | 批准并派发（重复/过期 409；agent 离线 503） |
+| `POST /api/approvals/{id}/reject`（M2d） | — | 驳回（终态，不建 Job） |
 
 校验：name 非空 ≤64 字符；steps 非空 ≤20；step.name 同一 workflow 内唯一
-≤64；`timeout_s`/`command` 等沿用 P1 各限；`retry` 0-3。
+≤64；`timeout_s`/`command` 等沿用 P1 各限；`retry` 0-3。M2d：`approval`
+只收 `required`；进审批的 payload 必须先过 validateJobPayload（批准后原样
+派发，校验不可后置）。
 
 ## 数据模型
 
@@ -168,9 +180,9 @@ type WorkflowRun struct {
   台账过滤 + 权限/审计。验收：探针跑通成功链/失败停/重试/取消四场景 +
   真机连一台 agent 编排一轮。
 - **M2（候选，另行立项）**：步骤变量传递（见下节 M2a 立项）、多目标扇出
-  （见 M2b 立项）、取消信号（见 M2c 立项）、DAG 依赖、审批门、SSE 推送。
-  已开工 M2a/M2b/M2c；DAG 维持 W4 压后等真实并行需求，审批门因孤儿 run
-  问题未解不开工，SSE 与全仓轮询模式冲突拍不做。
+  （见 M2b 立项）、取消信号（见 M2c 立项）、DAG 依赖、审批门（见 M2d 立项）、
+  SSE 推送。M2a/M2b/M2c/M2d 均已落地；DAG 维持 W4 压后等真实并行需求，
+  SSE 与全仓轮询模式冲突拍不做。
 - **不做**：定时触发器（W11 约定）、输出实时流（P1 边界节留远控域统一设计）、
   Workflow 嵌套 Workflow（递归执行面先不碰）。
 
@@ -331,6 +343,60 @@ DAG/审批门/SSE 的依据（2026-10-10 巡检拍板）：DAG 维持 W4 压后�
 - 死防御与登录态分支按惯例登记 `tool/known_uncoverable.txt`（jobs 9 条 /
   workflow 17 条，理由注记各自分支；仅竞态窗口可达的登记口径同 C10
   0-rows 409 条目）。
+
+## M2 立项：审批门（M2d，2026-10-11）
+
+高危 `agent.exec` 目前提交即执行：命令进了 `jobs:write` 的手就直达目标机。
+M2d 加一道显式二次确认——提交时可声明 `approval="required"`，请求落审批
+记录即返 202（不建 Job），审批人在台账里看到「目标 + 命令摘要 + 提交人 +
+到期」，批准后才按原 payload 派发。选中它作为 M2 收官项的依据（2026-10-10
+拍板「先解 server 重启孤儿 run 再立项」）：前置阻塞点已由 9079b52 重启清扫
+解掉；且审批等待态若沿用 W1 的 goroutine 语义，server 重启即丢待批——本批
+把等待态落库不落 goroutine，重启不丢（D1）。
+
+### 关键决策
+
+| # | 决策 | 选择 | 理由 |
+|---|------|------|------|
+| D1 | 等待态放哪 | SQLite `approvals` 表，不放 goroutine | M2b 时代立项阻塞点即「等待态 goroutine 不可复活」；落库后 server 重启不丢待批，台账天然可查 |
+| D2 | 提交入口与权限 | `POST /api/jobs` 加 `approval` 字段；提交仍走 `jobs:write`，台账/决策走 `approvals:read/write` | 门槛与执行权同面——审批的价值在「显式二次确认 + 审计分账」，不是权限提升；独立资源点管决策动作 |
+| D3 | 校验时机 | 提交时前置 validateJobPayload（坏 payload 400 不进审批；targets 扇出同样拒绝） | 批准后按原 payload 原样派发，校验若后置，批准的可能是执行不了的请求 |
+| D4 | 并发与过期收口 | `DecideApproval` 条件 UPDATE `WHERE status='pending' AND (expires_at IS NULL OR expires_at > ?)` 返回命中行数；0 行 → 409 | 重复批准/批准后驳回/过期批准都在一条 UPDATE 里闭合（C10 同口径）；TTL 过期不依赖清扫任务，惰性清扫只改台账展示 |
+| D5 | 批准时 agent 离线 | 批准终态已落、派发如实 503（不假称已派发）；重试面=重新提交 | 批准不可回滚也不假装成功；提交时不拦离线——等待窗口内 agent 可回线 |
+| D6 | payload 损坏 | 审计记 `dispatch=payload corrupt` + 500 | 现网不可达（D3 前置校验 + JSON 解码产物恒可序列化），纯防御；防御立场仍是「不假称已派发」 |
+| D7 | 审计分账 | submit（提交人）/approve（批准人）/reject（批准人）三动作各自落账 | 台账互链（approval.job_id 回写最佳努力）+ 审计上「谁提交、谁放行」分账 |
+
+不变式：
+
+- 待批期间无 Job 行——「提交」与「执行」分账的库面体现（批准才建行）。
+- `approved`/`rejected`/`expired` 均终态，决策只从 `pending` 出发；过期未决
+  只能重新提交。
+- pending 审批行不依赖进程内状态，server 重启原样保留。
+- 派发复用 submitJob（与直接创建同一校验/同一 503 语义），actor 记提交人。
+
+### 前端
+
+- `web/src/pages/Approvals/index.tsx`：审批台账页（5s 轮询 + 状态过滤 +
+  批准/驳回 Popconfirm 二次确认，批准弹层带命令摘要）；终态行显示回写
+  jobId 可复制；菜单「审批门」（`approvals:read`）、决策按钮
+  `approvals:write`；
+- Jobs 页创建弹窗加「需审批执行」开关：走 `createJobWithApproval`，
+  toast「已提交审批，批准后开始执行」。
+
+### 测试
+
+- storage：CRUD/条件终态写（命中一次、重复 0 行、过期 0 行、无到期恒可决）、
+  `SetApprovalJobID` 回写、批量过期只动到期 pending、关库错误面
+  （`internal/storage/approval_test.go`）；
+- server：全链（202 无 Job 行 → 批准 200 → Job 跑到终态 → 审计两笔）、驳回
+  不建 Job、重复决策 409、TTL 取负构造过期、路由守卫（空 id/405/未知 id）、
+  关库 500、corrupt payload 500、离线 agent 批准 503、长命令摘要截断、
+  RBAC 权限点（`internal/server/api_approvals_test.go`）；
+- web：Approvals 页台账渲染/批准/驳回/失败提示/状态过滤/无写权限隐藏操作、
+  Jobs 页开关分流（`web/src/pages/Approvals/index.test.tsx` 扩 Jobs 页）；
+- 覆盖率：新增分支按 100% 纪律收口，不可达防御按既有格式登记
+  `tool/known_uncoverable.txt`（approvals 5 条；jobs 行号随 submitJob 抽取
+  迁移）。
 
 ## 边界自检（战略评审两问）
 
