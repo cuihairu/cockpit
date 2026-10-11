@@ -26,3 +26,10 @@ pages/terminal_page.dart:56 await 挂起行，!mounted 分支已被用例验证�
 # 非 101 → WebSocketException not upgraded）经 channel.stream addError
 # 投递，「WS 握手被拒」用例在 runAsync 真 zone 内以本地 ServerSocket 回
 # 400 真实触发该分支，已移出登记表。
+
+# [工具漏计] SettingsPage 的 const 构造器空体。
+# settings_page_test.dart 四处以 const SettingsPage() 直接实例化（85/153/191/230 行），
+# 但 const 调用在编译期规范化，VM 不执行构造器体，lcov 记 DA:12,0。
+# 该 DA 条目仅本机 3.47.5 产出：CI stable 通道同源码两跑（10-02/10-06）均未
+# 出现此行，旧登记表无需此条；本机门禁按脚本默认 3.47.5 校验，故登记。
+pages/settings_page.dart:12 const 构造行，页面渲染已由用例验证，3.47.5 漏计
