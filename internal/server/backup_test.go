@@ -267,10 +267,13 @@ func TestBackupRunDispatchesAndTracks(t *testing.T) {
 		t.Fatalf("run: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// 等待 track goroutine 回填终态
+	// 等待 track goroutine 回填终态：run 与 config.LastStatus 是两次独立
+	// DB 写（trackBackupTask 先 run 后 config），两者都脱离 running 才算落定
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if run, err := s.db.GetBackupRun(1); err == nil && run.Status != "running" {
+		run, runErr := s.db.GetBackupRun(1)
+		cfgNow, cfgErr := s.db.GetBackupConfig(cfg.ID)
+		if runErr == nil && run.Status != "running" && cfgErr == nil && cfgNow.LastStatus != "running" {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
