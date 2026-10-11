@@ -2,12 +2,15 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -88,7 +91,9 @@ type NasProvider struct {
 	run Commander
 	// readFile 文件读取器（/proc/mdstat、/etc/exports fallback），测试注入用
 	readFile func(path string) ([]byte, error)
-	// targets 网络 NAS 目标（M2，COCKPIT_NAS_TARGETS；nil = 仅本地观测）
+	// mu 保护 targets：server 侧 vault 条目可在快照并发窗口内热更新
+	// （vault-design.md V6：nas.set_targets RPC / 注册响应引导）
+	mu      sync.Mutex
 	targets []NasTarget
 }
 
@@ -99,13 +104,54 @@ func NewNasProvider(run Commander) *NasProvider {
 	return &NasProvider{run: run, readFile: os.ReadFile, targets: parseNasTargets(os.Getenv(nasTargetsEnv))}
 }
 
+// NewNasProviderWithTargets 以给定目标构建（注册响应引导路径：agent 侧无
+// env targets 也注册 nas provider，凭据由 server vault 下发）
+func NewNasProviderWithTargets(run Commander, ts []NasTarget) *NasProvider {
+	p := NewNasProvider(run)
+	p.targets = ts
+	return p
+}
+
 func (p *NasProvider) Type() string { return "nas" }
 
+// currentTargets 锁内快照目标列表。
+func (p *NasProvider) currentTargets() []NasTarget {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.targets
+}
+
+// SetTargets 整体替换目标列表（vault 为第一来源，覆盖 env 引导值）。
+func (p *NasProvider) SetTargets(ts []NasTarget) {
+	p.mu.Lock()
+	p.targets = ts
+	p.mu.Unlock()
+	log.Printf("nas: %d vault targets applied", len(ts))
+}
+
 func (p *NasProvider) Call(action string, params map[string]interface{}) (interface{}, error) {
-	if action != "status" {
-		return nil, fmt.Errorf("unknown nas action: %s", action)
+	switch action {
+	case "status":
+		return p.Snapshot()
+	case "set_targets":
+		return nil, p.setTargetsFromParams(params)
 	}
-	return p.Snapshot()
+	return nil, fmt.Errorf("unknown nas action: %s", action)
+}
+
+// setTargetsFromParams 处理 nas.set_targets RPC：targets 数组复用 env JSON
+// 同形解析（含校验与降级日志）。
+func (p *NasProvider) setTargetsFromParams(params map[string]interface{}) error {
+	raw, ok := params["targets"]
+	if !ok {
+		return fmt.Errorf("targets required")
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return fmt.Errorf("encode targets: %w", err)
+	}
+	p.SetTargets(ParseNasTargetsJSON(string(b)))
+	return nil
 }
 
 // DetectNas 探测 NAS 观测价值：mdstat 存在（软件 RAID 可能有）、任一存储

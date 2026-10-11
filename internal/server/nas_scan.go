@@ -137,9 +137,10 @@ type nasScanMount struct {
 	Host      string  `json:"host"`
 }
 
-// scanNASOnce 扫一轮：带 nas capability 的在线 agent
+// scanNASOnce 扫一轮：带 nas capability 的在线 agent（含注册时收到 vault
+// NAS 目标引导的 agent，vault-design.md V6 纯 vault 部署）
 func (s *Server) scanNASOnce() {
-	agents := s.registry.ListByCapability("nas")
+	agents := s.nasScanAgents()
 	if len(agents) == 0 {
 		return
 	}

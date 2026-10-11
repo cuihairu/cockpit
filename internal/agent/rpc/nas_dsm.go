@@ -33,6 +33,12 @@ type NasTarget struct {
 const nasTargetsEnv = "COCKPIT_NAS_TARGETS"
 
 // parseNasTargets 解析 targets JSON：非法整体忽略（log），单条缺字段丢弃
+// ParseNasTargetsJSON 导出包装：vault 下发路径（注册响应/nas.set_targets
+// RPC）复用 env JSON 同形解析与校验（vault-design.md V6）。
+func ParseNasTargetsJSON(raw string) []NasTarget {
+	return parseNasTargets(raw)
+}
+
 func parseNasTargets(raw string) []NasTarget {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -277,7 +283,7 @@ func dsmSnapshot(ctx context.Context, t NasTarget) ([]NasPool, []NasMount, []Nas
 // 返回 false 表示没有任何 target 成功产出
 func (p *NasProvider) snapshotFromTargets(ctx context.Context, snap *NasSnapshot, sources *[]string) bool {
 	anyOK := false
-	for _, t := range p.targets {
+	for _, t := range p.currentTargets() {
 		var pools []NasPool
 		var mounts []NasMount
 		var shares []NasShare

@@ -24,8 +24,12 @@ type Agent struct {
 	Labels         map[string]interface{}
 	Metadata       map[string]interface{}
 	Send           chan *protocol.Message
-	mu             sync.RWMutex
-	closed         atomic.Bool
+	// nasVaultTargets 注册时收到 vault NAS 目标引导（vault-design.md V6）：
+	// agent 能力检测先于连接，纯 vault 部署由此标记纳入 NAS 巡检；
+	// 注册流程串行赋值，无并发写
+	nasVaultTargets bool
+	mu              sync.RWMutex
+	closed          atomic.Bool
 	// sendMu 保护 Send 通道的 close 与入队互斥，消除并发发送的
 	// send-on-closed-channel panic（旧实现靠 recover 兜底，仍算数据竞争）
 	sendMu   sync.Mutex
@@ -113,6 +117,12 @@ func (a *Agent) GetCapabilities() []protocol.Capability {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.Capabilities
+}
+
+// NasObservationReady 是否可纳入 NAS 巡检：声明 nas 能力，或注册时收到
+// vault NAS 目标引导（vault-design.md V6 纯 vault 部署）
+func (a *Agent) NasObservationReady() bool {
+	return a.HasCapability("nas") || a.nasVaultTargets
 }
 
 // HasCapability 检查是否有指定能力

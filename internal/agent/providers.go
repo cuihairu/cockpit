@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"log"
 	"os"
 	"runtime"
@@ -251,4 +252,30 @@ func (a *Agent) registerOpenWrtProvider(cap protocol.Capability) {
 	}
 
 	a.rpc.RegisterProvider(rpc.NewOpenWrtProvider(host, port, user, pass))
+}
+
+// applyVaultNasTargets 注册响应引导（vault-design.md V6）：server 随注册
+// 响应下发 vault nas/ 条目（无条目不下发）。已有 nas provider 时热更新
+// 目标（vault 覆盖 env 引导值），没有时补注册——纯 vault 部署无需 env 占位。
+// 载荷只经 JSON 同形解析（parseNasTargets 校验），凭据不落日志。
+func (a *Agent) applyVaultNasTargets(payload map[string]any) {
+	raw, ok := payload["nasTargets"]
+	if !ok || raw == nil {
+		return
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return
+	}
+	ts := rpc.ParseNasTargetsJSON(string(b))
+	if len(ts) == 0 {
+		return
+	}
+	if p := a.rpc.Provider("nas"); p != nil {
+		if np, npOK := p.(*rpc.NasProvider); npOK {
+			np.SetTargets(ts)
+			return
+		}
+	}
+	a.rpc.RegisterProvider(rpc.NewNasProviderWithTargets(nil, ts))
 }

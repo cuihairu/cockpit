@@ -185,7 +185,9 @@ func NewAgent(cfg Config) *Agent {
 			}
 			return a.codec.ReadMessage(conn)
 		},
-		func() { a.registered.Store(true) })
+		func() { a.registered.Store(true) },
+		// 注册响应载荷：server 随响应下发 vault NAS 目标引导（vault-design.md V6）
+		a.applyVaultNasTargets)
 	// 心跳装配（core/heartbeat）：快照事实注入，间隔在 Run 时读包级
 	// var（测试注入惯例不变）
 	a.heartbeats = heartbeat.New(ctx, heartbeat.Options{

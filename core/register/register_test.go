@@ -89,7 +89,7 @@ func TestDetectLocation(t *testing.T) {
 }
 
 // regCapture 构造带报文捕获的 Registrar（传输全注入，无网络）。
-func regCapture(resp *protocol.Message, respErr error, accepted *bool) (*Registrar, *[]*protocol.Message) {
+func regCapture(resp *protocol.Message, respErr error, accepted *bool, onResp func(map[string]any)) (*Registrar, *[]*protocol.Message) {
 	var sent []*protocol.Message
 	r := New(
 		Config{AgentID: "a1", Secret: "s", Region: "r", Zone: "z", Version: "v1",
@@ -111,6 +111,7 @@ func regCapture(resp *protocol.Message, respErr error, accepted *bool) (*Registr
 			return resp, nil
 		},
 		func() { *accepted = true },
+		onResp,
 	)
 	return r, &sent
 }
@@ -118,7 +119,7 @@ func regCapture(resp *protocol.Message, respErr error, accepted *bool) (*Registr
 // TestRegisterSuccess 全字段报文 + 放行回调。
 func TestRegisterSuccess(t *testing.T) {
 	accepted := false
-	r, sent := regCapture(&protocol.Message{Type: protocol.MessageTypeRegister}, nil, &accepted)
+	r, sent := regCapture(&protocol.Message{Type: protocol.MessageTypeRegister}, nil, &accepted, nil)
 
 	started := time.Unix(1700000000, 0)
 	id, loc, err := r.Register(started,
@@ -168,7 +169,7 @@ func TestRegisterSuccess(t *testing.T) {
 // TestRegisterWrongResponseType 响应类型不符报错、不放行。
 func TestRegisterWrongResponseType(t *testing.T) {
 	accepted := false
-	r, _ := regCapture(&protocol.Message{Type: protocol.MessageTypeHeartbeat}, nil, &accepted)
+	r, _ := regCapture(&protocol.Message{Type: protocol.MessageTypeHeartbeat}, nil, &accepted, nil)
 	if _, _, err := r.Register(time.Now(), nil, nil); err == nil ||
 		!strings.HasPrefix(err.Error(), "expected register response") {
 		t.Fatalf("err = %v", err)
@@ -185,7 +186,8 @@ func TestRegisterWriteFailure(t *testing.T) {
 	r := New(Config{AgentID: "a1"}, Facts{MachineID: func() string { return "" }},
 		func(m *protocol.Message) error { return errors.New("queue full") },
 		func() (*protocol.Message, error) { return nil, errors.New("should not read") },
-		func() { accepted = true })
+		func() { accepted = true },
+		nil)
 	if _, _, err := r.Register(time.Now(), nil, nil); err == nil || err.Error() != "queue full" {
 		t.Fatalf("err = %v", err)
 	}
@@ -197,7 +199,7 @@ func TestRegisterWriteFailure(t *testing.T) {
 // TestRegisterReadFailure 等响应失败（含 conn 快照 nil）原样上抛、不放行。
 func TestRegisterReadFailure(t *testing.T) {
 	accepted := false
-	r, _ := regCapture(nil, errors.New("agent not connected"), &accepted)
+	r, _ := regCapture(nil, errors.New("agent not connected"), &accepted, nil)
 	if _, _, err := r.Register(time.Now(), nil, nil); err == nil ||
 		err.Error() != "agent not connected" {
 		t.Fatalf("err = %v", err)
@@ -207,15 +209,32 @@ func TestRegisterReadFailure(t *testing.T) {
 	}
 }
 
-// TestNilAcceptedCallback onAccepted 可省（装配面宽容）。
+// TestNilAcceptedCallback onAccepted/onResp 可省（装配面宽容）。
 func TestNilAcceptedCallback(t *testing.T) {
 	r := New(Config{AgentID: "a1"}, Facts{MachineID: func() string { return "" }},
 		func(m *protocol.Message) error { return nil },
 		func() (*protocol.Message, error) {
 			return &protocol.Message{Type: protocol.MessageTypeRegister}, nil
 		},
-		nil)
+		nil, nil)
 	if _, _, err := r.Register(time.Now(), nil, nil); err != nil {
 		t.Fatalf("Register: %v", err)
+	}
+}
+
+// TestOnRespCallback 注册响应载荷回调：server 随响应下发引导配置
+// （vault NAS 目标，vault-design.md V6）。
+func TestOnRespCallback(t *testing.T) {
+	accepted := false
+	var got map[string]any
+	r, _ := regCapture(&protocol.Message{
+		Type:    protocol.MessageTypeRegister,
+		Payload: map[string]interface{}{"nasTargets": []interface{}{map[string]interface{}{"name": "box"}}},
+	}, nil, &accepted, func(p map[string]any) { got = p })
+	if _, _, err := r.Register(time.Now(), nil, nil); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if got == nil || got["nasTargets"] == nil {
+		t.Fatalf("onResp payload missing: %v", got)
 	}
 }

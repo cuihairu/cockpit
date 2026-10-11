@@ -82,6 +82,10 @@ func (s *Server) registerVaultAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/remote/vault/verify", s.authService().Middleware(s.handleVaultVerify))
 	mux.HandleFunc("/api/remote/vault/credentials", s.authService().Middleware(s.handleVaultCredentials))
 	mux.HandleFunc("/api/remote/vault/credentials/", s.authService().Middleware(s.handleVaultCredentialDelete))
+	// 通用密码箱条目（vault-design.md V2/V6/V7：provider 读写删面，
+	// NAS 目标走 nas/<name> 条目）
+	mux.HandleFunc("/api/remote/vault/entries", s.authService().Middleware(s.handleVaultEntries))
+	mux.HandleFunc("/api/remote/vault/entries/", s.authService().Middleware(s.handleVaultEntry))
 }
 
 // handleVaultVerify 二次验证：重输登录密码或 TOTP 动态码 → 签发 vault token

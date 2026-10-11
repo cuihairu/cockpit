@@ -46,14 +46,18 @@ type Registrar struct {
 	readResp func() (*protocol.Message, error)
 	// onAccepted 注册被接受后的放行回调
 	onAccepted func()
+	// onResp 注册响应载荷回调（nil 安全）：server 随响应下发引导配置
+	// （如 vault NAS 目标，vault-design.md V6）
+	onResp func(map[string]any)
 }
 
 // New 装配。
 func New(cfg Config, facts Facts,
 	write func(*protocol.Message) error,
 	readResp func() (*protocol.Message, error),
-	onAccepted func()) *Registrar {
-	return &Registrar{cfg: cfg, facts: facts, write: write, readResp: readResp, onAccepted: onAccepted}
+	onAccepted func(),
+	onResp func(map[string]any)) *Registrar {
+	return &Registrar{cfg: cfg, facts: facts, write: write, readResp: readResp, onAccepted: onAccepted, onResp: onResp}
 }
 
 // DeriveID ID 派生：显式 ID 优先（bias 追加后缀）；否则 machine-id 前 8
@@ -167,6 +171,9 @@ func (r *Registrar) Register(startedAt time.Time, caps []protocol.Capability,
 		return id, loc, fmt.Errorf("expected register response, got: %s", resp.Type)
 	}
 
+	if r.onResp != nil {
+		r.onResp(resp.Payload)
+	}
 	if r.onAccepted != nil {
 		r.onAccepted()
 	}

@@ -133,7 +133,8 @@ func NewUpstream(a *Agent, cfg *Config, version string) *Upstream {
 		register.Facts{MachineID: u.machineID},
 		func(m *protocol.Message) error { return u.upstream.WriteNow(m) },
 		u.readRegisterResp,
-		func() { u.registered.Store(true) })
+		func() { u.registered.Store(true) },
+		nil) // 探针无 vault NAS 引导（server 不向 probe agent 下发 nasTargets）
 	// 心跳（core/heartbeat）：探针无服务面/系统信息注入（Services 空闭包
 	// 必须显式给——nil func 在 Beat 组包处直接 panic）
 	u.heartbeats = heartbeat.New(ctx, heartbeat.Options{

@@ -98,11 +98,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Agent registered: %s at %s/%s", agent.ID, reg.Location.Region, reg.Location.Zone)
 
 	// 发送注册响应
-	resp := protocol.NewMessage(protocol.MessageTypeRegister, map[string]interface{}{
-		"status":            "accepted",
-		"serverTime":        time.Now().Unix(),
-		"heartbeatInterval": int(30),
-	})
+	resp := protocol.NewMessage(protocol.MessageTypeRegister, s.registerRespPayload(agent))
 	s.codec.WriteMessage(conn, resp)
 
 	// 启动读写循环

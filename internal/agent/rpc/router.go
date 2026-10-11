@@ -43,6 +43,14 @@ func (h *Handler) RegisterProvider(p provider.Provider) {
 	log.Printf("Registered provider: %s", p.Type())
 }
 
+// Provider 按类型取已注册 provider（注册响应引导路径：vault NAS 目标
+// 下发时定位既有 provider 热更新，vault-design.md V6）。
+func (h *Handler) Provider(providerType string) provider.Provider {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.providers[providerType]
+}
+
 // RegisteredTypes returns the provider types currently registered, sorted.
 // Useful for diagnostics and tests that need to assert which providers
 // setupProviders wired up.
