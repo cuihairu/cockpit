@@ -248,14 +248,16 @@ func TestTokenNotBefore(t *testing.T) {
 		t.Fatal("NotBefore should be set")
 	}
 
-	// NotBefore should be approximately now
+	// NotBefore should be approximately now. 生成与断言之间隔着 ValidateToken
+	// 与调度——负载下可超 1s（重载机 race 跑实测 1.005s），是调度噪声不是
+	// 语义偏移；放宽到 10s 仍能拒绝 epoch/错位值。
 	now := time.Now()
 	diff := now.Sub(claims.NotBefore.Time)
 	if diff < 0 {
 		diff = -diff
 	}
-	if diff > time.Second {
-		t.Errorf("NotBefore diff = %v, want < 1s", diff)
+	if diff > 10*time.Second {
+		t.Errorf("NotBefore diff = %v, want < 10s", diff)
 	}
 }
 
