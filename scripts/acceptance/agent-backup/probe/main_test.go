@@ -353,20 +353,23 @@ func TestNewConfigAndQueries(t *testing.T) {
 	_ = srv
 }
 
-// waitTerminal* 的 running→终态序列（先 running 后 success）
+// waitTerminal* 的 running→终态序列（先 running 后 success）。
+// runs 与 tasks 各自独立相位：共享计数器时 waitTerminalRun 先把计数推过
+// 2，task 首拍即 success，waitTerminalTask 的「still running」分支只在
+// 竞速窗口内被覆盖——慢机/快机覆盖漂移的根因。
 func TestWaitTerminalSequences(t *testing.T) {
 	resetGlobals(t)
-	var calls int32
+	var runCalls, taskCalls int32
 	srv := fakeAPI(t, func(mux *http.ServeMux) {
 		mux.HandleFunc("/api/backups/configs/5/runs", func(w http.ResponseWriter, r *http.Request) {
-			if atomic.AddInt32(&calls, 1) == 1 {
+			if atomic.AddInt32(&runCalls, 1) == 1 {
 				_, _ = w.Write([]byte(`{"runs":[{"id":1,"status":"running"}]}`))
 				return
 			}
 			_, _ = w.Write([]byte(`{"runs":[{"id":1,"status":"success","file":"f.tar.gz"}]}`))
 		})
 		mux.HandleFunc("/api/backups/configs/5/tasks/b1", func(w http.ResponseWriter, r *http.Request) {
-			if atomic.AddInt32(&calls, 1) == 1 {
+			if atomic.AddInt32(&taskCalls, 1) == 1 {
 				_, _ = w.Write([]byte(`{"taskId":"b1","status":"running"}`))
 				return
 			}
@@ -649,8 +652,8 @@ func TestBuildTreeAndDiff(t *testing.T) {
 		got[k] = v
 	}
 	got["src/extra.txt"] = treeEntry{Kind: "reg", Size: 1, SHA: "x"}
-	got["src/sub"] = treeEntry{Kind: "reg"}                    // 类型不符
-	got["src/link"] = treeEntry{Kind: "sym", Link: "other"}    // 链接不符
+	got["src/sub"] = treeEntry{Kind: "reg"}                          // 类型不符
+	got["src/link"] = treeEntry{Kind: "sym", Link: "other"}          // 链接不符
 	got["src/sub/b.txt"] = treeEntry{Kind: "reg", Size: 9, SHA: "y"} // 内容不符
 	probs := diffEntries(withPrefix, got)
 	for _, want := range []string{"missing: src/a.txt", "extra: src/extra.txt",
