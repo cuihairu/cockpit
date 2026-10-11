@@ -11,18 +11,24 @@
 //	    pending 且无 Job（停推进）；run 台账恰 2 条 Job
 //	W4  重试：marker 文件命令 retry=1 → attempts=2、两条 Job 行、间隔
 //	    ≈5s（workflowRetryInterval，断言 [4s,10s] 带宽）
-//	W5  取消：sleep 步骤在途取消 → 200 cancelled；在途步骤自然跑完不被
-//	    打断、后续步骤不推进（保持 pending、无 Job）；再 cancel 409
+//	W5  取消（M2c C8 后）：sleep 步骤在途取消 → 200 cancelled；在途步骤
+//	    被 job.cancel 击杀落 cancelled + stopReason（不被杀会跑满 12s 落
+//	    success，轮询恒不满足 → 超时失败，判定确定性）；后续步骤不推进
+//	    （保持 pending、无 Job）；再 cancel 409
 //	W6  重入/冻结：active run 期间同定义 run 409 / PUT 409 / DELETE 409
 //	W7  离线 ghost 目标 → 503 不建 run（与单条 Job 同口径，不落幽灵）；
 //	    无 active run 后 DELETE 200
 //	W8  权限与审计：viewer（workflows:read）读 200 写 403；自定义无权限
 //	    角色全 403；审计 resource=workflow 的 create/run/cancel 齐
-//	W9  Job cancel 语义（workflow-design W3）：running Job 取消 409
-//	    （等自然结束，RPC 无取消帧）、ghost 404、GET /cancel 405
+//	W9  Job cancel 语义（M2c C6 后）：running Job 取消 200 且被击杀快速落
+//	    cancelled（等自然结束=12s 后 success 则轮询超时失败）、终态再取消
+//	    409、ghost 404、GET /cancel 405
 //	W10 多目标扇出（M2b）：双台顺序执行 run success、逐台快照 success+独立
 //	    jobId、台账按台 2 条；首台失败停（次台 pending 无 Job）；ghost 混入
 //	    503 不建 run（F8 逐台校验延伸 W7）
+//	W11 步骤变量传递（M2a）：后步命令 {{steps.NAME.output}} 在 server 侧
+//	    解析为前步输出（Job 参数不含模板原文）、agent 收到解析后命令产出
+//	    拼接结果；定义文件保留模板原文（快照即事实 W6 同款边界）
 //
 // 证据落 .acceptance/workflows/evidence/（probe.log + 场景原始响应）；
 // FAIL → exit 1。
@@ -661,7 +667,7 @@ func main() {
 
 	// ---- W5+W6 取消与重入/冻结 ----
 	func() {
-		name := "W5+W6 取消与重入/冻结：active run 409 面 + 在途取消不推进"
+		name := "W5+W6 取消与重入/冻结：active run 409 面 + 在途取消击杀（M2c C8）"
 		steps := []map[string]interface{}{
 			step("s1-sleep", *agentA1, "sleep 12", nil),
 			step("s2-after", *agentA1, "echo after-cancel", nil),
@@ -692,7 +698,8 @@ func main() {
 			return
 		}
 		cv, _ := parseRun(craw)
-		// 在途 sleep 自然跑完（不被打断），后续不推进
+		// M2c C8：在途 sleep 被 job.cancel 击杀落 cancelled + stopReason；
+		// 若未被杀会跑满 12s 落 success，本轮询条件恒不满足 → 超时失败
 		final, ferr := pollRun(run.ID, func(rv *runView) bool {
 			return len(rv.Steps) == 2 && isJobTerminal(rv.Steps[0].Status)
 		}, 30*time.Second)
@@ -701,17 +708,19 @@ func main() {
 			return
 		}
 		saveEV("final-W5.json", mustJSON(final))
-		notAdvanced := final.Status == "cancelled" &&
-			final.Steps[0].Status == "success" &&
+		killed := final.Status == "cancelled" &&
+			final.Steps[0].Status == "cancelled" &&
+			final.Steps[0].StopReason == "run cancelled" &&
 			final.Steps[1].Status == "pending" && final.Steps[1].JobID == "" &&
 			final.FinishedAt != nil
 		jobs, _ := jobsByRun(run.ID)
+		ledgerOK := len(jobs) == 1 && jobs[0].Status == "cancelled" // 无孤儿 pending 行
 		cAgain, rawAgain := reqJSON(http.MethodPost, *apiBase+"/api/workflow-runs/"+run.ID+"/cancel", nil)
 		cAgainOK := cAgain == http.StatusConflict && strings.Contains(string(rawAgain), "not running")
 		check(name, freezeOK && cv != nil && cv.Status == "cancelled" &&
-			notAdvanced && len(jobs) == 1 && cAgainOK,
-			fmt.Sprintf("冻结面 run/PUT/DELETE=%d/%d/%d cancel=cancelled+finishedAt 后续不推进=%v 台账=%d 条 再取消 409=%v",
-				cRun, cPut, cDel, notAdvanced, len(jobs), cAgainOK))
+			killed && ledgerOK && cAgainOK,
+			fmt.Sprintf("冻结面 run/PUT/DELETE=%d/%d/%d cancel=cancelled+finishedAt 击杀=%v 台账=%d 条 cancelled=%v 再取消 409=%v",
+				cRun, cPut, cDel, killed, len(jobs), ledgerOK, cAgainOK))
 	}()
 
 	// ---- W7 离线 ghost 不建 run ----
@@ -828,9 +837,9 @@ func main() {
 		check(name, allOK, strings.Join(detail, "；"))
 	}()
 
-	// ---- W9 Job cancel 语义 ----
+	// ---- W9 Job cancel 语义（M2c C6）----
 	func() {
-		name := "W9 Job cancel：running 取消 409/ghost 404/GET cancel 405"
+		name := "W9 Job cancel：running 可撤击杀 200+cancelled/终态再取消 409/ghost 404/GET cancel 405"
 		code, raw := reqJSON(http.MethodPost, *apiBase+"/api/jobs", map[string]interface{}{
 			"type": "agent.exec", "target": *agentA1,
 			"parameters": map[string]interface{}{"command": "sleep 12", "timeout_s": 30},
@@ -844,19 +853,30 @@ func main() {
 			check(name, false, err.Error())
 			return
 		}
-		// 等派发进 running（cancel 只对 pending 放行——running 已在途，如实拒绝）
+		// 等派发进 running（M2c C6：running 走 job.cancel RPC 真击杀）
 		v, werr := pollJob(pending.ID, func(j *jobView) bool { return j.Status == "running" }, 10*time.Second)
 		if werr != nil {
 			check(name, false, "等 running: "+werr.Error())
 			return
 		}
-		codeC, rawC := reqJSON(http.MethodPost, *apiBase+"/api/jobs/"+v.ID+"/cancel", nil)
-		cancelOK := codeC == http.StatusConflict && strings.Contains(string(rawC), "only pending")
+		codeC, _ := reqJSON(http.MethodPost, *apiBase+"/api/jobs/"+v.ID+"/cancel", nil)
+		cancelAccepted := codeC == http.StatusOK
+		// 击杀确定性：sleep 12 若未被杀会跑满落 success，轮询 cancelled
+		// 恒不满足 → 超时失败（10s << 12s，双保险）
+		killed, kerr := pollJob(v.ID, func(j *jobView) bool { return j.Status == "cancelled" }, 10*time.Second)
+		// 终态再取消 409（C6：终态一律如实拒绝）
+		cAgain, rawAgain := reqJSON(http.MethodPost, *apiBase+"/api/jobs/"+v.ID+"/cancel", nil)
+		againOK := cAgain == http.StatusConflict && strings.Contains(string(rawAgain), "already finished")
 		codeGhost, _ := reqJSON(http.MethodPost, *apiBase+"/api/jobs/no-such-job/cancel", nil)
 		code405, _ := reqJSON(http.MethodGet, *apiBase+"/api/jobs/"+v.ID+"/cancel", nil)
-		check(name, cancelOK && codeGhost == 404 && code405 == 405,
-			fmt.Sprintf("running 取消=%d（only pending） ghost=%d GET cancel=%d（job=%s 等 12s 自然结束）",
-				codeC, codeGhost, code405, truncate(v.ID, 12)))
+		if kerr != nil {
+			check(name, false, "等击杀 cancelled: "+kerr.Error())
+			return
+		}
+		check(name, cancelAccepted && killed.Status == "cancelled" && againOK &&
+			codeGhost == 404 && code405 == 405,
+			fmt.Sprintf("running 取消=%d 击杀=cancelled（%s）再取消=%d（already finished） ghost=%d GET cancel=%d",
+				codeC, truncate(killed.ID, 12), cAgain, codeGhost, code405))
 	}()
 
 	// ---- W10 多目标扇出（M2b）----
@@ -935,6 +955,55 @@ func main() {
 		check(name, code == http.StatusServiceUnavailable && cerr == nil && n == 0,
 			fmt.Sprintf("run=%d（want 503）台账=%d 条（不落幽灵 run）: %s",
 				code, n, truncate(string(raw), 120)))
+	}()
+
+	// ---- W11 步骤变量传递（M2a）----
+	func() {
+		name := "W11 变量传递：后步命令 server 侧解析前步输出/定义留模板原文（M2a V3/V6）"
+		steps := []map[string]interface{}{
+			step("s1-scan", *agentA1, "echo VAR-MARKER-7f3a", nil),
+			step("s2-report", *agentA1, `printf 'got=%s' "{{steps.s1-scan.output}}"`, nil),
+		}
+		wfID := wfCreate("wf-acc-vars", steps)
+		run, raw := wfRun(wfID)
+		saveEV("run-W11.json", raw)
+		final, err := pollRun(run.ID, func(rv *runView) bool { return isRunTerminal(rv.Status) }, 90*time.Second)
+		if err != nil {
+			check(name, false, "轮询 run: "+err.Error())
+			return
+		}
+		saveEV("final-W11.json", mustJSON(final))
+		if len(final.Steps) != 2 || final.Steps[1].JobID == "" {
+			check(name, false, "步骤快照形状异常: "+string(mustJSON(final.Steps)))
+			return
+		}
+		_, jraw := reqJSON(http.MethodGet, *apiBase+"/api/jobs/"+final.Steps[1].JobID, nil)
+		s2, jerr := parseJob(jraw)
+		if jerr != nil {
+			check(name, false, jerr.Error())
+			return
+		}
+		cmd, _ := s2.Parameters["command"].(string)
+		// 定义文件保留模板原文（快照即事实：解析结果只落该步 Job 行）
+		_, draw := reqJSON(http.MethodGet, *apiBase+"/api/workflows/"+wfID, nil)
+		var def struct {
+			Steps []struct {
+				Parameters map[string]interface{} `json:"parameters"`
+			} `json:"steps"`
+		}
+		defOK := json.Unmarshal(draw, &def) == nil && len(def.Steps) == 2
+		if defOK {
+			defCmd, _ := def.Steps[1].Parameters["command"].(string)
+			defOK = strings.Contains(defCmd, "{{steps.s1-scan.output}}")
+		}
+		resolved := final.Status == "success" && final.Steps[0].Status == "success" &&
+			cmd != "" && !strings.Contains(cmd, "{{") &&
+			strings.Contains(cmd, "VAR-MARKER-7f3a") &&
+			strings.Contains(s2.Output, "got=VAR-MARKER-7f3a")
+		check(name, resolved && defOK,
+			fmt.Sprintf("run=%s s2 命令含标记=%v 无模板=%v 输出含拼接=%v 定义留原文=%v",
+				final.Status, strings.Contains(cmd, "VAR-MARKER-7f3a"),
+				!strings.Contains(cmd, "{{"), strings.Contains(s2.Output, "got=VAR-MARKER-7f3a"), defOK))
 	}()
 
 	ev("=== 汇总：PASS=%d FAIL=%d（%s） ===", passes, fails, time.Now().Format(time.RFC3339))
