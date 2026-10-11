@@ -229,3 +229,34 @@ func TestDecodeDataField(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeExecLog(t *testing.T) {
+	msg := &Message{
+		Type: MessageTypeExecLog,
+		Payload: map[string]interface{}{
+			"entries": []interface{}{
+				map[string]interface{}{
+					"id": "exec-1", "time": 1759000000, "provider": "service",
+					"action": "restart", "target": "nginx.service", "status": "success",
+					"durationMs": 812, "params": map[string]interface{}{"unit": "nginx.service"},
+				},
+			},
+		},
+	}
+
+	got, err := DecodeExecLog(msg)
+	if err != nil {
+		t.Fatalf("DecodeExecLog failed: %v", err)
+	}
+	if len(got.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(got.Entries))
+	}
+	e := got.Entries[0]
+	if e.ID != "exec-1" || e.Provider != "service" || e.Action != "restart" ||
+		e.Target != "nginx.service" || e.Status != "success" || e.DurationMs != 812 {
+		t.Errorf("unexpected entry: %+v", e)
+	}
+	if e.Params["unit"] != "nginx.service" {
+		t.Errorf("unexpected params: %+v", e.Params)
+	}
+}

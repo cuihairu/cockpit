@@ -67,6 +67,10 @@ const (
 	ActionWorkflowCancel = "workflow_cancel"
 	// 防漂移检测：手动登记基线「以当前为准」（见 docs/guide/drift-design.md M4）
 	ActionDriftRecord = "drift_record"
+	// agent 执行留痕归集（agent-core P5 exec_log；username=cockpit-agent，
+	// resource=执行面 provider）。与 service_health 自愈归集同口径：审计
+	// 由 server 落库，来源标记 cockpit-agent。
+	ActionExec = "exec"
 )
 
 // ResourceStack Compose Stack 资源类型
