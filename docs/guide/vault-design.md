@@ -100,4 +100,43 @@ KDF 只在 vault 包定义一处：env key 走 `sha256`（兼容存量密文）�
 - vault 包单测：接口契约（解锁/上锁/TTL）、local provider CRUD、错误路径不带明文、审计钩子、v0/v1 密文兼容。
 - remote-credential 既有测试全绿（格式兼容证明）。
 - NAS RPC：agent 拉 vault targets 成功/失败回退 env。
-- 配置：`vault.provider` 未知值启动报错；逐字段文档见 getting-started/config 参考。
+- 配置：`vault.provider` 未知值启动报错；逐字段文档见下节。
+
+## 5. 配置逐字段
+
+### 5.1 配置文件（`vault:` 节，整节可省略 = 全默认）
+
+| 字段 | 类型 | 默认值 | 含义 |
+|------|------|--------|------|
+| `vault.provider` | string | `local` | 密码箱提供商，经注册表解析（`internal/vault.Register`）；未知值**启动即报错**，不降级（V7）。切换 provider 只改此值，业务代码零改动 |
+| `vault.session_ttl` | duration | `0` | provider 级解锁会话时长（`5m` 等 Go duration 写法）；`0` = 进程生命周期。local 实现随启动解锁，TTL 到期自动上锁后**需重启进程重新解锁**——自托管无人值守建议保持 `0`。用户级 vault token（10 分钟）在 API 层独立计时，不受此字段影响 |
+
+```yaml
+# 密码箱（provider 可替换；密钥只用 env 注入，yaml 中无任何密钥字段）
+vault:
+  provider: local
+  session_ttl: 0
+```
+
+### 5.2 环境变量（密钥注入，V5）
+
+| 变量 | 必填 | 默认值 | 含义 |
+|------|------|--------|------|
+| `COCKPIT_VAULT_KEY` | 生产必填 | 回退 `TOTP_ENCRYPTION_KEY` | local provider 加密主密钥，`openssl rand -base64 32` 生成。未设置/过短（<32 字符）/命中内置弱默认前缀 → 启动 WARNING 并回落弱默认（仅供开发，日志可见，不阻断） |
+| `TOTP_ENCRYPTION_KEY` | 生产必填（既有） | 内置弱默认 | 既有 TOTP 域密钥；作为 `COCKPIT_VAULT_KEY` 未设置时的回退。两域共用密钥链入口但存储格式独立（TOTP 走 v0 裸格式，vault 写入走 `v1:` 版本前缀） |
+
+设置优先级：`COCKPIT_VAULT_KEY` > `TOTP_ENCRYPTION_KEY` > 内置弱默认（告警）。
+
+### 5.3 条目 path 约定（provider 无关）
+
+| 前缀 | Kind | 字段 | 消费方 |
+|------|------|------|--------|
+| `nas/<name>` | `pair` | `username`；`value`=口令；`meta.type`（dsm/truenas/omv）、`meta.addr`（必须带协议）、`meta.insecure_tls`（`"true"` 自签） | server 经注册响应/nas.set_targets 下发 agent（V6）；变更即对在线 agent 补推 |
+| `remote/...` | — | 远控凭据（既有 remote-credential 存储已收敛到 vault core，格式零迁移） | SSH/RDP/VNC 会话建立 |
+
+path 规则：小写字母数字与 `/ _ . -`，不以 `/` 开头、不含 `..`（API 层校验，违规 400）。
+
+### 5.4 同链路既有配置
+
+- `COCKPIT_NAS_TARGETS`（agent env JSON）：继续生效（零迁移）；vault 存在 `nas/` 条目时**整体覆盖** env 引导值（vault 为第一来源，V8）。
+- API 层 vault token：登录口令（+TOTP）重验签发、10 分钟、`X-Vault-Token` 头携带；条目写/删共用此门，列表只回元数据。

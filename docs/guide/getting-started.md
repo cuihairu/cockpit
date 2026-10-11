@@ -213,6 +213,8 @@ OpenWrt 路由器无需手工编译：nightly release 提供多架构
 ```bash
 export ADMIN_PASSWORD='use-a-strong-password'
 export TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+# 密码箱主密钥（未设置时回退 TOTP_ENCRYPTION_KEY，见 docs/guide/vault-design.md 第 5 节）
+export COCKPIT_VAULT_KEY="$(openssl rand -base64 32)"
 export ALLOWED_ORIGINS="https://cockpit.cuihairu.site"
 export PRODUCTION=true
 ```
