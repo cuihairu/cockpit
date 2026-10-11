@@ -6,7 +6,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/cuihairu/cockpit/core/execlog"
 	"github.com/cuihairu/cockpit/internal/agent/provider"
 	"github.com/cuihairu/cockpit/internal/protocol"
 )
@@ -15,6 +17,14 @@ import (
 type Handler struct {
 	mu        sync.RWMutex
 	providers map[string]provider.Provider // provider type -> provider instance
+	exec      *execlog.Recorder            // 执行留痕（可缺省：nil=不留痕，行为不变）
+}
+
+// SetExecLogger 挂执行留痕记录器（P5b）：所有 provider 的 Call 经 Handle
+// 单点埋点，逐 provider 零改造；service_health 自愈走引擎内直调不经此路，
+// 已有独立审计链（service_health_scan 归集）不重复记。
+func (h *Handler) SetExecLogger(r *execlog.Recorder) {
+	h.exec = r
 }
 
 // NewHandler 创建 RPC 处理器
@@ -73,8 +83,12 @@ func (h *Handler) Handle(msg *protocol.Message) (*protocol.Message, error) {
 		return nil, fmt.Errorf("unknown provider: %s", providerType)
 	}
 
-	// 调用 Provider
+	// 调用 Provider（执行留痕：只记真执行，解码失败/未知 provider 不记）
+	start := time.Now()
 	result, err := p.Call(action, req.Params)
+	if h.exec != nil {
+		h.exec.RecordCall(providerType, action, time.Since(start), err, req.Params)
+	}
 	if err != nil {
 		return nil, err
 	}

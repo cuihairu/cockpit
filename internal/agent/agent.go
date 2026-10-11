@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/core/backoff"
+	"github.com/cuihairu/cockpit/core/execlog"
 	"github.com/cuihairu/cockpit/core/heartbeat"
 	"github.com/cuihairu/cockpit/core/metrics"
 	"github.com/cuihairu/cockpit/core/platform"
@@ -36,6 +37,7 @@ type Agent struct {
 	upstream     *report.Upstream    // 统一上行（core/report：队列消费/放行门/串行写出）
 	registrar    *register.Registrar // 注册上线（core/register：ID 派生/报文/握手）
 	heartbeats   *heartbeat.Loop     // 心跳与存活（core/heartbeat：周期组包上行）
+	execRecorder *execlog.Recorder   // 执行留痕（core/execlog：环 + 攒批上行，P5b）
 
 	// 注册信息
 	agentID      string
@@ -74,6 +76,9 @@ var (
 	// （最坏 3s），不宜频繁；新开/关掉 SSH/RDP/VNC 最迟一个周期内同步。
 	// 心跳（30s）只回带缓存，不在关键路径上探测。
 	servicesRefreshInterval = 5 * time.Minute
+	// execlogFlushInterval 执行留痕攒批上行周期（core/execlog）：执行面
+	// 是低频事件（人工操作/任务触发），30s 批足够；停机另有末次 Flush。
+	execlogFlushInterval = 30 * time.Second
 )
 
 // goos 运行平台快照，默认 runtime.GOOS，生产行为与直接读 runtime.GOOS
@@ -197,6 +202,9 @@ func NewAgent(cfg Config) *Agent {
 		Send:       a.upstream.Enqueue,
 		OnSendFail: func() { go a.reconnect() },
 	})
+	// 执行留痕装配（core/execlog）：router Handle 单点埋点，攒批经统一上行
+	a.execRecorder = execlog.New(execlog.DefaultCapacity, a.upstream.Enqueue)
+	a.rpc.SetExecLogger(a.execRecorder)
 	return a
 }
 
@@ -301,6 +309,7 @@ func (a *Agent) Start() error {
 	go a.writeLoop()
 	go a.heartbeatLoop()
 	go a.servicesRefreshLoop()
+	go a.execRecorder.Run(a.ctx, execlogFlushInterval)
 
 	// 5. 启动消息循环
 	go a.messageLoop()

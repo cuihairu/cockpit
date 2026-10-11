@@ -28,6 +28,12 @@ type ExecLogEntry struct {
 	Params map[string]string `json:"params,omitempty"`
 }
 
+// 执行状态取值（对齐 server 审计 Status 列的 success/failure）。
+const (
+	ExecStatusSuccess = "success"
+	ExecStatusFailure = "failure"
+)
+
 // ExecLogPayload exec_log 消息负载：一批留痕。空批合法（no-op）。
 type ExecLogPayload struct {
 	Entries []ExecLogEntry `json:"entries"`
