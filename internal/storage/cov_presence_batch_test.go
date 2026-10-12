@@ -18,7 +18,10 @@ func TestCovAgentUpdateFieldsPresence(t *testing.T) {
 
 	st := time.Unix(1700000000, 0).UTC()
 	// 单测两个字段块：StartedAt 非零写入、Services 非 nil 写入（含空切片）
-	u := agentUpdateFields(&Agent{StartedAt: st, Services: []AgentService{}})
+	u, err := agentUpdateFields(&Agent{StartedAt: st, Services: []AgentService{}})
+	if err != nil {
+		t.Fatalf("agentUpdateFields: %v", err)
+	}
 	if v, ok := u["started_at"]; !ok || v != st {
 		t.Errorf("started_at = %v, want %v", v, st)
 	}
@@ -26,7 +29,10 @@ func TestCovAgentUpdateFieldsPresence(t *testing.T) {
 		t.Errorf("services = %#v, want []", v)
 	}
 	// 零值：两字段都不进 updates（老 agent 不带该字段）
-	u = agentUpdateFields(&Agent{Hostname: "h"})
+	u, err = agentUpdateFields(&Agent{Hostname: "h"})
+	if err != nil {
+		t.Fatalf("agentUpdateFields: %v", err)
+	}
 	if _, ok := u["started_at"]; ok {
 		t.Error("zero StartedAt must be skipped")
 	}

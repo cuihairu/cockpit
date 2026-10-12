@@ -131,3 +131,4 @@ internal/server/api_approvals.go:188,190	3. approve DecideApproval 失败 500（
 internal/server/api_approvals.go:216,217	3. SetApprovalJobID 对账回写失败仅降级 log（DecideApproval/CreateJob 先行成功，主键 UPDATE 无现实失败面；同 orphan_run 48,49 口径）
 internal/server/api_approvals.go:236,238	3. reject DecideApproval 失败 500（同 188,190 口径）
 internal/vault/local.go:223,224	3. json.Marshal(map[string]string) 不可能失败，防御分支
+internal/storage/capability_crypto.go:100,101	4. Value 里 json.Marshal(enc) 恒成功：加密后条目只剩 string 字段与空 map，无不可序列化值路径（直测已覆盖加密失败透传）

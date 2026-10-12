@@ -110,10 +110,13 @@ func TestCovRemoteCredentialCorruptCiphertext(t *testing.T) {
 }
 
 func TestCovAgentUpdateFieldsJSONColumns(t *testing.T) {
-	u := agentUpdateFields(&Agent{
+	u, err := agentUpdateFields(&Agent{
 		LocalIPs: []string{"10.0.0.2", "10.0.0.3"},
 		Metadata: map[string]interface{}{"bootMode": "uefi"},
 	})
+	if err != nil {
+		t.Fatalf("agentUpdateFields: %v", err)
+	}
 	ips, ok := u["local_ips"].(string)
 	if !ok || !strings.Contains(ips, "10.0.0.3") {
 		t.Errorf("local_ips = %v, want JSON array string", u["local_ips"])

@@ -12,7 +12,7 @@ import (
 type AcmeAccount struct {
 	ID              uint      `gorm:"primarykey" json:"id"`
 	Email           string    `gorm:"size:255" json:"email"`
-	PrivateKeyPEM   string    `gorm:"size:4096" json:"-"`
+	PrivateKeyPEM   string    `gorm:"size:4096;serializer:acmeprivkey" json:"-"` // 落库加密（vault-design.md V6 第二波）
 	RegistrationURI string    `gorm:"size:512" json:"registrationURI"`
 	CADirectory     string    `gorm:"size:64" json:"caDirectory"` // 账户注册时所用目录（staging/production 账户不通用）
 	CreatedAt       time.Time `json:"createdAt"`
@@ -29,7 +29,7 @@ type AcmeCert struct {
 	Status          string    `gorm:"size:16" json:"status"`      // pending / issued / failed
 	CertificatePEM  string    `gorm:"size:16384" json:"-"`
 	IssuerPEM       string    `gorm:"size:8192" json:"-"`
-	PrivateKeyPEM   string    `gorm:"size:8192" json:"-"`
+	PrivateKeyPEM   string    `gorm:"size:8192;serializer:acmeprivkey" json:"-"` // 落库加密（vault-design.md V6 第二波）
 	ExpiresAt       time.Time `gorm:"index" json:"expiresAt"`
 	RenewBeforeDays int       `gorm:"default:30" json:"renewBeforeDays"` // 7~90
 	AutoRenew       bool      `json:"autoRenew"`

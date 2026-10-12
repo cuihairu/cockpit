@@ -15,7 +15,7 @@ type Agent struct {
 	Region       string       `gorm:"index" json:"region"`
 	Zone         string       `gorm:"index" json:"zone"`
 	Version      string       `json:"version"`
-	Capabilities []Capability `gorm:"serializer:json" json:"capabilities"`
+	Capabilities []Capability `gorm:"serializer:capconf" json:"capabilities"`
 	Status       string       `gorm:"index;default:offline" json:"status"` // online, offline
 	LastSeen     time.Time    `json:"lastSeen"`
 	FirstSeen    time.Time    `json:"firstSeen"`
@@ -24,7 +24,7 @@ type Agent struct {
 	StartedAt time.Time `gorm:"index" json:"startedAt"`
 	// Services 本机开放的服务面（SSH/RDP/VNC/telnet + 端口），
 	// 由 agent 探测后随心跳上报刷新。客户端只给真正开放的协议入口
-	Services []AgentService `gorm:"serializer:json" json:"services"`
+	Services  []AgentService `gorm:"serializer:json" json:"services"`
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
 
@@ -60,7 +60,10 @@ type Capability struct {
 	// 与 agent 上报的 metadata 语义不同、并存不互斥。
 	Endpoint string                 `json:"endpoint,omitempty"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
-	Config   map[string]interface{} `json:"config,omitempty"`
+	// Config inventory 声明的 capability 配置（inventory/sync.go）：落库时
+	// 序列化加密进 ConfigEnc（明文只在内存态，vault-design.md V6 第二波）
+	Config    map[string]interface{} `json:"config,omitempty"`
+	ConfigEnc string                 `json:"config_enc,omitempty"`
 }
 
 // AgentService agent 上报的本机开放服务面（SSH/RDP/VNC/telnet…）。

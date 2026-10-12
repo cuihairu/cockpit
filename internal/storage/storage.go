@@ -161,7 +161,10 @@ func (d *DB) UpsertAgent(agent *Agent) error {
 	if _, err := d.GetAgent(agent.ID); err != nil {
 		return d.db.Create(agent).Error
 	}
-	fields := agentUpdateFields(agent)
+	fields, err := agentUpdateFields(agent)
+	if err != nil {
+		return err
+	}
 	if len(fields) == 0 {
 		return nil
 	}
@@ -171,9 +174,11 @@ func (d *DB) UpsertAgent(agent *Agent) error {
 }
 
 // agentUpdateFields 提取非零字段；SecretHash 仅在调用方显式提供时写入。
-// serializer:json 字段（Capabilities/Labels）不走 Updates(map) 的 schema
+// serializer 字段（Capabilities/Labels）不走 Updates(map) 的 schema
 // 序列化，需手动 JSON 后以 string 写入，否则驱动收到裸 struct 报错。
-func agentUpdateFields(a *Agent) map[string]interface{} {
+// Capabilities 先经 encryptCapabilityConfigs 落密文（capability_crypto.go，
+// 与 Create 路径的 capconf 序列化器同一变换），失败上抛不静默跳过。
+func agentUpdateFields(a *Agent) (map[string]interface{}, error) {
 	u := map[string]interface{}{}
 	if a.Hostname != "" {
 		u["hostname"] = a.Hostname
@@ -191,7 +196,11 @@ func agentUpdateFields(a *Agent) map[string]interface{} {
 		u["version"] = a.Version
 	}
 	if len(a.Capabilities) > 0 {
-		if b, err := json.Marshal(a.Capabilities); err == nil {
+		enc, err := encryptCapabilityConfigs(a.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		if b, err := json.Marshal(enc); err == nil {
 			u["capabilities"] = string(b)
 		}
 	}
@@ -236,7 +245,7 @@ func agentUpdateFields(a *Agent) map[string]interface{} {
 	if a.SecretHash != "" {
 		u["secret_hash"] = a.SecretHash
 	}
-	return u
+	return u, nil
 }
 
 // GetAgent 获取单个 Agent
