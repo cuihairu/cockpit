@@ -48,7 +48,10 @@ jobs:
           bash tool/coverage_check.sh coverage.out
 
       - name: Run tests with race detector
-        run: go test -race -short ./... -timeout 900s
+        run: |
+          # race 插桩比覆盖步更慢：server 包本地实测 1004s（2026-10-13，
+          # P2 ② stack webhook/follow 用例入账后），900s 已不够，放宽到 1500s
+          go test -race -short ./... -timeout 1500s
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
