@@ -177,3 +177,28 @@ provider 解释）；若出现「同一 secret 多处共享」，再议条目别
 
 **重开条件**：若未来需要策略优先级（如 deny 策略压过 allow），再引入显式 priority 字段；
 当前只有 allow 语义，并集已足够。
+
+## D-2026-10-12-3 ACME 证书多目标部署模型
+
+**定了什么**：证书部署绑定从 `AcmeCert` 行内五列（一对一）升级为新表 `AcmeDeployTarget`
+（`(cert_id, agent_id)` 唯一，含 CertPath/KeyPath/LastDeployAt/LastDeployError），单个证书
+可部署到最多 8 个 agent。API 入参 `deployTargets[]`（agentId 必填、绝对路径、同 agent 去重），
+视图输出 `deployTargets[]`；旧五列弃用（列保留只为回滚安全，json 不再输出），migrate 一次性
+幂等 backfill 生成同内容 target 行并清空旧列。部署语义：逐目标 `file.write` 并逐目标回写状态；
+手动部署端点 无目标 400 / 无任何在线目标 503 / **仅全部目标失败才 502**（部分成功 = 200）；
+审计 `acme_deploy` 逐目标记录（不含 PEM）。实现 `internal/storage/acme_deploy.go` +
+`internal/server/api_acme.go`，web 表单改 Form.List 多行目标。
+
+**为什么**：原一对一绑定只覆盖「一张证书 → 一个网关」，实际场景一张泛域名证书要铺到
+多台反代/网关（proxy-design.md D7 每个 https 站点各自引用路径），逐台手动搬证书正是 D14
+要消除的环节；行内列扩展到 N 列不可行，独立表是唯一干净形态。部分成功不算失败：全部
+失败才报错，避免「8 台里 1 台网络抖动」把整体标红误导排查；逐目标状态在 target 行与
+响应里可见，故障定位不丢信息。
+
+**备选**：①行内加 `DeployAgentIDs []string` JSON 列——否决：无法承载逐目标的路径与部署
+状态，查询/更新都要整列读写；②全部目标失败才 502 vs 任一失败即 502——后者否决：续期
+自动部署场景下，部分成功是常态（某台离线），整体报错会让巡检告警与实际状态脱节；
+③旧列直接删除——否决：保留一版可回滚（迁移首日发现问题可直接回退二进制），下一版再删。
+
+**重开条件**：回滚窗口过后（确认无回退需求）删除五列；若单证书目标数超 8 出现真实需求，
+再议上限放宽或改为 target 组（group）引用。

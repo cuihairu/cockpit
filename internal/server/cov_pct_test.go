@@ -188,7 +188,6 @@ func covPctSeedCert(t *testing.T, db *storage.DB) {
 		PrimaryDomain: "cov.example.com",
 		CADirectory:   AcmeCADirectoryStaging,
 		Status:        "issued",
-		DeployAgentID: "deploy-closed",
 	}); err != nil {
 		t.Fatalf("seed acme cert: %v", err)
 	}
@@ -338,10 +337,10 @@ func TestCovPctAcmeUpdateValidations(t *testing.T) {
 	s.handleAcmeUpdate(rec, covReq(http.MethodPut, "/api/acme/certs/1", strings.NewReader(`{"domains":[]}`)), 1)
 	covWantCode(t, "update bad domains", rec, http.StatusBadRequest)
 
-	// deploy 只给路径不给 agentID：validateAcmeDeploy 失败
+	// 部署目标缺 agentID：validateAcmeDeployTargets 失败
 	rec = covRec()
 	s.handleAcmeUpdate(rec, covReq(http.MethodPut, "/api/acme/certs/1",
-		strings.NewReader(`{"domains":["cov.example.com"],"deployCertPath":"/tmp/c.pem"}`)), 1)
+		strings.NewReader(`{"domains":["cov.example.com"],"deployTargets":[{"certPath":"/tmp/c.pem","keyPath":"/tmp/k.pem"}]}`)), 1)
 	covWantCode(t, "update bad deploy", rec, http.StatusBadRequest)
 }
 
@@ -364,32 +363,34 @@ func TestCovPctAcmeDeleteDBFail(t *testing.T) {
 	covWantCode(t, "delete 500", rec, http.StatusInternalServerError)
 }
 
-// TestCovPctAcmeDeployWriteReject 覆盖 deployAcmeCert 第一次 file.write 被
-// agent 拒绝（api_acme.go L416-418）：fake agent 回 error status。
+// TestCovPctAcmeDeployWriteReject 覆盖 deployAcmeTarget 第一次 file.write 被
+// agent 拒绝：fake agent 回 error status，目标行回写错误。
 func TestCovPctAcmeDeployWriteReject(t *testing.T) {
 	s := covNewServer(t)
+	covPctSeedCert(t, s.db)
 	covFakeAgent(t, s, "deploy-reject", nil, func(string, map[string]interface{}) map[string]interface{} {
 		return covErrPayload("denied")
 	})
-	cert := &storage.AcmeCert{
-		ID: 1, PrimaryDomain: "cov.example.com",
-		DeployAgentID:  "deploy-reject",
-		DeployCertPath: "/tmp/c.pem", DeployKeyPath: "/tmp/k.pem",
-		CertificatePEM: "CERT", PrivateKeyPEM: "KEY",
+	bindAcmeTargets(t, s.db, 1, storage.AcmeDeployTarget{AgentID: "deploy-reject", CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"})
+	cert, err := s.db.GetAcmeCert(1)
+	if err != nil {
+		t.Fatalf("get cert: %v", err)
 	}
-	err := s.deployAcmeCert(cert)
-	if err == nil || !strings.Contains(err.Error(), "rejected by agent") {
+	cert.CertificatePEM, cert.PrivateKeyPEM = "CERT", "KEY"
+	if err := s.deployAcmeCert(cert); err == nil || !strings.Contains(err.Error(), "rejected by agent") {
 		t.Fatalf("expect write reject, got %v", err)
 	}
-	if cert.LastDeployError == "" {
-		t.Fatalf("LastDeployError should be recorded")
+	targets, _ := s.db.ListAcmeDeployTargets(1)
+	if len(targets) != 1 || targets[0].LastDeployError == "" {
+		t.Fatalf("target status not recorded: %+v", targets)
 	}
 }
 
-// TestCovPctAcmeDeployKeyReject 覆盖 deployAcmeCert 第二次（key）file.write
-// 被拒（api_acme.go L424-426）：cert 路径成功、key 路径回 error。
+// TestCovPctAcmeDeployKeyReject 覆盖 deployAcmeTarget 第二次（key）
+// file.write 被拒：cert 路径成功、key 路径回 error。
 func TestCovPctAcmeDeployKeyReject(t *testing.T) {
 	s := covNewServer(t)
+	covPctSeedCert(t, s.db)
 	covFakeAgent(t, s, "deploy-key-reject", nil, func(_ string, params map[string]interface{}) map[string]interface{} {
 		path, _ := params["path"].(string)
 		if strings.HasSuffix(path, "k.pem") {
@@ -397,44 +398,56 @@ func TestCovPctAcmeDeployKeyReject(t *testing.T) {
 		}
 		return covOKPayload(nil)
 	})
-	cert := &storage.AcmeCert{
-		ID: 1, PrimaryDomain: "cov.example.com",
-		DeployAgentID:  "deploy-key-reject",
-		DeployCertPath: "/tmp/c.pem", DeployKeyPath: "/tmp/k.pem",
-		CertificatePEM: "CERT", PrivateKeyPEM: "KEY",
+	bindAcmeTargets(t, s.db, 1, storage.AcmeDeployTarget{AgentID: "deploy-key-reject", CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"})
+	cert, err := s.db.GetAcmeCert(1)
+	if err != nil {
+		t.Fatalf("get cert: %v", err)
 	}
-	err := s.deployAcmeCert(cert)
-	if err == nil || !strings.Contains(err.Error(), "rejected by agent") {
+	cert.CertificatePEM, cert.PrivateKeyPEM = "CERT", "KEY"
+	if err := s.deployAcmeCert(cert); err == nil || !strings.Contains(err.Error(), "rejected by agent") {
 		t.Fatalf("expect key write reject, got %v", err)
 	}
 }
 
-// TestCovPctAcmeDeployFinalUpdateFail 覆盖 deployAcmeCert 末尾
-// UpdateAcmeCert 失败分支（api_acme.go L429-431）：两次 write 成功 +
-// closed db（写部署状态时失败）。
-func TestCovPctAcmeDeployFinalUpdateFail(t *testing.T) {
+// TestCovPctAcmeDeployStatusUpdateFail 覆盖 deployAcmeTarget 的状态回写
+// 失败分支：两次 write 成功 + closed db（回写部署状态时失败）。
+func TestCovPctAcmeDeployStatusUpdateFail(t *testing.T) {
 	s := covNewServer(t)
+	covPctSeedCert(t, s.db)
 	covFakeAgent(t, s, "deploy-ok", nil, func(string, map[string]interface{}) map[string]interface{} {
 		return covOKPayload(nil)
 	})
-	cert := &storage.AcmeCert{
-		ID: 1, PrimaryDomain: "cov.example.com",
-		DeployAgentID:  "deploy-ok",
-		DeployCertPath: "/tmp/c.pem", DeployKeyPath: "/tmp/k.pem",
-		CertificatePEM: "CERT", PrivateKeyPEM: "KEY",
+	bindAcmeTargets(t, s.db, 1, storage.AcmeDeployTarget{AgentID: "deploy-ok", CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"})
+	cert, err := s.db.GetAcmeCert(1)
+	if err != nil {
+		t.Fatalf("get cert: %v", err)
 	}
+	cert.CertificatePEM, cert.PrivateKeyPEM = "CERT", "KEY"
 	covCloseDB(t, s)
+	if err := s.deployAcmeTarget(cert, &storage.AcmeDeployTarget{AgentID: "deploy-ok", CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, time.Now().Unix()); err == nil {
+		t.Fatalf("expect status update failure on closed db")
+	}
+	// closed db 下 deployAcmeCert 首查目标列表即失败（List 错误分支）
 	if err := s.deployAcmeCert(cert); err == nil {
-		t.Fatalf("expect final update failure on closed db")
+		t.Fatalf("expect list targets failure on closed db")
 	}
 }
 
-// TestCovPctAcmeDeployHandler502 覆盖 handleAcmeDeploy 的 deployAcmeCert
-// 失败分支（api_acme.go L472-475）：registry 命中但 agent 已 Close（不
-// Unregister）→ CallAgent 立即报 "agent X is closed" → 502。
+// TestCovPctAcmeDeployHandler502 覆盖 handleAcmeDeploy 的部署失败分支：
+// registry 命中但 agent 已 Close（不 Unregister）→ CallAgent 立即报
+// "agent X is closed" → 全目标失败 → 502 透传首个错误。
 func TestCovPctAcmeDeployHandler502(t *testing.T) {
 	s := newTestServerWithDB(t)
 	covPctSeedCert(t, s.db)
+	bindAcmeTargets(t, s.db, 1, storage.AcmeDeployTarget{AgentID: "deploy-closed", CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"})
+	cert, err := s.db.GetAcmeCert(1)
+	if err != nil {
+		t.Fatalf("get cert: %v", err)
+	}
+	cert.CertificatePEM, cert.PrivateKeyPEM = "CERT", "KEY"
+	if err := s.db.UpdateAcmeCert(cert); err != nil {
+		t.Fatal(err)
+	}
 	closed := NewAgent("deploy-closed", nil)
 	if err := s.registry.Register(closed); err != nil {
 		t.Fatal(err)

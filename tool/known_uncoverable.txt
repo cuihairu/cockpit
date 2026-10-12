@@ -132,3 +132,10 @@ internal/server/api_approvals.go:216,217	3. SetApprovalJobID 对账回写失败�
 internal/server/api_approvals.go:236,238	3. reject DecideApproval 失败 500（同 188,190 口径）
 internal/vault/local.go:223,224	3. json.Marshal(map[string]string) 不可能失败，防御分支
 internal/storage/capability_crypto.go:100,101	4. Value 里 json.Marshal(enc) 恒成功：加密后条目只剩 string 字段与空 map，无不可序列化值路径（直测已覆盖加密失败透传）
+internal/storage/storage.go:145,146	3. migrate 里 backfillAcmeDeployTargets 失败上抛（紧随 AutoMigrate 成功之后的同句柄查询，进程内无现实失败面；迁移函数自身错误分支已用触发器/关库直测，见 acme_deploy_test）
+internal/server/api_acme.go:544,545	3. handleAcmeDeploy 部署后重读目标失败降级（首查同行同表已成功，两次查询间无确定性失败注入面；降级只影响审计 details，不遮蔽部署结果）
+internal/server/api_acme.go:255,257	3. handleAcmeList 逐证书读目标失败 500（闭库时首查 ListAcmeCerts 先失败走前分支，同句柄两次查询间无确定性注入面）
+internal/server/api_acme.go:293,295	3. create 后 ReplaceAcmeDeployTargets 失败 500（CreateAcmeCert 同句柄先行成功，server 测试无 storage 级触发器注入面；函数自身错误分支已在 acme_deploy_test 直测）
+internal/server/api_acme.go:339,341	3. update 后 ReplaceAcmeDeployTargets 失败 500（同 293,295 口径）
+internal/server/api_acme.go:519,521	3. handleAcmeDeploy 首查目标失败 500（GetAcmeCert 同句柄先行成功，同 255,257 口径）
+internal/storage/acme_deploy.go:82,83	3. backfill 迁移 Count 失败上抛（首查 Find 同句柄先行，闭库时先失败；Count 无触发器注入面）

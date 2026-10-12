@@ -6,7 +6,8 @@ import Acme from './index'
 import type { AcmeCertView, Agent } from '@/types'
 
 // Acme：DNS 凭据引导分叉、工具条（巡检开关/账户邮箱）、证书表全列渲染、
-// 签发/部署/下载/删除、新建与编辑表单（默认路径回填）、RBAC 分档
+// 签发/部署（多目标成功与部分成功）/下载/删除、新建与编辑表单（多行部署目标、
+// 默认路径回填）、RBAC 分档
 
 const apiMock = vi.hoisted(() => ({
   getAcmeCerts: vi.fn(),
@@ -48,10 +49,12 @@ const soonIso = new Date(Date.now() + 20 * 86400000 + 3600000).toISOString()
 const certs = [
   { id: 1, status: 'issued', primaryDomain: 'a.com', domains: ['a.com', '*.a.com'], caDirectory: 'production',
     autoRenew: true, renewBeforeDays: 30, expiresAt: '2026-12-01', lastRenewAt: 0,
-    deployAgentId: 'ag-1', deployCertPath: '/etc/cockpit/certs/a.com.crt.pem', lastDeployAt: 1759000000 },
+    deployTargets: [{ id: 11, certId: 1, agentId: 'ag-1', certPath: '/etc/cockpit/certs/a.com.crt.pem',
+      keyPath: '/etc/cockpit/certs/a.com.key.pem', lastDeployAt: 1759000000, lastDeployError: '' }] },
   { id: 2, status: 'failed', primaryDomain: 'b.io', domains: ['b.io'], caDirectory: 'staging',
     autoRenew: false, renewBeforeDays: 30, expiresAt: '', lastRenewAt: 0, lastError: 'dns txt 校验超时',
-    deployAgentId: 'ag-1', deployCertPath: '/x', lastDeployAt: 0, lastDeployError: 'agent 离线' },
+    deployTargets: [{ id: 21, certId: 2, agentId: 'ag-1', certPath: '/x', keyPath: '/x.key',
+      lastDeployAt: 0, lastDeployError: 'agent 离线' }] },
   { id: 3, status: 'pending', primaryDomain: 'c.dev', domains: ['c.dev'], caDirectory: 'staging',
     autoRenew: false, renewBeforeDays: 14, expiresAt: '', lastRenewAt: 0 },
   { id: 4, status: 'issued', primaryDomain: 'd.net', domains: ['d.net'], caDirectory: 'staging',
@@ -105,13 +108,15 @@ const expectModalLeaving = async () => {
   await waitFor(() => expect(document.querySelector('.ant-modal')?.className).toContain('ant-zoom-leave'))
 }
 
-const openSelect = (label: string) => {
-  const input = screen.getByLabelText(label)
-  fireEvent.mouseDown(input.closest('.ant-select-selector')!)
+const openAgentSelect = () => {
+  const ph = screen.getByText('选 agent')
+  fireEvent.mouseDown(ph.closest('.ant-select-selector')!)
 }
 
 const pickOption = async (label: string) => {
-  fireEvent.click(await screen.findByText(label))
+  // 多行目标时前一行的下拉面板 DOM 残留 + 已选项文本 → 取最后一个（当前打开的下拉）
+  const hits = await screen.findAllByText(label)
+  fireEvent.click(hits[hits.length - 1]!)
 }
 
 const addDomainTag = (value: string) => {
@@ -137,29 +142,31 @@ describe('Acme', () => {
     expect(screen.queryByText('新建签发')).not.toBeInTheDocument()
   })
 
-  it('证书表全列：状态徽标、多域名、CA、部署、到期色阶与续期 Tag、失败警示', async () => {
+  it('证书表全列：状态徽标、多域名、CA、逐目标部署、到期色阶与续期 Tag、失败警示', async () => {
     renderPage()
     expect(await screen.findByText('a.com')).toBeInTheDocument()
-    // issued 两行（a.com / d.net）各一枚徽标；b.io 徽标+部署失败 Tag 各一枚「失败」
-    expect(screen.getAllByText('已签发').length).toBe(2)
-    expect(within(rowOf('b.io')).getAllByText('失败').length).toBe(2)
+    // b.io：状态徽标「失败」+ 部署红标「ag-1 失败」各一枚
+    expect(within(rowOf('b.io')).getAllByText(/失败/).length).toBe(2)
     expect(screen.getByText('待签发')).toBeInTheDocument()
     expect(screen.getByText('共 2 个（含泛域名）')).toBeInTheDocument()
     expect(screen.getByText('正式')).toBeInTheDocument()
-    // 部署成功（绿 Tag）与部署失败（红 Tag）
+    // 部署成功（绿 Tag 日期）与部署失败（红 Tag）；无目标行显示 —
+    // （a.com 行另有一枚 CA 绿 Tag「正式」，部署绿 Tag 文本为日期）
     expect(rowOf('b.io').querySelector('.ant-tag-red')?.textContent).toContain('失败')
-    expect(rowOf('a.com').querySelector('.ant-tag-green')?.textContent).toBeTruthy()
+    const greens = Array.from(rowOf('a.com').querySelectorAll('.ant-tag-green')).map((t) => t.textContent)
+    expect(greens).toContain('正式')
+    expect(greens.some((t) => t!.includes('/'))).toBe(true)
+    expect(within(rowOf('d.net')).getAllByText('—').length).toBeGreaterThanOrEqual(1)
     // 到期 20 天 → 橙色「剩 20 天」；空到期兜底 —
     expect(within(rowOf('d.net')).getByText(/剩 20 天/)).toHaveStyle({ color: '#d46b08' })
-    expect(within(rowOf('c.dev')).getAllByText('—').length).toBeGreaterThanOrEqual(1)
     expect(within(rowOf('a.com')).getByText('开（30天前）')).toBeInTheDocument()
     expect(within(rowOf('b.io')).getByText('关')).toBeInTheDocument()
     expect(screen.getByText(/有配置最近一次签发失败/)).toBeInTheDocument()
   })
 
-  it('签发与手动部署：成功提示带域名/目标', async () => {
+  it('签发与手动部署：成功提示带域名/目标数', async () => {
     apiMock.issueAcmeCert.mockResolvedValue({ primaryDomain: 'a.com', expiresAt: '2026-12-01' })
-    apiMock.deployAcmeCert.mockResolvedValue({ deployAgentId: 'ag-1' })
+    apiMock.deployAcmeCert.mockResolvedValue({ deployTargets: [{ agentId: 'ag-1' }] })
     renderPage()
     expect(await screen.findByText('a.com')).toBeInTheDocument()
     fireEvent.click(iconBtnIn(rowOf('c.dev'), 'anticon-cloud-upload')!)
@@ -167,7 +174,18 @@ describe('Acme', () => {
     await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith(expect.stringContaining('签发成功：a.com')))
     fireEvent.click(iconBtnIn(rowOf('a.com'), 'anticon-send')!)
     await waitFor(() => expect(apiMock.deployAcmeCert).toHaveBeenCalledWith(1))
-    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已部署到 ag-1'))
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已部署到 1 个目标'))
+  })
+
+  it('部署部分成功：warning 提示成功数', async () => {
+    apiMock.deployAcmeCert.mockResolvedValue({
+      deployTargets: [{ agentId: 'ag-1' }, { agentId: 'ag-2', lastDeployError: 'agent 离线' }],
+    })
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(iconBtnIn(rowOf('a.com'), 'anticon-send')!)
+    await waitFor(() => expect(apiMock.deployAcmeCert).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('部署完成：成功 1 / 共 2（失败目标见部署列红标）'))
   })
 
   it('下载证书与私钥：分片参数与审计提示', async () => {
@@ -195,21 +213,41 @@ describe('Acme', () => {
     await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已删除（不影响 CA 侧已签发的证书）'))
   })
 
-  it('编辑：回填、按主域名填默认路径、保存走 update', async () => {
+  it('编辑：回填多行目标、按主域名填默认路径、保存走 update', async () => {
     apiMock.updateAcmeCert.mockResolvedValue({})
     renderPage()
     expect(await screen.findByText('a.com')).toBeInTheDocument()
     fireEvent.click(iconBtnIn(rowOf('a.com'), 'anticon-edit')!)
     await modalTitle('编辑签发配置')
-    expect(fieldEl('证书路径（agent 上）').value).toBe('/etc/cockpit/certs/a.com.crt.pem')
+    const certInput = screen.getByPlaceholderText('/etc/cockpit/certs/example.com.crt.pem') as HTMLInputElement
+    expect(certInput.value).toBe('/etc/cockpit/certs/a.com.crt.pem')
     fireEvent.click(screen.getByRole('button', { name: /按主域名填默认路径/ }))
-    expect(fieldEl('证书路径（agent 上）').value).toBe('/etc/cockpit/certs/a.com.crt.pem')
-    expect(fieldEl('私钥路径（agent 上，落盘权限 0600）').value).toBe('/etc/cockpit/certs/a.com.key.pem')
+    expect(certInput.value).toBe('/etc/cockpit/certs/a.com.crt.pem')
+    const keyInput = screen.getByPlaceholderText('/etc/cockpit/certs/example.com.key.pem') as HTMLInputElement
+    expect(keyInput.value).toBe('/etc/cockpit/certs/a.com.key.pem')
     fireEvent.change(fieldEl('提前续期（天）'), { target: { value: '14' } })
     modalOk()
     await waitFor(() => expect(apiMock.updateAcmeCert).toHaveBeenCalledWith(1,
-      expect.objectContaining({ domains: ['a.com', '*.a.com'], caDirectory: 'production', renewBeforeDays: 14 })))
+      expect.objectContaining({
+        domains: ['a.com', '*.a.com'], caDirectory: 'production', renewBeforeDays: 14,
+        deployTargets: [expect.objectContaining({ agentId: 'ag-1', certPath: '/etc/cockpit/certs/a.com.crt.pem' })],
+      })))
     await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('已保存（域名/CA 变更后需重新签发）'))
+  })
+
+  it('编辑：删除部署目标行后按钮随 fields 收起', async () => {
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(iconBtnIn(rowOf('a.com'), 'anticon-edit')!)
+    await modalTitle('编辑签发配置')
+    expect(screen.getByPlaceholderText('/etc/cockpit/certs/example.com.crt.pem')).toBeInTheDocument()
+    // 行内删除按钮（Form.List remove）：唯一 anticon-delete 在弹窗内的表单行上
+    fireEvent.click(document.querySelector('.ant-modal .anticon-delete')!.closest('button')!)
+    await waitFor(() =>
+      expect(screen.queryByPlaceholderText('/etc/cockpit/certs/example.com.crt.pem')).not.toBeInTheDocument())
+    // 行删光后「按主域名填默认路径」随 fields.length>0 消失，「添加目标」仍在
+    expect(screen.queryByRole('button', { name: /按主域名填默认路径/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /添加目标/ })).toBeInTheDocument()
   })
 
   it('新建：空域名校验拦截，合法提交走 create 并小写化', async () => {
@@ -336,7 +374,7 @@ describe('Acme', () => {
     await expectModalLeaving()
   })
 
-  it('新建取消与编辑无部署字段证书', async () => {
+  it('新建取消与编辑无部署目标证书', async () => {
     renderPage()
     expect(await screen.findByText('a.com')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /新建签发/ }))
@@ -346,24 +384,67 @@ describe('Acme', () => {
     fireEvent.click(iconBtnIn(rowOf('c.dev'), 'anticon-edit')!)
     await modalTitle('编辑签发配置')
     expect(fieldEl('域名（首个为主域名）').id).toBeTruthy()
-    expect(screen.queryByLabelText('证书路径（agent 上）')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('私钥路径（agent 上，落盘权限 0600）')).not.toBeInTheDocument()
+    // 无部署目标：不渲染路径输入与默认路径按钮，「添加目标」可用
+    expect(screen.queryByPlaceholderText('/etc/cockpit/certs/example.com.crt.pem')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /按主域名填默认路径/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /添加目标/ })).toBeInTheDocument()
   })
 
-  it('新建表单：部署目标选项兜底与空域名默认路径', async () => {
+  it('新建表单：添加目标、agent 选项兜底与空域名默认路径', async () => {
     renderPage()
     expect(await screen.findByText('a.com')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /新建签发/ }))
     await modalTitle('新建签发配置')
-    openSelect('自动部署目标（可选）')
+    fireEvent.click(screen.getByRole('button', { name: /添加目标/ }))
+    openAgentSelect()
     expect(await screen.findByText('web-01（Nginx）')).toBeInTheDocument()
     expect(screen.getByText('db-01（离线）')).toBeInTheDocument()
     expect(screen.getByText('ag-3')).toBeInTheDocument()
     await pickOption('web-01（Nginx）')
-    await screen.findByLabelText('证书路径（agent 上）')
+    const certInput = await screen.findByPlaceholderText('/etc/cockpit/certs/example.com.crt.pem') as HTMLInputElement
     fireEvent.click(screen.getByRole('button', { name: /按主域名填默认路径/ }))
-    expect(fieldEl('证书路径（agent 上）').value).toBe('/etc/cockpit/certs/example.com.crt.pem')
-    expect(fieldEl('私钥路径（agent 上，落盘权限 0600）').value).toBe('/etc/cockpit/certs/example.com.key.pem')
+    expect(certInput.value).toBe('/etc/cockpit/certs/example.com.crt.pem')
+    expect((screen.getByPlaceholderText('/etc/cockpit/certs/example.com.key.pem') as HTMLInputElement).value)
+      .toBe('/etc/cockpit/certs/example.com.key.pem')
+  })
+
+  it('部署目标行缺路径：required 内联拦截且不调接口', async () => {
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建签发/ }))
+    await modalTitle('新建签发配置')
+    addDomainTag('y.com,')
+    await screen.findByText('y.com', { selector: '.ant-select-selection-item-content' })
+    fireEvent.click(screen.getByRole('button', { name: /添加目标/ }))
+    openAgentSelect()
+    await pickOption('web-01（Nginx）')
+    modalOk()
+    // Form.List required 规则出内联错误，submit 早退
+    expect(await screen.findByText('证书绝对路径')).toBeInTheDocument()
+    expect(await screen.findByText('私钥绝对路径（落盘 0600）')).toBeInTheDocument()
+    expect(apiMock.createAcmeCert).not.toHaveBeenCalled()
+  })
+
+  it('同一 agent 重复部署目标：提交被拦截提示', async () => {
+    renderPage()
+    expect(await screen.findByText('a.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建签发/ }))
+    await modalTitle('新建签发配置')
+    addDomainTag('y.com,')
+    await screen.findByText('y.com', { selector: '.ant-select-selection-item-content' })
+    // 两行同 agent、路径齐全 → 通过内联校验，撞重复 agent 兜底
+    for (let i = 0; i < 2; i++) {
+      fireEvent.click(screen.getByRole('button', { name: /添加目标/ }))
+      openAgentSelect()
+      await pickOption('web-01（Nginx）')
+      const certs = screen.getAllByPlaceholderText('/etc/cockpit/certs/example.com.crt.pem')
+      fireEvent.change(certs[certs.length - 1]!, { target: { value: `/c${i}.pem` } })
+      const keys = screen.getAllByPlaceholderText('/etc/cockpit/certs/example.com.key.pem')
+      fireEvent.change(keys[keys.length - 1]!, { target: { value: `/c${i}.key.pem` } })
+    }
+    modalOk()
+    await waitFor(() => expect(msgWarning).toHaveBeenCalledWith('同一 agent 只能有一个部署目标'))
+    expect(apiMock.createAcmeCert).not.toHaveBeenCalled()
   })
 
   it('仅空白域名：提交被拦截提示且不调接口', async () => {
@@ -395,7 +476,8 @@ describe('Acme', () => {
     const edgeCerts = [
       { id: 11, status: 'issued', primaryDomain: 'e.org', domains: ['e.org'], caDirectory: 'staging',
         autoRenew: true, renewBeforeDays: 7, expiresAt: redIso, lastRenewAt: 1759000000,
-        deployAgentId: 'ag-1', deployCertPath: '/e.crt.pem', lastDeployAt: 0 },
+        deployTargets: [{ id: 31, certId: 11, agentId: 'ag-1', certPath: '/e.crt.pem', keyPath: '/e.key.pem',
+          lastDeployAt: 0, lastDeployError: '' }] },
       { id: 12, status: 'oops', primaryDomain: 'g.dev', domains: ['g.dev'], caDirectory: 'staging',
         autoRenew: false, renewBeforeDays: 30, expiresAt: '', lastRenewAt: 0 },
     ] as unknown as AcmeCertView[]

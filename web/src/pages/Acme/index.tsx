@@ -75,14 +75,18 @@ const STATUS_META: Record<AcmeCertView['status'], { label: string; badge: 'succe
   pending: { label: '待签发', badge: 'default' },
 }
 
+interface AcmeDeployFormRow {
+  agentId?: string
+  certPath?: string
+  keyPath?: string
+}
+
 interface AcmeFormValues {
   domains: string[]
   caDirectory: 'staging' | 'production'
   autoRenew: boolean
   renewBeforeDays: number
-  deployAgentId?: string
-  deployCertPath?: string
-  deployKeyPath?: string
+  deployTargets?: AcmeDeployFormRow[]
 }
 
 const formatUnix = (unix: number) => (unix ? new Date(unix * 1000).toLocaleString() : '—')
@@ -171,7 +175,10 @@ const Acme = () => {
     mutationFn: (id: number) => api.deployAcmeCert(id),
     onSuccess: (res) => {
       void invalidate()
-      message.success(`已部署到 ${res.deployAgentId}`)
+      const ok = (res.deployTargets ?? []).filter((t) => !t.lastDeployError).length
+      const total = (res.deployTargets ?? []).length
+      if (ok === total) message.success(`已部署到 ${total} 个目标`)
+      else message.warning(`部署完成：成功 ${ok} / 共 ${total}（失败目标见部署列红标）`)
     },
     onError: (err) => message.error(getApiErrorMessage(err, '部署失败')),
   })
@@ -205,9 +212,7 @@ const Acme = () => {
       caDirectory: cert.caDirectory,
       autoRenew: cert.autoRenew,
       renewBeforeDays: cert.renewBeforeDays,
-      deployAgentId: cert.deployAgentId || undefined,
-      deployCertPath: cert.deployCertPath || undefined,
-      deployKeyPath: cert.deployKeyPath || undefined,
+      deployTargets: (cert.deployTargets ?? []).map((t) => ({ agentId: t.agentId, certPath: t.certPath, keyPath: t.keyPath })),
     })
     setModalOpen(true)
   }
@@ -220,14 +225,19 @@ const Acme = () => {
       message.warning('请至少填写一个域名')
       return
     }
+    // 行完整性由 Form.List required 规则内联拦截（validateFields 失败即 return）；
+    // 这里只兜底同一 agent 重复目标。required 校验后三字段必齐，收窄掉可选项
+    const rows = (values.deployTargets ?? []) as { agentId: string; certPath: string; keyPath: string }[]
+    if (new Set(rows.map((t) => t.agentId)).size !== rows.length) {
+      message.warning('同一 agent 只能有一个部署目标')
+      return
+    }
     const input = {
       domains,
       caDirectory: values.caDirectory,
       autoRenew: values.autoRenew,
       renewBeforeDays: values.renewBeforeDays,
-      deployAgentId: values.deployAgentId,
-      deployCertPath: values.deployCertPath,
-      deployKeyPath: values.deployKeyPath,
+      deployTargets: rows,
     }
     try {
       if (editing) {
@@ -291,19 +301,23 @@ const Acme = () => {
       title: '部署',
       width: 140,
       render: (_, r: AcmeCertView) => {
-        // D14：绑定 agent 后签发/续期自动推送，nginx 站点以绝对路径引用
-        if (!r.deployAgentId) return <Typography.Text type="secondary">—</Typography.Text>
-        if (r.lastDeployError) {
-          return (
-            <Tooltip title={`部署失败（${formatUnix(r.lastDeployAt)}）：${r.lastDeployError}`}>
-              <Tag color="red">失败</Tag>
-            </Tooltip>
-          )
-        }
+        // D14 多目标：绑定 agent 后签发/续期自动推送，nginx 站点以绝对路径引用；
+        // 逐目标状态随行展示（红标 = 最近一次推送失败）
+        if (!r.deployTargets?.length) return <Typography.Text type="secondary">—</Typography.Text>
         return (
-          <Tooltip title={`${r.deployAgentId}：${r.deployCertPath}`}>
-            <Tag color="green">{r.lastDeployAt ? new Date(r.lastDeployAt * 1000).toLocaleDateString() : '待推送'}</Tag>
-          </Tooltip>
+          <Space size={4} wrap>
+            {r.deployTargets.map((t) =>
+              t.lastDeployError ? (
+                <Tooltip key={t.id} title={`部署失败（${formatUnix(t.lastDeployAt)}）：${t.lastDeployError}`}>
+                  <Tag color="red">{t.agentId} 失败</Tag>
+                </Tooltip>
+              ) : (
+                <Tooltip key={t.id} title={`${t.agentId}：${t.certPath}`}>
+                  <Tag color="green">{t.lastDeployAt ? new Date(t.lastDeployAt * 1000).toLocaleDateString() : '待推送'}</Tag>
+                </Tooltip>
+              ),
+            )}
+          </Space>
         )
       },
     },
@@ -378,9 +392,9 @@ const Acme = () => {
               </Button>
             </Space.Compact>
           )}
-          {r.deployAgentId && r.status === 'issued' && (
+          {(r.deployTargets?.length ?? 0) > 0 && r.status === 'issued' && (
             <PermGuard perm="acme:admin">
-              <Tooltip title={`立即部署到 ${r.deployAgentId}`}>
+              <Tooltip title={`立即部署到 ${r.deployTargets.length} 个目标`}>
                 <Button
                   size="small"
                   type="text"
@@ -512,47 +526,64 @@ const Acme = () => {
             <InputNumber min={7} max={90} style={{ width: 200 }} />
           </Form.Item>
           <Form.Item
-            name="deployAgentId"
-            label="自动部署目标（可选）"
-            extra="签发/续期成功后自动把证书推送到该 agent，供反向代理站点以绝对路径引用"
+            label="自动部署目标（可选，可多台网关）"
+            extra="签发/续期成功后自动把证书推送到各目标 agent，供反向代理站点以绝对路径引用；同一 agent 至多一条，最多 8 个"
           >
-            <Select options={deployAgentOptions} allowClear placeholder="不部署" />
-          </Form.Item>
-          <Form.Item noStyle shouldUpdate={(a, b) => a.deployAgentId !== b.deployAgentId}>
-            {({ getFieldValue }) =>
-              getFieldValue('deployAgentId') ? (
+            <Form.List name="deployTargets">
+              {(fields, { add, remove }) => (
                 <>
-                  <Form.Item
-                    name="deployCertPath"
-                    label="证书路径（agent 上）"
-                    rules={[{ required: true, message: '填写 agent 上的绝对路径' }]}
-                  >
-                    <Input placeholder="/etc/cockpit/certs/example.com.crt.pem" />
-                  </Form.Item>
-                  <Form.Item
-                    name="deployKeyPath"
-                    label="私钥路径（agent 上，落盘权限 0600）"
-                    rules={[{ required: true, message: '填写 agent 上的绝对路径' }]}
-                  >
-                    <Input placeholder="/etc/cockpit/certs/example.com.key.pem" />
-                  </Form.Item>
-                  <Button
-                    size="small"
-                    style={{ marginBottom: 16 }}
-                    onClick={() => {
-                      const primary = (getFieldValue('domains') ?? [])[0] ?? 'example.com'
-                      const name = String(primary).replace('*.', '')
-                      form.setFieldsValue({
-                        deployCertPath: `/etc/cockpit/certs/${name}.crt.pem`,
-                        deployKeyPath: `/etc/cockpit/certs/${name}.key.pem`,
-                      })
-                    }}
-                  >
-                    按主域名填默认路径
-                  </Button>
+                  {fields.map((field) => (
+                    <Space key={field.key} align="baseline" style={{ display: 'flex', marginBottom: 4 }} wrap>
+                      <Form.Item
+                        name={[field.name, 'agentId']}
+                        style={{ minWidth: 180, marginBottom: 0 }}
+                        rules={[{ required: true, message: '选 agent' }]}
+                      >
+                        <Select options={deployAgentOptions} placeholder="选 agent" style={{ minWidth: 180 }} />
+                      </Form.Item>
+                      <Form.Item
+                        name={[field.name, 'certPath']}
+                        style={{ minWidth: 220, marginBottom: 0 }}
+                        rules={[{ required: true, message: '证书绝对路径' }]}
+                      >
+                        <Input placeholder="/etc/cockpit/certs/example.com.crt.pem" />
+                      </Form.Item>
+                      <Form.Item
+                        name={[field.name, 'keyPath']}
+                        style={{ minWidth: 220, marginBottom: 0 }}
+                        rules={[{ required: true, message: '私钥绝对路径（落盘 0600）' }]}
+                      >
+                        <Input placeholder="/etc/cockpit/certs/example.com.key.pem" />
+                      </Form.Item>
+                      <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                    </Space>
+                  ))}
+                  <Space>
+                    <Button size="small" onClick={() => add()}>
+                      添加目标
+                    </Button>
+                    {fields.length > 0 && (
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          const primary = (form.getFieldValue('domains') ?? [])[0] ?? 'example.com'
+                          const name = String(primary).replace('*.', '')
+                          form.setFieldsValue({
+                            deployTargets: fields.map((f) => ({
+                              ...form.getFieldValue(['deployTargets', f.name]),
+                              certPath: `/etc/cockpit/certs/${name}.crt.pem`,
+                              keyPath: `/etc/cockpit/certs/${name}.key.pem`,
+                            })),
+                          })
+                        }}
+                      >
+                        按主域名填默认路径
+                      </Button>
+                    )}
+                  </Space>
                 </>
-              ) : null
-            }
+              )}
+            </Form.List>
           </Form.Item>
         </Form>
       </Modal>

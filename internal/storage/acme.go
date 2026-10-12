@@ -38,13 +38,14 @@ type AcmeCert struct {
 	LastError       string    `gorm:"size:512" json:"lastError"`
 	CheckedAt       int64     `json:"checkedAt"` // 最近一次巡检看到它的时间，0=从未
 
-	// 部署目标（D14，一对一；空 AgentID = 未绑定）：签发成功后把 PEM
-	// 经 file.write 推到 agent，nginx 站点以绝对路径引用
-	DeployAgentID   string `gorm:"size:100;index" json:"deployAgentId"`
-	DeployCertPath  string `gorm:"size:255" json:"deployCertPath"`
-	DeployKeyPath   string `gorm:"size:255" json:"deployKeyPath"`
-	LastDeployAt    int64  `json:"lastDeployAt"`                    // 最近一次部署尝试（含失败）Unix 秒，0=从未
-	LastDeployError string `gorm:"size:512" json:"lastDeployError"` // 空 = 最近一次部署成功
+	// 部署目标旧列（D14 单目标时代，已弃用）：多目标迁移到
+	// AcmeDeployTarget 表（D-2026-10-12-3），启动时一次性迁入后清零；
+	// 列保留只为回滚安全，读写均不再经过
+	DeployAgentID   string `gorm:"size:100;index" json:"-"`
+	DeployCertPath  string `gorm:"size:255" json:"-"`
+	DeployKeyPath   string `gorm:"size:255" json:"-"`
+	LastDeployAt    int64  `json:"-"`
+	LastDeployError string `gorm:"size:512" json:"-"`
 
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -120,7 +121,12 @@ func (d *DB) ListAcmeCerts() ([]*AcmeCert, error) {
 	return list, nil
 }
 
-// DeleteAcmeCert 仅删本地记录，不向 CA 吊销（D9）
+// DeleteAcmeCert 仅删本地记录，不向 CA 吊销（D9）；部署目标随删
 func (d *DB) DeleteAcmeCert(id uint) error {
-	return d.db.Delete(&AcmeCert{}, id).Error
+	return d.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("cert_id = ?", id).Delete(&AcmeDeployTarget{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&AcmeCert{}, id).Error
+	})
 }

@@ -126,6 +126,7 @@ func (d *DB) migrate() error {
 		&DDNSConfig{},
 		&AcmeAccount{},
 		&AcmeCert{},
+		&AcmeDeployTarget{},
 		&DomainBinding{},
 		&Role{},
 		&RemoteCredential{},
@@ -136,6 +137,11 @@ func (d *DB) migrate() error {
 		&AgentTag{},
 		&AgentTagAssignment{},
 	); err != nil {
+		return err
+	}
+
+	// ACME 单目标绑定 → 部署目标表一次性迁移（D-2026-10-12-3，幂等）
+	if err := backfillAcmeDeployTargets(d); err != nil {
 		return err
 	}
 

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/cuihairu/cockpit/internal/storage"
 )
 
 // mustJSON 解析 recorder 响应体
@@ -156,10 +158,10 @@ func TestCovAcmeHandlers(t *testing.T) {
 		{"bad ca", `{"domains":["x.com"],"caDirectory":"go daddy"}`, 400},
 		{"days low", `{"domains":["x.com"],"renewBeforeDays":6}`, 400},
 		{"days high", `{"domains":["x.com"],"renewBeforeDays":91}`, 400},
-		{"deploy paths no agent", `{"domains":["x.com"],"deployCertPath":"/etc/x.pem"}`, 400},
-		{"deploy relative path", `{"domains":["x.com"],"deployAgentId":"a","deployCertPath":"etc/x.pem","deployKeyPath":"/etc/x.key"}`, 400},
+		{"deploy paths no agent", `{"domains":["x.com"],"deployTargets":[{"agentId":"","certPath":"/etc/x.pem","keyPath":"/etc/x.key"}]}`, 400},
+		{"deploy relative path", `{"domains":["x.com"],"deployTargets":[{"agentId":"a","certPath":"etc/x.pem","keyPath":"/etc/x.key"}]}`, 400},
 		{"ok", `{"domains":["*.X.com","y.com"],"caDirectory":" production ","renewBeforeDays":14}`, 200},
-		{"ok with deploy", `{"domains":["z.com"],"deployAgentId":"a1","deployCertPath":"/etc/z.pem","deployKeyPath":"/etc/z.key"}`, 200},
+		{"ok with deploy", `{"domains":["z.com"],"deployTargets":[{"agentId":"a1","certPath":"/etc/z.pem","keyPath":"/etc/z.key"}]}`, 200},
 	}
 	ids := map[string]uint{}
 	for _, tc := range cases {
@@ -251,25 +253,21 @@ func TestCovAcmeHandlers(t *testing.T) {
 	}
 
 	// deployAcmeCert 直测（收尾执行）：无 target / 未签发 / agent 离线。
-	// 注意拷贝共享主键，fail() 回写会落到库中该证书——放测试末尾不再有
-	// 依赖库内 DeployAgentID 的断言
+	// 部署状态随目标行回写（D-2026-10-12-3），放测试末尾不再有依赖库内
+	// 部署状态的断言
 	base, err := s.db.GetAcmeCert(ids["ok"])
 	if err != nil {
 		t.Fatalf("get cert: %v", err)
 	}
-	c2 := *base
-	if err := s.deployAcmeCert(&c2); err == nil || !strings.Contains(err.Error(), "no deploy target") {
+	if err := s.deployAcmeCert(base); err == nil || !strings.Contains(err.Error(), "no deploy target") {
 		t.Errorf("no target: err = %v", err)
 	}
-	c3 := *base
-	c3.DeployAgentID = "offline-agent"
-	if err := s.deployAcmeCert(&c3); err == nil || !strings.Contains(err.Error(), "not issued yet") {
+	bindAcmeTargets(t, s.db, base.ID, storage.AcmeDeployTarget{AgentID: "offline-agent", CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"})
+	if err := s.deployAcmeCert(base); err == nil || !strings.Contains(err.Error(), "not issued yet") {
 		t.Errorf("not issued: err = %v", err)
 	}
-	c4 := *base
-	c4.DeployAgentID = "ghost"
-	c4.CertificatePEM, c4.PrivateKeyPEM = "c", "k"
-	if err := s.deployAcmeCert(&c4); err == nil {
+	base.CertificatePEM, base.PrivateKeyPEM = "c", "k"
+	if err := s.deployAcmeCert(base); err == nil {
 		t.Error("offline agent should fail")
 	}
 }

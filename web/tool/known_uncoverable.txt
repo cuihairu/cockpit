@@ -46,7 +46,6 @@ pages/Proxy/index.tsx:149 同上（return）
 pages/Docker/index.tsx:189 动作 switch default 抛错：action 来自固定按钮集合，未知值不可达
 pages/Stacks/StackDetail.tsx:191 taskActionLabel 未知 action 兜底：后端 action 枚举封闭，四类已知动作已全测；同款兜底语义已由历史 Tab 用例实证
 pages/Cron/index.tsx:41 空表达式早退：表单 required 前置，简写/五段式主路径已实证
-pages/Acme/index.tsx:186 下载文件名三元 issuer 分支：download() 仅被 cert/key 两个按钮调用，issuer 无 UI 入口（预留）
 pages/DNS/index.tsx:170 导出文件名 zone?.name ?? zoneId 兜底：导出必先选 zone（未选 zone 无导出入口），zone.name 主路径已断言，zoneId 命名侧数据形态不可达
 
 # ---- v8 伪缺口：行为已由用例双向实证，lcov 计数为 0（JSX 内联/回调链/三元怪癖）----
@@ -59,7 +58,6 @@ pages/DNS/index.tsx:385 Modal onCancel 内联回调：取消关闭并重开重�
 pages/DNS/DDNSPanel.tsx:198 agent 列 render 三元/||：hostname 缺省用 id、未知 id 原样显示均已断言
 pages/Drift/ConsistencyTab.tsx:139 mismatch 字段映射 hostname 分支：fixture 含 hostname 明细且「主机名」渲染断言通过，v8 对 Table columns 内联 render 三元漏计
 contexts/UserContext.tsx:90 login 后拉权限 setUser updater：login 成功用例断言 user 合并结果，async 回调内联漏计
-pages/Acme/index.tsx:543 按主域名填默认路径 onClick：编辑（a.com）与新建（空域名 example.com 兜底）双向断言均有
 pages/Docker/index.tsx:206 handleAction logs 分支 setLogContainer：日志弹窗打开即实证该行执行，v8 漏计
 pages/Docker/index.tsx:263 容器状态 Tag color 内联映射：running/exited/paused/未知四态渲染断言均有
 pages/Docker/index.tsx:175 switch 语句行：各 case 分支计数正常，switch 行本身 v8 记 0
@@ -341,3 +339,7 @@ pages/Approvals/index.tsx:34 STATUS_META[status] ?? 兜底：四态闭合（pend
 pages/Approvals/index.tsx:57 决策失败 message.error 内联 action 三元的驳回侧：驳回失败无用例（批准失败已断言），v8 对内联三元边漏计
 pages/Approvals/index.tsx:87 summary || '-'：summary 服务端摘要恒非空（agent.exec command 必填、批准门校验前置），'-' 侧不可达，v8 漏计
 pages/Workflows/index.tsx:464 depends_on Select onChange vs ?? [] 兜底：antd multiple 恒传数组（清空给 []），null 不可达（M2e；同 442 targets 口径）
+pages/Acme/index.tsx:178 部署响应 deployTargets ?? [] 防空：server acmeCertView 无条件输出该字段（200 响应恒为数组），?? 兜 JSON null（issue 降级路径 nil 切片），无 UI 可触发
+pages/Acme/index.tsx:179 同上第二处 ??（total 计数），与 178 同根因
+pages/Acme/index.tsx:193 下载文件名三元 issuer 分支：download() 仅被 cert/key 两个按钮调用，issuer 无 UI 入口（预留）
+pages/Acme/index.tsx:569 按主域名填默认路径 domains ?? [] 防空：openCreate/openEdit 均先 setFieldsValue({domains})，字段恒已设，?? 兜 Form 未挂载时域值缺失，无 UI 可触发

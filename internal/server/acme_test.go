@@ -569,19 +569,34 @@ func TestAcmeConfigDNSField(t *testing.T) {
 	}
 }
 
-// TestAcmeDeployValidation 部署目标校验（D14）：三字段要么全空，
-// 要么 agentID + 两绝对路径齐全
+// bindAcmeTargets 测试用：登记证书部署目标（多目标，D-2026-10-12-3）
+func bindAcmeTargets(t *testing.T, db *storage.DB, certID uint, targets ...storage.AcmeDeployTarget) {
+	t.Helper()
+	if err := db.ReplaceAcmeDeployTargets(certID, targets); err != nil {
+		t.Fatalf("bind targets: %v", err)
+	}
+}
+
+// TestAcmeDeployValidation 部署目标校验（D14 多目标，D-2026-10-12-3）：
+// 空数组 = 未绑定；每条 agentID + 两绝对路径齐全；同 agent 去重；≤8 条
 func TestAcmeDeployValidation(t *testing.T) {
 	s, _ := newAcmeTestServer(t)
+	nine := make([]string, 9)
+	for i := range nine {
+		nine[i] = `{"agentId":"a` + strconv.Itoa(i+1) + `","certPath":"/c.pem","keyPath":"/k.pem"}`
+	}
 	cases := []struct {
 		name string
 		body string
 		ok   bool
 	}{
 		{"no deploy fields", `{"domains":["a.example.com"],"autoRenew":true}`, true},
-		{"full target", `{"domains":["a.example.com"],"deployAgentId":"a1","deployCertPath":"/c.pem","deployKeyPath":"/k.pem"}`, true},
-		{"missing agent", `{"domains":["a.example.com"],"deployCertPath":"/c.pem","deployKeyPath":"/k.pem"}`, false},
-		{"relative path", `{"domains":["a.example.com"],"deployAgentId":"a1","deployCertPath":"c.pem","deployKeyPath":"/k.pem"}`, false},
+		{"single target", `{"domains":["a.example.com"],"deployTargets":[{"agentId":"a1","certPath":"/c.pem","keyPath":"/k.pem"}]}`, true},
+		{"two targets", `{"domains":["a.example.com"],"deployTargets":[{"agentId":"a1","certPath":"/c.pem","keyPath":"/k.pem"},{"agentId":"a2","certPath":"/c2.pem","keyPath":"/k2.pem"}]}`, true},
+		{"missing agent", `{"domains":["a.example.com"],"deployTargets":[{"agentId":"","certPath":"/c.pem","keyPath":"/k.pem"}]}`, false},
+		{"relative path", `{"domains":["a.example.com"],"deployTargets":[{"agentId":"a1","certPath":"c.pem","keyPath":"/k.pem"}]}`, false},
+		{"duplicate agent", `{"domains":["a.example.com"],"deployTargets":[{"agentId":"a1","certPath":"/c.pem","keyPath":"/k.pem"},{"agentId":"a1","certPath":"/c2.pem","keyPath":"/k2.pem"}]}`, false},
+		{"nine targets", `{"domains":["a.example.com"],"deployTargets":[` + strings.Join(nine, ",") + `]}`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -597,18 +612,20 @@ func TestAcmeDeployValidation(t *testing.T) {
 	}
 }
 
-// TestAcmeDeployAPI 手动部署端点（D14）：未绑定 400 / agent 离线 503 /
-// 成功两次 RPC 往返（cert 0644、key 0600、truncate 覆盖）+ 状态回写 + 审计
+// TestAcmeDeployAPI 手动部署端点（D14 多目标，D-2026-10-12-3）：未绑定
+// 400 / 全部目标离线 503 / 双目标成功 4 次 RPC 往返（cert 0644、key 0600、
+// truncate 覆盖）+ 逐目标状态回写 + 审计；单目标失败不挡其他目标
 func TestAcmeDeployAPI(t *testing.T) {
 	s, _ := newAcmeTestServer(t)
 	cert := mkAcmeCert(t, s, func(c *storage.AcmeCert) {
 		c.Status = "issued"
 		c.CertificatePEM = "CERT-PEM"
 		c.PrivateKeyPEM = "KEY-PEM"
-		c.DeployAgentID = "a1"
-		c.DeployCertPath = "/etc/cockpit/certs/home.example.com.crt.pem"
-		c.DeployKeyPath = "/etc/cockpit/certs/home.example.com.key.pem"
 	})
+	bindAcmeTargets(t, s.db, cert.ID,
+		storage.AcmeDeployTarget{AgentID: "a1", CertPath: "/etc/cockpit/certs/home.example.com.crt.pem", KeyPath: "/etc/cockpit/certs/home.example.com.key.pem"},
+		storage.AcmeDeployTarget{AgentID: "a2", CertPath: "/etc/cockpit/certs/home.example.com.crt.pem", KeyPath: "/etc/cockpit/certs/home.example.com.key.pem"},
+	)
 	idPath := "/api/acme/certs/" + strconv.Itoa(int(cert.ID)) + "/deploy"
 
 	// 未绑定 → 400
@@ -620,14 +637,14 @@ func TestAcmeDeployAPI(t *testing.T) {
 		t.Fatalf("no target: code = %d body = %s", rec.Code, rec.Body.String())
 	}
 
-	// agent 离线 → 503
+	// 全部目标 agent 离线 → 503
 	rec = httptest.NewRecorder()
 	s.handleACME(rec, httptest.NewRequest(http.MethodPost, idPath, nil))
 	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("agent offline: code = %d body = %s", rec.Code, rec.Body.String())
+		t.Fatalf("agents offline: code = %d body = %s", rec.Code, rec.Body.String())
 	}
 
-	// 成功：两次 file.write 往返，参数逐项断言
+	// 成功：a2 离线不挡 a1（部分成功 200）；a1 两次 file.write 参数逐项断言
 	agent := NewAgent("a1", nil)
 	if err := s.registry.Register(agent); err != nil {
 		t.Fatalf("register agent: %v", err)
@@ -638,8 +655,8 @@ func TestAcmeDeployAPI(t *testing.T) {
 			mode float64
 			data string
 		}{
-			{cert.DeployCertPath, 0o644, "CERT-PEM"},
-			{cert.DeployKeyPath, 0o600, "KEY-PEM"},
+			{"/etc/cockpit/certs/home.example.com.crt.pem", 0o644, "CERT-PEM"},
+			{"/etc/cockpit/certs/home.example.com.key.pem", 0o600, "KEY-PEM"},
 		}
 		for i, w := range want {
 			reqMsg := <-agent.Send
@@ -669,19 +686,27 @@ func TestAcmeDeployAPI(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("deploy: code = %d body = %s", rec.Code, rec.Body.String())
 	}
-	got, _ := s.db.GetAcmeCert(cert.ID)
-	if got.LastDeployAt == 0 || got.LastDeployError != "" {
-		t.Fatalf("after deploy = lastDeployAt %d err %q", got.LastDeployAt, got.LastDeployError)
+	targets, _ := s.db.ListAcmeDeployTargets(cert.ID)
+	byAgent := map[string]storage.AcmeDeployTarget{}
+	for _, tg := range targets {
+		byAgent[tg.AgentID] = tg
+	}
+	if tg := byAgent["a1"]; tg.LastDeployAt == 0 || tg.LastDeployError != "" {
+		t.Fatalf("a1 after deploy = lastDeployAt %d err %q", tg.LastDeployAt, tg.LastDeployError)
+	}
+	if tg := byAgent["a2"]; tg.LastDeployAt == 0 || tg.LastDeployError == "" {
+		t.Fatalf("a2 offline target must record error, got at=%d err=%q", tg.LastDeployAt, tg.LastDeployError)
 	}
 	// 响应视图无 PEM
 	if strings.Contains(rec.Body.String(), "CERT-PEM") {
 		t.Error("deploy response must not contain PEM")
 	}
-	// 审计 acme_deploy
+	// 审计 acme_deploy 含逐目标结果
 	logs, _, _ := s.db.GetAuditLogs(0, 10, nil)
 	found := false
 	for _, l := range logs {
-		if l.Action == "acme_deploy" && l.ResourceID == cert.PrimaryDomain {
+		if l.Action == "acme_deploy" && l.ResourceID == cert.PrimaryDomain &&
+			strings.Contains(fmt.Sprint(l.Details), `"a1"`) {
 			found = true
 		}
 	}
@@ -690,19 +715,18 @@ func TestAcmeDeployAPI(t *testing.T) {
 	}
 }
 
-// TestAcmeIssueAutoDeploy 签发成功后自动推送（D14）：绑定 + agent 在线
-// 时 issue 200 且部署状态回写成功；巡检续期共用 runACMEIssue 同路径
+// TestAcmeIssueAutoDeploy 签发成功后自动推送（D14）：绑定目标 + agent 在线
+// 时 issue 200 且目标部署状态回写成功；巡检续期共用 runACMEIssue 同路径
 func TestAcmeIssueAutoDeploy(t *testing.T) {
 	s, _ := newAcmeTestServer(t)
 	agent := NewAgent("a1", nil)
 	if err := s.registry.Register(agent); err != nil {
 		t.Fatalf("register agent: %v", err)
 	}
-	cert := mkAcmeCert(t, s, func(c *storage.AcmeCert) {
-		c.DeployAgentID = "a1"
-		c.DeployCertPath = "/etc/cockpit/certs/home.example.com.crt.pem"
-		c.DeployKeyPath = "/etc/cockpit/certs/home.example.com.key.pem"
-	})
+	cert := mkAcmeCert(t, s, nil)
+	bindAcmeTargets(t, s.db, cert.ID,
+		storage.AcmeDeployTarget{AgentID: "a1", CertPath: "/etc/cockpit/certs/home.example.com.crt.pem", KeyPath: "/etc/cockpit/certs/home.example.com.key.pem"},
+	)
 	go func() {
 		for i := 0; i < 2; i++ {
 			reqMsg := <-agent.Send
@@ -723,10 +747,12 @@ func TestAcmeIssueAutoDeploy(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("issue: code = %d body = %s", rec.Code, rec.Body.String())
 	}
-	got, _ := s.db.GetAcmeCert(cert.ID)
-	if got.Status != "issued" || got.LastDeployAt == 0 || got.LastDeployError != "" {
-		t.Fatalf("after issue+deploy = status %s lastDeployAt %d err %q",
-			got.Status, got.LastDeployAt, got.LastDeployError)
+	if got, _ := s.db.GetAcmeCert(cert.ID); got.Status != "issued" {
+		t.Fatalf("after issue+deploy = status %s", got.Status)
+	}
+	targets, _ := s.db.ListAcmeDeployTargets(cert.ID)
+	if len(targets) != 1 || targets[0].LastDeployAt == 0 || targets[0].LastDeployError != "" {
+		t.Fatalf("after issue+deploy targets = %+v", targets)
 	}
 }
 

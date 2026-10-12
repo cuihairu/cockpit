@@ -1373,14 +1373,20 @@ export interface AcmeCertView {
   lastStatus: 'never' | 'ok' | 'failed'
   lastError: string
   checkedAt: number
-  // 部署目标与状态（D14）
-  deployAgentId: string
-  deployCertPath: string
-  deployKeyPath: string
-  lastDeployAt: number
-  lastDeployError: string
+  // 部署目标与状态（D14 多目标，D-2026-10-12-3）
+  deployTargets: AcmeDeployTargetView[]
   createdAt: string
   updatedAt: string
+}
+
+export interface AcmeDeployTargetView {
+  id: number
+  certId: number
+  agentId: string
+  certPath: string
+  keyPath: string
+  lastDeployAt: number
+  lastDeployError: string
 }
 
 // 签发配置创建/更新入参
@@ -1389,9 +1395,7 @@ export interface AcmeCertInput {
   caDirectory: 'staging' | 'production'
   autoRenew: boolean
   renewBeforeDays: number
-  deployAgentId?: string
-  deployCertPath?: string
-  deployKeyPath?: string
+  deployTargets?: { agentId: string; certPath: string; keyPath: string }[]
 }
 
 // ACME 账户信息

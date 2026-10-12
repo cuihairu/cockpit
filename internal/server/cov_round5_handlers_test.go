@@ -177,31 +177,43 @@ func TestCovAcmeDispatchMisc(t *testing.T) {
 	}
 }
 
-// TestCovAcmeAutoDeploy 签发后自动部署：无目标直返 / 目标离线失败只记日志 /
-// 在线 file-manager agent 两次 file.write 成功后清 LastDeployError
+// TestCovAcmeAutoDeploy 签发后自动部署（D-2026-10-12-3）：无目标直返 /
+// 目标离线失败只记日志（目标行回写错误）/ 在线 file-manager agent 两次
+// file.write 成功后目标行状态清错误
 func TestCovAcmeAutoDeploy(t *testing.T) {
 	s := covNewServer(t)
 	covFakeAgent(t, s, "dep-a", []string{"file-manager"}, func(string, map[string]interface{}) map[string]interface{} {
 		return map[string]interface{}{"status": "success", "data": map[string]interface{}{}}
 	})
 	mk := func(id uint, agent string) *storage.AcmeCert {
-		return &storage.AcmeCert{
+		c := &storage.AcmeCert{
 			ID: id, Domains: []string{"d.test"}, PrimaryDomain: "d.test", CADirectory: "staging",
 			Status: "issued", CertificatePEM: "CERT", PrivateKeyPEM: "KEY",
-			DeployAgentID: agent, DeployCertPath: "/etc/d/cert.pem", DeployKeyPath: "/etc/d/key.pem",
 		}
+		if err := s.db.CreateAcmeCert(c); err != nil {
+			t.Fatalf("create cert: %v", err)
+		}
+		bindAcmeTargets(t, s.db, c.ID, storage.AcmeDeployTarget{AgentID: agent, CertPath: "/etc/d/cert.pem", KeyPath: "/etc/d/key.pem"})
+		return c
 	}
-	// 离线目标：deployAcmeCert 失败 → maybeDeploy 只记日志（LastDeployError 回写）
+	targetErr := func(id uint) string {
+		targets, _ := s.db.ListAcmeDeployTargets(id)
+		if len(targets) != 1 {
+			return "<missing>"
+		}
+		return targets[0].LastDeployError
+	}
+	// 离线目标：deployAcmeCert 失败 → maybeDeploy 只记日志（目标行回写错误）
 	ghost := mk(11, "ghost-dep")
 	s.maybeDeployAcmeCert(ghost)
-	if ghost.LastDeployError == "" {
-		t.Fatal("ghost deploy should record LastDeployError")
+	if targetErr(11) == "" {
+		t.Fatal("ghost deploy should record target error")
 	}
 	// 在线目标：两次 write 成功
 	okCert := mk(12, "dep-a")
 	s.maybeDeployAcmeCert(okCert)
-	if okCert.LastDeployError != "" {
-		t.Fatalf("deploy should succeed: %q", okCert.LastDeployError)
+	if err := targetErr(12); err != "" {
+		t.Fatalf("deploy should succeed: %q", err)
 	}
 }
 
