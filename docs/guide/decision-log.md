@@ -262,3 +262,40 @@ go-git 对 sparse/worktree/凭据助手支持不全；④`.gitignore` 过滤 `.c
 
 **重开条件**：出现多仓库真实需求（如多团队分区）再议 per-stack 仓库或多 remote；
 P2 ② webhook 自动 pull 落地时需补 drift 保护策略评审（自动 stash？拒绝？）。
+
+## D-2026-10-12-6 Stack webhook 触发部署 + 任务日志流式推送（P2 ②）口径
+
+**定了什么**：新增 `POST /api/stacks/webhook`（forge 回调，token 即凭据：
+头 `X-Cockpit-Token` 常量时间比对配置 `stacks.webhook_token`，令牌空 =
+端点 404 关闭，默认关）。语义只做「拉取已接入 origin + 部署改动 stack」，
+请求里的 `remote` 参数一律剥离（webhook 不能重定向部署源）。body 可选
+`{agentId, branch}`，缺省扇出全部心跳在线 agent；响应 `{triggered:[...]}`
+即返回、部署异步跑，成功落审计（username=webhook）+ 部署历史（映射 up），
+RPC 失败只落 server 日志。agent 侧 `stack.git.deploy` 部署范围：接入前无
+HEAD → 全部 stack；HEAD 前移 → diff 顶层目录；未动 → 不动；目标 stack
+任务执行中记 skipped 不阻塞。drift 保护沿用 git 自身拒绝（`--ff-only`
+失败即整体报错，不 stash 不代提交）——回应 D-2026-10-12-5 重开条件。
+任务日志流式推送完全复用 logs-design.md F4 架构：agent `stack.task.follow`
+经 proxy_data（`stacktask:` 前缀）回推增量 + proxy_close 回传终态；server
+NDJSON 流配额全局 8 / 单 agent 4、帧缓冲 256 满则丢帧、断开补发 follow.stop；
+web StackDetail 运行期 follow 替代轮询，打不开自动回退轮询。
+
+**为什么**：①token 空即关——webhook 是无认证面的新增入口，默认开等于给
+公网扫描器送「触发任意部署」按钮，同 notification 红线口径；②拒收 remote——
+部署源必须以 agent 侧 `.git/config` 为准，接受请求里的 remote 等于让任何
+拿到 token 的人把部署源重定向到任意仓库；③异步扇出——多 agent 串行拉取
+会把 forge 回调拖到超时，回调方只关心「受理了没有」；④drift 不 stash——
+自动 stash 会把用户未提交的改动藏起来再部署旧内容，爆炸半径不可见，
+git 拒绝 + 报错原文落日志是唯一诚实的语义；⑤日志流复用 F4——follow 会话/
+配额/背压/断开清理全套已在 logs 路径验证过，第二实现只会引入第二套 bug。
+
+**备选**：①webhook 带 secret 签名（HMAC payload）——否决：个人场景 forge
+多在局域网，token 头已够，HMAC 需要每个 forge 单独配 secret 文档成本高；
+等真实需求出现再升级；②同步等部署完成再响应——否决：部署是分钟级任务，
+回调方（forge）超时通常 10s 内；③UI 侧 SSE 替代 NDJSON fetch 流——否决：
+EventSource 不能带 Authorization 头，与 followLogs 同款 fetch 流保持一致；
+④部署范围按 changed files 精确到文件级重启——否决：compose 栈的部署单位
+就是 stack 目录，文件级无意义。
+
+**重开条件**：出现多 forge / 多 secret 需求（升级 HMAC 签名）；大仓库 fetch
+常态化超时（考虑 agent 侧后台 fetch 队列替代同步 RPC）。

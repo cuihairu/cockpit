@@ -18,7 +18,23 @@ const apiMock = vi.hoisted(() => ({
   stackAction: vi.fn(),
   saveStackCompose: vi.fn(),
   deleteStack: vi.fn(),
+  followStackTask: vi.fn(),
 }))
+
+// follow 流响应（ReadableStream 按 NDJSON 帧推送，同 LogsPanel 测试）
+const ndjson = (frames: object[]) => {
+  const enc = new TextEncoder()
+  const chunks = frames.map((f) => enc.encode(JSON.stringify(f) + '\n'))
+  let i = 0
+  return new ReadableStream({
+    pull(controller) {
+      if (i < chunks.length) controller.enqueue(chunks[i++])
+      else controller.close()
+    },
+  })
+}
+const followResp = (frames: object[]) =>
+  ({ ok: true, status: 200, body: ndjson(frames) }) as unknown as Response
 vi.mock('@/services/api', () => ({ api: apiMock }))
 vi.mock('@/hooks/usePerm', () => ({ usePerm: () => true }))
 
@@ -70,6 +86,8 @@ describe('StackDetail', () => {
     })
     apiMock.getStackLogs.mockResolvedValue({ logs: '' })
     apiMock.getStackHistory.mockResolvedValue({ deployments: [] })
+    // follow 默认打不开：既有任务用例走轮询回退（catch 分支）
+    apiMock.followStackTask.mockRejectedValue(new Error('HTTP 502'))
   })
 
   it('离线 Stack：离线 Tag 且不拉取详情', async () => {
@@ -396,6 +414,125 @@ describe('StackDetail', () => {
     const before = apiMock.getStackDetail.mock.calls.length
     fireEvent.click(within(drawer()).getByRole('button', { name: /刷新$/ }))
     await waitFor(() => expect(apiMock.getStackDetail.mock.calls.length).toBeGreaterThan(before))
+  })
+
+  it('任务运行期实时日志：follow 增量追加，eof 后拉终态收尾', async () => {
+    apiMock.stackAction.mockResolvedValue({ taskId: 't-1' })
+    let resolveTask: (v: unknown) => void = () => {}
+    apiMock.getStackTask.mockImplementation(() => new Promise((r) => { resolveTask = r }))
+    // 先只推数据帧，eof 由测试手动触发（eof 即清空实时块，不能同批送达）
+    let sendEof: () => void = () => {}
+    apiMock.followStackTask.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: new ReadableStream({
+        start(controller) {
+          const enc = new TextEncoder()
+          controller.enqueue(enc.encode(JSON.stringify({ data: 'compose up line-1\n' }) + '\n'))
+          // 空行帧（split 残留）→ continue 跳过；无数据无 eof 的空对象帧 → 不动实时区
+          controller.enqueue(enc.encode('\n{}\n'))
+          // 混入坏帧（非 JSON）：解析失败静默跳过，不影响后续帧
+          controller.enqueue(enc.encode('not-json\n'))
+          sendEof = () => {
+            controller.enqueue(enc.encode(JSON.stringify({ eof: true, reason: 'success' }) + '\n'))
+            controller.close()
+          }
+        },
+      }),
+    } as unknown as Response)
+    renderDetail()
+    await openDetail()
+    fireEvent.click(screen.getByRole('button', { name: /启动$/ }))
+    await waitFor(() =>
+      expect(apiMock.followStackTask).toHaveBeenCalledWith('ag-1', 't-1', expect.anything()))
+    expect(await screen.findByText('部署日志（实时）')).toBeInTheDocument()
+    await waitFor(() => expect(drawer().textContent).toContain('line-1'))
+    // eof：拉一次终态 → 既有 effect 出成功提示；实时块随任务结束消失
+    sendEof()
+    resolveTask({ id: 't-1', status: 'success', log: '' })
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('启动任务执行成功'))
+    await waitFor(() => expect(screen.queryByText('部署日志（实时）')).not.toBeInTheDocument())
+  })
+
+  it('follow 打不开：退回轮询并在实时块展示轮询快照', async () => {
+    apiMock.stackAction.mockResolvedValue({ taskId: 't-1' })
+    let n = 0
+    apiMock.getStackTask.mockImplementation(() => {
+      n += 1
+      if (n === 1) return Promise.resolve({ id: 't-1', status: 'running', log: 'poll-snapshot' })
+      return new Promise(() => {}) // 保持 running，测试期内不终态
+    })
+    renderDetail()
+    await openDetail()
+    fireEvent.click(screen.getByRole('button', { name: /启动$/ }))
+    await waitFor(() => expect(apiMock.followStackTask).toHaveBeenCalled())
+    // follow 失败 → 轮询快照展示在实时块 + 「轮询中」标记
+    await waitFor(() => expect(drawer().textContent).toContain('poll-snapshot'))
+    expect(screen.getByText('轮询中')).toBeInTheDocument()
+  })
+
+  it('follow 响应非 ok（老 agent 404）：走 catch 回退轮询', async () => {
+    apiMock.stackAction.mockResolvedValue({ taskId: 't-1' })
+    apiMock.getStackTask.mockResolvedValue({ id: 't-1', status: 'running', log: '' })
+    apiMock.followStackTask.mockResolvedValue({ ok: false, status: 404 } as unknown as Response)
+    renderDetail()
+    await openDetail()
+    fireEvent.click(screen.getByRole('button', { name: /启动$/ }))
+    await waitFor(() => expect(screen.getByText('轮询中')).toBeInTheDocument())
+  })
+
+  it('follow 响应无 body（浏览器不支持流式）：回退轮询', async () => {
+    apiMock.stackAction.mockResolvedValue({ taskId: 't-1' })
+    apiMock.getStackTask.mockResolvedValue({ id: 't-1', status: 'running', log: '' })
+    apiMock.followStackTask.mockResolvedValue({ ok: true, status: 200, body: null } as unknown as Response)
+    renderDetail()
+    await openDetail()
+    fireEvent.click(screen.getByRole('button', { name: /启动$/ }))
+    await waitFor(() => expect(screen.getByText('轮询中')).toBeInTheDocument())
+  })
+
+  it('follow 中断为主动 abort：静默返回不回退', async () => {
+    apiMock.stackAction.mockResolvedValue({ taskId: 't-1' })
+    apiMock.getStackTask.mockResolvedValue({ id: 't-1', status: 'running', log: '' })
+    apiMock.followStackTask.mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+    renderDetail()
+    await openDetail()
+    fireEvent.click(screen.getByRole('button', { name: /启动$/ }))
+    await waitFor(() => expect(apiMock.followStackTask).toHaveBeenCalled())
+    // AbortError 主动断开不算失败：不置 followFailed、无「轮询中」标记
+    await new Promise((r) => setTimeout(r, 80))
+    expect(screen.queryByText('轮询中')).not.toBeInTheDocument()
+  })
+
+  it('follow 流异常断开（无 eof 帧）：拉一次终态收尾', async () => {
+    apiMock.stackAction.mockResolvedValue({ taskId: 't-1' })
+    let resolveTask: (v: unknown) => void = () => {}
+    let n = 0
+    apiMock.getStackTask.mockImplementation(() => {
+      n += 1
+      if (n === 1) return Promise.resolve({ id: 't-1', status: 'running', log: '' })
+      return new Promise((r) => { resolveTask = r })
+    })
+    // 流直接 close（服务端异常断开，无 eof 帧）
+    apiMock.followStackTask.mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: new ReadableStream({
+        start(controller) {
+          const enc = new TextEncoder()
+          controller.enqueue(enc.encode(JSON.stringify({ data: 'tail-chunk\n' }) + '\n'))
+          controller.close()
+        },
+      }),
+    } as unknown as Response)
+    renderDetail()
+    await openDetail()
+    fireEvent.click(screen.getByRole('button', { name: /启动$/ }))
+    // 数据帧与流关闭同批送达，实时块转瞬即清——只断言收尾语义
+    await waitFor(() => expect(n).toBeGreaterThanOrEqual(2)) // refetchTask 已拉终态
+    resolveTask({ id: 't-1', status: 'success', log: 'final-log' })
+    await waitFor(() => expect(msgSuccess).toHaveBeenCalledWith('启动任务执行成功'))
+    await waitFor(() => expect(screen.queryByText('部署日志（实时）')).not.toBeInTheDocument())
   })
 
   it('底部「关闭」按钮触发 onClose', async () => {

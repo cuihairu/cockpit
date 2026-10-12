@@ -111,6 +111,11 @@ const StackDetail = ({
   const handledTaskRef = useRef('')
   // 任务失败日志弹窗是否已被用户手动关闭
   const [failLogDismissed, setFailLogDismissed] = useState(false)
+  // 部署日志实时流（P2 ②）：任务运行期打开 follow 替代 2s 轮询；
+  // follow 打不开（老 agent / 限流）时退回轮询
+  const [liveLog, setLiveLog] = useState('')
+  const [followFailed, setFollowFailed] = useState(false)
+  const followAbortRef = useRef<AbortController | null>(null)
   // 通用深色终端弹窗内容（YAML 校验错误输出等，仅在事件回调中设置）
   const [terminal, setTerminal] = useState<{ title: string; content: string } | null>(null)
 
@@ -125,6 +130,15 @@ const StackDetail = ({
 
   const agentId = stack?.agentId ?? ''
   const stackName = stack?.name ?? ''
+
+  // 换任务（新 taskId）时重置实时流状态：清空日志、重新尝试 follow
+  // （渲染期派生重置，官方模式；避免 set-state-in-effect）
+  const [prevTaskId, setPrevTaskId] = useState('')
+  if ((taskMeta?.taskId ?? '') !== prevTaskId) {
+    setPrevTaskId(taskMeta?.taskId ?? '')
+    setLiveLog('')
+    setFollowFailed(false)
+  }
 
   // 服务列表（详情接口）
   const {
@@ -146,14 +160,71 @@ const StackDetail = ({
       if (query.state.error) return false
       const t = query.state.data
       if (t && t.status !== 'running') return false
-      return 2000
+      // 运行期日志走 follow 流（P2 ②）；follow 打不开才退回 2s 轮询
+      return followFailed ? 2000 : false
     },
   })
   const taskData = taskQuery.data
+  const refetchTask = taskQuery.refetch
 
   // 任务是否仍在执行（由查询数据派生，错误时视为结束）
   const taskPending =
     !!taskMeta && !taskQuery.isError && (!taskData || taskData.status === 'running')
+
+  // 任务运行期打开日志 follow 流：增量帧追加到 liveLog；eof（任务终态）后
+  // 拉一次终态（完整日志供失败弹窗，完成提示沿用既有 effect）。
+  // follow 请求失败（老 agent 不认识新 RPC / 限流）退回轮询
+  useEffect(() => {
+    if (!open || !agentId || !taskMeta || !taskPending || followFailed) return
+    const abort = new AbortController()
+    followAbortRef.current = abort
+    ;(async () => {
+      try {
+        const resp = await api.followStackTask(agentId, taskMeta.taskId, abort.signal)
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+        const reader = resp.body?.getReader()
+        if (!reader) throw new Error('当前浏览器不支持流式响应')
+        const decoder = new TextDecoder()
+        let buf = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const frames = buf.split('\n')
+          buf = frames.pop() ?? ''
+          for (const f of frames) {
+            if (!f.trim()) continue
+            let frame: { data?: string; eof?: boolean; reason?: string }
+            try {
+              frame = JSON.parse(f) as { data?: string; eof?: boolean; reason?: string }
+            } catch {
+              continue
+            }
+            if (frame.eof) {
+              // 任务终态：拉一次完整任务（最终状态 + 全量日志），提示走既有 effect
+              setLiveLog('')
+              void refetchTask()
+              followAbortRef.current = null
+              return
+            }
+            if (frame.data != null) setLiveLog((prev) => prev + frame.data)
+          }
+        }
+        // 流结束未见 eof 帧（异常断开）：拉一次终态
+        setLiveLog('')
+        void refetchTask()
+        followAbortRef.current = null
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return // 主动断开不算失败
+        setFollowFailed(true)
+        followAbortRef.current = null
+      }
+    })()
+    return () => {
+      abort.abort()
+      followAbortRef.current = null
+    }
+  }, [open, agentId, taskMeta, taskPending, followFailed, refetchTask])
 
   // compose.yml / .env 内容（进入 Tab 时加载）
   const { data: composeData, isFetching: composeLoading } = useQuery({
@@ -563,6 +634,33 @@ const StackDetail = ({
         </div>
       }
     >
+      {/* 任务运行中：实时部署日志（follow 流；follow 失败时展示轮询快照） */}
+      {taskPending && (
+        <Collapse
+          size="small"
+          style={{ marginBottom: 12 }}
+          defaultActiveKey={['livelog']}
+          items={[
+            {
+              key: 'livelog',
+              label: (
+                <Space size={8}>
+                  <span>部署日志（实时）</span>
+                  {followFailed && <Tag>轮询中</Tag>}
+                </Space>
+              ),
+              children: (
+                <TerminalBlock
+                  content={liveLog || taskData?.log || ''}
+                  loading={!followFailed && !liveLog && !taskData?.log}
+                  maxHeight={260}
+                />
+              ),
+            },
+          ]}
+        />
+      )}
+
       <Tabs activeKey={activeKey} onChange={setActiveKey} items={tabItems} />
 
       {/* 任务失败日志弹窗（深色终端风格） */}

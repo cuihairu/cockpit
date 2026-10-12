@@ -78,7 +78,12 @@ type StackProvider struct {
 	mu         sync.Mutex
 	tasks      map[string]*stackTask
 	stackLocks map[string]*sync.Mutex
-	sem        chan struct{}
+	// 任务日志 follow（P2 ②，见 stack_task_follow.go）：sender/closer 由
+	// providers.go 注入（proxy_data 通道），taskFollows 是进行中的会话表
+	taskSender  func(proxyID string, data []byte)
+	taskCloser  func(proxyID, reason string)
+	taskFollows map[string]*taskFollowSession
+	sem         chan struct{}
 }
 
 // SetBaseline 注入漂移基线挂钩（providers.go 接线用）
@@ -108,15 +113,16 @@ func NewStackProvider(cfg StackConfig) *StackProvider {
 		}
 	}
 	return &StackProvider{
-		dir:        dir,
-		docker:     cfg.Docker,
-		composeBin: composeBin,
-		gitCmd:     cfg.GitBin,
-		now:        now,
-		newID:      newID,
-		tasks:      make(map[string]*stackTask),
-		stackLocks: make(map[string]*sync.Mutex),
-		sem:        make(chan struct{}, stackMaxTasks),
+		dir:         dir,
+		docker:      cfg.Docker,
+		composeBin:  composeBin,
+		gitCmd:      cfg.GitBin,
+		now:         now,
+		newID:       newID,
+		tasks:       make(map[string]*stackTask),
+		stackLocks:  make(map[string]*sync.Mutex),
+		taskFollows: make(map[string]*taskFollowSession),
+		sem:         make(chan struct{}, stackMaxTasks),
 	}
 }
 
@@ -146,10 +152,16 @@ func (p *StackProvider) Call(action string, params map[string]interface{}) (inte
 		return p.GitStatus(), nil
 	case "git.pull":
 		return p.GitPull(params)
+	case "git.deploy":
+		return p.GitDeploy(params)
 	case "logs":
 		return p.StackLogs(params)
 	case "task.get":
 		return p.GetTask(paramString(params, "taskId"))
+	case "task.follow":
+		return p.FollowTask(params)
+	case "task.follow.stop":
+		return p.StopTaskFollow(params)
 	case "remove":
 		return p.RemoveStack(stackParam(params))
 	default:

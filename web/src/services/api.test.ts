@@ -117,6 +117,7 @@ describe('ApiService 全方法驱动（URL/method/参数序列化不抛错）', 
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).queryLogs('x', {})
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).searchLogs('x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).followLogs('x', {}, ctrl.signal)
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).followStackTask('x', 't1', ctrl.signal)
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).checkDrift('x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).driftDiff('x', 'x', 'x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).driftRecord('x', 'x', 'x')
@@ -310,6 +311,30 @@ describe('ApiService 关键路径断言', () => {
     )
     const headers = (fetchMock.mock.calls[0][1] as { headers: Record<string, string> }).headers
     expect(headers.Authorization).toBe('Bearer tk')
+  })
+
+  it('followStackTask 直连 fetch 带 Bearer 与 abort signal', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('ok'))
+    vi.stubGlobal('fetch', fetchMock)
+    localStorage.setItem('token', 'tk')
+    const ctrl = new AbortController()
+    await api.followStackTask('ag', 't-9', ctrl.signal)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/stacks/agents/ag/tasks/t-9/follow',
+      expect.objectContaining({ method: 'POST', signal: ctrl.signal }),
+    )
+    const headers = (fetchMock.mock.calls[0][1] as { headers: Record<string, string> }).headers
+    expect(headers.Authorization).toBe('Bearer tk')
+  })
+
+  it('followStackTask 无 token 时不带 Authorization 头', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    localStorage.removeItem('token')
+    await api.followStackTask('ag', 't-1', new AbortController().signal)
+    const headers = (fetchMock.mock.calls[0][1] as { headers: Record<string, string> }).headers
+    expect(headers.Authorization).toBeUndefined()
+    expect(headers['Content-Type']).toBe('application/json')
   })
 })
 

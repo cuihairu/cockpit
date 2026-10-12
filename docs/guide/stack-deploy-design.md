@@ -86,6 +86,9 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 | `stack.info` | — | `{dir, dirWritable, dirError?, composeVersion?}`，目录可写性探针 + compose 版本（M1.5） | 同步 |
 | `stack.git.status` | — | `{enabled, reason?, remote?, branch?, head?, remoteHead?, ahead, behind, changes?: [{code, path}]}`，stacks 仓库接入状态 + drift（P2 ①） | 同步 |
 | `stack.git.pull` | `remote?, branch?` | 同 `git.status` 的接入后快照；首次调用即接入（P2 ①） | 同步 |
+| `stack.git.deploy` | `branch?` | `{head, deployed: [{stack, taskId}], skipped: [{stack, reason}]}`：拉取 + 部署改动 stack（P2 ②，webhook 专用；语义见[P2 ② 设计](#p2--设计2026-10-12)） | 同步（含 fetch，慢仓库受 CallAgent 30s 上限约束） |
+| `stack.task.follow` | `taskId, followId` | `{followId}`：订阅任务日志增量，经 proxy_data（`proxyId="stacktask:<followId>"`）回推，终态经 proxy_close（P2 ②） | 异步会话 |
+| `stack.task.follow.stop` | `followId` | 停止一个 follow 会话（P2 ②） | 同步 |
 
 实现要点：
 
@@ -110,6 +113,8 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 | `GET /api/stacks/agents/{agentId}/{name}/history` | — | 部署历史（server 侧 `stack_deployments` 表），`?limit=`（默认 50，上限 200）（M1.5） |
 | `GET /api/stacks/agents/{agentId}/{name}/logs` | `stack.logs` | `?service=&tail=` |
 | `GET /api/stacks/agents/{agentId}/tasks/{taskId}` | `stack.task.get` | 任务轮询 |
+| `POST /api/stacks/agents/{agentId}/tasks/{taskId}/follow` | `stack.task.follow` | 任务日志 NDJSON 流（`{"data":...}` 增量 / `{"eof":true,"reason":终态}`）；上限全局 8 / 单 agent 4（P2 ②；浏览类不记审计，同日志尾随纪律） |
+| `POST /api/stacks/webhook` | `stack.git.deploy` | forge 回调入口：头 `X-Cockpit-Token` 常量时间比对配置 `stacks.webhook_token`；body 可选 `{agentId, branch}`，缺省扇出全部在线 agent；响应 `{triggered:[...]}` 即返回、部署异步（审计 username=webhook）（P2 ②；不走认证中间件，令牌空 = 端点 404 关闭） |
 | `GET /api/stacks/agents/{agentId}/git` | `stack.git.status` | stacks 仓库接入状态 + drift（P2 ①；不记审计） |
 | `POST /api/stacks/agents/{agentId}/git/pull` | `stack.git.pull` | 拉取远端（首次即接入；body 可选 `{remote, branch}`；审计 stack_git_pull）（P2 ①） |
 | `DELETE /api/stacks/agents/{agentId}/{name}` | `stack.remove` | 删 stack（body 可选 `{force}`） |
@@ -171,7 +176,7 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 ### P2 —— Git-to-deploy（Komodo 式升级）
 
 - [x] stacks 目录升级为 Git worktree：远端仓库拉取 → drift 提示（本地改动 vs 仓库）（2026-10-12，见下文[Git-to-deploy ① 设计](#p2--git-to-deploy-设计)）
-- [ ] webhook 触发部署；部署日志流式推送（复用 proxy data 通道，替代轮询）
+- [x] webhook 触发部署；部署日志流式推送（复用 proxy data 通道，替代轮询）（2026-10-12，见下文[P2 ② 设计](#p2--设计2026-10-12)）
 - [ ] inventory 联动：stack 与 CMDB 服务条目关联，probe 直接探测 stack 暴露的端口
 
 #### P2 ① Git-to-deploy 设计（2026-10-12）
@@ -192,6 +197,23 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 - 远端 URL 持久在 agent 侧 `.git/config`（server 不建表）；写操作（pull）记审计 `stack_git_pull`，状态查询不记
 
 **UI（Stacks 页 GitBar）**：按 agent 一条告警行——未接入=低调 info +「接入」入口；无 git=warning；drift=warning 列改动文件（超出 5 条折叠）；behind>0=info +「拉取更新」。老 agent 不认识新 RPC（502）时静默跳过。
+
+#### P2 ② 设计（2026-10-12）
+
+**webhook 触发部署**（决策记录见 decision-log D-2026-10-12-6）：
+
+- **入口**：`POST /api/stacks/webhook`（精确路由，先于 `/api/stacks/` 认证前缀注册，ServeMux 最长匹配胜出）。forge 推送回调没有登录态，token 即凭据：头 `X-Cockpit-Token` 与配置 `stacks.webhook_token` 常量时间比对；**令牌空 = 端点 404 关闭（默认关，显式配置开启，同 notification 红线口径）**
+- **语义**：只触发「拉取已接入 origin + 部署改动 stack」，**不接受 `remote` 参数**（请求里的 remote 一律剥离——webhook 不能重定向部署源）；body 可选 `{agentId, branch}`：指定单 agent，缺省扇出全部心跳在线 agent（未接入仓库的 agent RPC 报错，仅落日志）
+- **执行**：异步——响应即返回 `{triggered:[...]}`，每 agent 一个 goroutine 跑 `stack.git.deploy`；成功落审计（`username=webhook`，action `stack_webhook_deploy`）+ 逐 stack 写部署历史（映射为 up 跟踪终态）；RPC 失败只落 server 日志
+- **部署范围**（`stack.git.deploy`）：接入前无 HEAD → 部署仓库全部 stack；HEAD 前移 → `git diff --name-only old new` 的顶层目录；HEAD 未动 → 不部署。目标 stack 任务执行中（锁占用）记 `skipped`（原因经凭据抹除），不阻塞其余 stack
+- **drift 保护**：沿用 git 自身拒绝——本地改动/分叉使 `merge --ff-only` 失败时整个 deploy 报错（不自动 stash、不代提交，同 D-2026-10-12-5 重开条件的评审结论）
+
+**部署日志流式推送**（架构同 logs-design.md F4 尾随）：
+
+- agent 侧 `stack.task.follow`：复用日志尾随同款 proxy_data 通道，`proxyId="stacktask:<followId>"`；pump 每 300ms 取任务日志增量推送，任务到终态经 proxy_close 回传 reason；agent 侧活跃 follow 上限 8
+- server 侧 `POST /api/stacks/agents/{agentId}/tasks/{taskId}/follow`：NDJSON 流（`{"data":...}` 增量 / `{"eof":true,"reason":终态}`），注册表配额全局 8 / 单 agent 4，帧缓冲 256 满则丢帧（不堵 agent WS 读循环）；客户端断开由 `r.Context().Done()` 感知并补发 `stack.task.follow.stop`；浏览类不记审计
+- web 侧 StackDetail：任务运行期打开 follow 替代 2s 轮询，`eof` 后清实时区 + 拉一次终态；follow 打不开（老 agent 502 等）自动回退轮询并提示「轮询中」
+- 已知限制：CallAgent 30s 超时约束 `stack.git.deploy` 的 fetch 时长（大仓库慢网络下 webhook 部署可能超时失败，重试即可）
 
 ## 风险与权衡
 
@@ -270,6 +292,14 @@ compose build/pull/profiles/healthcheck 语义、`COCKPIT_STACKS_DIR` 权限实�
 **覆盖（A18.1-A18.7）**：未接入 reason=not-a-repo → attach（enabled=true、远端文件落地、head=remoteHead）→ 远端新提交二次 pull 快进（磁盘内容更新）→ 本地改 tracked 文件 + 远端同文件新提交 → pull 409 → `stack.git.status` drift 列表（attach 前已存在的 UI 建 stack 记为 untracked `??`，预期语义）→ `ext::` 传输助手远端被拒（502）→ 审计含 `stack_git_pull`。agent 单测另以真实 git 覆盖 attach/untracked 冲突不覆盖本地文件、分支切换、凭据脱敏、`gitPathSkipped` 边界。
 
 **验收中发现并修复**：agent 侧 execlog（router 单点埋点）把 `stack.file.save` 入参 `env`（.env 明文凭据负载）原样记入留痕并上行落审计表——违反「凭据不落审计」红线；此前因 execlog 30s 攒批晚于验收取审计而侥幸未暴露。修复：`core/execlog` 敏感键正则补 `env`（全仓唯一使用方即 stack.file.save），A14 回归断言转绿。
+
+### 2026-10-12 本机验收（P2 ② webhook + 日志流，A19）
+
+**方式**：`run-acceptance.sh` A19 段——同一本地 bare 远端，`stacks.webhook_token` 配置开启；链路 REST（无登录态，`X-Cockpit-Token`）→ webhook 扇出 → WebSocket RPC `stack.git.deploy` → git CLI → compose 假体 → 任务 follow NDJSON 流。62 项断言全部通过，重跑可重复。
+
+**覆盖（A19.1-A19.7）**：无 token 401（默认关）→ 带盘外 `remote` 的恶意 body 受理但参数被剥离（200 + triggered）→ 新 stack 落盘 + 已接入 stack 快进（nginx:webhook）→ 部署历史 action=up → follow 流含 `"eof":true` 帧 → follow 未知任务 404 → 审计含 `stack_webhook_deploy`（username=webhook）。A18.4-A18.7 drift 用例回归同绿。
+
+**验收中发现并修复**：① `stack_provider.go` Call 分派漏 `git.deploy` case（方法已实现但 RPC 到不了，报 unknown stack action）——单测直调方法掩盖分派缺失，补 case 并将一条用例改走 `Call` 覆盖分发行；② A19.4/A19.5 断言与异步落库竞速（webhook 受理即 200，部署历史行要等 `startStackDeployment` 写入、`trackStackTask` 轮到终态才翻转 status）——改为轮询 `action=up && status!=running` 行后再断言；③ follow 收尾的 `stop` RPC 改即发即忘（goroutine）——同步等应答在 agent 无应答时被 CallAgent 30s 超时拖住 handler 返回（no-flusher 500 路径 race 步实测 30s）。race 步顺带实锤一个**存量**竞态：`RemoteSessionManager.Get/List` 直透存储指针，WS 数据面 goroutine 并发 `UpdateStatus` 写同一会话字段——读侧改锁内浅拷贝快照（独立 fix commit）；server 包 race 插桩本地实测 1004s，CI race 步 timeout 900s→1500s。
 
 ## 参考
 

@@ -461,6 +461,26 @@ class ApiService {
     return this.client.get<unknown, StackTask>(`/stacks/agents/${agentId}/tasks/${taskId}`)
   }
 
+  // 部署任务日志实时尾随（P2 ②）：NDJSON 流式响应（{"data":...} 增量 /
+  // {"eof":true,"reason":终态}）。任务运行期打开替代 2s 轮询；EventSource
+  // 不能带 Authorization 头，用 fetch streaming（signal 供 abort 断流，
+  // 断开后 server 补发 follow.stop）。架构同 followLogs
+  async followStackTask(agentId: string, taskId: string, signal: AbortSignal): Promise<Response> {
+    const token = localStorage.getItem('token')
+    return fetch(
+      `/api/stacks/agents/${encodeURIComponent(agentId)}/tasks/${encodeURIComponent(taskId)}/follow`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({}),
+        signal,
+      },
+    )
+  }
+
   // Stack 部署日志（可按服务过滤）
   async getStackLogs(
     agentId: string,

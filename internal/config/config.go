@@ -22,6 +22,15 @@ type Config struct {
 	Overlay       *OverlayConfig       `yaml:"overlay,omitempty"`
 	Vault         *VaultConfig         `yaml:"vault,omitempty"`
 	Probe         *ProbeConfig         `yaml:"probe,omitempty"`
+	Stacks        *StacksConfig        `yaml:"stacks,omitempty"`
+}
+
+// StacksConfig stacks 部署相关配置（stack-deploy-design.md P2 ②）。
+type StacksConfig struct {
+	// WebhookToken git 仓库 webhook 触发部署的令牌（X-Cockpit-Token 头）。
+	// 空 = webhook 端点关闭（默认关，显式配置开启——数据外发/外部触达
+	// 默认不接入的口径同 notification.enabled）。常量时间比对。
+	WebhookToken string `yaml:"webhook_token,omitempty"`
 }
 
 // ProbeConfig 自动拨测配置（probe-enhance-design.md M1：间隔亦可经 UI 保存，
@@ -305,6 +314,9 @@ func applyDefaults(cfg *Config) {
 
 	if cfg.Probe == nil {
 		cfg.Probe = &ProbeConfig{}
+	}
+	if cfg.Stacks == nil {
+		cfg.Stacks = &StacksConfig{}
 	}
 	if cfg.Probe.Interval <= 0 {
 		cfg.Probe.Interval = ProbeDefaultInterval

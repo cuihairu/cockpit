@@ -148,4 +148,9 @@ internal/server/api_jobs.go:285,286	3. dispatch 前 UpdateJob 回写失败降级
 # stack git RPC 错误映射的传输层对称分支：CallAgent 传输错误仅
 # ErrAgentNotFound/send timeout/response timeout，无 conflict 语义；
 # conflict→409 仅 RPC payload 分支可达（cov_stack_git_test 已测）。
-internal/server/api_stacks.go:221,222	3. CallAgent 传输层错误含 conflict→409（防御性对称映射，传输错误词表不含 conflict，无现实注入面）
+# （P2 ② 路由插入使行号 +21 漂移：2026-10-12 校准 221,222 → 242,243）
+internal/server/api_stacks.go:242,243	3. CallAgent 传输层错误含 conflict→409（防御性对称映射，传输错误词表不含 conflict，无现实注入面）
+# —— 2026-10-12 stack webhook + 任务日志流（P2 ②）补充 ——
+internal/agent/providers.go:214,219	3. registerStackProvider 的 sender 闭包体：注册体需真实 Docker daemon Ping 通过（NewClient 探活），无 daemon 环境在 connect 分支即跳过；回调语义由 StackProvider 单测 SetSender 直驱实证，同款装配由 logs provider 闭包（TestCovLogsProviderSenderCloserWired）实证
+internal/agent/providers.go:221,222	3. 同上 closer 闭包体（同款同批）
+internal/agent/rpc/stack_task_follow.go:106,107	3. pumpTaskLog 快照短于 offset 的重置防御：cappedBuffer 200KB 尾部淘汰与 300ms tick 相交时序无法确定性构造；防重复段死循环的兜底分支

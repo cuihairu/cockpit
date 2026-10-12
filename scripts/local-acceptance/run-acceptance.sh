@@ -26,6 +26,8 @@
 #   A17 目录自检信息（stack.info → agentInfo.dirWritable）
 #   A18 Git-to-deploy ①（P2）：bare 远端接入 → 拉取落地 → 快进 →
 #       drift 409 → drift 列表 → ext:: 拒绝 → 审计 stack_git_pull
+#   A19 Git-to-deploy ②（P2）：webhook token 鉴权 → 触发拉取+部署 →
+#       部署历史 → 任务日志 follow 流 eof → 审计 stack_webhook_deploy
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -99,6 +101,8 @@ database:
 jwt:
   secret: acceptance-test-jwt-secret-0123456789
   expiration: 1h
+stacks:
+  webhook_token: accept-stack-webhook-token
 EOF
 ADMIN_USERNAME=admin ADMIN_PASSWORD="$ADMIN_PASS" \
   "$WORK/cockpit" server -config "$WORK/config.yaml" >"$WORK/server.log" 2>&1 &
@@ -294,6 +298,54 @@ resp="$(curl -s -w '\n%{http_code}' -X POST "$API/stacks/agents/$AGENT_ID/git/pu
 code="$(echo "$resp" | tail -1)"
 check_eq "A18.3 二次 pull 200" "$code" "200"
 check_eq "A18.3 快进到新内容" "$(grep -c 'nginx:1.27' "$WORK/stacks/git-stack-demo/compose.yml" || true)" "1"
+
+step "A19. webhook 触发部署 + 任务日志流（P2 ②）"
+WH_TOKEN=accept-stack-webhook-token
+# 远端新提交：改已接入 stack + 新增一个 stack
+printf 'services:\n  web:\n    image: nginx:webhook\n' > "$SEED/git-stack-demo/compose.yml"
+mkdir -p "$SEED/webhook-stack"
+printf 'services:\n  w:\n    image: nginx:wh\n' > "$SEED/webhook-stack/compose.yml"
+seed_git add . && seed_git commit -m webhook >/dev/null 2>&1 && seed_git push origin main >/dev/null 2>&1
+
+code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/stacks/webhook" \
+  -H 'Content-Type: application/json' -d '{}')"
+check_eq "A19.1 无 token → 401" "$code" "401"
+
+resp="$(curl -s -w '\n%{http_code}' -X POST "$API/stacks/webhook" \
+  -H "X-Cockpit-Token: $WH_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"agentId":"'"$AGENT_ID"'","branch":"main","remote":"ext::sh -c touch /tmp/pwned"}')"
+code="$(echo "$resp" | tail -1)"
+body="$(echo "$resp" | head -1)"
+check_eq "A19.2 webhook 受理 200" "$code" "200"
+check_eq "A19.2 triggered 含 agent" "$(echo "$body" | jq -r '.triggered | index("'"$AGENT_ID"'") != null')" "true"
+
+# 部署异步执行：新增 stack 落盘 + 已接入 stack 快进
+retry 20 bash -c "[ -f '$WORK/stacks/webhook-stack/compose.yml' ]" || fail "webhook 部署未落地"
+check_eq "A19.3 webhook 部署新增 stack" "$(grep -c 'nginx:wh' "$WORK/stacks/webhook-stack/compose.yml" 2>/dev/null || echo 0)" "1"
+check_eq "A19.3 已接入 stack 快进" "$(grep -c 'nginx:webhook' "$WORK/stacks/git-stack-demo/compose.yml" || true)" "1"
+
+# 部署历史异步落库 + 任务终态：webhook 受理后 startStackDeployment 写 running 行、
+# trackStackTask 轮询到终态才翻转 status，因此轮询到 action=up 且 status!=running 的行
+h=""
+for _ in $(seq 1 20); do
+  h="$(curl -s "${AUTH[@]}" "$API/stacks/agents/$AGENT_ID/webhook-stack/history?limit=5")"
+  [ -n "$(echo "$h" | jq -r '.deployments[]? | select(.action=="up" and .status!="running") | .action' | head -1)" ] && break
+  sleep 1
+done
+check_eq "A19.4 部署历史 action=up" "$(echo "$h" | jq -r '.deployments[]? | select(.action=="up") | .action' | head -1)" "up"
+
+# 任务日志流：取一个已终态任务，follow 流必须有 eof 帧
+TASK="$(echo "$h" | jq -r '.deployments[]? | select(.status!="running") | .taskId // empty' | head -1)"
+eof="$(curl -s -X POST "$API/stacks/agents/$AGENT_ID/tasks/$TASK/follow" "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d '{}' | grep -o '"eof":true' | head -1)"
+check_eq "A19.5 follow 流有 eof 帧" "$([ -n "$eof" ] && echo yes || echo no)" "yes"
+
+code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/stacks/agents/$AGENT_ID/tasks/nope/follow" \
+  "${AUTH[@]}" -H 'Content-Type: application/json' -d '{}')"
+check_eq "A19.6 follow 未知任务 404" "$code" "404"
+
+audit="$(curl -s "${AUTH[@]}" "$API/admin/audit/logs?page=1&page_size=100&resource=stack")"
+check_eq "A19.7 审计含 stack_webhook_deploy" "$(echo "$audit" | grep -c 'stack_webhook_deploy' || true)" "1"
 
 # 本地改 tracked 文件 + 远端再新提交 → pull 被拒 409（drift 保护）
 printf 'services:\n  web:\n    image: nginx:local-edit\n' > "$WORK/stacks/git-stack-demo/compose.yml"

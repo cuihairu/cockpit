@@ -320,3 +320,82 @@ func (p *StackProvider) gitAttach(remote, branch string) (map[string]interface{}
 		"changes":    st.Changes,
 	}, nil
 }
+
+// GitDeploy webhook 触发部署（P2 ②）：git 拉取后按「本次拉取改动的文件」
+// 决定重新部署哪些 stack——HEAD 前移时 diff old→new 取顶层目录名（即 stack
+// 名）；首次接入（原先无 HEAD）部署仓库里的全部 stack；HEAD 未动（只有本地
+// drift 或无更新）不部署。up 是异步任务（busy 的 stack 记 skipped 不报错）。
+func (p *StackProvider) GitDeploy(params map[string]interface{}) (map[string]interface{}, error) {
+	oldHead := p.gitHeadShort()
+	pullRes, err := p.GitPull(params)
+	if err != nil {
+		return nil, err
+	}
+	newHead, _ := pullRes["head"].(string)
+
+	var names []string
+	switch {
+	case oldHead == "":
+		// 首次接入：部署仓库里现有全部 stack
+		if entries, err := os.ReadDir(p.dir); err == nil {
+			for _, e := range entries {
+				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+					names = append(names, e.Name())
+				}
+			}
+		}
+	case oldHead != "" && newHead != "" && oldHead != newHead:
+		// HEAD 前移：本次拉取改动的顶层目录（即 stack 名）
+		if out, err := p.runGit(p.dir, "diff", "--name-only", oldHead, newHead); err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				line = strings.TrimSpace(line)
+				if i := strings.Index(line, "/"); i > 0 {
+					line = line[:i]
+				}
+				if line != "" {
+					names = append(names, line)
+				}
+			}
+		}
+	}
+
+	deployed := []map[string]interface{}{}
+	skipped := []map[string]interface{}{}
+	seen := map[string]bool{}
+	for _, name := range names {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		// 非 stack 目录（无 compose 文件 / 非法名）静默跳过——仓库里可以有
+		// README、scripts 等非 stack 内容
+		if !stackNameRe.MatchString(name) {
+			continue
+		}
+		if findComposeFile(filepath.Join(p.dir, name)) == "" {
+			continue
+		}
+		res, err := p.UpStack(name)
+		if err != nil {
+			skipped = append(skipped, map[string]interface{}{"stack": name, "reason": sanitizeGitSecret(err.Error())})
+			continue
+		}
+		deployed = append(deployed, map[string]interface{}{"stack": name, "taskId": res["taskId"]})
+	}
+
+	pullRes["deployed"] = deployed
+	pullRes["skipped"] = skipped
+	return pullRes, nil
+}
+
+// gitHeadShort 当前 HEAD 短 SHA（未接入/未提交返回 ""）
+func (p *StackProvider) gitHeadShort() string {
+	if !isGitRepo(p.dir) {
+		return ""
+	}
+	out, err := p.runGit(p.dir, "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}

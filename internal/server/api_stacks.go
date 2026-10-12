@@ -28,7 +28,10 @@ import (
 const stacksAPIPrefix = "/api/stacks/"
 
 // stackTasksSegment 保留路由段：stack 名正则不匹配它，但解析时仍需先于 {name} 判断
-const stackTasksSegment = "tasks"
+const (
+	stackTasksSegment      = "tasks"
+	stackTaskFollowSegment = "follow" // POST /tasks/{taskId}/follow（P2 ② 流式日志）
+)
 
 // stackGitSegment git 保留路由段（P2 ① Git-to-deploy）："git" 本身满足
 // stack 名正则，同样必须先于 {name} 判断。
@@ -44,6 +47,9 @@ func (s *Server) registerStacksAPI(mux *http.ServeMux) {
 	mux.HandleFunc(stacksAPIPrefix, func(w http.ResponseWriter, r *http.Request) {
 		s.authService().Middleware(s.handleStacks)(w, r)
 	})
+	// webhook：forge 回调无登录态，精确路由独立注册（ServeMux 最长匹配
+	// 胜出，先于 /api/stacks/ 认证前缀），token 即凭据（P2 ②）
+	mux.HandleFunc("POST /api/stacks/webhook", s.handleStackWebhook)
 }
 
 func (s *Server) handleStacks(w http.ResponseWriter, r *http.Request) {
@@ -77,8 +83,23 @@ func (s *Server) handleStacks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// /api/stacks/agents/{agentId}/tasks/{taskId}
-	if segments[2] == stackTasksSegment && len(segments) == 4 {
+	// /api/stacks/agents/{agentId}/tasks/{taskId}[/follow]
+	if segments[2] == stackTasksSegment && (len(segments) == 4 ||
+		(len(segments) == 5 && segments[4] == stackTaskFollowSegment)) {
+		if len(segments) == 5 {
+			// 部署日志流式推送（P2 ②）：NDJSON，替代任务运行期轮询
+			if r.Method != http.MethodPost {
+				s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			taskID, err := pathSegment(segments[3])
+			if err != nil || taskID == "" {
+				s.handleError(w, r, http.StatusBadRequest, "invalid task id")
+				return
+			}
+			s.handleStackTaskFollow(w, r, agentID, taskID)
+			return
+		}
 		if r.Method != http.MethodGet {
 			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -265,6 +286,8 @@ var stackTrackingActions = map[string]string{
 	audit.ActionStackRestart: "restart",
 	audit.ActionStackPull:    "pull",
 	audit.ActionStackRemove:  "remove",
+	// webhook 触发的 up 任务（P2 ②）：历史记录 action 同 up，来源看审计
+	audit.ActionStackWebhookDeploy: "up",
 }
 
 // stackTaskTrackInterval 后台跟踪任务终态的轮询间隔；

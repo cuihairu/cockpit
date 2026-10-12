@@ -587,6 +587,12 @@ func (s *Server) handleProxyData(agent *Agent, msg *protocol.Message) {
 		return
 	}
 
+	// 部署任务日志流式推送：proxyId 以 "stacktask:" 前缀（P2 ②，api_stack_task_follow.go）
+	if hasPrefix(p.ProxyID, "stacktask:") {
+		s.HandleStackTaskFollowData(p.ProxyID, p.Data)
+		return
+	}
+
 	// Guacamole 目标转发：proxyId 以 "guac:" 前缀（不依赖 proxyMgr，见 guac_relay.go）
 	if hasPrefix(p.ProxyID, guacRelayPrefix) {
 		if err := guacRelayDeliver(p.ProxyID, p.ConnID, p.Data); err != nil {
@@ -628,6 +634,12 @@ func (s *Server) handleProxyClose(agent *Agent, msg *protocol.Message) {
 	// 日志实时尾随终止：转 eof 帧收尾（不依赖 proxyMgr）
 	if hasPrefix(p.ProxyID, "logs:") {
 		s.HandleLogsFollowClose(p.ProxyID, p.Reason)
+		return
+	}
+
+	// 部署任务日志流终止：转 eof 帧收尾（P2 ②）
+	if hasPrefix(p.ProxyID, "stacktask:") {
+		s.HandleStackTaskFollowClose(p.ProxyID, p.Reason)
 		return
 	}
 

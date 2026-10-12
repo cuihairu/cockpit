@@ -208,6 +208,18 @@ func (a *Agent) registerStackProvider(cap protocol.Capability, baseline rpc.Base
 		Docker: dockerClient,
 	})
 	sp.SetBaseline(baseline)
+	// 任务日志流式推送（P2 ②）：复用日志尾随同款 proxy_data 通道，
+	// proxyId="stacktask:<followId>"，server 按 前缀分派（follow 无对端连接）
+	sp.SetSender(func(proxyID string, data []byte) {
+		a.proxyHandler.SendMessage(protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{
+			"proxyId": proxyID,
+			"connId":  proxyID, // follow 无对端连接，server 只按 proxyId 前缀分派
+			"data":    data,
+		}))
+	})
+	sp.SetCloser(func(proxyID, reason string) {
+		a.proxyHandler.SendClose(proxyID, proxyID, reason)
+	})
 	a.rpc.RegisterProvider(sp)
 }
 
