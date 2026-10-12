@@ -84,13 +84,18 @@ func (m *RemoteSessionManager) Register(id, userID, username string, req RemoteS
 	return session
 }
 
+// List / Get 返回台账快照（浅拷贝）：WS 数据面 goroutine 会并发 UpdateStatus
+// 写同一会话字段，读侧若直透存储指针，序列化/断言读到写一半的状态（-race 实锤）。
+// ClosedAt 是指针替换非穿透写，浅拷贝即一致快照。
+
 func (m *RemoteSessionManager) List() []*RemoteSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	result := make([]*RemoteSession, 0, len(m.sessions))
 	for _, session := range m.sessions {
-		result = append(result, session)
+		cp := *session
+		result = append(result, &cp)
 	}
 	return result
 }
@@ -99,7 +104,11 @@ func (m *RemoteSessionManager) Get(id string) (*RemoteSession, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	session, ok := m.sessions[id]
-	return session, ok
+	if !ok {
+		return nil, false
+	}
+	cp := *session
+	return &cp, true
 }
 
 func (m *RemoteSessionManager) UpdateStatus(id string, status RemoteSessionStatus, errMsg string) error {
