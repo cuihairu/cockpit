@@ -227,14 +227,39 @@ func TestCovStartProbeRunner(t *testing.T) {
 	if s.probeRunner == nil {
 		t.Fatal("probeRunner not set")
 	}
+	if got := s.probeRunner.Interval(); got != probe.DefaultInterval {
+		t.Fatalf("default interval = %v, want %v", got, probe.DefaultInterval)
+	}
 	runners = append(runners, s.probeRunner)
 
-	for _, v := range []string{"abc", "99999", "10"} { // 非法/超范围/低于下限 → 默认
+	// 配置文件 probe.interval 作为基线（无 UI 保存值时生效）
+	s.cfg.Probe = &config.ProbeConfig{Interval: 45 * time.Second}
+	s.startProbeRunner()
+	runners = append(runners, s.probeRunner)
+	if got := s.probeRunner.Interval(); got != 45*time.Second {
+		t.Fatalf("yaml interval = %v, want 45s", got)
+	}
+
+	// UI 保存值（DB）优先于配置文件
+	if err := s.db.SetSetting(probe.IntervalSettingKey, "60"); err != nil {
+		t.Fatal(err)
+	}
+	s.startProbeRunner()
+	runners = append(runners, s.probeRunner)
+	if got := s.probeRunner.Interval(); got != time.Minute {
+		t.Fatalf("db override = %v, want 1m", got)
+	}
+
+	// DB 值非法 → 回落配置文件值（而非内置默认）
+	for _, v := range []string{"abc", "99999", "10"} { // 非法/超范围/低于下限
 		if err := s.db.SetSetting(probe.IntervalSettingKey, v); err != nil {
 			t.Fatal(err)
 		}
 		s.startProbeRunner()
 		runners = append(runners, s.probeRunner)
+		if got := s.probeRunner.Interval(); got != 45*time.Second {
+			t.Fatalf("invalid db %q fallback = %v, want yaml 45s", v, got)
+		}
 	}
 	if err := s.db.SetSetting(probe.IntervalSettingKey, "60"); err != nil { // 合法覆盖
 		t.Fatal(err)

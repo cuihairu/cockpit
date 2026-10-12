@@ -133,3 +133,8 @@ dns:
 #     cloudflare:
 #       api_token: "vault:dns/cloudflare"   # 条目 value=API token
 # 支持字段见 docs/guide/vault-design.md 第 5.1 节
+
+# 自动拨测（probe；每轮完整探测域名/服务/证书并回写状态）
+# probe:
+#   interval: 5m   # 探测间隔，默认 5m；越界自动夹到 [30s, 1h]
+#                  # UI「设置 → 拨测」保存的间隔（落库）优先于本字段，且即时生效

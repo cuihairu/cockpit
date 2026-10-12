@@ -230,6 +230,30 @@ storage 新增：`CreateProbeResults([]ProbeResult)`（批量）、
       （重复跳过+已读再现+阈值分档）、server config 扩容校验 + history 分支
 - [x] 文档收尾（本清单勾选）+ todo.md 同步
 
+## 配置文件字段（probe.interval，2026-10-12 补）
+
+M1 把探测间隔做成了 UI 可配（Setting 表 `probe.interval_seconds`），M3 补配置文件
+入口，使间隔可随部署编排（IaC/容器 env 渲染 yaml）声明，不必先登 UI：
+
+```yaml
+probe:
+  interval: 5m   # 探测间隔，默认 5m；越界自动夹到 [30s, 1h]
+```
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `probe.interval` | duration | `5m` | 每轮完整探测的周期。下限 30s（防自 DDoS）、上限 1h（不如关闭拨测），越界自动夹到边界（与 internal/probe `Min/MaxIntervalSeconds` 一致；config 包经 notification 依赖链不能反向 import probe，故在 config 侧镜像常量）。 |
+
+**取值优先级**：DB 中 UI 保存值（`probe.interval_seconds`，UI 保存即时生效）> 配置文件
+`probe.interval`（启动时读一次）> 内置默认 5m。`startProbeRunner` 按此链取值：
+yaml 值只在没有 UI 保存值时作为基线；UI 保存过则 YAML 声明被覆盖——UI 是更晚、
+更明确的运行期意图，编排声明不应推翻运维在界面上的手动调整。
+
+**通知外发红线对照**（notification 渠道配置见 `config/cockpit.yaml` notification 节）：
+`notification.enabled` 默认 false——不配置即零外发；渠道（herald/ntfy/webhook/telegram）
+仅由显式 yaml 条目构建；事件白名单 `events` 默认全拒（`IsEventEnabled` 无命中即 false）；
+已启用渠道清单经 `GET /api/probe/notification/status` 明示（不含凭据）。
+
 ## 参考
 
 - [Uptime Kuma](https://github.com/louislam/uptime-kuma)——间隔 UI 配置、retry 防抖、恢复通知

@@ -205,6 +205,43 @@ server:
 	}
 }
 
+func TestLoadProbeInterval(t *testing.T) {
+	tmpDir := t.TempDir()
+	load := func(content string) *Config {
+		t.Helper()
+		p := filepath.Join(tmpDir, "probe.yaml")
+		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		return cfg
+	}
+
+	// 显式合法值原样保留
+	if got := load("probe:\n  interval: 45s\n").Probe.Interval; got != 45*time.Second {
+		t.Errorf("interval 45s = %v, want 45s", got)
+	}
+	// 缺省节 → 默认 5m
+	if got := load("server:\n  port: 9000\n").Probe.Interval; got != ProbeDefaultInterval {
+		t.Errorf("absent probe section = %v, want %v", got, ProbeDefaultInterval)
+	}
+	// 空值 → 默认 5m
+	if got := load("probe:\n  interval: 0s\n").Probe.Interval; got != ProbeDefaultInterval {
+		t.Errorf("interval 0s = %v, want %v", got, ProbeDefaultInterval)
+	}
+	// 越界下限 → 夹到 30s
+	if got := load("probe:\n  interval: 10s\n").Probe.Interval; got != ProbeMinInterval {
+		t.Errorf("interval 10s = %v, want clamp %v", got, ProbeMinInterval)
+	}
+	// 越界上限 → 夹到 1h
+	if got := load("probe:\n  interval: 2h\n").Probe.Interval; got != ProbeMaxInterval {
+		t.Errorf("interval 2h = %v, want clamp %v", got, ProbeMaxInterval)
+	}
+}
+
 func TestLoadRemoteControlEgressPolicies(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "egress.yaml")

@@ -21,7 +21,26 @@ type Config struct {
 	DNS           *DNSConfig           `yaml:"dns,omitempty"`
 	Overlay       *OverlayConfig       `yaml:"overlay,omitempty"`
 	Vault         *VaultConfig         `yaml:"vault,omitempty"`
+	Probe         *ProbeConfig         `yaml:"probe,omitempty"`
 }
+
+// ProbeConfig 自动拨测配置（probe-enhance-design.md M1：间隔亦可经 UI 保存，
+// DB 保存值优先于本文件）。
+type ProbeConfig struct {
+	// Interval 探测间隔（每轮完整探测的周期）。默认 5m；越界自动夹到
+	// [30s, 1h]（与 internal/probe 的 Min/MaxIntervalSeconds 一致——probe
+	// 包经 notification 依赖本包，本包不能反向 import 取常量）。启动时
+	// 读一次；UI 保存的间隔（Setting 表）运行期仍可即时生效。
+	Interval time.Duration `yaml:"interval,omitempty"`
+}
+
+// 拨测间隔默认值与边界（镜像 internal/probe 的 DefaultInterval /
+// MinIntervalSeconds / MaxIntervalSeconds，见 ProbeConfig.Interval 注释）
+const (
+	ProbeDefaultInterval = 5 * time.Minute
+	ProbeMinInterval     = 30 * time.Second
+	ProbeMaxInterval     = time.Hour
+)
 
 // VaultConfig 密码箱配置（vault-design.md V4/V5/V7）：provider 选择与
 // 会话口径；密钥不落 yaml，走 env（COCKPIT_VAULT_KEY，回退
@@ -282,6 +301,19 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Notification == nil {
 		cfg.Notification = &NotificationConfig{}
+	}
+
+	if cfg.Probe == nil {
+		cfg.Probe = &ProbeConfig{}
+	}
+	if cfg.Probe.Interval <= 0 {
+		cfg.Probe.Interval = ProbeDefaultInterval
+	}
+	if cfg.Probe.Interval < ProbeMinInterval {
+		cfg.Probe.Interval = ProbeMinInterval
+	}
+	if cfg.Probe.Interval > ProbeMaxInterval {
+		cfg.Probe.Interval = ProbeMaxInterval
 	}
 
 	if cfg.Agent == nil {

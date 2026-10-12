@@ -401,9 +401,13 @@ func (s *Server) startInventorySync() error {
 	return nil
 }
 
-// startProbeRunner 启动自动健康探测；DB 中保存过间隔则覆盖默认值
+// startProbeRunner 启动自动健康探测。间隔取值优先级：DB 中 UI 保存值 >
+// 配置文件 probe.interval > 内置默认 5m（probe.DefaultInterval）。
 func (s *Server) startProbeRunner() {
 	interval := probe.DefaultInterval
+	if s.cfg != nil && s.cfg.Probe != nil && s.cfg.Probe.Interval > 0 {
+		interval = s.cfg.Probe.Interval
+	}
 	if v, err := s.db.GetSetting(probe.IntervalSettingKey); err == nil && v != "" {
 		if secs, convErr := strconv.Atoi(v); convErr == nil &&
 			secs >= probe.MinIntervalSeconds && secs <= probe.MaxIntervalSeconds {
