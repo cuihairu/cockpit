@@ -606,7 +606,8 @@ func TestHealthLoopEmptyConfig(t *testing.T) {
 }
 
 // TestHealthLoopTimerAndEpochSkip 循环的定时触发与过期轮次丢弃（D3）：
-// epoch 在睡眠窗口内被推高 → timer 自然到期后该轮作废、按新配置重排
+// epoch 在睡眠窗口内被推高 → timer 自然到期后该轮作废、按新配置重排。
+// calls 读写统一 env.mu（读侧误用引擎锁 env.e.mu 不互斥，CI race 实锤）
 func TestHealthLoopTimerAndEpochSkip(t *testing.T) {
 	env := newHealthTestEnv(nil)
 	var calls int
@@ -627,9 +628,9 @@ func TestHealthLoopTimerAndEpochSkip(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		env.e.mu.Lock()
+		env.mu.Lock()
 		n := calls
-		env.e.mu.Unlock()
+		env.mu.Unlock()
 		if n >= 1 {
 			break
 		}
@@ -641,17 +642,17 @@ func TestHealthLoopTimerAndEpochSkip(t *testing.T) {
 	env.e.mu.Unlock()
 	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		env.e.mu.Lock()
+		env.mu.Lock()
 		n := calls
-		env.e.mu.Unlock()
+		env.mu.Unlock()
 		if n >= 2 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	env.e.mu.Lock()
+	env.mu.Lock()
 	n := calls
-	env.e.mu.Unlock()
+	env.mu.Unlock()
 	if n < 2 {
 		t.Fatalf("probe calls = %d, want >=2 (timer fire + epoch skip path)", n)
 	}
