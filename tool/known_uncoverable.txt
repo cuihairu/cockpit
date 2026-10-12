@@ -138,3 +138,14 @@ internal/server/api_acme.go:293,295	3. create 后 ReplaceAcmeDeployTargets 失�
 internal/server/api_acme.go:339,341	3. update 后 ReplaceAcmeDeployTargets 失败 500（同 293,295 口径）
 internal/server/api_acme.go:519,521	3. handleAcmeDeploy 首查目标失败 500（GetAcmeCert 同句柄先行成功，同 255,257 口径）
 internal/storage/acme_deploy.go:82,83	3. backfill 迁移 Count 失败上抛（首查 Find 同句柄先行，闭库时先失败；Count 无触发器注入面）
+# —— 2026-10-12 stack git（P2 ①）补充 ——
+# 以下两块随全局桩（legoNewClient/setDNS01Provider 等 t.Cleanup 恢复的包级变量）
+# 与 t.Parallel 测试交错而波动：同包并行时桩存活窗口内其他 Issue/Job 流程改走
+# 别的错误路径，块覆盖逐轮漂移（api_jobs:285,286 曾在上一轮显示已覆盖被移除、
+# 本轮复现未覆盖）。登记口径：不可确定性构造，语义均有独立直测。
+internal/server/acme_issuer.go:270,271	3. Issue 内 dnsProvider 错误传播（dnsProvider 工厂自身错误分支在 acme_test 直测；Issue 入口侧被并行桩窗口吞没不可稳定覆盖）
+internal/server/api_jobs.go:285,286	3. dispatch 前 UpdateJob 回写失败降级 log（主键 UPDATE 先行成功；闭库场景首查先失败，与并行桩窗口波动同类）
+# stack git RPC 错误映射的传输层对称分支：CallAgent 传输错误仅
+# ErrAgentNotFound/send timeout/response timeout，无 conflict 语义；
+# conflict→409 仅 RPC payload 分支可达（cov_stack_git_test 已测）。
+internal/server/api_stacks.go:221,222	3. CallAgent 传输层错误含 conflict→409（防御性对称映射，传输错误词表不含 conflict，无现实注入面）

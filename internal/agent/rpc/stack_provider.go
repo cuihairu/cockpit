@@ -60,6 +60,7 @@ type StackConfig struct {
 	Dir        string           // stacks 根目录，默认 /var/lib/cockpit/stacks
 	Docker     docker.DockerAPI // 用于按 compose label 过滤容器状态
 	ComposeBin []string         // compose 命令，默认 ["docker", "compose"]；测试可注入
+	GitBin     []string         // git 命令，默认 ["git"]；测试可注入
 	Now        func() time.Time // 可注入时钟
 	NewID      func() string    // 可注入任务 ID 生成器
 }
@@ -69,6 +70,7 @@ type StackProvider struct {
 	dir        string
 	docker     docker.DockerAPI
 	composeBin []string
+	gitCmd     []string
 	now        func() time.Time
 	newID      func() string
 	baseline   BaselineRecorder // 漂移基线挂钩（见 drift-design.md D7），nil 不记录
@@ -109,6 +111,7 @@ func NewStackProvider(cfg StackConfig) *StackProvider {
 		dir:        dir,
 		docker:     cfg.Docker,
 		composeBin: composeBin,
+		gitCmd:     cfg.GitBin,
 		now:        now,
 		newID:      newID,
 		tasks:      make(map[string]*stackTask),
@@ -139,6 +142,10 @@ func (p *StackProvider) Call(action string, params map[string]interface{}) (inte
 		return p.PullStack(stackParam(params))
 	case "info":
 		return p.InfoStack(), nil
+	case "git.status":
+		return p.GitStatus(), nil
+	case "git.pull":
+		return p.GitPull(params)
 	case "logs":
 		return p.StackLogs(params)
 	case "task.get":

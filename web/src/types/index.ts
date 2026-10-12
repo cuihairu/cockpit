@@ -485,6 +485,37 @@ export interface StackDeployment {
   finishedAt: number // Unix 秒级时间戳，0 = 未结束
 }
 
+// Stacks 目录的 git 接入状态（P2 ① Git-to-deploy）
+// enabled=false 时 reason: git-unavailable / not-a-repo（未接入是常态非错误）
+export interface StackGitChange {
+  code: string // porcelain XY 码：M / ?? / A 等
+  path: string
+}
+
+export interface StackGitStatus {
+  enabled: boolean
+  reason?: string
+  remote?: string
+  branch?: string
+  head?: string // 本地 HEAD 短 SHA；空 = 无提交
+  remoteHead?: string // origin/<branch> 短 SHA（上次 fetch 时点）
+  ahead: number
+  behind: number
+  changes?: StackGitChange[] // drift：本地改动 vs 仓库（.cockpit/ 已过滤）
+}
+
+// git pull（首次即接入）响应：同 StackGitStatus 的接入后快照
+export interface StackGitPullResponse {
+  enabled: boolean
+  remote?: string
+  branch?: string
+  head?: string
+  remoteHead?: string
+  ahead: number
+  behind: number
+  changes?: StackGitChange[]
+}
+
 // 拨测配置（探测间隔可配置）
 export interface ProbeConfig {
   interval_seconds: number

@@ -24,6 +24,8 @@
 #   A15 restart / pull 动作（M1.5）→ 任务 success
 #   A16 部署历史：server 记录 + 后台回填终态（含 up/restart/pull）
 #   A17 目录自检信息（stack.info → agentInfo.dirWritable）
+#   A18 Git-to-deploy ①（P2）：bare 远端接入 → 拉取落地 → 快进 →
+#       drift 409 → drift 列表 → ext:: 拒绝 → 审计 stack_git_pull
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -259,6 +261,61 @@ step "A17. 目录自检信息（stack.info）"
 agg="$(curl -sL "${AUTH[@]}" "$API/stacks")"
 check_eq "A17.1 聚合响应含 agentInfo" "$(echo "$agg" | jq -r --arg id "$AGENT_ID" '.agentInfo[$id].dirWritable // empty')" "true"
 check_eq "A17.2 自检带 stacks 目录路径" "$(echo "$agg" | jq -r --arg id "$AGENT_ID" '.agentInfo[$id].dir // empty' | grep -c 'stacks' || true)" "1"
+
+step "A18. Git-to-deploy ①（远端仓库接入 + 拉取 + drift + 冲突）"
+# 本地 bare 仓当远端（不依赖外网凭据）；seed 工作仓推一版初始内容
+GIT_REMOTE="$WORK/stacks-remote.git"
+git init --bare "$GIT_REMOTE" >/dev/null 2>&1
+git -C "$GIT_REMOTE" symbolic-ref HEAD refs/heads/main >/dev/null 2>&1
+SEED="$WORK/stacks-seed"
+git init "$SEED" >/dev/null 2>&1
+git -C "$SEED" symbolic-ref HEAD refs/heads/main >/dev/null 2>&1
+mkdir -p "$SEED/git-stack-demo"
+printf 'services:\n  web:\n    image: nginx:1.25\n' > "$SEED/git-stack-demo/compose.yml"
+seed_git() { git -C "$SEED" -c user.name=accept -c user.email=accept@local "$@"; }
+seed_git add .
+seed_git commit -m seed >/dev/null 2>&1
+seed_git remote add origin "$GIT_REMOTE"
+seed_git push -u origin main >/dev/null 2>&1
+
+st="$(curl -s "${AUTH[@]}" "$API/stacks/agents/$AGENT_ID/git")"
+check_eq "A18.1 未接入 reason=not-a-repo" "$(echo "$st" | jq -r '.reason // empty')" "not-a-repo"
+
+body="$(curl -s -X POST "$API/stacks/agents/$AGENT_ID/git/pull" "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d "$(jq -n --arg r "$GIT_REMOTE" '{remote:$r,branch:"main"}')")"
+check_eq "A18.2 attach enabled=true" "$(echo "$body" | jq -r '.enabled // empty')" "true"
+check_eq "A18.2 远端文件落地" "$([ -f "$WORK/stacks/git-stack-demo/compose.yml" ] && echo yes || echo no)" "yes"
+check_eq "A18.2 head=remoteHead" "$(echo "$body" | jq -r '.head // empty')" "$(echo "$body" | jq -r '.remoteHead // empty')"
+
+# 远端新提交 → pull 快进，磁盘内容更新
+printf 'services:\n  web:\n    image: nginx:1.27\n' > "$SEED/git-stack-demo/compose.yml"
+seed_git add . && seed_git commit -m v2 >/dev/null 2>&1 && seed_git push origin main >/dev/null 2>&1
+resp="$(curl -s -w '\n%{http_code}' -X POST "$API/stacks/agents/$AGENT_ID/git/pull" "${AUTH[@]}" -H 'Content-Type: application/json' -d '{}')"
+code="$(echo "$resp" | tail -1)"
+check_eq "A18.3 二次 pull 200" "$code" "200"
+check_eq "A18.3 快进到新内容" "$(grep -c 'nginx:1.27' "$WORK/stacks/git-stack-demo/compose.yml" || true)" "1"
+
+# 本地改 tracked 文件 + 远端再新提交 → pull 被拒 409（drift 保护）
+printf 'services:\n  web:\n    image: nginx:local-edit\n' > "$WORK/stacks/git-stack-demo/compose.yml"
+printf 'services:\n  web:\n    image: nginx:1.28\n' > "$SEED/git-stack-demo/compose.yml"
+seed_git add . && seed_git commit -m v3 >/dev/null 2>&1 && seed_git push origin main >/dev/null 2>&1
+resp="$(curl -s -w '\n%{http_code}' -X POST "$API/stacks/agents/$AGENT_ID/git/pull" "${AUTH[@]}" -H 'Content-Type: application/json' -d '{}')"
+code="$(echo "$resp" | tail -1)"
+check_eq "A18.4 本地改动 pull → 409" "$code" "409"
+
+st="$(curl -s "${AUTH[@]}" "$API/stacks/agents/$AGENT_ID/git")"
+check_eq "A18.5 drift 列出改动文件" "$(echo "$st" | jq -r '[.changes[]?.path] | index("git-stack-demo/compose.yml") != null')" "true"
+# UI 建的 stack（attach 前已存在）作为 untracked 出现在 drift 是预期语义
+check_eq "A18.5 UI 建的 stack 记为 untracked" "$(echo "$st" | jq -r '[.changes[]? | select(.path == "cache-demo/compose.yml") | .code] | join("")')" "??"
+
+# ext:: 传输助手语法（RCE 面）必须被拒
+resp="$(curl -s -w '\n%{http_code}' -X POST "$API/stacks/agents/$AGENT_ID/git/pull" "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -d '{"remote":"ext::sh -c touch /tmp/pwned"}')"
+code="$(echo "$resp" | tail -1)"
+check_ne "A18.6 ext:: 远端被拒" "$code" "200"
+
+audit="$(curl -s "${AUTH[@]}" "$API/admin/audit/logs?page=1&page_size=100&resource=stack")"
+check_eq "A18.7 审计含 stack_git_pull" "$(echo "$audit" | grep -c 'stack_git_pull' || true)" "1"
 
 step "A13. agent 断连 → 缓存灰态"
 kill "$AGENT_PID" 2>/dev/null; wait "$AGENT_PID" 2>/dev/null; AGENT_PID=''

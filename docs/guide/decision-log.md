@@ -231,3 +231,34 @@ failed）」，本次接线使台账状态与活会话生命周期对齐。
 **重开条件**：若未来 web 前端接入会话列表展示，需补充 REST 查询权限点（当前
 `terminal:write` 仅覆盖票据签发）；若 guacd 会话量增长导致 `guacSessions` 内存
 压力，再议 LRU 淘汰策略。
+
+## D-2026-10-12-5 Stack Git-to-deploy ①（Git worktree 化）口径
+
+**定了什么**：stacks 根目录整体接入为一个 git 仓库（非 per-stack 仓库）；新增
+`stack.git.status` / `stack.git.pull` 两个 RPC 与 `GET .../git`、
+`POST .../git/pull` 两条 REST。接入流程 `init → symbolic-ref → remote add →
+fetch → checkout -B`（要求远端分支已存在）；已接入再拉为 `fetch --prune →
+merge --ff-only`，不自动 commit、不代做 rebase/merge。drift = 工作区相对
+HEAD 的 porcelain 改动（`-uall` 逐文件展开），`.cockpit/` 与 `.git/` 在代码
+里过滤而非依赖 `.gitignore`。安全侧：remote URL 拒绝 `::` 传输助手语法、
+前导 `-` 与控制字符；分支名 `^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$` 且禁 `..`；
+URL 内 userinfo 凭据回显前统一抹除。远端 URL 只存 agent 侧 `.git/config`，
+server 不建表；写操作审计 `stack_git_pull`，状态查询不审计。
+
+**为什么**：①整仓粒度——个人 stacks 场景通常就是单一仓库，per-stack 仓库
+倍增配置成本且无真实需求；②不自动 commit——compose-file-first 原则下 UI
+编辑就是 drift，替用户提交会让「本地改动」概念消失、与「保存即真相源」冲突；
+③status 不联网——列表页每次加载都触发远端 fetch 会把远端故障传导成 UI 卡顿，
+behind/ahead 反映上次 fetch 时点足够引导操作；④`::` 拒绝——git 传输助手
+`ext::sh -c ...` 等价任意命令执行，URL 由 web 表单录入，必须入口侧封死；
+⑤凭据抹除——git 报错原样回显带凭据的 URL，违反「凭据不落日志」红线。
+
+**备选**：①per-stack git 仓库——否决：配置面翻倍，且 `.cockpit/` 保留目录
+会出现在每个仓库；②服务端 webhook 自动 pull——否决：留给 P2 ②（webhook 触发
+部署）统一做，且自动 pull + 自动重启的爆炸半径需要独立评审；③用 go-git 库
+替代 shell out——否决：与 provider 既有 `docker compose` shell-out 惯例一致，
+go-git 对 sparse/worktree/凭据助手支持不全；④`.gitignore` 过滤 `.cockpit/`
+——否决：接入的是用户既有仓库，无权替用户改 `.gitignore`。
+
+**重开条件**：出现多仓库真实需求（如多团队分区）再议 per-stack 仓库或多 remote；
+P2 ② webhook 自动 pull 落地时需补 drift 保护策略评审（自动 stash？拒绝？）。

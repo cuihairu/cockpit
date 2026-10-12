@@ -30,6 +30,13 @@ const stacksAPIPrefix = "/api/stacks/"
 // stackTasksSegment 保留路由段：stack 名正则不匹配它，但解析时仍需先于 {name} 判断
 const stackTasksSegment = "tasks"
 
+// stackGitSegment git 保留路由段（P2 ① Git-to-deploy）："git" 本身满足
+// stack 名正则，同样必须先于 {name} 判断。
+//
+//	GET  /api/stacks/agents/{agentId}/git          stacks 仓接入状态 + drift
+//	POST /api/stacks/agents/{agentId}/git/pull     拉取远端（首次=接入，body 可带 remote/branch）
+const stackGitSegment = "git"
+
 // stackAggregateTimeout 聚合视图的整体等待预算（单 agent 的 CallAgent 内部超时 30s）
 const stackAggregateTimeout = 10 * time.Second
 
@@ -82,6 +89,24 @@ func (s *Server) handleStacks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.handleStackTask(w, r, agentID, taskID)
+		return
+	}
+
+	// /api/stacks/agents/{agentId}/git[/pull]（stacks 根目录级，与单个 stack 无关）
+	if segments[2] == stackGitSegment {
+		switch {
+		case len(segments) == 3 && r.Method == http.MethodGet:
+			s.handleStackRPC(w, r, agentID, "stack.git.status", map[string]interface{}{}, "")
+		case len(segments) == 4 && segments[3] == "pull" && r.Method == http.MethodPost:
+			params, err := requestParams(r)
+			if err != nil {
+				s.handleError(w, r, http.StatusBadRequest, err.Error())
+				return
+			}
+			s.handleStackRPC(w, r, agentID, "stack.git.pull", params, audit.ActionStackGitPull)
+		default:
+			s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		}
 		return
 	}
 
@@ -191,6 +216,9 @@ func (s *Server) handleStackRPC(w http.ResponseWriter, r *http.Request, agentID,
 			status = http.StatusNotFound
 		} else if strings.Contains(err.Error(), "busy") {
 			status = http.StatusConflict
+		} else if strings.Contains(err.Error(), "conflict") {
+			// git pull 遇本地改动/分叉拒绝合并（--ff-only），前端按 409 引导先处理 drift
+			status = http.StatusConflict
 		} else if strings.Contains(err.Error(), "not found") {
 			status = http.StatusNotFound
 		} else if strings.Contains(err.Error(), "timeout") {
@@ -208,6 +236,8 @@ func (s *Server) handleStackRPC(w http.ResponseWriter, r *http.Request, agentID,
 	if rpcResp.Status == "error" {
 		status := http.StatusBadGateway
 		if strings.Contains(rpcResp.Error, "busy") {
+			status = http.StatusConflict
+		} else if strings.Contains(rpcResp.Error, "conflict") {
 			status = http.StatusConflict
 		} else if strings.Contains(rpcResp.Error, "not found") {
 			status = http.StatusNotFound
@@ -358,7 +388,12 @@ func (s *Server) auditStackAction(r *http.Request, action, agentID, name string,
 		}
 	}
 	details["result"] = data
-	s.audit.LogResource(username, action, audit.ResourceStack, agentID+"/"+name, details, s.getClientIP(r), r.UserAgent())
+	// git pull 等仓库级动作没有 stack 名，资源记 agentID 本身
+	resource := agentID
+	if name != "" {
+		resource = agentID + "/" + name
+	}
+	s.audit.LogResource(username, action, audit.ResourceStack, resource, details, s.getClientIP(r), r.UserAgent())
 }
 
 func stackString(params map[string]interface{}, key string) string {

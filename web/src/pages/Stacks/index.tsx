@@ -25,6 +25,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
 import type { StackView } from '@/types'
 import { PermGuard } from '@/components/PermGuard'
+import GitBar from './GitBar'
 import StackDetail from './StackDetail'
 import TerminalBlock from './TerminalBlock'
 import {
@@ -244,6 +245,8 @@ const Stacks = () => {
             ))}
           />
         )}
+        {/* Git 接入状态与 drift 提示（P2 ① Git-to-deploy） */}
+        <GitBar agents={stackAgents.map((a) => ({ id: a.id, hostname: a.hostname }))} />
         <Table
           columns={columns}
           dataSource={stacks}

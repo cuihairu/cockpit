@@ -84,6 +84,8 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 | `stack.restart` | `name` | `{task_id}`，等价 `docker compose restart`（M1.5） | 异步 |
 | `stack.pull` | `name` | `{task_id}`，等价 `docker compose pull`（M1.5） | 异步 |
 | `stack.info` | — | `{dir, dirWritable, dirError?, composeVersion?}`，目录可写性探针 + compose 版本（M1.5） | 同步 |
+| `stack.git.status` | — | `{enabled, reason?, remote?, branch?, head?, remoteHead?, ahead, behind, changes?: [{code, path}]}`，stacks 仓库接入状态 + drift（P2 ①） | 同步 |
+| `stack.git.pull` | `remote?, branch?` | 同 `git.status` 的接入后快照；首次调用即接入（P2 ①） | 同步 |
 
 实现要点：
 
@@ -108,9 +110,11 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 | `GET /api/stacks/agents/{agentId}/{name}/history` | — | 部署历史（server 侧 `stack_deployments` 表），`?limit=`（默认 50，上限 200）（M1.5） |
 | `GET /api/stacks/agents/{agentId}/{name}/logs` | `stack.logs` | `?service=&tail=` |
 | `GET /api/stacks/agents/{agentId}/tasks/{taskId}` | `stack.task.get` | 任务轮询 |
+| `GET /api/stacks/agents/{agentId}/git` | `stack.git.status` | stacks 仓库接入状态 + drift（P2 ①；不记审计） |
+| `POST /api/stacks/agents/{agentId}/git/pull` | `stack.git.pull` | 拉取远端（首次即接入；body 可选 `{remote, branch}`；审计 stack_git_pull）（P2 ①） |
 | `DELETE /api/stacks/agents/{agentId}/{name}` | `stack.remove` | 删 stack（body 可选 `{force}`） |
 
-约定：404 = agent 不在线/无 stack provider；409 = stack busy；502/504 沿用 `api_docker.go` 的 RPC 错误映射。
+约定：404 = agent 不在线/无 stack provider；409 = stack busy；502/504 沿用 `api_docker.go` 的 RPC 错误映射。P2 ① 追加：409 亦用于 git pull 冲突（本地改动/分叉被 `--ff-only` 拒绝）；agent 报「remote branch not found」（空仓库/分支写错）→ 404。
 
 ### 存储
 
@@ -166,9 +170,28 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 
 ### P2 —— Git-to-deploy（Komodo 式升级）
 
-- [ ] stacks 目录升级为 Git worktree：远端仓库拉取 → drift 提示（本地改动 vs 仓库）
+- [x] stacks 目录升级为 Git worktree：远端仓库拉取 → drift 提示（本地改动 vs 仓库）（2026-10-12，见下文[Git-to-deploy ① 设计](#p2--git-to-deploy-设计)）
 - [ ] webhook 触发部署；部署日志流式推送（复用 proxy data 通道，替代轮询）
 - [ ] inventory 联动：stack 与 CMDB 服务条目关联，probe 直接探测 stack 暴露的端口
+
+#### P2 ① Git-to-deploy 设计（2026-10-12）
+
+**模型**：stacks 根目录整体作为一个 git 仓库接入一个远端（不是每 stack 一个仓库）——个人服务场景 stacks 通常就是单一仓库（Komodo/Dockge 同款粒度），per-stack 仓库等真实需求出现再议。
+
+**语义**（决策记录见 decision-log D-2026-10-12-5）：
+
+- **接入**（目录还不是仓库）：`git init` → `symbolic-ref HEAD refs/heads/<branch>`（`init -b` 需 git≥2.28，symbolic-ref 全版本可用）→ `remote add origin` → `fetch` → `checkout -B <branch> origin/<branch>`。**要求远端分支已存在**（空仓库先在别处推首版）；远端文件与既有本地文件重名时 git 拒绝覆盖 untracked，不静默吞掉本地文件
+- **已接入再拉**：`fetch --prune` → `merge --ff-only origin/<branch>`。不自动 commit、不代做 rebase/merge 决策；本地有提交分叉或 tracked 文件被改时 git 拒绝合并，错误原文透传给 UI（409 conflict）——那就是 drift 提示本身
+- **drift = 工作区相对 HEAD 的改动**（`status --porcelain -uall`）：UI 编辑 compose（stack.file.save）天然是 drift——compose-file-first 原则下这是特性不是缺陷，UI 提示而不阻止；`.cockpit/`、`.git/` 路径在代码里过滤（不下发 `.gitignore`，避免污染用户仓库）
+- **状态查询不联网**：`stack.git.status` 只读本地引用（`behind/ahead` 反映上次 fetch 时点），拉取动作本身承担 fetch——状态面永不因远端挂起而卡 UI
+
+**安全**：
+
+- remote URL 拒绝 `::`（git 传输助手语法，`ext::sh -c ...` 可执行任意命令）、前导 `-`（防被当 git 选项）、控制字符；分支名约束 `^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$` 且拒绝 `..`
+- URL 内 userinfo 凭据（`user:pass@`）在任何回显（错误消息/审计/状态）前统一抹为 `***`；凭据本身由 agent 主机的 git 凭据助手管理，server 不存储
+- 远端 URL 持久在 agent 侧 `.git/config`（server 不建表）；写操作（pull）记审计 `stack_git_pull`，状态查询不记
+
+**UI（Stacks 页 GitBar）**：按 agent 一条告警行——未接入=低调 info +「接入」入口；无 git=warning；drift=warning 列改动文件（超出 5 条折叠）；behind>0=info +「拉取更新」。老 agent 不认识新 RPC（502）时静默跳过。
 
 ## 风险与权衡
 
@@ -239,6 +262,14 @@ compose build/pull/profiles/healthcheck 语义、`COCKPIT_STACKS_DIR` 权限实�
 - 路径非法场景下 `stack.info`（dirError）到不了列表页——server 仅在 list 成功后拉取自检信息；需要 server 侧「list 失败仍拉 info」+ web 呈现联动
 - 「无权限」场景对 root agent 不可模拟（CAP_DAC_OVERRIDE 绕过 DAC），需非 root 部署真验
 - 镜像 nginx:alpine/busybox 留作 VM 缓存未清理；模板库/import 为 UI 填充路径（落库即常规 create+up，UI 链路由 vitest 覆盖），真机以原始 compose 等价验证
+
+### 2026-10-12 本机验收（P2 ① Git-to-deploy，A18）
+
+**方式**：`run-acceptance.sh` A18 段——本地 bare 仓当远端（不依赖外网凭据），seed 工作仓推三版内容，走真实 REST → JWT → 审计 → WebSocket RPC → stack provider → git CLI 全链路。53 项断言全部通过，重跑可重复。
+
+**覆盖（A18.1-A18.7）**：未接入 reason=not-a-repo → attach（enabled=true、远端文件落地、head=remoteHead）→ 远端新提交二次 pull 快进（磁盘内容更新）→ 本地改 tracked 文件 + 远端同文件新提交 → pull 409 → `stack.git.status` drift 列表（attach 前已存在的 UI 建 stack 记为 untracked `??`，预期语义）→ `ext::` 传输助手远端被拒（502）→ 审计含 `stack_git_pull`。agent 单测另以真实 git 覆盖 attach/untracked 冲突不覆盖本地文件、分支切换、凭据脱敏、`gitPathSkipped` 边界。
+
+**验收中发现并修复**：agent 侧 execlog（router 单点埋点）把 `stack.file.save` 入参 `env`（.env 明文凭据负载）原样记入留痕并上行落审计表——违反「凭据不落审计」红线；此前因 execlog 30s 攒批晚于验收取审计而侥幸未暴露。修复：`core/execlog` 敏感键正则补 `env`（全仓唯一使用方即 stack.file.save），A14 回归断言转绿。
 
 ## 参考
 

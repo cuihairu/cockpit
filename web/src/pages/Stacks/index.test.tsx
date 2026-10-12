@@ -19,6 +19,8 @@ const apiMock = vi.hoisted(() => ({
   getStackHistory: vi.fn(),
   stackAction: vi.fn(),
   deleteStack: vi.fn(),
+  getStackGit: vi.fn(),
+  pullStackGit: vi.fn(),
 }))
 vi.mock('@/services/api', () => ({ api: apiMock }))
 
@@ -68,6 +70,11 @@ const renderPage = (stackList = stacks) => {
       'ag-1111111111112': { dir: '/data/stacks', dirWritable: true },
     },
   })
+  // GitBar：默认已接入且干净（不产生告警噪音，专项用例在 GitBar.test.tsx）
+  apiMock.getStackGit.mockResolvedValue({
+    enabled: true, remote: 'https://git.example/ops/stacks.git', branch: 'main',
+    head: 'abc1234', remoteHead: 'abc1234', ahead: 0, behind: 0,
+  })
   return mount()
 }
 
@@ -105,6 +112,20 @@ describe('Stacks', () => {
   it('空态：无 Stack 出引导文案', async () => {
     renderPage([])
     expect(await screen.findByText('暂无 Stack，点击右上角「新建 Stack」开始部署应用')).toBeInTheDocument()
+  })
+
+  it('Git drift 提示：已接入且本地改动时展示告警（P2 ①）', async () => {
+    apiMock.getAgents.mockResolvedValue(agents)
+    apiMock.getStacks.mockResolvedValue({ stacks, agentInfo: {} })
+    // drift mock 必须先于挂载就位（renderPage 会覆盖为干净态默认值）
+    apiMock.getStackGit.mockResolvedValue({
+      enabled: true, remote: 'https://git.example/ops/stacks.git', branch: 'main',
+      head: 'abc1234', remoteHead: 'def5678', ahead: 0, behind: 0,
+      changes: [{ code: 'M', path: 'web/compose.yml' }],
+    })
+    mount()
+    expect(await screen.findByText(/本地改动 1 处/)).toBeInTheDocument()
+    expect(screen.getByText(/M web\/compose\.yml/)).toBeInTheDocument()
   })
 
   it('新建：名称校验、模板填充与合法提交', async () => {

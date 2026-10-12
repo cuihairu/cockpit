@@ -30,6 +30,8 @@ import type {
   StackTask,
   StackInfo,
   StackDeployment,
+  StackGitStatus,
+  StackGitPullResponse,
   ProbeConfig,
   ProbeResult,
   ProbeTargetSnapshot,
@@ -473,6 +475,16 @@ class ApiService {
   // 删除 Stack（异步任务：先 down 再删目录）
   async deleteStack(agentId: string, name: string): Promise<StackTaskStartResponse> {
     return this.client.delete<unknown, StackTaskStartResponse>(`/stacks/agents/${agentId}/${name}`)
+  }
+
+  // Stacks 目录 git 接入状态 + drift（P2 ① Git-to-deploy；未接入 enabled=false）
+  async getStackGit(agentId: string): Promise<StackGitStatus> {
+    return this.client.get<unknown, StackGitStatus>(`/stacks/agents/${agentId}/git`)
+  }
+
+  // git pull（首次调用即接入远端仓库；409 = 本地改动冲突，需先处理 drift）
+  async pullStackGit(agentId: string, data?: { remote?: string; branch?: string }): Promise<StackGitPullResponse> {
+    return this.client.post<unknown, StackGitPullResponse>(`/stacks/agents/${agentId}/git/pull`, data ?? {})
   }
 
   // ========== 计算实例 ==========

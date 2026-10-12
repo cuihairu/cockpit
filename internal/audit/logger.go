@@ -30,13 +30,14 @@ const (
 	// 前重验身份，签发短期多次使用的 vault token）
 	ActionVaultVerify = "vault_verify"
 	// Compose Stack 部署（见 docs/guide/stack-deploy-design.md）
-	ActionStackCreate  = "stack_create"
-	ActionStackUpdate  = "stack_update"
-	ActionStackUp      = "stack_up"
-	ActionStackDown    = "stack_down"
-	ActionStackRemove  = "stack_remove"
-	ActionStackRestart = "stack_restart"
-	ActionStackPull    = "stack_pull"
+	ActionStackCreate   = "stack_create"
+	ActionStackUpdate   = "stack_update"
+	ActionStackUp       = "stack_up"
+	ActionStackDown     = "stack_down"
+	ActionStackRemove   = "stack_remove"
+	ActionStackRestart  = "stack_restart"
+	ActionStackPull     = "stack_pull"
+	ActionStackGitPull  = "stack_git_pull" // P2 ① Git-to-deploy：stacks 仓库拉取/接入
 	// 服务健康探针与自愈（见 docs/guide/service-health-design.md D9）
 	ActionServiceHealthConfig      = "service_health_config"       // 探针/白名单配置保存
 	ActionServiceHealthHeal        = "service_health_heal"         // 自愈重启成功（agent 事件归集，username=cockpit-agent）
