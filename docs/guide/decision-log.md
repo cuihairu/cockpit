@@ -306,8 +306,8 @@ EventSource 不能带 Authorization 头，与 followLogs 同款 fetch 流保持�
 `stack.list`/`stack.status` 服务条目新增 `ports: [{hostPort, containerPort,
 proto}]`（docker list API 自带，零额外 Engine 调用，只收 hostPort>0）；
 server 在 `cacheStack` 同步点调用 `syncStackServices`，每条 **tcp** 已发布
-端口 upsert 一条 `services` 表台账行：确定性 ID `stackport-<agentId>-<stack>-
-<hostPort>-tcp`、`Type=tcp`、`URL=tcp://<agentIP>:<hostPort>`、
+端口 upsert 一条 `services` 表台账行：确定性 ID
+`stackport-{agentId}-{stack}-{hostPort}-tcp`、`Type=tcp`、`URL=tcp://{agentIP}:{hostPort}`、
 `Labels{source:"stack", agent_id, stack}`。host 取 agent IP（registry 优先、
 离线退 DB 档案，空 IP 不建行）；IP 变更刷新 URL 但探测状态保留（新 store
 方法 `UpsertServiceTarget` 只动寻址字段，status/lastCheck 归 probe 独占）。

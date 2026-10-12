@@ -221,8 +221,8 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 **inventory 联动**（决策记录见 decision-log D-2026-10-13-1）：
 
 - **事实源**：agent 的 `stack.list` / `stack.status` 服务条目自带已发布端口（docker list API 的 `Ports` 随容器列表返回，零额外 Engine 调用）；`ContainerInfo.Ports` → `StackService.Ports: [{hostPort, containerPort, proto}]`，只收 `hostPort > 0`——未发布端口仅容器网络内可达，probe 触达不到
-- **收编**：server 在 `cacheStack`（列表同步点，单 agent 与聚合两条路径共用）调用 `syncStackServices`：每条 **tcp** 已发布端口 upsert 一条 CMDB `Service` 台账行，`Type=tcp`、`URL=tcp://<agentIP>:<hostPort>` → probe 走既有 `parseHostPort` + `CheckTCP`，**probe 侧零改动**；不新建表，复用 `services` 表
-- **确定性 ID**：`stackport-<agentId>-<stack>-<hostPort>-tcp`（同 `dns-` 先例），端口消失时按 ID 删除，无需反查
+- **收编**：server 在 `cacheStack`（列表同步点，单 agent 与聚合两条路径共用）调用 `syncStackServices`：每条 **tcp** 已发布端口 upsert 一条 CMDB `Service` 台账行，`Type=tcp`、`URL=tcp://{agentIP}:{hostPort}` → probe 走既有 `parseHostPort` + `CheckTCP`，**probe 侧零改动**；不新建表，复用 `services` 表
+- **确定性 ID**：`stackport-{agentId}-{stack}-{hostPort}-tcp`（同 `dns-` 先例），端口消失时按 ID 删除，无需反查
 - **来源标记**：`Labels{source: "stack", agent_id, stack}`（同 DNS `labels.source=dns` 先例）；inventory 声明或手工登记的行无此标签，对账永不触碰
 - **host 取 agent IP**：registry 优先、离线退回 DB 档案；IP 为空不建行（没有探测目标）；IP 变更时刷新 URL 但探测状态保留——`storage.UpsertServiceTarget` 只动寻址字段（name/agent/type/url/labels），`status/responseTimeMs/lastCheck` 归 probe 独占
 - **对账**：端口对账随每次 `syncStackServices`（该 stack 名下集合外的行删除）；stack 消失对账在全量列表成功后 `pruneStackServices`——agent 不可达 ≠ 已删除，探测失败的 agent 不对账
