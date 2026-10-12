@@ -394,3 +394,80 @@ func TestStackTaskFollow(t *testing.T) {
 		t.Fatal("double stop should fail")
 	}
 }
+
+// follow 中任务日志被截短（cappedBuffer 淘汰语义）：快照短于 offset →
+// offset 归零重发全量快照（尾部缓冲语义，接受重复段）
+func TestStackTaskFollowLogEvictionReset(t *testing.T) {
+	dir := t.TempDir()
+	seedStackDir(t, dir, "web")
+	p := gitDeployProvider(t, dir, true) // up 睡 1s：留出泵窗口
+	var mu sync.Mutex
+	var got []string
+	p.SetSender(func(proxyID string, data []byte) {
+		if !strings.HasPrefix(proxyID, "stacktask:") {
+			t.Errorf("proxyId prefix missing: %q", proxyID)
+		}
+		mu.Lock()
+		got = append(got, string(data))
+		mu.Unlock()
+	})
+	closed := make(chan string, 1)
+	p.SetCloser(func(proxyID, reason string) { closed <- reason })
+
+	res, err := p.UpStack("web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := res["taskId"].(string)
+	if _, err := p.FollowTask(map[string]interface{}{"taskId": taskID, "followId": "f1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 等首拍增量（offset 记到当前快照长度）
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		n := len(got)
+		mu.Unlock()
+		if n > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first pump never pushed")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// 锁内截短任务日志（模拟 cappedBuffer 淘汰后快照变短）
+	p.mu.Lock()
+	p.tasks[taskID].Log = &cappedBuffer{limit: stackLogLimit}
+	_, _ = p.tasks[taskID].Log.Write([]byte("tail-after-eviction\n"))
+	p.mu.Unlock()
+
+	// 下一拍：重发从 0 开始——最后一帧恰为完整新快照
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		last := ""
+		if len(got) > 0 {
+			last = got[len(got)-1]
+		}
+		n := len(got)
+		mu.Unlock()
+		if n >= 2 && last == "tail-after-eviction\n" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("eviction reset never resent full snapshot, got=%d last=%q", n, last)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	select {
+	case reason := <-closed:
+		if reason != stackTaskSuccess {
+			t.Fatalf("close reason = %q", reason)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("follow never closed")
+	}
+}

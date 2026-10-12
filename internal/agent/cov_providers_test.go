@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
+	"github.com/cuihairu/cockpit/internal/proxy"
 )
 
 // covFakeDockerDaemon 在临时 unix socket 上模拟 docker daemon 的
@@ -140,4 +142,40 @@ func fakeBinDirCov(t *testing.T, scripts map[string]string) {
 		}
 	}
 	t.Setenv("PATH", dir)
+}
+
+// TestCovStackFollowWiring 覆盖任务日志 follow 的 sender/closer 出口
+// （registerStackProvider 内联闭包的具名化，P2 ②）：proxy_data 带
+// proxyId=connId 双同值载荷，proxy_close 带 reason。
+func TestCovStackFollowWiring(t *testing.T) {
+	h := proxy.NewHandler()
+	h.Start(nil) // AttachConn(nil) 仅置 running；真实发送走 SetSendFunc 捕获
+	var mu sync.Mutex
+	var msgs []*protocol.Message
+	h.SetSendFunc(func(m *protocol.Message) error {
+		mu.Lock()
+		msgs = append(msgs, m)
+		mu.Unlock()
+		return nil
+	})
+
+	stackTaskFollowSender(h)("stacktask:f1", []byte("up -d web"))
+	stackTaskFollowCloser(h)("stacktask:f1", "success")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(msgs) != 2 {
+		t.Fatalf("msgs = %d, want 2", len(msgs))
+	}
+	if msgs[0].Type != protocol.MessageTypeProxyData {
+		t.Errorf("sender type = %v, want proxy_data", msgs[0].Type)
+	}
+	for _, k := range []string{"proxyId", "connId"} {
+		if msgs[0].Payload[k] != "stacktask:f1" {
+			t.Errorf("sender %s = %v, want stacktask:f1", k, msgs[0].Payload[k])
+		}
+	}
+	if msgs[1].Type != protocol.MessageTypeProxyClose || msgs[1].Payload["reason"] != "success" {
+		t.Errorf("closer = %v / reason %v, want proxy_close success", msgs[1].Type, msgs[1].Payload["reason"])
+	}
 }

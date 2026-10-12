@@ -12,6 +12,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
 	"github.com/cuihairu/cockpit/internal/docker"
 	"github.com/cuihairu/cockpit/internal/protocol"
+	"github.com/cuihairu/cockpit/internal/proxy"
 )
 
 // setupProviders 根据检测到的 capabilities 注册 RPC Provider。
@@ -210,17 +211,28 @@ func (a *Agent) registerStackProvider(cap protocol.Capability, baseline rpc.Base
 	sp.SetBaseline(baseline)
 	// 任务日志流式推送（P2 ②）：复用日志尾随同款 proxy_data 通道，
 	// proxyId="stacktask:<followId>"，server 按 前缀分派（follow 无对端连接）
-	sp.SetSender(func(proxyID string, data []byte) {
-		a.proxyHandler.SendMessage(protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{
+	sp.SetSender(stackTaskFollowSender(a.proxyHandler))
+	sp.SetCloser(stackTaskFollowCloser(a.proxyHandler))
+	a.rpc.RegisterProvider(sp)
+}
+
+// stackTaskFollowSender / stackTaskFollowCloser 任务日志 follow 的数据面出口：
+// follow 无对端连接，proxy_data/proxy_close 的 connId 与 proxyId 同值，
+// server 只按 "stacktask:" 前缀分派（独立具名函数，wiring 可单测）。
+func stackTaskFollowSender(h *proxy.Handler) func(string, []byte) {
+	return func(proxyID string, data []byte) {
+		_ = h.SendMessage(protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{
 			"proxyId": proxyID,
-			"connId":  proxyID, // follow 无对端连接，server 只按 proxyId 前缀分派
+			"connId":  proxyID,
 			"data":    data,
 		}))
-	})
-	sp.SetCloser(func(proxyID, reason string) {
-		a.proxyHandler.SendClose(proxyID, proxyID, reason)
-	})
-	a.rpc.RegisterProvider(sp)
+	}
+}
+
+func stackTaskFollowCloser(h *proxy.Handler) func(string, string) {
+	return func(proxyID, reason string) {
+		h.SendClose(proxyID, proxyID, reason)
+	}
 }
 
 // registerPVEProvider 注册 PVE Provider
