@@ -132,11 +132,11 @@ describe('isAgentExpired', () => {
   })
 
   it('last_seen 缺失/为 0 视为未过期（不隐藏首帧数据）', () => {
-    expect(isAgentExpired(baseAgent({ lastSeen: '0' }), 5)).toBe(false)
+    expect(isAgentExpired(baseAgent({ lastSeen: '0' as unknown as number }), 5)).toBe(false)
     expect(isAgentExpired(baseAgent({}), 5)).toBe(false)
   })
 
   it('字符串时间戳归一（与 formatOfflineDuration 同口径）', () => {
-    expect(isAgentExpired(baseAgent({ lastSeen: String(now - 3600) }), 5)).toBe(true)
+    expect(isAgentExpired(baseAgent({ lastSeen: String(now - 3600) as unknown as number }), 5)).toBe(true)
   })
 })

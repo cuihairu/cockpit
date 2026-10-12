@@ -107,7 +107,7 @@ describe('MobileTabBar', () => {
   })
 
   it('无名路由被更多面板过滤（flattenLeaves 防御分支）', async () => {
-    renderBar([...FULL_ROUTES, { path: '/orphan' }])
+    renderBar([...FULL_ROUTES, { path: '/orphan' }] as typeof FULL_ROUTES)
     fireEvent.click(screen.getByText('更多'))
     expect(await screen.findByText('反向代理')).toBeInTheDocument()
     expect(screen.queryByText('/orphan')).not.toBeInTheDocument()

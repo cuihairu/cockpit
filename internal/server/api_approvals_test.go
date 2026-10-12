@@ -274,6 +274,23 @@ func TestApprovalSubmitNoJobSideEffects(t *testing.T) {
 	if v.Status != storage.JobStatusPending {
 		t.Fatalf("status = %s", v.Status)
 	}
+	// 异步派发 goroutine（dispatchJobAsync）在测试结束后继续回写终态——不等
+	// 终态收口，db.Close 后 goroutine 仍在写库，TempDir RemoveAll 与 WAL
+	// 落盘竞态（unlinkat ENOTEMPTY，CI race 腿 flaky 根因）
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		job, err := s.db.GetJob(v.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.Status != storage.JobStatusPending && job.Status != storage.JobStatusRunning {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s never reached terminal: %s", v.ID, job.Status)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // TestApprovalRoutingGuards 路由分发面：serveAPI → approvals 分发 case、
