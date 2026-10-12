@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -77,6 +78,41 @@ func TestClientListContainers(t *testing.T) {
 	}
 	if containers[1].Name != "" {
 		t.Errorf("containers[1].Name should be empty for no names, got %v", containers[1].Name)
+	}
+}
+
+// 端口映射随 list API 一并返回（inventory 联动用）：host=PublicPort，
+// 容器侧=PrivatePort，协议原样透传
+func TestClientListContainersPorts(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/containers/json") {
+			json.NewEncoder(w).Encode([]container.Summary{
+				{
+					ID:    "p1",
+					State: "running",
+					Ports: []container.PortSummary{
+						{PrivatePort: 80, PublicPort: 8080, Type: "tcp"},
+						{PrivatePort: 53, PublicPort: 5353, Type: "udp"},
+						{PrivatePort: 9090, Type: "tcp"}, // 未发布：PublicPort 0
+					},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	containers, err := c.ListContainers(true)
+	if err != nil {
+		t.Fatalf("ListContainers() error = %v", err)
+	}
+	want := []PortInfo{
+		{HostPort: 8080, ContainerPort: 80, Proto: "tcp"},
+		{HostPort: 5353, ContainerPort: 53, Proto: "udp"},
+		{HostPort: 0, ContainerPort: 9090, Proto: "tcp"},
+	}
+	if !reflect.DeepEqual(containers[0].Ports, want) {
+		t.Errorf("ports = %+v, want %+v", containers[0].Ports, want)
 	}
 }
 

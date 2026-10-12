@@ -693,6 +693,19 @@ func (d *DB) DeleteService(id string) error {
 	return d.db.Delete(&Service{}, "id = ?", id).Error
 }
 
+// UpsertServiceTarget 同步服务条目的寻址字段（名称/归属/类型/URL/标签）。
+// 探测状态字段（status/responseTimeMs/lastCheck）由 probe 独占维护，这里
+// 永不触碰。labels 无法经此清空（struct Updates 跳零值），删行走 DeleteService。
+// 先 Updates 后 create：UpsertService 的 FirstOrCreate 会用库内值回填入参，
+// 顺序颠倒会让 Updates 拿到回填后的旧值写个寂寞。
+func (d *DB) UpsertServiceTarget(service *Service) error {
+	if err := d.db.Model(&Service{}).Where("id = ?", service.ID).Updates(service).Error; err != nil {
+		return err
+	}
+	cp := *service
+	return d.UpsertService(&cp)
+}
+
 // ============ Gateway 操作 ============
 
 // UpsertGateway 插入或更新网关

@@ -86,6 +86,13 @@ func composeWebContainers() []docker.ContainerInfo {
 		{
 			ID: "c1", Name: "web-nginx-1", Image: "nginx:latest", State: "running", Status: "Up 2 hours",
 			Labels: map[string]string{"com.docker.compose.project": "web", "com.docker.compose.service": "nginx"},
+			// 已发布 tcp + udp、未发布（HostPort 0）三种形态
+			Ports: []docker.PortInfo{
+				{HostPort: 8080, ContainerPort: 80, Proto: "tcp"},
+				{HostPort: 8443, ContainerPort: 443, Proto: "tcp"},
+				{HostPort: 0, ContainerPort: 9090, Proto: "tcp"},
+				{HostPort: 5353, ContainerPort: 53, Proto: "udp"},
+			},
 		},
 		{
 			ID: "c2", Name: "web-redis-1", Image: "redis:7", State: "exited", Status: "Exited (0)",
@@ -204,6 +211,15 @@ func TestStackProviderList(t *testing.T) {
 	}
 	if len(web.Services) != 2 || web.Services[0].Name != "nginx" || web.Services[0].ContainerID != "c1" {
 		t.Errorf("web services = %+v", web.Services)
+	}
+	// 端口只收已发布条目（HostPort>0），未发布/协议保留原样（tcp 过滤在 server 侧）
+	nginxPorts := web.Services[0].Ports
+	if len(nginxPorts) != 3 || nginxPorts[0].HostPort != 8080 || nginxPorts[0].Proto != "tcp" ||
+		nginxPorts[2].HostPort != 5353 || nginxPorts[2].Proto != "udp" {
+		t.Errorf("nginx ports = %+v", nginxPorts)
+	}
+	if len(web.Services[1].Ports) != 0 {
+		t.Errorf("redis ports = %+v", web.Services[1].Ports)
 	}
 	if web.LastAction != "up" || web.LastStatus != "success" || web.LastDeployedAt != 1700000000 {
 		t.Errorf("web last task = %s/%s/%d", web.LastAction, web.LastStatus, web.LastDeployedAt)

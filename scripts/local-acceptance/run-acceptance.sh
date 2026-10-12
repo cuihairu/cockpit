@@ -28,6 +28,8 @@
 #       drift 409 → drift 列表 → ext:: 拒绝 → 审计 stack_git_pull
 #   A19 Git-to-deploy ②（P2）：webhook token 鉴权 → 触发拉取+部署 →
 #       部署历史 → 任务日志 follow 流 eof → 审计 stack_webhook_deploy
+#   A20 inventory 联动（P2 ③）：stack 已发布端口自动收编为 CMDB 服务台账行
+#       （labels.source=stack），udp/未发布端口不入账，服务视图带端口列表
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -85,8 +87,11 @@ step "1. 启动 fake Docker Engine + fake compose CLI"
 mkdir -p "$WORK/bin" "$WORK/state" "$WORK/stacks"
 cp "$HERE/fake-docker" "$WORK/bin/docker"
 chmod +x "$WORK/bin/docker"
+# 直接编译成二进制再启动：go run 的 DAEMON_PID 是包装进程，kill 收不掉
+# 真正的子进程（本机曾积压 9 个泄漏 daemon）
+( go build -o "$WORK/fake-docker-daemon" "$HERE/fake-docker-daemon.go" ) || { fail "build fake daemon"; exit 1; }
 FAKE_DOCKER_SOCK="$WORK/docker.sock" FAKE_COMPOSE_STATE_DIR="$WORK/state" \
-  go run -tags acceptance "$HERE/fake-docker-daemon.go" >"$WORK/daemon.log" 2>&1 &
+  "$WORK/fake-docker-daemon" >"$WORK/daemon.log" 2>&1 &
 DAEMON_PID=$!
 retry 10 bash -c "[ -S '$WORK/docker.sock' ]" || { fail "fake daemon socket"; exit 1; }
 pass "fake engine on $WORK/docker.sock"
@@ -145,6 +150,8 @@ COMPOSE_OK='services:
       - "8080:80"
   redis:
     image: redis:7-alpine
+    ports:
+      - "5353:53/udp"
 '
 COMPOSE_BAD='services:
   web:
@@ -265,6 +272,28 @@ step "A17. 目录自检信息（stack.info）"
 agg="$(curl -sL "${AUTH[@]}" "$API/stacks")"
 check_eq "A17.1 聚合响应含 agentInfo" "$(echo "$agg" | jq -r --arg id "$AGENT_ID" '.agentInfo[$id].dirWritable // empty')" "true"
 check_eq "A17.2 自检带 stacks 目录路径" "$(echo "$agg" | jq -r --arg id "$AGENT_ID" '.agentInfo[$id].dir // empty' | grep -c 'stacks' || true)" "1"
+
+step "A20. inventory 联动（P2 ③）：stack 端口 → CMDB 服务台账行"
+# cache-demo 已在 A15 up（compose 带 8080:80 tcp + 5353:53 udp）；
+# 触发一次列表同步（handleAgentStacks → cacheStack → syncStackServices）
+curl -s "${AUTH[@]}" "$API/stacks/agents/$AGENT_ID" >/dev/null
+ROW_ID="stackport-$AGENT_ID-cache-demo-8080-tcp"
+svc_row() {
+  curl -s "${AUTH[@]}" "$API/resources/services" | jq -e --arg id "$ROW_ID" \
+    '.data[]? | select(.id == $id and .labels.source == "stack" and .labels.stack == "cache-demo" and .type == "tcp")' >/dev/null
+}
+retry 10 svc_row
+check_eq "A20.1 发布端口收编为台账行" "$(svc_row && echo yes || echo no)" "yes"
+row="$(curl -s "${AUTH[@]}" "$API/resources/services" | jq -r --arg id "$ROW_ID" '.data[]? | select(.id == $id)')"
+check_eq "A20.2 台账行 name 定型" "$(echo "$row" | jq -r '.name // empty')" "cache-demo-8080"
+check_eq "A20.2 URL 指向 agent 主机端口" "$(echo "$row" | jq -r '.url // empty | test("^tcp://.+:8080$")')" "true"
+check_eq "A20.3 udp 端口不入台账（probe 仅 TCP/HTTP）" \
+  "$(curl -s "${AUTH[@]}" "$API/resources/services" | jq --arg id "stackport-$AGENT_ID-cache-demo-5353-udp" '[.data[]? | select(.id == $id)] | length')" "0"
+st="$(curl -s "${AUTH[@]}" "$API/stacks/agents/$AGENT_ID/cache-demo")"
+check_eq "A20.4 服务视图带端口列表" \
+  "$(echo "$st" | jq -r '[.services[]? | select(.name == "nginx") | .ports[]? | select(.hostPort == 8080 and .proto == "tcp")] | length')" "1"
+check_eq "A20.4 udp 端口原样展示" \
+  "$(echo "$st" | jq -r '[.services[]? | select(.name == "redis") | .ports[]? | select(.hostPort == 5353 and .proto == "udp")] | length')" "1"
 
 step "A18. Git-to-deploy ①（远端仓库接入 + 拉取 + drift + 冲突）"
 # 本地 bare 仓当远端（不依赖外网凭据）；seed 工作仓推一版初始内容

@@ -299,3 +299,40 @@ EventSource 不能带 Authorization 头，与 followLogs 同款 fetch 流保持�
 
 **重开条件**：出现多 forge / 多 secret 需求（升级 HMAC 签名）；大仓库 fetch
 常态化超时（考虑 agent 侧后台 fetch 队列替代同步 RPC）。
+
+## D-2026-10-13-1 Stack 端口自动收编为 CMDB 服务台账行（P2 ③）口径
+
+**定了什么**：inventory 联动不做手动映射，改为自动收编——agent 的
+`stack.list`/`stack.status` 服务条目新增 `ports: [{hostPort, containerPort,
+proto}]`（docker list API 自带，零额外 Engine 调用，只收 hostPort>0）；
+server 在 `cacheStack` 同步点调用 `syncStackServices`，每条 **tcp** 已发布
+端口 upsert 一条 `services` 表台账行：确定性 ID `stackport-<agentId>-<stack>-
+<hostPort>-tcp`、`Type=tcp`、`URL=tcp://<agentIP>:<hostPort>`、
+`Labels{source:"stack", agent_id, stack}`。host 取 agent IP（registry 优先、
+离线退 DB 档案，空 IP 不建行）；IP 变更刷新 URL 但探测状态保留（新 store
+方法 `UpsertServiceTarget` 只动寻址字段，status/lastCheck 归 probe 独占）。
+对账两把刷子：端口对账随每次 sync（集合外的行删除），stack 消失对账只在
+全量列表成功后跑（agent 不可达 ≠ 已删除）。udp/sctp 只在 UI 展示不收编。
+probe 侧零改动——`Type=tcp` 天然走既有 `parseHostPort` + `CheckTCP`。
+
+**为什么**：①自动收编而非手动映射——CMDB Service 行目前只由 inventory.yaml
+文件管理（无 CRUD API、UI 只读），手动关联没有落点，而 stack 端口本就是
+机器可读的事实源，让用户手工抄录一遍 YAML 只是制造新的漂移面；②tcp-only——
+probe 只实现了 TCP/HTTP 探测，收编 udp 行等于制造永远 down 的假阴性告警；
+③确定性 ID + labels.source——同 `dns-` 先例：删除无需反查、对账永不触碰
+inventory 声明或手工登记的行；④探测状态与寻址字段分家——列表轮询是高频
+写路径，若整体 upsert 会把 probe 刚写好的 status/lastCheck 清掉，探测历史
+永远停留在两次轮询之间；⑤Dashboard 计数耦合接受——stack 台账行本就该被
+监控，ServicesUp/Down 把它一并算入是台账语义的自然结果。
+
+**备选**：①给 Service 加独立 `stackPortID` 外键字段——否决：labels 已是
+既定外挂位（DNS 先例），加列要动迁移；②probe 直接读 stack 缓存而不经
+services 表——否决：probe 的枚举/通知/结果落库全套围着 Service 行转，
+旁路第二实现没有收益；③udp 行也收编、probe 显示 unreachable——否决：
+用户无法区分「服务挂了」和「协议探不了」；④按 compose labels 手动挑选
+哪些端口入账——否决：等真实需求出现再加，自动全量 + 对账已经是可预期
+的最小语义。
+
+**重开条件**：CMDB Service 出现手工 CRUD（考虑 inventory 声明与自动收编
+的冲突规则）；probe 支持 udp（放开 udp 收编）；用户要求某些端口不入账
+（加 compose label 黑名单）。

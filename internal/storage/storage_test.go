@@ -799,6 +799,60 @@ func TestListServices(t *testing.T) {
 	}
 }
 
+// UpsertServiceTarget 只动寻址字段：探测状态保留；缺行时创建
+func TestUpsertServiceTarget(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+
+	agentID := "agent-1"
+	target := &Service{
+		ID: "svc-1", Name: "web-8080", AgentID: &agentID,
+		Type: "tcp", URL: "tcp://10.0.0.5:8080",
+		Labels: map[string]string{"source": "stack", "stack": "web"},
+	}
+
+	// 缺行 → 创建
+	if err := db.UpsertServiceTarget(target); err != nil {
+		t.Fatalf("UpsertServiceTarget() create error = %v", err)
+	}
+	got, err := db.GetService("svc-1")
+	if err != nil {
+		t.Fatalf("GetService() error = %v", err)
+	}
+	if got.Name != "web-8080" || got.URL != "tcp://10.0.0.5:8080" || got.Labels["stack"] != "web" {
+		t.Errorf("created row = %+v", got)
+	}
+
+	// 已有行：探测状态写入后重同步，状态保留、寻址字段刷新
+	if err := db.UpdateServiceStatus("svc-1", "up", 12, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	target.URL = "tcp://10.0.0.9:8080"
+	target.Labels = map[string]string{"source": "stack", "stack": "web", "agent_id": "agent-1"}
+	if err := db.UpsertServiceTarget(target); err != nil {
+		t.Fatalf("UpsertServiceTarget() update error = %v", err)
+	}
+	got, err = db.GetService("svc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "up" || got.ResponseTimeMs != 12 {
+		t.Errorf("probe state wiped: %+v", got)
+	}
+	if got.URL != "tcp://10.0.0.9:8080" || got.Labels["agent_id"] != "agent-1" {
+		t.Errorf("target fields stale: %+v", got)
+	}
+}
+
+func TestUpsertServiceTargetDBError(t *testing.T) {
+	db := testDB(t)
+	db.Close() // Updates 闭库即错，错误分支先行返回
+
+	if err := db.UpsertServiceTarget(&Service{ID: "svc-1", Name: "x"}); err == nil {
+		t.Fatal("UpsertServiceTarget() on closed db: want error, got nil")
+	}
+}
+
 func TestDeleteService(t *testing.T) {
 	db := testDB(t)
 	var err error

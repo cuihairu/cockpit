@@ -402,6 +402,13 @@ export interface RoleInfo {
 }
 
 // ========== 应用部署（Compose Stack） ==========
+// 单条已发布端口映射（hostPort=0 的未发布端口不会出现在列表里）
+export interface StackPort {
+  hostPort: number
+  containerPort: number
+  proto: string // tcp / udp / sctp
+}
+
 // Stack 内单个服务的信息
 export interface StackService {
   name: string
@@ -409,6 +416,7 @@ export interface StackService {
   state: string // running / exited 等（docker 状态）
   status: string // 可读状态串，如 "Up 2 hours"
   containerId: string
+  ports?: StackPort[] // 已发布端口（inventory 联动会收编成 CMDB 台账行）
 }
 
 // Stack 列表视图（聚合所有 agent；离线 agent 条目 online=false 且无 services）

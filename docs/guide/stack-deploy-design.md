@@ -72,7 +72,7 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 
 | 方法 | 参数 | 返回 | 同步/异步 |
 |------|------|------|-----------|
-| `stack.list` | — | `[{name, services: [{name, image, state, status}], running, total}]` | 同步 |
+| `stack.list` | — | `[{name, services: [{name, image, state, status, ports?: [{hostPort, containerPort, proto}]}], running, total}]`（ports 为已发布端口，P2 ③） | 同步 |
 | `stack.status` | `name` | 单个 stack 的服务/容器明细（含容器 ID，可跳转 `/docker`） | 同步 |
 | `stack.file.get` | `name` | `{compose, env, modifiedAt}` | 同步 |
 | `stack.file.save` | `name, compose, env?` | 保存前执行 `docker compose config -q` 校验，失败返回错误不落盘 | 同步 |
@@ -131,6 +131,7 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 
 - agent 上报 list 时 upsert；agent 离线时 `GET /api/stacks` 用它渲染灰态
 - 部署历史表（每次 up/down 一条记录）推迟到 M1.5，P1 只靠审计日志追溯
+- inventory 联动（P2 ③）不新建表：stack 已发布端口收编为 `services` 表台账行（`labels.source=stack`，确定性 ID `stackport-*`），probe 复用既有服务探测
 
 ### 审计
 
@@ -177,7 +178,7 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 
 - [x] stacks 目录升级为 Git worktree：远端仓库拉取 → drift 提示（本地改动 vs 仓库）（2026-10-12，见下文[Git-to-deploy ① 设计](#p2--git-to-deploy-设计)）
 - [x] webhook 触发部署；部署日志流式推送（复用 proxy data 通道，替代轮询）（2026-10-12，见下文[P2 ② 设计](#p2--设计2026-10-12)）
-- [ ] inventory 联动：stack 与 CMDB 服务条目关联，probe 直接探测 stack 暴露的端口
+- [x] inventory 联动：stack 与 CMDB 服务条目关联，probe 直接探测 stack 暴露的端口（2026-10-13，见下文[P2 ③ 设计](#p2--设计2026-10-13)）
 
 #### P2 ① Git-to-deploy 设计（2026-10-12）
 
@@ -214,6 +215,19 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 - server 侧 `POST /api/stacks/agents/{agentId}/tasks/{taskId}/follow`：NDJSON 流（`{"data":...}` 增量 / `{"eof":true,"reason":终态}`），注册表配额全局 8 / 单 agent 4，帧缓冲 256 满则丢帧（不堵 agent WS 读循环）；客户端断开由 `r.Context().Done()` 感知并补发 `stack.task.follow.stop`；浏览类不记审计
 - web 侧 StackDetail：任务运行期打开 follow 替代 2s 轮询，`eof` 后清实时区 + 拉一次终态；follow 打不开（老 agent 502 等）自动回退轮询并提示「轮询中」
 - 已知限制：CallAgent 30s 超时约束 `stack.git.deploy` 的 fetch 时长（大仓库慢网络下 webhook 部署可能超时失败，重试即可）
+
+#### P2 ③ 设计（2026-10-13）
+
+**inventory 联动**（决策记录见 decision-log D-2026-10-13-1）：
+
+- **事实源**：agent 的 `stack.list` / `stack.status` 服务条目自带已发布端口（docker list API 的 `Ports` 随容器列表返回，零额外 Engine 调用）；`ContainerInfo.Ports` → `StackService.Ports: [{hostPort, containerPort, proto}]`，只收 `hostPort > 0`——未发布端口仅容器网络内可达，probe 触达不到
+- **收编**：server 在 `cacheStack`（列表同步点，单 agent 与聚合两条路径共用）调用 `syncStackServices`：每条 **tcp** 已发布端口 upsert 一条 CMDB `Service` 台账行，`Type=tcp`、`URL=tcp://<agentIP>:<hostPort>` → probe 走既有 `parseHostPort` + `CheckTCP`，**probe 侧零改动**；不新建表，复用 `services` 表
+- **确定性 ID**：`stackport-<agentId>-<stack>-<hostPort>-tcp`（同 `dns-` 先例），端口消失时按 ID 删除，无需反查
+- **来源标记**：`Labels{source: "stack", agent_id, stack}`（同 DNS `labels.source=dns` 先例）；inventory 声明或手工登记的行无此标签，对账永不触碰
+- **host 取 agent IP**：registry 优先、离线退回 DB 档案；IP 为空不建行（没有探测目标）；IP 变更时刷新 URL 但探测状态保留——`storage.UpsertServiceTarget` 只动寻址字段（name/agent/type/url/labels），`status/responseTimeMs/lastCheck` 归 probe 独占
+- **对账**：端口对账随每次 `syncStackServices`（该 stack 名下集合外的行删除）；stack 消失对账在全量列表成功后 `pruneStackServices`——agent 不可达 ≠ 已删除，探测失败的 agent 不对账
+- **边界**：udp/sctp 端口只在 UI 展示不收编（probe 仅实现 TCP/HTTP）；不做手动映射 UI（CMDB Service 仍由 inventory.yaml 文件管理，没有手工关联的落点，等真实需求出现再议）；Dashboard 的 ServicesUp/Down 计数把 stack 行一并算入（可接受的耦合，台账行本就该被监控）
+- **尽力而为**：联动失败只记日志，不影响 stack 缓存与 API 应答（同 DNS 台账联动 D20 口径）
 
 ## 风险与权衡
 
@@ -301,7 +315,11 @@ compose build/pull/profiles/healthcheck 语义、`COCKPIT_STACKS_DIR` 权限实�
 
 **验收中发现并修复**：① `stack_provider.go` Call 分派漏 `git.deploy` case（方法已实现但 RPC 到不了，报 unknown stack action）——单测直调方法掩盖分派缺失，补 case 并将一条用例改走 `Call` 覆盖分发行；② A19.4/A19.5 断言与异步落库竞速（webhook 受理即 200，部署历史行要等 `startStackDeployment` 写入、`trackStackTask` 轮到终态才翻转 status）——改为轮询 `action=up && status!=running` 行后再断言；③ follow 收尾的 `stop` RPC 改即发即忘（goroutine）——同步等应答在 agent 无应答时被 CallAgent 30s 超时拖住 handler 返回（no-flusher 500 路径 race 步实测 30s）。race 步顺带实锤一个**存量**竞态：`RemoteSessionManager.Get/List` 直透存储指针，WS 数据面 goroutine 并发 `UpdateStatus` 写同一会话字段——读侧改锁内浅拷贝快照（独立 fix commit）；server 包 race 插桩本地实测 1004s，CI race 步 timeout 900s→1500s。
 
-## 参考
+### 2026-10-13 本机验收（P2 ③ inventory 联动，A20）
+
+**环境**：本地 bare 仓当远端（A18 已建）+ fake-docker-daemon（A20 起 `compose up` 解析 compose ports 段输出 `Ports` 公共/私有端口对）+ 真 agent 二进制；`cache-demo` 带 `8080:80 tcp` + `5353:53 udp` 双端口。
+
+**验收中发现并修复**：A20 断言误用 `/api/services`（该路由不存在，CMDB 台账行挂在 `/api/resources/services` 资源派发下）——服务行实际已正确落库（DB 直查 + probe 巡检均见行），纯断言 URL 笔误；修正后 A20.1-A20.4 全绿（台账行收编/name 定型/URL 指向 agent 主机端口/udp 不入账/服务视图带端口列表）。
 
 - [Komodo Git-to-deploy](https://komo.do/docs/intro)——Core/Periphery 同构、自动化程序（可对照本方案 P2）
 - [Dockge](https://github.com/louislam/dockge)——compose-file-first、目录即栈

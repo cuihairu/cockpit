@@ -180,13 +180,21 @@ func paramString(params map[string]interface{}, key string) string {
 
 // ============ 数据结构（JSON 输出统一 camelCase） ============
 
+// StackPort 一条已发布端口映射（仅 hostPort>0 的条目进入列表）
+type StackPort struct {
+	HostPort      int    `json:"hostPort"`
+	ContainerPort int    `json:"containerPort"`
+	Proto         string `json:"proto"` // tcp/udp/sctp
+}
+
 // StackService stack 内的单个服务容器
 type StackService struct {
-	Name        string `json:"name"`
-	Image       string `json:"image"`
-	State       string `json:"state"`
-	Status      string `json:"status"`
-	ContainerID string `json:"containerId"`
+	Name        string      `json:"name"`
+	Image       string      `json:"image"`
+	State       string      `json:"state"`
+	Status      string      `json:"status"`
+	ContainerID string      `json:"containerId"`
+	Ports       []StackPort `json:"ports,omitempty"` // 已发布端口（inventory 联动用，P2 ③）
 }
 
 // StackSummary 单个 stack 的状态总览
@@ -355,6 +363,18 @@ func (p *StackProvider) buildSummary(name, composeFile string, containers []dock
 			summary.Running++
 		}
 		summary.Total++
+		// 已发布端口（hostPort>0）随服务上报；未发布的端口仅容器网络内可达，
+		// probe 无法触达，不进列表
+		ports := make([]StackPort, 0, len(cnt.Ports))
+		for _, p := range cnt.Ports {
+			if p.HostPort > 0 {
+				ports = append(ports, StackPort{
+					HostPort:      p.HostPort,
+					ContainerPort: p.ContainerPort,
+					Proto:         p.Proto,
+				})
+			}
+		}
 		summary.Services = append(summary.Services, StackService{
 			// 服务名取 compose service label，缺失时退化为容器名
 			Name:        firstNonEmpty(cnt.Labels["com.docker.compose.service"], cnt.Name),
@@ -362,6 +382,7 @@ func (p *StackProvider) buildSummary(name, composeFile string, containers []dock
 			State:       state,
 			Status:      cnt.Status,
 			ContainerID: cnt.ID,
+			Ports:       ports,
 		})
 	}
 	if lt := readLastTask(filepath.Join(p.dir, name, stackReservedDir)); lt != nil {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -482,6 +483,7 @@ func (s *Server) handleAgentStacks(w http.ResponseWriter, r *http.Request, agent
 
 	items, _ := rpcResp.Data.([]interface{})
 	views := make([]stackView, 0, len(items))
+	keepStacks := make(map[string]bool)
 	for _, raw := range items {
 		item, ok := raw.(map[string]interface{})
 		if !ok {
@@ -489,7 +491,9 @@ func (s *Server) handleAgentStacks(w http.ResponseWriter, r *http.Request, agent
 		}
 		views = append(views, s.stackViewFromItem(agent, item, true))
 		s.cacheStack(agent.ID, item)
+		keepStacks[mapString(item, "name")] = true
 	}
+	s.pruneStackServices(agent.ID, keepStacks)
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"stacks": views,
 		"info":   s.fetchStackInfo(agentID),
@@ -564,6 +568,7 @@ func (s *Server) handleStacksAll(w http.ResponseWriter, r *http.Request) {
 	views := make([]stackView, 0)
 	agentInfo := make(map[string]interface{})
 	onlineAgents := make(map[string]bool)
+	stackKeep := make(map[string]map[string]bool)
 	deadline := time.After(stackAggregateTimeout)
 loop:
 	for {
@@ -576,6 +581,14 @@ loop:
 			if res.info != nil {
 				agentInfo[res.agent.ID] = res.info
 			}
+			if res.items != nil {
+				// 列表成功才对账（items 为 nil = agent 探测失败，其台账行不动）
+				keep := make(map[string]bool)
+				for _, item := range res.items {
+					keep[mapString(item, "name")] = true
+				}
+				stackKeep[res.agent.ID] = keep
+			}
 			for _, item := range res.items {
 				views = append(views, s.stackViewFromItem(res.agent, item, true))
 				s.cacheStack(res.agent.ID, item)
@@ -583,6 +596,9 @@ loop:
 		case <-deadline:
 			break loop
 		}
+	}
+	for agentID, keep := range stackKeep {
+		s.pruneStackServices(agentID, keep)
 	}
 
 	// 离线/失败的 agent 用缓存补齐灰态
@@ -636,7 +652,7 @@ func (s *Server) stackViewFromItem(agent *Agent, item map[string]interface{}, on
 	return view
 }
 
-// cacheStack 把 agent 上报的 stack 条目写入缓存表
+// cacheStack 把 agent 上报的 stack 条目写入缓存表，并同步其端口台账行
 func (s *Server) cacheStack(agentID string, item map[string]interface{}) {
 	err := s.db.UpsertStack(&storage.Stack{
 		AgentID:        agentID,
@@ -650,6 +666,113 @@ func (s *Server) cacheStack(agentID string, item map[string]interface{}) {
 	if err != nil {
 		fmt.Printf("cache stack %s/%s: %v\n", agentID, mapString(item, "name"), err)
 	}
+	s.syncStackServices(agentID, mapString(item, "name"), item)
+}
+
+// ============ inventory 联动（P2 ③，stack-deploy-design.md） ============
+
+// stackCMDBSourceLabel stack 来源台账行的 labels.source 值（对账判定依据，
+// 同 dns- 先例）；inventory 声明或手工登记的行不带此标签，永不被对账触碰
+const stackCMDBSourceLabel = "stack"
+
+// syncStackServices 把 stack 已发布端口同步成 CMDB Service 台账行：agent
+// 上报的容器端口是事实源，probe 据台账行定时探测（Type=tcp → CheckTCP，
+// probe 侧零改动）。只收 tcp（probe 仅实现 TCP/HTTP 探测）；host 取 agent
+// IP，缺失不建行——没有探测目标。确定性 ID（同 dns- 先例）让端口消失时
+// 无需反查即可定位删除。联动尽力而为：失败只记日志，不影响 stack 缓存。
+func (s *Server) syncStackServices(agentID, stackName string, item map[string]interface{}) {
+	host := s.stackAgentIP(agentID)
+	if host == "" {
+		return
+	}
+	expected := make(map[string]bool)
+	if services, ok := item["services"].([]interface{}); ok {
+		for _, raw := range services {
+			svc, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			ports, ok := svc["ports"].([]interface{})
+			if !ok {
+				continue
+			}
+			for _, rawPort := range ports {
+				pm, ok := rawPort.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				hostPort := mapInt(pm, "hostPort")
+				if mapString(pm, "proto") != "tcp" || hostPort <= 0 {
+					continue // 未发布/非 tcp 端口 probe 触达不到，不建行
+				}
+				agentIDCopy := agentID
+				id := fmt.Sprintf("stackport-%s-%s-%d-tcp", agentID, stackName, hostPort)
+				expected[id] = true
+				if err := s.db.UpsertServiceTarget(&storage.Service{
+					ID:      id,
+					Name:    fmt.Sprintf("%s-%d", stackName, hostPort),
+					AgentID: &agentIDCopy,
+					Type:    "tcp",
+					URL:     fmt.Sprintf("tcp://%s:%d", host, hostPort),
+					Labels: map[string]string{
+						"source":   stackCMDBSourceLabel,
+						"agent_id": agentID,
+						"stack":    stackName,
+					},
+				}); err != nil {
+					log.Printf("stack service sync %s: %v", id, err)
+				}
+			}
+		}
+	}
+	// 端口对账：该 stack 名下 source=stack 行里不在本轮集合的删掉
+	// （端口下线/容器重建换端口后，孤儿行不再被 probe 空转探测）
+	existing, err := s.db.ListServices()
+	if err != nil {
+		log.Printf("stack service sync %s/%s: %v", agentID, stackName, err)
+		return
+	}
+	for _, svc := range existing {
+		l := svc.Labels
+		if l["source"] != stackCMDBSourceLabel || l["agent_id"] != agentID || l["stack"] != stackName {
+			continue
+		}
+		if expected[svc.ID] {
+			continue
+		}
+		// 删除失败不记不修：对账随每次列表同步自愈重试
+		_ = s.db.DeleteService(svc.ID)
+	}
+}
+
+// pruneStackServices 清掉该 agent 名下已消失 stack 的台账行（全量列表对账：
+// agent 在线且列表成功但某 stack 不再上报 → 行随之下线）。只在全量列表
+// 成功后调用；agent 探测失败/离线不对账（不可达 ≠ 已删除）。
+func (s *Server) pruneStackServices(agentID string, keep map[string]bool) {
+	existing, err := s.db.ListServices()
+	if err != nil {
+		log.Printf("stack service prune %s: %v", agentID, err)
+		return
+	}
+	for _, svc := range existing {
+		l := svc.Labels
+		if l["source"] != stackCMDBSourceLabel || l["agent_id"] != agentID || keep[l["stack"]] {
+			continue
+		}
+		// 删除失败不记不修：对账随每次列表同步自愈重试
+		_ = s.db.DeleteService(svc.ID)
+	}
+}
+
+// stackAgentIP 台账行探测目标 host：registry 优先，离线退回 DB 档案
+func (s *Server) stackAgentIP(agentID string) string {
+	if agent, ok := s.registry.Get(agentID); ok {
+		return agent.IP
+	}
+	if st, err := s.db.GetAgent(agentID); err == nil {
+		return st.IP
+	}
+	return ""
 }
 
 // stackAgentName 缓存条目里补 agent 主机名（agent 不在线时 registry 可能查不到）

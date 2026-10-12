@@ -33,7 +33,7 @@ import {
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { api } from '@/services/api'
-import type { StackService, StackView } from '@/types'
+import type { StackPort, StackService, StackView } from '@/types'
 import { PermGuard } from '@/components/PermGuard'
 import TerminalBlock from './TerminalBlock'
 import {
@@ -71,6 +71,18 @@ const serviceColumns = (
     key: 'state',
     width: 110,
     render: (state: string) => <Tag color={serviceStateColor[state] || 'default'}>{state}</Tag>,
+  },
+  {
+    // 已发布端口（hostPort→containerPort/proto）；未发布的端口不进列表。
+    // server 侧同步逻辑只收 tcp 行，这里展示如实呈现全部协议
+    title: '端口',
+    dataIndex: 'ports',
+    key: 'ports',
+    ellipsis: true,
+    render: (ports: StackPort[] | undefined) => {
+      if (!ports || ports.length === 0) return '-'
+      return ports.map((p) => `${p.hostPort}→${p.containerPort}/${p.proto}`).join(', ')
+    },
   },
   {
     title: '详情',

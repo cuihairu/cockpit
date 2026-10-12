@@ -21,20 +21,6 @@ const apiMock = vi.hoisted(() => ({
   followStackTask: vi.fn(),
 }))
 
-// follow 流响应（ReadableStream 按 NDJSON 帧推送，同 LogsPanel 测试）
-const ndjson = (frames: object[]) => {
-  const enc = new TextEncoder()
-  const chunks = frames.map((f) => enc.encode(JSON.stringify(f) + '\n'))
-  let i = 0
-  return new ReadableStream({
-    pull(controller) {
-      if (i < chunks.length) controller.enqueue(chunks[i++])
-      else controller.close()
-    },
-  })
-}
-const followResp = (frames: object[]) =>
-  ({ ok: true, status: 200, body: ndjson(frames) }) as unknown as Response
 vi.mock('@/services/api', () => ({ api: apiMock }))
 vi.mock('@/hooks/usePerm', () => ({ usePerm: () => true }))
 
@@ -116,6 +102,31 @@ describe('StackDetail', () => {
     expect(within(rNginx).getByText('running').closest('.ant-tag')?.className).toContain('ant-tag-green')
     expect(within(rWeird).getAllByText('-').length).toBeGreaterThanOrEqual(1)
     expect(within(rNginx).getByText('Up 2 hours')).toBeInTheDocument()
+  })
+
+  it('服务表端口列：已发布端口格式化，空数组与缺失兜底 -', async () => {
+    apiMock.getStackDetail.mockResolvedValue({
+      running: 1, total: 3,
+      services: [
+        {
+          name: 'nginx', image: 'nginx:latest', state: 'running', status: 'Up', containerId: 'c1',
+          ports: [
+            { hostPort: 8080, containerPort: 80, proto: 'tcp' },
+            { hostPort: 5353, containerPort: 53, proto: 'udp' },
+          ],
+        },
+        { name: 'redis', image: 'redis:7', state: 'running', status: 'Up', containerId: 'c2', ports: [] },
+        { name: 'worker', image: 'w:1', state: 'exited', status: 'Exited (0)', containerId: 'c3' },
+      ],
+    })
+    renderDetail()
+    await openDetail()
+    await screen.findByText('8080→80/tcp, 5353→53/udp')
+    const rows = Array.from(drawer().querySelectorAll<HTMLTableRowElement>('tr.ant-table-row'))
+    for (const name of ['redis', 'worker']) {
+      const tr = rows.find((r) => r.textContent?.includes(name))!
+      expect(within(tr).getByText('-')).toBeInTheDocument()
+    }
   })
 
   it('停止/拉取镜像下发；重启在无运行服务时禁用', async () => {

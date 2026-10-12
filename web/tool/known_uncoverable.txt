@@ -44,10 +44,10 @@ pages/Proxy/index.tsx:147 空域名运行时校验：表单 required + validator
 pages/Proxy/index.tsx:148 同上（错误文案）
 pages/Proxy/index.tsx:149 同上（return）
 pages/Docker/index.tsx:189 动作 switch default 抛错：action 来自固定按钮集合，未知值不可达
-pages/Stacks/StackDetail.tsx:138 任务换帧重置 `?? ''` 右边：setTaskMeta 恒置非空（up/delete 两入口），重置块仅在 taskId 变化时执行，taskMeta 归空不可达
-pages/Stacks/StackDetail.tsx:194 frames.pop() ?? '' 右边：String.split 恒返回 ≥1 元素，pop 结果不可能 undefined，死防御
-pages/Stacks/StackDetail.tsx:262 taskActionLabel 未知 action 兜底：后端 action 枚举封闭，四类已知动作已全测；同款兜底语义已由历史 Tab 用例实证（原 191，② 插行使 +71 漂移）
-pages/Stacks/StackDetail.tsx:279 同款兜底（failed 日志弹窗标题内 taskActionLabel ||）：同上口径
+pages/Stacks/StackDetail.tsx:150 任务换帧重置 `?? ''` 右边：setTaskMeta 恒置非空（up/delete 两入口），重置块仅在 taskId 变化时执行，taskMeta 归空不可达（原 138，③ 端口列插行使 +12 漂移）
+pages/Stacks/StackDetail.tsx:206 frames.pop() ?? '' 右边：String.split 恒返回 ≥1 元素，pop 结果不可能 undefined，死防御（原 194，③ +12 漂移）
+pages/Stacks/StackDetail.tsx:274 taskActionLabel 未知 action 兜底：后端 action 枚举封闭，四类已知动作已全测；同款兜底语义已由历史 Tab 用例实证（原 191，② +71、③ +12 漂移）
+pages/Stacks/StackDetail.tsx:291 同款兜底（failed 日志弹窗标题内 taskActionLabel ||）：同上口径（原 279，③ +12 漂移）
 pages/Cron/index.tsx:41 空表达式早退：表单 required 前置，简写/五段式主路径已实证
 pages/DNS/index.tsx:170 导出文件名 zone?.name ?? zoneId 兜底：导出必先选 zone（未选 zone 无导出入口），zone.name 主路径已断言，zoneId 命名侧数据形态不可达
 

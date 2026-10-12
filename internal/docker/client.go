@@ -92,6 +92,16 @@ type ContainerInfo struct {
 	Status  string
 	Labels  map[string]string
 	Created int64
+	// Ports 端口映射（list API 自带，零额外请求；PublicPort 0 = 未发布，
+	// 仅容器网络内可达）。stack inventory 联动据此收编 CMDB（P2 ③）
+	Ports []PortInfo
+}
+
+// PortInfo 一条端口映射
+type PortInfo struct {
+	HostPort      int    `json:"hostPort"` // 宿主侧发布端口（0 = 未发布）
+	ContainerPort int    `json:"containerPort"`
+	Proto         string `json:"proto"` // tcp/udp/sctp
 }
 
 // ListContainers lists containers
@@ -109,6 +119,14 @@ func (c *Client) ListContainers(all bool) ([]ContainerInfo, error) {
 		if len(cnt.Names) > 0 {
 			name = cnt.Names[0]
 		}
+		ports := make([]PortInfo, 0, len(cnt.Ports))
+		for _, p := range cnt.Ports {
+			ports = append(ports, PortInfo{
+				HostPort:      int(p.PublicPort),
+				ContainerPort: int(p.PrivatePort),
+				Proto:         p.Type,
+			})
+		}
 		result[i] = ContainerInfo{
 			ID:      cnt.ID,
 			Name:    name,
@@ -118,6 +136,7 @@ func (c *Client) ListContainers(all bool) ([]ContainerInfo, error) {
 			Status:  cnt.Status,
 			Labels:  cnt.Labels,
 			Created: cnt.Created,
+			Ports:   ports,
 		}
 	}
 

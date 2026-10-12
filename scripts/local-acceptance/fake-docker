@@ -107,8 +107,45 @@ case "$sub" in
     for svc in $svcs; do
       image="$(echo "$body" | sed -n "/^  $svc:/,/^[A-Za-z]/p" | grep -E '^[[:space:]]+image:' | head -1 | sed -E 's/.*image:[[:space:]]*//; s/["'\'']//g')"
       [ -n "$image" ] || image="unknown:latest"
+      # ports 段：- "8080:80/tcp" / - "8080:80" → 发布映射（host:container[/proto]，
+      # 缺省 tcp）；短语法 "80"（仅容器端口）不带 PublicPort，与真实 daemon 一致
+      ports_json=""
+      blk="$(echo "$body" | awk -v hdr="^  $svc:" '
+        $0 ~ hdr { f=1; print; next }
+        f && /^  [A-Za-z0-9_-]+:/ { f=0 }
+        f { print }')"
+      in_ports=0
+      while IFS= read -r line; do
+        case "$line" in
+          *ports:*) in_ports=1; continue ;;
+        esac
+        [ "$in_ports" = 1 ] || continue
+        case "$line" in
+          "    "*) ;;                      # 服务块内的缩进行
+          *) in_ports=0; continue ;;       # 回到 2 空格同层 key，ports 段结束
+        esac
+        entry="${line#*- }"
+        [ "$entry" != "$line" ] || continue
+        entry="${entry%\"}"; entry="${entry#\"}"
+        entry="${entry%\'}"; entry="${entry#\'}"
+        case "$entry" in
+          *:*)
+            host="${entry%%:*}"
+            rest="${entry#*:}"
+            cport="${rest%%/*}"
+            proto="${rest#*/}"
+            [ "$proto" = "$rest" ] && proto="tcp"
+            pj="{\"PrivatePort\":$cport,\"PublicPort\":$host,\"Type\":\"$proto\"}"
+            if [ -n "$ports_json" ]; then ports_json="$ports_json,$pj"; else ports_json="$pj"; fi
+            ;;
+        esac
+      done <<PORTS
+$blk
+PORTS
+      ports_attr=""
+      [ -n "$ports_json" ] && ports_attr=",\"Ports\":[$ports_json]"
       id="fake$(printf '%s%s' "$project" "$svc" | md5sum | cut -c1-10)"
-      item="{\"ID\":\"$id\",\"Names\":[\"/${project}-${svc}-1\"],\"Image\":\"$image\",\"Created\":1700000000,\"State\":\"running\",\"Status\":\"Up 1 second\",\"Labels\":{\"com.docker.compose.project\":\"$project\",\"com.docker.compose.service\":\"$svc\"}}"
+      item="{\"ID\":\"$id\",\"Names\":[\"/${project}-${svc}-1\"],\"Image\":\"$image\",\"Created\":1700000000,\"State\":\"running\",\"Status\":\"Up 1 second\",\"Labels\":{\"com.docker.compose.project\":\"$project\",\"com.docker.compose.service\":\"$svc\"}$ports_attr}"
       if [ -n "$items" ]; then items="$items,$item"; else items="$item"; fi
       echo "[fake] Container ${project}-${svc}-1  Starting"
     done
