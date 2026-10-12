@@ -127,3 +127,32 @@ ID 冒名注册的口子。故过期只做「判定 + 标离线 + 列表隐藏 +
 web 不动服务端——否决：DB 侧假在线行无从判定，隐藏口径没有数据基础。**重开条件**：
 若需要「离线 N 天自动摘除清单」的资产轮转策略，应加**独立的保留期配置**（默认远长
 于 5 分钟，如 30 天）而非复用过期阈值，走 todo 立项。
+
+## D-2026-10-12-1 密码箱第二波开工（巡检授权自拍板）
+
+**定了什么**：按 `vault-design.md` V6 第二波登记直接开工（用户 2026-10-12 巡检授权自拍板，
+硬验收①与硬件真机项维持等待）：①**服务端 API token 加 vault 源**——DNS（cloudflare
+api_token / dnspod login_token / alidns access_key+secret_key）、overlay（zerotier /
+tailscale api_token）、notification（ntfy[].token / webhook[].secret / telegram[].bot_token）、
+SMTP（password），yaml 字段支持 `vault:<path>` 显式引用，server 启动 initVault 后一次性解析
+进内存 config；**优先级 env > yaml > vault**（vault 只经显式引用生效，不做约定路径隐式查找
+——隐式查找会让「vault 里有没有条目」悄悄改变配置语义）；引用解析失败（ErrNotFound/读失败）
+**启动即 logFatal 不降级**（V7 同口径，错误消息只含 path 不含内容）；条目口径 `value`=凭据。
+②**ACME 私钥列加密落库**（`acme_certificates` 账户/证书私钥明文列 → vault core v1 密文，
+读兼容 v0/明文存量行，写全走加密）。③**inventory capability config 加密落库**
+（`agents.capabilities` JSON 内 `config.*` 现明文且无任何消费方 → 落库加密而非改 ref）。
+jenkins external ref 维持「随链接功能立项」不变。
+
+**为什么**：第二波三项都是 M1 盘点表上的已知欠账——API token 明文 yaml/用户口令同权限面
+暴露、ACME 私钥是域信任根（库文件拖走即私钥泄露）、capability config 随库落明文；M1 已把
+加密与解锁口径收敛进 vault 包，此三项都是纯消费侧接线，无新抽象。授权依据：仓内决策
+`vault-design.md` V6「第二波（登记后续）」+ 用户 2026-10-12 巡检令自拍板。
+
+**备选**：①约定路径隐式回填（字段空即查 vault）——否决：排查「token 到底从哪来」三源
+叠加不可解释，且无法区分「未配置」与「配置了但 vault 缺条目」；②capability config 改
+vault ref——否决：该字段当前零消费方，改 ref 是无消费者的间接层，先加密落库、出现消费方
+再议 ref；③ACME 私钥挪进 vault 条目（per-cert path）——否决：迁移面大且部署脚本
+（acme.sh 对接）依赖行内取数，列加密保持表结构零迁移。
+
+**重开条件**：外部密码箱 provider 落地后，`vault:` 引用语法天然跨 provider（path 语义由
+provider 解释）；若出现「同一 secret 多处共享」，再议条目别名/继承。
