@@ -51,10 +51,21 @@ func NewRemoteSessionManager() *RemoteSessionManager {
 	}
 }
 
+// Create 登记会话并自分配 UUID（REST 登记入口用）。
 func (m *RemoteSessionManager) Create(userID, username string, req RemoteSessionRequest) *RemoteSession {
+	return m.Register("", userID, username, req)
+}
+
+// Register 登记一个活会话。id 为空则生成 UUID（Create 语义）；terminal /
+// guacamole 链路传入自身会话 ID，使台账与数据面索引同源（审计 Session 字段
+// 与控制面 DELETE 命中同一 ID，D-2026-10-12-4）。
+func (m *RemoteSessionManager) Register(id, userID, username string, req RemoteSessionRequest) *RemoteSession {
+	if id == "" {
+		id = uuid.New().String()
+	}
 	now := time.Now()
 	session := &RemoteSession{
-		ID:        uuid.New().String(),
+		ID:        id,
 		UserID:    userID,
 		Username:  username,
 		AgentID:   req.AgentID,
@@ -67,7 +78,7 @@ func (m *RemoteSessionManager) Create(userID, username string, req RemoteSession
 	}
 
 	m.mu.Lock()
-	m.sessions[session.ID] = session
+	m.sessions[id] = session
 	m.mu.Unlock()
 
 	return session

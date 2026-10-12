@@ -122,6 +122,15 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 	terminalByConn[connID] = session
 	terminalSessionsMu.Unlock()
 
+	// 会话台账登记（D-2026-10-12-4）：terminal 会话 ID 与控制面同源，
+	// 状态随建立/成功/失败/关闭推进（pending→connected→closed/failed）。
+	s.remoteSessions.Register(sessionID, ticket.UserID, ticket.Username, RemoteSessionRequest{
+		AgentID:  agentID,
+		Protocol: remoteProtocol,
+		Host:     host,
+		Port:     port,
+	})
+
 	// 输出流录制（开关默认开；失败仅记日志，不影响远控主链路）
 	if s.recordingEnabled() {
 		session.recorder = s.startRecording(session)
@@ -165,8 +174,11 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 		delete(terminalSessions, sessionID)
 		delete(terminalByConn, connID)
 		terminalSessionsMu.Unlock()
+		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "agent unreachable")
 		return
 	}
+	// proxy_new 已下发：会话建立（浏览器 ↔ agent 数据面就绪）
+	_ = s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusConnected, "")
 
 	conn.WriteJSON(map[string]interface{}{
 		"type":    "connect",
@@ -311,6 +323,8 @@ func (s *Server) closeTerminalSession(session *TerminalSession) {
 	delete(terminalByConn, session.ConnID)
 	terminalSessionsMu.Unlock()
 	log.Printf("Terminal session closed: %s", session.ID)
+	// 台账收口：关闭即终态（与审计结束同刻回填）
+	_ = s.remoteSessions.UpdateStatus(session.ID, RemoteSessionStatusClosed, "")
 
 	s.auditRemoteEnd(session.UserID, session.Username, "", "",
 		&audit.RemoteSessionDetails{
@@ -363,6 +377,8 @@ func (s *Server) HandleTerminalClose(connID string, reason string) {
 	})
 	session.ClientWS.Close()
 	log.Printf("Terminal connection closed: %s, reason: %s", connID, reason)
+	// 台账收口（agent 先断时立即回填，不等 keepalive 兜底）
+	_ = s.remoteSessions.UpdateStatus(session.ID, RemoteSessionStatusClosed, "")
 }
 
 // registerRemoteAPI 注册远程连接 API
@@ -607,6 +623,12 @@ func (s *Server) handleRemoteSession(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, http.StatusOK, session)
 	case http.MethodDelete:
+		// 活会话优先真正终止（断开数据面，状态落 closed）；仅台账记录才
+		// 走软删（D-2026-10-12-4：DELETE 语义从「删登记」收口为「先终止后删登记」）
+		if s.terminateLiveSession(id) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if ok := s.remoteSessions.Delete(id); !ok {
 			http.Error(w, "Remote session not found", http.StatusNotFound)
 			return
@@ -645,4 +667,25 @@ func (s *Server) handleRemoteSessionCreate(w http.ResponseWriter, r *http.Reques
 	userInfo, _ := auth.GetUserFromContext(r)
 	session := s.remoteSessions.Create(userInfo.UserID, userInfo.Username, req)
 	s.writeJSON(w, http.StatusCreated, session)
+}
+
+// terminateLiveSession 终止一个活会话（terminal 或 guacamole），返回是否命中。
+// 关闭动作本身收口在两条链路各自的 close 函数（幂等 + 审计 + 台账状态），
+// 这里只做定位——按会话 ID 在两个数据面索引里查。
+func (s *Server) terminateLiveSession(id string) bool {
+	terminalSessionsMu.Lock()
+	ts, ok := terminalSessions[id]
+	terminalSessionsMu.Unlock()
+	if ok {
+		s.closeTerminalSession(ts)
+		return true
+	}
+	guacSessionsMu.Lock()
+	gs, ok := guacSessions[id]
+	guacSessionsMu.Unlock()
+	if ok {
+		s.closeGuacamoleSession(gs)
+		return true
+	}
+	return false
 }

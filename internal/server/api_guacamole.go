@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/audit"
+	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -59,6 +60,14 @@ func guacdAddr() string {
 	}
 	return guacdDefaultAddr
 }
+
+// guacSessions 活会话索引（sessionID -> 会话），与 terminal 的
+// terminalSessions 对称——此前 guacamole 会话是 handler 局部变量，
+// 控制面（会话台账 / DELETE 终止）不可达（D-2026-10-12-4 补）。
+var (
+	guacSessions   = make(map[string]*GuacamoleSession)
+	guacSessionsMu sync.Mutex
+)
 
 // GuacamoleSession 一条 Guacamole 桌面会话：浏览器 WS ↔ guacd TCP 双跳管道。
 // 职责：票据校验（握手时）+ 出口策略 + 审计 + 双向字节管道。
@@ -425,6 +434,18 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		done:     make(chan struct{}),
 	}
 
+	// 会话台账登记（D-2026-10-12-4）：guacamole 会话 ID 与控制面同源，
+	// 使台账状态（pending→connected→closed/failed）与活会话生命周期对齐。
+	s.remoteSessions.Register(sessionID, ticket.UserID, ticket.Username, RemoteSessionRequest{
+		AgentID:  agentID,
+		Protocol: protocol.RemoteProtocol(protocolStr),
+		Host:     host,
+		Port:     port,
+	})
+	guacSessionsMu.Lock()
+	guacSessions[sessionID] = session
+	guacSessionsMu.Unlock()
+
 	// 5a. tunnel UUID 先发浏览器（INTERNAL_DATA 单元素指令，即
 	// Guacamole.Tunnel.INTERNAL_DATA_OPCODE 空 opcode）：common-js 首条指令
 	// 若为内部指令单元素则 setUUID，否则仅置 OPEN（uuid 留 null）。
@@ -445,6 +466,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		conn.Close()
 		_ = guacdConn.Close()
 		relay.Close()
+		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "select write failed")
 		return
 	}
 	// 读 guacd 的 select 响应：args 参数名列表。connect 必须与这份列表逐位
@@ -456,6 +478,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		conn.Close()
 		_ = guacdConn.Close()
 		relay.Close()
+		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "read select response failed")
 		return
 	}
 	argNames := guacParseArgNames(argsLine)
@@ -464,6 +487,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		conn.Close()
 		_ = guacdConn.Close()
 		relay.Close()
+		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "malformed args response")
 		return
 	}
 	if width <= 0 {
@@ -492,6 +516,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		conn.Close()
 		_ = guacdConn.Close()
 		relay.Close()
+		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "relay addr malformed")
 		return
 	}
 	relayPort, _ := strconv.Atoi(relayPortStr)
@@ -507,6 +532,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		conn.Close()
 		_ = guacdConn.Close()
 		relay.Close()
+		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "handshake write failed")
 		return
 	}
 	session.guacdRd = hsReader
@@ -540,6 +566,9 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 			Session:  sessionID,
 			Egress:   egressMatch.summary(),
 		})
+
+	// 台账状态推进：pending → connected（握手完成、审计已落）
+	_ = s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusConnected, "")
 
 	log.Printf("Guacamole session created: %s -> %s:%d (%s)", sessionID, host, port, protocolStr)
 
@@ -692,6 +721,12 @@ func (s *Server) closeGuacamoleSession(gs *GuacamoleSession) {
 			gs.relay.Close() // 拆中继 + 通知 agent 拆目标连接
 		}
 		log.Printf("Guacamole session closed: %s", gs.ID)
+
+		// 台账收口：关闭即终态 + 移出活会话索引（D-2026-10-12-4）
+		_ = s.remoteSessions.UpdateStatus(gs.ID, RemoteSessionStatusClosed, "")
+		guacSessionsMu.Lock()
+		delete(guacSessions, gs.ID)
+		guacSessionsMu.Unlock()
 
 		// M3 D2：收集 guacd 卷里的 .guac → recordingsDir（先于审计，
 		// 文件与元数据同刻回填；失败只记日志不阻塞审计出口）

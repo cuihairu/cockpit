@@ -202,3 +202,32 @@ provider 解释）；若出现「同一 secret 多处共享」，再议条目别
 
 **重开条件**：回滚窗口过后（确认无回退需求）删除五列；若单证书目标数超 8 出现真实需求，
 再议上限放宽或改为 target 组（group）引用。
+
+## D-2026-10-12-4 远控会话生命周期登记收口
+
+**定了什么**：将 `RemoteSessionManager` 从孤立的 REST 登记入口接线到 terminal /
+guacamole 两条活会话链路。terminal 链路：`handleTerminalWebSocket` 在票据校验后
+`Register(pending)`，proxy_new 下发成功后 `UpdateStatus(connected)`，
+`closeTerminalSession` 与 `HandleTerminalClose` 各 `UpdateStatus(closed)`。guacamole
+链路：`handleGuacamoleWebSocket` 在会话对象创建后 `Register(pending)` + 插入
+`guacSessions` 全局索引，握手完成 + 审计开始后 `UpdateStatus(connected)`，5 条早失败
+路径各 `UpdateStatus(failed)`，`closeGuacamoleSession` 内 `UpdateStatus(closed)` +
+移出 `guacSessions`。`DELETE /api/remote/sessions/{id}` 语义从「删登记」收口为
+「先终止后删登记」：先查 `terminalSessions` / `guacSessions` 两个数据面索引，命中
+则调对应 close 函数（幂等 + 审计 + 台账收口），未命中走 `Delete` 软删。
+
+**为什么**：原 `RemoteSessionManager` 只有 REST `/api/remote/sessions` POST/GET/DELETE
+入口，web 前端从未调用（零引用），`UpdateStatus` 在生产代码中从未被调用——管理
+员无法从 API 看到当前有哪些活跃远控会话，DELETE 也无法真正断开已建立的连接。
+设计文档 D4 明确要求「`RemoteSessionManager` 会话登记（pending/connected/closed/
+failed）」，本次接线使台账状态与活会话生命周期对齐。
+
+**备选**：①只接线 terminal 不接线 guacamole——否决：guacamole 同样是远控会话，
+管理语义应统一；②DELETE 只删登记不终止活会话——否决：管理员点「删除」期望断开
+连接，留着活会话只删台账会造成「已删除但仍连接」的安全错觉；③引入独立会话 ID
+而非复用会话自身 ID——否决：审计 `Session` 字段、录制 `SessionID`、`guacSessions`
+索引均使用会话自身 ID，复用使台账与数据面同源，DELETE 命中同一 ID。
+
+**重开条件**：若未来 web 前端接入会话列表展示，需补充 REST 查询权限点（当前
+`terminal:write` 仅覆盖票据签发）；若 guacd 会话量增长导致 `guacSessions` 内存
+压力，再议 LRU 淘汰策略。

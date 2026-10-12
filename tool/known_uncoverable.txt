@@ -51,10 +51,10 @@ internal/agent/rpc/service_windows_scm.go:20,20	2. serviceWindowsMgr 默认闭�
 # ---------- 3. 死防御（2 语句） ----------
 
 scripts/acceptance/guac/probe/main.go:351,352	3. parseInstr len(Args)==0 防御（strings.Split 非空串恒 ≥1 段，不可达）
-internal/server/api_guacamole.go:240,241	3. collectGuacRecording 稳定后复 Stat 竞态防御（loop break 与复 Stat 之间无代码；仅外部并发 unlink 的微秒窗口可触发，单测不可确定性构造；复 Stat 取 info.Size() 供元数据，非冗余可删）
+internal/server/api_guacamole.go:249,250	3. collectGuacRecording 稳定后复 Stat 失败防御（loop break 与复 Stat 之间无代码；仅外部并发 unlink 的微秒窗口可触发，单测不可确定性构造；复 Stat 取 info.Size() 供元数据，非冗余可删）
 internal/server/guac_relay.go:66,67	3. net.Listen 回环临时端口失败防御（127.0.0.1:0 由内核分配端口，仅 fd 耗尽才失败，进程内单测不可构造）
 internal/server/api_guacamole.go:377,390	3. startGuacRelay listen 失败分支（同 guac_relay.go:66,67 根因，中继起不来即 listen 失败）
-internal/server/api_guacamole.go:491,496	3. relayAddr SplitHostPort 失败防御（恒为 listener.Addr().String() 的 host:port 形态）
+internal/server/api_guacamole.go:515,521	3. relayAddr SplitHostPort 失败防御（恒为 listener.Addr().String() 的 host:port 形态，不可达）
 scripts/acceptance/agent-backup/probe/main.go:426,427	3. buildTree 回调 filepath.Rel 死防御（p 恒由同一 root 的 filepath.Walk 派生，POSIX 同根不可失败）
 scripts/acceptance/agent-backup/probe/main.go:553,554	3. writeEvilTar WriteHeader 失败分支（tar.Writer→gzip→os.File 纯本地写链，仅磁盘满/fd 级故障可触发，无注入点）
 scripts/acceptance/agent-backup/probe/main.go:560,562	3. writeEvilTar 越界条目写失败清理路径（同上磁盘级错误不可构造）
@@ -82,7 +82,6 @@ cmd/cockpit-probe-agent/main.go:52,54	3. run() 内 probeagent.New(cfg) 失败防
 # 降级 log）现由 closed-db 传输面测试命中，删除登记。
 
 internal/server/api_jobs.go:245,246	4. 带登录态的用户分支（handler 单测无 auth middleware，Actor 恒 unknown；真名分支由登录流程整链覆盖）
-internal/server/api_jobs.go:285,286	3. dispatch 后台 goroutine 标记 running 失败仅降级 log（闭库/终态竞态时机决定是否盖到——M2d 全量绿、M2e 两跑皆漏，竞态窗口类）
 internal/server/api_jobs.go:300,301	3. C7 守卫 MarkJobCancelledOutput 失败仅降级 log（后台 goroutine 中途失败，单行主键 UPDATE 不可构造失败）
 internal/server/api_jobs.go:340,341	4. cancel 带登录态的用户分支（同 242,243 口径）
 internal/server/api_jobs.go:348,350	3. cancel 后重读 GetJob 失败 500（同 handler 入口 GetJob 先行成功，SELECT 不可致错）
