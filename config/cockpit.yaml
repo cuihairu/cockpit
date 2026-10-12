@@ -127,3 +127,9 @@ dns:
 # vault:
 #   provider: local       # 默认本地加密实现（零外部依赖）；未知值启动报错
 #   session_ttl: 0        # provider 级解锁会话时长；0 = 进程生命周期
+#
+# 凭据字段可写 "vault:<path>" 引用密码箱条目（启动时解析，env 优先）：
+#   dns:
+#     cloudflare:
+#       api_token: "vault:dns/cloudflare"   # 条目 value=API token
+# 支持字段见 docs/guide/vault-design.md 第 5.1 节

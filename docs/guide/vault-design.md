@@ -118,6 +118,30 @@ vault:
   session_ttl: 0
 ```
 
+#### vault: 引用（V6 第二波）
+
+各凭据字段的值可写成 `vault:<path>` 显式引用，启动时经 provider 解析为条目 value
+（只进内存 config；解析失败启动即终止，错误只含字段名与 path）：
+
+```yaml
+dns:
+  cloudflare:
+    api_token: "vault:dns/cloudflare"     # 条目 value=API token
+notification:
+  telegram:
+    - bot_token: "vault:notify/telegram"
+      chat_id: "123456"
+```
+
+- **优先级 env > yaml > vault**：env 覆盖（`CLOUDFLARE_API_TOKEN` 等）先于 yaml 生效，
+  vault 引用只在 env 未覆盖该字段时存活；不做约定路径隐式回填（决策 D-2026-10-12-1）。
+- **支持字段**：`dns.cloudflare.api_token`、`dns.dnspod.login_token`、
+  `dns.alidns.access_key`/`secret_key`、`overlay.zerotier.api_token`、
+  `overlay.tailscale.api_token`、`notification.ntfy[].token`、
+  `notification.webhook[].secret`、`notification.telegram[].bot_token`、
+  `email.smtp.password`。
+- 条目口径：`value`=凭据本体；引用 path 无大小写/`..`（与条目 path 约定一致）。
+
 ### 5.2 环境变量（密钥注入，V5）
 
 | 变量 | 必填 | 默认值 | 含义 |

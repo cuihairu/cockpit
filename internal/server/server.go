@@ -99,6 +99,12 @@ func NewServer(cfg *config.Config) *Server {
 		logFatalf("Failed to init vault: %v", err)
 	}
 
+	// vault secret 引用解析（vault-design.md V6 第二波）：yaml 里的
+	// vault:<path> 一次性换成明文（只进内存 config）；失败启动即终止
+	if err := applyVaultSecretRefs(cfg, vaultProvider); err != nil {
+		logFatalf("Failed to resolve vault secret refs: %v", err)
+	}
+
 	authService := auth.NewService(db, auth.Options{
 		Secret:     cfg.JWT.Secret,
 		Expiration: cfg.JWT.Expiration,
