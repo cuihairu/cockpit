@@ -25,8 +25,10 @@ const errorClip = 256
 const valueClip = 128
 
 // sensitiveKeyRe 入参键命中即整条剔除（凭据纪律：口令/私钥/令牌不进留痕，
-// 同 proxy 凭据「不落盘、不进日志/审计」口径）。
-var sensitiveKeyRe = regexp.MustCompile(`(?i)pass|secret|token|credential|private`)
+// 同 proxy 凭据「不落盘、不进日志/审计」口径）。env = stack.file.save 的
+// .env 明文凭据负载（2026-10-12 验收实锤泄漏：SECRET=... 原文进留痕上行
+// 落审计表），键名即凭据载体，整条剔除。
+var sensitiveKeyRe = regexp.MustCompile(`(?i)pass|secret|token|credential|private|env`)
 
 // Recorder 执行留痕记录器：并发安全，Record 任意 goroutine 可调。
 type Recorder struct {

@@ -161,6 +161,7 @@ func TestSanitize(t *testing.T) {
 		"empty":      nil,
 		"password":   "leak",
 		"privateKey": "leak",
+		"env":        "SECRET_VALUE=leak",
 		"nested":     map[string]interface{}{"secret": "deep"},
 	})
 	if got["path"] != strings.Repeat("x", 128)+"…" {
@@ -172,7 +173,7 @@ func TestSanitize(t *testing.T) {
 	if got["nested"] != "…" {
 		t.Fatalf("nested = %q, want shape marker", got["nested"])
 	}
-	for _, k := range []string{"password", "privateKey"} {
+	for _, k := range []string{"password", "privateKey", "env"} {
 		if _, ok := got[k]; ok {
 			t.Fatalf("sensitive key %q not dropped", k)
 		}
