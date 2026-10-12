@@ -156,3 +156,58 @@ func TestValidateRemoteTargetForAgentRejectsMismatchedPort(t *testing.T) {
 		t.Fatalf("reason = %q, want allowed_ports guidance", reason)
 	}
 }
+
+// 多策略命中规则（D-2026-10-12-2）：同一 agent 多条策略按「任一策略同时
+// 放行目标与端口即放行」合并，与配置顺序无关；不跨策略拼凑。
+func TestMatchRemoteEgressMultiPolicyUnion(t *testing.T) {
+	policies := []*config.RemoteEgressPolicy{
+		{AgentID: "gw", AllowedTargets: []string{"10.0.0.0/24"}, AllowedPorts: []int{22}},
+		{AgentID: "gw", AllowedTargets: []string{"db.internal"}, AllowedPorts: []int{5900}},
+	}
+	newServer := func() *Server {
+		return &Server{cfg: &config.Config{RemoteControl: &config.RemoteControlConfig{
+			AllowedTargets: []string{"10.0.0.0/24", "db.internal"},
+			EgressPolicies: policies,
+		}}}
+	}
+
+	// 各策略各自的 (目标, 端口) 组合放行
+	for _, order := range [][]int{{0, 1}, {1, 0}} {
+		s := newServer()
+		s.cfg.RemoteControl.EgressPolicies = []*config.RemoteEgressPolicy{policies[order[0]], policies[order[1]]}
+		if m, reason := s.matchRemoteEgress("gw", "10.0.0.5", 22); m == nil {
+			t.Fatalf("policy A pair rejected (order %v): %s", order, reason)
+		}
+		if m, reason := s.matchRemoteEgress("gw", "db.internal", 5900); m == nil {
+			t.Fatalf("policy B pair rejected (order %v): %s", order, reason)
+		}
+		// 跨策略拼凑拒绝：A 的目标 × B 的端口
+		if m, _ := s.matchRemoteEgress("gw", "10.0.0.5", 5900); m != nil {
+			t.Fatalf("cross-policy pair allowed (order %v)", order)
+		}
+		if m, reason := s.matchRemoteEgress("gw", "db.internal", 22); m != nil {
+			t.Fatalf("cross-policy pair allowed (order %v): %s", order, reason)
+		}
+		// 目标命中但端口两条策略都不放行 → 端口文案
+		if m, reason := s.matchRemoteEgress("gw", "db.internal", 8080); m != nil || !strings.Contains(reason, "allowed_ports") {
+			t.Fatalf("pairless port: m=%v reason=%q", m, reason)
+		}
+	}
+}
+
+func TestMatchRemoteEgressNoPolicyForAgent(t *testing.T) {
+	s := &Server{cfg: &config.Config{RemoteControl: &config.RemoteControlConfig{
+		AllowedTargets: []string{"10.0.0.0/24"},
+		EgressPolicies: []*config.RemoteEgressPolicy{
+			{AgentID: "other", AllowedTargets: []string{"10.0.0.0/24"}, AllowedPorts: []int{22}},
+		},
+	}}}
+
+	allow, reason := s.validateRemoteTargetForAgent("gw", "10.0.0.5", 22)
+	if allow {
+		t.Fatal("agent without any policy must be denied")
+	}
+	if !strings.Contains(reason, "add it to remote_control.egress") || strings.Contains(reason, "allowed_targets") {
+		t.Fatalf("reason = %q, want agent-level egress guidance", reason)
+	}
+}

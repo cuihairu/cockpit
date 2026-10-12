@@ -117,24 +117,36 @@ func (s *Server) matchRemoteEgress(agentID, host string, port int) (*remoteEgres
 		return &remoteEgressMatch{Mode: "global-allow-list"}, ""
 	}
 
+	// 多策略命中规则（D-2026-10-12-2）：同一 agent 的多条 egress 策略按
+	// 「任一策略同时放行目标与端口即放行」合并判定，与配置顺序无关；
+	// 不跨策略拼凑（A 策略的目标 × B 策略的端口不构成放行）。
+	targetAllowed := false
+	agentListed := false
 	for _, policy := range cfg.EgressPolicies {
 		if policy == nil || strings.TrimSpace(policy.AgentID) != strings.TrimSpace(agentID) {
 			continue
 		}
+		agentListed = true
 		if !policy.allowsTarget(host) {
-			return nil, fmt.Sprintf("target host %q is not allowed for agent %q; add it to remote_control.egress[].allowed_targets", strings.TrimSpace(host), agentID)
+			continue
 		}
-		if !policy.allowsPort(port) {
-			return nil, fmt.Sprintf("target port %d is not allowed for agent %q; add it to remote_control.egress[].allowed_ports", port, agentID)
+		targetAllowed = true
+		if policy.allowsPort(port) {
+			return &remoteEgressMatch{
+				Mode:    "agent-egress",
+				AgentID: policy.AgentID,
+				Port:    port,
+			}, ""
 		}
-		return &remoteEgressMatch{
-			Mode:    "agent-egress",
-			AgentID: policy.AgentID,
-			Port:    port,
-		}, ""
 	}
 
-	return nil, fmt.Sprintf("agent %q is not allowed for remote egress; add it to remote_control.egress", agentID)
+	if !agentListed {
+		return nil, fmt.Sprintf("agent %q is not allowed for remote egress; add it to remote_control.egress", agentID)
+	}
+	if !targetAllowed {
+		return nil, fmt.Sprintf("target host %q is not allowed for agent %q; add it to remote_control.egress[].allowed_targets", strings.TrimSpace(host), agentID)
+	}
+	return nil, fmt.Sprintf("target port %d is not allowed for agent %q; add it to remote_control.egress[].allowed_ports", port, agentID)
 }
 
 func buildRemoteEgressPolicyViews(policies []*config.RemoteEgressPolicy) []*remoteEgressPolicyView {

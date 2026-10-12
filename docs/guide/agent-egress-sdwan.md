@@ -98,11 +98,11 @@ remote_control:
 - `remote_control.allowed_targets` 支持 CIDR。
 - `remote_control.egress` 支持按 Agent 约束目标和端口。
 - ticket 创建时会校验 `agent_id + host + port` 是否匹配策略。
+- 审计日志记录命中的出口 Agent、目标 IP、端口和协议（`RemoteSessionDetails.Egress`）。
+- **多策略命中规则已明确（D-2026-10-12-2）**：同一 Agent 配置多条 `egress[]` 时，按「任一策略同时放行目标与端口即放行」合并判定，与配置顺序无关；不跨策略拼凑（A 策略放行的目标 × B 策略放行的端口不构成放行）。Agent 未出现在任何策略中时，拒绝文案指向 `remote_control.egress`（补 Agent 级策略）；目标出现在某策略但 (目标, 端口) 组合不被任何策略覆盖时，拒绝文案指向 `allowed_ports`。
 
 后续建议：
 
-- 审计日志记录命中的出口 Agent、目标 IP、端口和协议。
-- 明确多策略命中规则和优先级。
 - 如果需要透明组网，再引入专用数据平面。
 
 该阶段能满足大部分“通过 Agent 访问内网 SSH/RDP/VNC”的需求，同时保持实现简单。
