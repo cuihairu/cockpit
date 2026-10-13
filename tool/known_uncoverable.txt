@@ -155,3 +155,6 @@ internal/server/api_stacks.go:242,243	3. CallAgent 传输层错误含 conflict�
 # TestCovStackFollowWiring（闭包具名化后直驱）与
 # TestStackTaskFollowLogEvictionReset（锁内截短任务日志构造淘汰）实测覆盖，
 # 2026-10-13 撤销登记——agent 模块独立 100% 门禁不接受登记）
+
+# —— 2026-10-13 persona provider 接入（vault.providers 配置节） ——
+internal/config/config.go:302,303	1. strictVaultProviders 将已解析 yaml.Node 重新编码喂 KnownFields 解码器，节点来自合法 yaml 文档，Encode 不可能失败，防御分支

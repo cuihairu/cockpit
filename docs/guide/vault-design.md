@@ -110,12 +110,25 @@ KDF 只在 vault 包定义一处：env key 走 `sha256`（兼容存量密文）�
 |------|------|--------|------|
 | `vault.provider` | string | `local` | 密码箱提供商，经注册表解析（`internal/vault.Register`）；未知值**启动即报错**，不降级（V7）。切换 provider 只改此值，业务代码零改动 |
 | `vault.session_ttl` | duration | `0` | provider 级解锁会话时长（`5m` 等 Go duration 写法）；`0` = 进程生命周期。local 实现随启动解锁，TTL 到期自动上锁后**需重启进程重新解锁**——自托管无人值守建议保持 `0`。用户级 vault token（10 分钟）在 API 层独立计时，不受此字段影响 |
+| `vault.providers.persona.endpoint` | string | —（persona 选中时必填） | persona Connect API 基址（`persona connect serve`，如 `http://127.0.0.1:8747`）。仅在 `vault.provider: persona` 时实例化；缺失/非法启动即报错（fail-fast 不降级） |
+| `vault.providers.persona.token` | string | —（必填） | persona Connect token（`pconn_…`，视同密码）；`PERSONA_CONNECT_TOKEN` env 优先，yaml 不落 secret。token 被拒（401）为显式错误，不按锁定处理 |
+| `vault.providers.persona.timeout` | duration | `5s` | Connect API HTTP 超时；须为正 |
+| `vault.providers.persona.session_ttl` | duration | `0`（回退 `vault.session_ttl`） | persona 会话时长；`Unlock` 走 health+items 双探握手，TTL 到期自动上锁后重跑 `Unlock` 即恢复 |
+
+`vault.providers.*` 子树按已知字段**严格解码**：未知字段（含未接入的
+provider 名）`Load` 即报错，防拼错键静默失效。`vault.providers` 节缺失或为
+空值时跳过检查，local-only 部署的配置不产生空节。
 
 ```yaml
 # 密码箱（provider 可替换；密钥只用 env 注入，yaml 中无任何密钥字段）
 vault:
   provider: local
   session_ttl: 0
+  # providers:            # 仅 provider 选中对应实现时生效（V7）
+  #   persona:
+  #     endpoint: http://127.0.0.1:8747
+  #     timeout: 5s
+  #     session_ttl: 30m   # token 用 PERSONA_CONNECT_TOKEN env 注入
 ```
 
 #### vault: 引用（V6 第二波）
@@ -148,6 +161,7 @@ notification:
 |------|------|--------|------|
 | `COCKPIT_VAULT_KEY` | 生产必填 | 回退 `TOTP_ENCRYPTION_KEY` | local provider 加密主密钥，`openssl rand -base64 32` 生成。未设置/过短（<32 字符）/命中内置弱默认前缀 → 启动 WARNING 并回落弱默认（仅供开发，日志可见，不阻断） |
 | `TOTP_ENCRYPTION_KEY` | 生产必填（既有） | 内置弱默认 | 既有 TOTP 域密钥；作为 `COCKPIT_VAULT_KEY` 未设置时的回退。两域共用密钥链入口但存储格式独立（TOTP 走 v0 裸格式，vault 写入走 `v1:` 版本前缀） |
+| `PERSONA_CONNECT_TOKEN` | `provider: persona` 时必填 | yaml 同名字段 | persona Connect token（`pconn_…`，视同密码）；env 优先于 yaml（惰性物化配置节，local-only 部署 yaml 不出现 persona 节）。token 永不进日志/错误消息/审计 |
 
 设置优先级：`COCKPIT_VAULT_KEY` > `TOTP_ENCRYPTION_KEY` > 内置弱默认（告警）。
 
@@ -164,3 +178,30 @@ path 规则：小写字母数字与 `/ _ . -`，不以 `/` 开头、不含 `..`�
 
 - `COCKPIT_NAS_TARGETS`（agent env JSON）：继续生效（零迁移）；vault 存在 `nas/` 条目时**整体覆盖** env 引导值（vault 为第一来源，V8）。
 - API 层 vault token：登录口令（+TOTP）重验签发、10 分钟、`X-Vault-Token` 头携带；条目写/删共用此门，列表只回元数据。
+
+### 5.5 persona provider（只读接入，2026-10-13）
+
+persona 密码箱经其 **HTTP Connect API**（`persona connect serve`，127.0.0.1 +
+Bearer token）接入为第二 provider，实现 `internal/vault/persona.go`；逐操作
+映射、错误分类与卡点见 [persona-vault-mapping.md](persona-vault-mapping.md)。
+
+- **只读**：persona Connect API 无写入/删除端点（写入路径上游未拍板）——
+  `Write`/`Delete` 会话门后显式 `ErrUnsupported`，不静默、不降级。条目只能在
+  persona 侧维护，cockpit 只读消费。
+- **Unlock 语义**：persona 无消费者解锁端点（凭据是 Connect token，vault 解锁
+  是属主行为）——`Unlock(passphrase)` 的口令参数不参与，握手 =
+  `GET /health`（存活）+ `GET /items`（token 有效且 vault 已解锁）双探；
+  `Lock` 仅关本地会话门。
+- **fail-closed**：连不上/超时/503 `vault_locked`/421/403/其他 5xx 一律包
+  `ErrLocked` 拒绝服务；401 token 被拒为显式错误（处置是换 token，不等解锁）；
+  404 → `ErrNotFound`。任何失败都不回退 local（V7 红线）。
+- **条目映射**：`Entry.Path`=persona 条目 UUID；`Kind`=persona type slug
+  （`password`/`api_key`/`totp`/`note`/`server_config`/`game_account`/
+  `software_license` 直通）；`Value` 取 `data` 变体的秘密字段
+  （`Password.password`、`ApiKey.api_key`、`TwoFactor.secret_key`、
+  `SecureNote.note`、`ServerConfig.password`（可空）、`GameToken.secret_key`、
+  `SoftwareLicense.license_key`）；`bank_card`/`certificate`/`identity` 无单一
+  秘密字段，`Value` 空、`Meta.persona_data` 列字段名清单（非敏感）。
+  `title`/`urls`/`updated_at` 进 `Meta.persona_*`（非敏感）。
+- **存量兼容**：切换 provider 只改 `vault.provider`，local 的 `vault_entries`
+  存量不动；切回 `local` 原条目完好（有测试佐证）。

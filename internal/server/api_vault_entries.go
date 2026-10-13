@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -81,6 +82,13 @@ func (s *Server) handleVaultEntry(w http.ResponseWriter, r *http.Request) {
 			Value:    req.Value,
 			Meta:     req.Meta,
 		})
+		if errors.Is(err, vault.ErrUnsupported) {
+			// 只读 provider（如 persona）：条目维护只能在 provider 侧进行
+			s.auditVaultAction(audit.ActionUpdate, userInfo.UserID, userInfo.Username,
+				audit.StatusFailure, ip, ua, entryPath, map[string]string{"reason": "unsupported by provider"})
+			http.Error(w, "Write not supported by vault provider", http.StatusNotImplemented)
+			return
+		}
 		if err != nil {
 			s.auditVaultAction(audit.ActionUpdate, userInfo.UserID, userInfo.Username,
 				audit.StatusFailure, ip, ua, entryPath, map[string]string{"reason": "write failed"})
@@ -99,6 +107,12 @@ func (s *Server) handleVaultEntry(w http.ResponseWriter, r *http.Request) {
 		err := s.vaultProvider.Delete(entryPath)
 		if err == vault.ErrNotFound {
 			http.Error(w, "Entry not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, vault.ErrUnsupported) {
+			s.auditVaultAction(audit.ActionDelete, userInfo.UserID, userInfo.Username,
+				audit.StatusFailure, ip, ua, entryPath, map[string]string{"reason": "unsupported by provider"})
+			http.Error(w, "Delete not supported by vault provider", http.StatusNotImplemented)
 			return
 		}
 		if err != nil {

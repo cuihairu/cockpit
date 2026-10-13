@@ -45,6 +45,9 @@ var (
 	ErrLocked          = errors.New("vault: locked")
 	ErrNotFound        = errors.New("vault: entry not found")
 	ErrUnknownProvider = errors.New("vault: unknown provider")
+	// ErrUnsupported 操作被 provider 不支持（如只读实现上的 Write/Delete）。
+	// 显式报错而非静默吞掉或降级（V7 红线：不降级）。
+	ErrUnsupported = errors.New("vault: operation not supported by provider")
 )
 
 // AuditFunc 审计钩子（V2）：vault 包统一发审计，实现不得自行落日志。

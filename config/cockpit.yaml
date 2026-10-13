@@ -128,6 +128,14 @@ dns:
 #   provider: local       # 默认本地加密实现（零外部依赖）；未知值启动报错
 #   session_ttl: 0        # provider 级解锁会话时长；0 = 进程生命周期
 #
+# persona provider（只读消费 persona Connect API；token 用
+# PERSONA_CONNECT_TOKEN env 注入，映射与卡点见 docs/guide/persona-vault-mapping.md）：
+#   providers:
+#     persona:
+#       endpoint: http://127.0.0.1:8747
+#       timeout: 5s
+#       session_ttl: 30m
+#
 # 凭据字段可写 "vault:<path>" 引用密码箱条目（启动时解析，env 优先）：
 #   dns:
 #     cloudflare:

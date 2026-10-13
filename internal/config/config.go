@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"regexp"
 	"time"
@@ -60,6 +62,32 @@ type VaultConfig struct {
 	Provider string `yaml:"provider,omitempty"`
 	// SessionTTL provider 级解锁会话时长；0 = 进程生命周期（自托管
 	// 无人值守重启默认）。用户级重验门（vault token 10min）在 API 层不受此影响
+	SessionTTL time.Duration `yaml:"session_ttl,omitempty"`
+	// Providers per-provider 配置节（V7：vault.providers.<name>.*）；仅在
+	// Provider 选中对应实现时生效。子树按已知字段严格解码，未知字段报错
+	// （防拼错键静默失效）
+	Providers *VaultProvidersConfig `yaml:"providers,omitempty"`
+}
+
+// VaultProvidersConfig per-provider 配置节（V7）。新 provider 接入时在此
+// 挂子结构体与严格解码（docs/guide/vault-design.md §5）。
+type VaultProvidersConfig struct {
+	Persona *PersonaVaultConfig `yaml:"persona,omitempty"`
+}
+
+// PersonaVaultConfig persona Connect API 接入参数（只读实现，接口映射与
+// 卡点见 docs/guide/persona-vault-mapping.md）。仅在 vault.provider: persona
+// 时生效。
+type PersonaVaultConfig struct {
+	// Endpoint Connect API 基址（persona connect serve，如
+	// http://127.0.0.1:8747），必填
+	Endpoint string `yaml:"endpoint,omitempty"`
+	// Token Connect token（pconn_…，视同密码）；PERSONA_CONNECT_TOKEN env
+	// 优先，yaml 不落 secret
+	Token string `yaml:"token,omitempty"`
+	// Timeout Connect API HTTP 超时；0 = 5s
+	Timeout time.Duration `yaml:"timeout,omitempty"`
+	// SessionTTL persona 会话时长；0 = 回退全局 vault.session_ttl
 	SessionTTL time.Duration `yaml:"session_ttl,omitempty"`
 }
 
@@ -239,8 +267,61 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// vault.providers 子树按已知字段严格解码（V7：未知字段启动报错，防
+	// 拼错键静默失效）；其余配置节维持宽松解码（向后兼容）。
+	if err := strictVaultProviders([]byte(expandedData)); err != nil {
+		return nil, err
+	}
+
 	applyDefaults(&cfg)
 	return &cfg, nil
+}
+
+// strictVaultProviders 对 yaml 中 vault.providers 子树做 KnownFields 严格
+// 解码。vault/providers 节不存在（或为 null）时跳过——env 注入的 persona
+// 配置不经 yaml，无需检查。
+func strictVaultProviders(data []byte) error {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	if len(root.Content) == 0 {
+		return nil
+	}
+	vaultNode := mappingValue(root.Content[0], "vault")
+	if vaultNode == nil {
+		return nil
+	}
+	provNode := mappingValue(vaultNode, "providers")
+	if provNode == nil || provNode.Kind != yaml.MappingNode {
+		return nil // 节缺失或空值（null）：无可查字段
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	if err := enc.Encode(provNode); err != nil {
+		return err
+	}
+	enc.Close()
+	dec := yaml.NewDecoder(&buf)
+	dec.KnownFields(true)
+	var sub VaultProvidersConfig
+	if err := dec.Decode(&sub); err != nil {
+		return fmt.Errorf("vault.providers: %w", err)
+	}
+	return nil
+}
+
+// mappingValue 在映射节点里取 key 对应的值节点；非映射或缺失返回 nil。
+func mappingValue(n *yaml.Node, key string) *yaml.Node {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
 }
 
 // expandEnvInContent 扩展内容中的环境变量
@@ -392,5 +473,16 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Vault.Provider == "" {
 		cfg.Vault.Provider = "local"
+	}
+	// persona token：env 优先于 yaml（secret 不落文件的惯例）；Providers 节
+	// 惰性创建，local-only 部署的 yaml 不出现空节
+	if v := os.Getenv("PERSONA_CONNECT_TOKEN"); v != "" {
+		if cfg.Vault.Providers == nil {
+			cfg.Vault.Providers = &VaultProvidersConfig{}
+		}
+		if cfg.Vault.Providers.Persona == nil {
+			cfg.Vault.Providers.Persona = &PersonaVaultConfig{}
+		}
+		cfg.Vault.Providers.Persona.Token = v
 	}
 }
