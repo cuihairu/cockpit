@@ -81,8 +81,16 @@ describe('MetricsChart', () => {
       xAxis: { axisLabel: { formatter: (v: string) => string } }
     }
     const fmt = option.xAxis.axisLabel.formatter
-    expect(fmt('2026-09-20T10:05:00Z')).toBe('10:05')
-    expect(fmt('2026-09-20T23:59:00Z')).toBe('23:59')
+    // 组件用 getHours()/getMinutes() 渲染本地时间；断言按同一本地时区推导，避免 CI 与本机时区不同误报
+    const local = (iso: string) => {
+      const d = new Date(iso)
+      return `${d.getHours().toString().padStart(2, '0')}:${d
+        .getMinutes()
+        .toString()
+        .padStart(2, '0')}`
+    }
+    expect(fmt('2026-09-20T10:05:00Z')).toBe(local('2026-09-20T10:05:00Z'))
+    expect(fmt('2026-09-20T23:59:00Z')).toBe(local('2026-09-20T23:59:00Z'))
 
     window.dispatchEvent(new Event('resize'))
     expect(chartInstance.resize).toHaveBeenCalled()
