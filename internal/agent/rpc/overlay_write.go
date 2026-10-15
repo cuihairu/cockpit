@@ -182,7 +182,7 @@ func (p *OverlayProvider) Daemon() (interface{}, error) {
 }
 
 func (p *OverlayProvider) daemonZeroTier() map[string]interface{} {
-	m := p.daemonBase("zerotier", overlayZTCliBin, "zerotier-one")
+	m := p.daemonBase("zerotier", overlayZTCliBin, overlayZTDaemonBin)
 	if m["installed"] == true {
 		if out, _, err := p.overlayRun(overlayZTCliBin, "--version"); err == nil {
 			if v := firstLine(out); v != "" {
@@ -194,7 +194,7 @@ func (p *OverlayProvider) daemonZeroTier() map[string]interface{} {
 }
 
 func (p *OverlayProvider) daemonTailscale() map[string]interface{} {
-	m := p.daemonBase("tailscale", overlayTailscaleBin, "tailscaled")
+	m := p.daemonBase("tailscale", overlayTailscaleBin, overlayTSDaemonBin)
 	if m["installed"] == true {
 		if out, _, err := p.overlayRun(overlayTailscaleBin, "version"); err == nil {
 			if v := firstLine(out); v != "" {

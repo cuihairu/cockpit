@@ -34,7 +34,9 @@ const (
 // overlay CLI 命令名做成变量仅为测试可注入
 var (
 	overlayZTCliBin     = "zerotier-cli"
+	overlayZTDaemonBin  = "zerotier-one"
 	overlayTailscaleBin = "tailscale"
+	overlayTSDaemonBin  = "tailscaled"
 	overlayWGBin        = "wg"
 	overlayFrpcBin      = "frpc"
 	overlayFrpsBin      = "frps"

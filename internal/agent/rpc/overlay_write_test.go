@@ -412,9 +412,20 @@ func stubOverlayBins(t *testing.T, zt, ts string) {
 	t.Cleanup(func() { overlayZTCliBin, overlayTailscaleBin = oldZT, oldTS })
 }
 
+// stubOverlayDaemonBins 同款打桩 daemon 二进制名：daemonBase 对 CLI 缺失
+// 会兜底 LookPath daemon（zerotier-one/tailscaled），开发机可能真装了它们，
+// 不打桩则安装态随宿主环境漂移（本机曾 installed=true 假失败）
+func stubOverlayDaemonBins(t *testing.T, zt, ts string) {
+	t.Helper()
+	oldZT, oldTS := overlayZTDaemonBin, overlayTSDaemonBin
+	overlayZTDaemonBin, overlayTSDaemonBin = zt, ts
+	t.Cleanup(func() { overlayZTDaemonBin, overlayTSDaemonBin = oldZT, oldTS })
+}
+
 func TestOverlayDaemonMissingInstalls(t *testing.T) {
 	stubDetectSystemd(t, true)
 	stubOverlayBins(t, "cockpit-missing-zt-cli", "cockpit-missing-tailscale")
+	stubOverlayDaemonBins(t, "cockpit-missing-zt-daemon", "cockpit-missing-tsd")
 	rec := &wrRecorder{routes: map[string]wrRoute{}}
 	p := NewOverlayProvider(rec.run)
 
