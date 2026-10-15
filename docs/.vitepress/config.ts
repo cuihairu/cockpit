@@ -56,7 +56,8 @@ export default defineConfig({
         {
           text: '设计',
           items: [
-            { text: 'agent-core 三层架构（core/平台层/插件）', link: '/design/agent-core-architecture' }
+            { text: 'agent-core 三层架构（core/平台层/插件）', link: '/design/agent-core-architecture' },
+            { text: '外部新建远程会话接口契约（memex）', link: '/design/external-session-api' }
           ]
         }
       ],
