@@ -12,30 +12,32 @@
 
 ## 待办
 
+> 2026-10-16 复核（PATROL1016）：19 条解锁条件逐条复核仍全部成立，无仓内可开工项；已裁决项不重开。每条尾注〔阻塞｜解锁〕。
+
 ### 真机验收（等硬件/真实环境/凭据）
 
-- [ ] service-health 生产接入：docker VM agent 已装但停用，改 SERVER_URL 指生产后 enable
-- [ ] Windows SCM 服务管理：列表/启停/自启/无权限透传
-- [ ] macOS launchd 服务管理：列表/启停/自启/kickstart 回退
-- [ ] NAS：DSM 6/7、TrueNAS CORE/SCALE、OMV 真机 API；mdadm 降级演练；ZFS/SMB/NFS 主机
-- [ ] 备份云远端：真实 S3/B2、限速、GB 级完整链（server 侧 rclone 需宿主安装）
-- [ ] 录制异地：rclone 真远端推送
-- [ ] ACME：staging/production 签发、自动续期、签发→部署→浏览器信任链
-- [ ] DDNS：真 Cloudflare token、家庭侧 agent 出口 IP 多源
-- [ ] overlay：真 ZT/TS token 授权/除名、join/leave、systemctl 单元态、第二台主机合并观测
-- [ ] SMART：带 attr 表主机读数、FAILED 端到端翻转
-- [ ] DNS 真账号：DNSPod/阿里云 SRV 与 TTL 下限、台账联动全链、M4 跨 provider 迁移演练
-- [ ] Guacamole 音频真机：RDP 音频 mimetype 与 L8/L16 编解码确认（D4，静音按钮已实现）
-- [ ] 移动端：Android release 安装/splash/R8/签名升级、生物识别、ntfy 送达、SSH 终端
-- [ ] web 移动端触屏与 Workbench 触屏交互
-- [ ] iOS 签名与装机（低优先级；编译验证已在 CI）
+- [ ] service-health 生产接入：docker VM agent 已装但停用，改 SERVER_URL 指生产后 enable〔阻塞=宿主 docker VM 的配置动作，非仓内改动｜解锁=用户在生产 VM 改 SERVER_URL 并 enable〕
+- [ ] Windows SCM 服务管理：列表/启停/自启/无权限透传〔阻塞=缺 Windows 主机｜解锁=真机到位按 checklist:246 验收〕
+- [ ] macOS launchd 服务管理：列表/启停/自启/kickstart 回退〔阻塞=缺 macOS 主机｜解锁=真机到位按 checklist:247 验收〕
+- [ ] NAS：DSM 6/7、TrueNAS CORE/SCALE、OMV 真机 API；mdadm 降级演练；ZFS/SMB/NFS 主机〔阻塞=缺 NAS 设备与账号｜解锁=真机到位按 checklist:220-224 验收〕
+- [ ] 备份云远端：真实 S3/B2、限速、GB 级完整链（server 侧 rclone 需宿主安装）〔阻塞=缺真实 S3/B2 凭据（checklist:48,49 明标不可本机验证）｜解锁=凭据与宿主 rclone 到位〕
+- [ ] 录制异地：rclone 真远端推送〔阻塞=缺 rclone 真远端（checklist:58,59,65,66 标阻塞）｜解锁=远端配置到位〕
+- [ ] ACME：staging/production 签发、自动续期、签发→部署→浏览器信任链〔阻塞=缺真实 ACME 账号与 DNS 凭据｜解锁=凭据到位按 checklist:108-114 验收〕
+- [ ] DDNS：真 Cloudflare token、家庭侧 agent 出口 IP 多源〔阻塞=缺真实 Cloudflare token｜解锁=token 到位按 checklist:120-123 验收〕
+- [ ] overlay：真 ZT/TS token 授权/除名、join/leave、systemctl 单元态、第二台主机合并观测〔阻塞=缺真实 ZT/TS token 与第二台主机｜解锁=token+主机到位按 checklist:163-165 验收〕
+- [ ] SMART：带 attr 表主机读数、FAILED 端到端翻转〔阻塞=缺带 SMART 属性表的真实磁盘｜解锁=真机到位按 checklist:181 验收〕
+- [ ] DNS 真账号：DNSPod/阿里云 SRV 与 TTL 下限、台账联动全链、M4 跨 provider 迁移演练〔阻塞=缺真实 DNSPod/阿里云账号｜解锁=账号到位按 checklist:130-132 验收〕
+- [ ] Guacamole 音频真机：RDP 音频 mimetype 与 L8/L16 编解码确认（D4，静音按钮已实现）〔阻塞=缺 Windows RDP 主机｜解锁=真机确认编解码〕
+- [ ] 移动端：Android release 安装/splash/R8/签名升级、生物识别、ntfy 送达、SSH 终端〔阻塞=缺 Android 真机与签名/ntfy 凭据｜解锁=真机+凭据到位按 checklist 移动端一节（:343 起）验收〕
+- [ ] web 移动端触屏与 Workbench 触屏交互〔阻塞=缺真机触屏设备；地基已随 web 移动适配交付（1076 用例），仓内无代码缺口｜解锁=触屏真机验收〕
+- [ ] iOS 签名与装机（低优先级；编译验证已在 CI）〔阻塞=缺 Apple 开发者账号与 Mac｜解锁=凭据到位装机验收〕
 
 ### 功能
 
-- [ ] 防火墙写操作（规则增删）：未立项，等需求
-- [ ] workflow 并行分支执行：等真实需求再立项
-- [ ] vault 硬验收：真 persona 服务端实测 provider 切换（单测已证切换不破坏 local 存量，cc51840）
-- [ ] jenkins/external endpoint 凭据 vault 引用：随链接功能立项
+- [ ] 防火墙写操作（规则增删）：未立项，等需求〔已裁决搁置：decision-log D-2026-10-07-3 否决直接做写，前置=只读真机验收闭环（未完成）｜解锁=只读真机验收后重开写操作评估〕
+- [ ] workflow 并行分支执行：等真实需求再立项〔已裁决搁置：workflow-design W4/G3 压后｜解锁=真实并行需求出现再立项〕
+- [ ] vault 硬验收：真 persona 服务端实测 provider 切换（单测已证切换不破坏 local 存量，cc51840）〔外部阻塞=缺 persona 服务端地址与 token｜解锁=用户提供地址+凭据〕
+- [ ] jenkins/external endpoint 凭据 vault 引用：随链接功能立项〔待立项=无独立开工条件｜解锁=链接功能立项〕
 
 ## 已完成
 
