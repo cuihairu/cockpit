@@ -185,6 +185,13 @@ func (s *Server) listServerBackups() ([]serverBackupFile, error) {
 	if err != nil {
 		return nil, err
 	}
+	return serverBackupList(entries), nil
+}
+
+// serverBackupList 过滤并排序备份文件。e.Info() 是惰性 Lstat（ReadDir 对
+// 已知 d_type 不预 stat），备份目录被并发清理时该步可能报错——跳过该
+// 条目继续。错误分支经 DirEntry 桩确定性覆盖（真机竞态窗口过窄）。
+func serverBackupList(entries []os.DirEntry) []serverBackupFile {
 	var list []serverBackupFile
 	for _, e := range entries {
 		if e.IsDir() || !isValidServerBackupName(e.Name()) {
@@ -197,7 +204,7 @@ func (s *Server) listServerBackups() ([]serverBackupFile, error) {
 		list = append(list, serverBackupFile{Name: e.Name(), Size: info.Size(), ModTime: info.ModTime()})
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Name > list[j].Name })
-	return list, nil
+	return list
 }
 
 // latestServerBackupAt 最近一次备份的时间（无备份返回零值）

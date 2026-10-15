@@ -191,12 +191,13 @@ func TestCovPctRcloneCopyTrims(t *testing.T) {
 	}
 }
 
-// TestCovPctServerBackupListInfoRace 覆盖 server_backup.go 的
-// listServerBackups 中 e.Info() 失败 continue 分支：并发 rename 备份目录，
-// 使 ReadDir 返回的 entry 在 Info()（按路径 Lstat）时目录已被挪走，
-// Lstat 报错进入 continue。这是该分支唯一可观测的触发手段（文件删除
-// 竞态窗口过窄）。
-func TestCovPctServerBackupListInfoRace(t *testing.T) {
+// TestCovPctServerBackupList 覆盖 server_backup.go 的 listServerBackups：
+// 目录缺失返回空表、子目录与非法名被过滤、合法备份按名倒序。
+// e.Info()（惰性 Lstat）失败 continue 分支由 DirEntry 桩确定性覆盖——
+// Unix 下 ReadDir 对已知 d_type 不预 stat，文件在 ReadDir 与 Info() 两步
+// 之间被清理即报错，真机竞态窗口过窄无法稳定命中（原 rename-swap 压测
+// 在覆盖门禁跑中漏窗口，改桩注入）。
+func TestCovPctServerBackupList(t *testing.T) {
 	s := covNewServer(t)
 	s.cfg = &config.Config{Database: &config.DatabaseConfig{Path: filepath.Join(t.TempDir(), "cockpit.db")}}
 
@@ -215,39 +216,40 @@ func TestCovPctServerBackupListInfoRace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "not-a-backup.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write invalid name: %v", err)
 	}
-	for i := 0; i < 120; i++ {
+	for i := 0; i < 3; i++ {
 		name := fmt.Sprintf("cockpit-20200101-%06d.db", i)
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
 			t.Fatalf("seed backup file: %v", err)
 		}
 	}
-
-	stop := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		swap := dir + ".swap"
-		for {
-			select {
-			case <-stop:
-				_ = os.Rename(swap, dir) // 收尾还原，保证清理路径完整
-				return
-			default:
-				_ = os.Rename(dir, swap)
-				_ = os.Rename(swap, dir)
-			}
-		}
-	}()
-
-	for i := 0; i < 600; i++ {
-		if _, err := s.listServerBackups(); err != nil {
-			t.Fatalf("listServerBackups: %v", err)
-		}
+	list, err := s.listServerBackups()
+	if err != nil {
+		t.Fatalf("listServerBackups: %v", err)
 	}
-	close(stop)
-	wg.Wait()
+	if len(list) != 3 || list[0].Name != "cockpit-20200101-000002.db" {
+		t.Fatalf("listServerBackups: got %d entries, first=%v", len(list), list)
+	}
+
+	// Info() 失败 continue 分支：DirEntry 桩直接注入 Lstat 失败，
+	// 该条目被跳过、不污染其余结果
+	got := serverBackupList([]os.DirEntry{
+		covBackupDirEntry{name: "cockpit-20200101-000003.db", err: errors.New("cov-pct3: lstat")},
+	})
+	if len(got) != 0 {
+		t.Fatalf("serverBackupList: want 0 entries, got %v", got)
+	}
 }
+
+// covBackupDirEntry 实现 os.DirEntry，Info() 注入失败（懒 Lstat 错误分支）。
+type covBackupDirEntry struct {
+	name string
+	err  error
+}
+
+func (d covBackupDirEntry) Name() string               { return d.name }
+func (d covBackupDirEntry) IsDir() bool                { return false }
+func (d covBackupDirEntry) Type() os.FileMode          { return 0 }
+func (d covBackupDirEntry) Info() (os.FileInfo, error) { return nil, d.err }
 
 // TestCovPctTOTPGenerateBadUsername 覆盖 totp_handlers.go 的两处 500：
 //   - Username 为空时 pquerna/otp Generate 报 ErrGenerateMissingAccountName，

@@ -481,6 +481,15 @@ func TestCovFinalAcmeIssueInject(t *testing.T) {
 		}
 	})
 
+	t.Run("dns provider", func(t *testing.T) {
+		// 空 DNS 配置 → 工厂 Ready 拒绝（Cloudflare token 缺失）：确定性覆盖
+		// Issue 入口侧 dnsProvider 错误传播（此前仅并行桩窗口偶发覆盖）
+		bad := NewLegoIssuer(db, func() AcmeDNSConfig { return AcmeDNSConfig{} }).(*legoIssuer)
+		if _, err := bad.Issue(cert); err == nil || !strings.Contains(err.Error(), "Cloudflare token not configured") {
+			t.Fatalf("Issue: want dns provider error, got %v", err)
+		}
+	})
+
 	// 后两个子测试共用「Obtain 返回假 Resource」注入
 	oldObtain := obtainCertificate
 	obtainCertificate = func(*lego.Client, certificate.ObtainRequest) (*certificate.Resource, error) {

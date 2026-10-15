@@ -175,6 +175,9 @@ func TestStackWebhookAgentFailure(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("accept still 200: code = %d", rec.Code)
 	}
+	// 同步直调一次：异步 goroutine 的 CallAgent 错误分支与覆盖采集存在
+	// 竞态（CI 慢机漏盖），同步调用确定性落覆盖，行为断言不变
+	s.runStackWebhookDeploy("a1", map[string]interface{}{"branch": "main"})
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		_, n, _ := s.db.GetAuditLogs(0, 10, map[string]interface{}{"action": "stack_webhook_deploy"})
