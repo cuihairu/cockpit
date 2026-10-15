@@ -145,7 +145,9 @@ internal/storage/acme_deploy.go:82,83	3. backfill 迁移 Count 失败上抛（�
 # 本轮复现未覆盖）。登记口径：不可确定性构造，语义均有独立直测。
 # （acme_issuer.go:270,271 曾登记同类波动，2026-10-15 经空 DNS 配置直驱真实
 # Issue 确定性覆盖后移除，见 cov_final_test.go「dns provider」子测试）
-internal/server/api_jobs.go:285,286	3. dispatch 前 UpdateJob 回写失败降级 log（主键 UPDATE 先行成功；闭库场景首查先失败，与并行桩窗口波动同类）
+# （api_jobs.go:285,286 同类登记，2026-10-15 随 309,310 一并经闭库直调
+# dispatchJobAsync 确定性覆盖后移除——原覆盖面是 Shutdown 等待收口前的
+# 在途 goroutine 撞已关库竞态窗口，见 cov_jobs_test.go ClosedDBWritesDegrade）
 # stack git RPC 错误映射的传输层对称分支：CallAgent 传输错误仅
 # ErrAgentNotFound/send timeout/response timeout，无 conflict 语义；
 # conflict→409 仅 RPC payload 分支可达（cov_stack_git_test 已测）。

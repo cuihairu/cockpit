@@ -629,6 +629,28 @@ func TestJobsCancelRunningExecOverwriteGuard(t *testing.T) {
 	}
 }
 
+// TestJobsDispatchAsyncClosedDBWritesDegrade dispatchJobAsync 两处终态回写失败
+// 的确定性覆盖（285,286 派发前 + 309,310 派发后降级 log）：原只靠在途
+// goroutine 撞已关库的竞态窗口「顺带覆盖」，Shutdown 等待收口后窗口消除，
+// 改闭库直调构造——exec 结果照常解析，回写失败不得中断流程或翻转判定
+func TestJobsDispatchAsyncClosedDBWritesDegrade(t *testing.T) {
+	s := covNewServer(t)
+	withFakeJobAgent(t, s, "a1", nil)
+	job := &storage.Job{ID: "j-closed", Type: "agent.exec", Target: "a1",
+		Actor: "u", Parameters: `{"command":"x"}`, Status: storage.JobStatusPending,
+		CreatedAt: time.Now()}
+	covCloseDB(t, s)
+
+	s.dispatchJobAsync(job, jobCreatePayload{
+		Type: "agent.exec", Target: "a1",
+		Parameters: map[string]interface{}{"command": "echo hi"},
+	}, "u")
+
+	if job.Status != storage.JobStatusSuccess {
+		t.Fatalf("status = %s, want success (write failure must not flip verdict)", job.Status)
+	}
+}
+
 // TestJobsCancelRunningStaleViewAfterFinish C6 击杀与回写竞态的确定性覆盖：
 // 库内行已是终态（exec 先到落了 success），调用方仍持 running 视图 →
 // RPC 击杀应答成功但条件 UPDATE 0 行 → 如实拒绝（409 文案），不得改写
