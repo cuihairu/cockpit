@@ -88,16 +88,17 @@ func newBackupTestServer(t *testing.T) *Server {
 	t.Helper()
 	db := testServerDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	// 任务终态轮询间隔缩短，track 测试不再贴 10s 等待窗口边缘（CI flaky 根因）
 	backupTrackInterval = 20 * time.Millisecond
-	return &Server{
+	s := &Server{
 		registry: NewRegistry(),
 		db:       db,
 		audit:    audit.NewLogger(db),
 		notifier: notification.NewService(nil),
 		ctx:      ctx,
 	}
+	covCancelAndWait(t, s, cancel)
+	return s
 }
 
 func newBackupCfg(agentID, name, schedule string, enabled bool) *storage.BackupConfig {

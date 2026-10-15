@@ -62,6 +62,18 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// bgWG 跟踪后台清扫循环与在途后台任务（goBg 启动），Shutdown 在
+	// cancel 之后先等它们全部退出再关 DB：循环只在自己 select 的
+	// ctx.Done 分支退出，mid-sweep 时被 cancel 会继续跑完本轮，不等待
+	// 就会打到已关闭的库（"database is closed"），测试侧还会与
+	// t.TempDir 的 RemoveAll 竞态（清扫写的 journal/子目录在删除过程中
+	// 出现 → "directory not empty"）。
+	// bgMu 保护 bgWG.Add 与 bgClosed：关闭已开始后新任务不再计数
+	// （避免 Add 与 Wait 并发 panic），任务照跑但不阻塞收尾。
+	bgWG     sync.WaitGroup
+	bgMu     sync.Mutex
+	bgClosed bool
+
 	// backupTrackWG 跟踪在途的备份任务跟踪 goroutine（测试注入
 	// backupTrackInterval 前等待其退出，保证恢复默认值不构成数据竞争）
 	backupTrackWG sync.WaitGroup
@@ -77,6 +89,24 @@ var logFatalf = log.Fatalf
 
 // storageValidateKey 注入点：生产密钥校验依赖环境，测试可控其失败。
 var storageValidateKey = storage.ValidateKey
+
+// goBg 在 bgWG 里起一个后台任务。关闭流程（Shutdown）等它全部退出后才
+// 关 DB，所以凡写库/写文件的在途任务都从这里启动。关闭已开始后照常
+// 执行但不再计数（bgClosed），既不 panic 也不拖住收尾。
+func (s *Server) goBg(fn func()) {
+	s.bgMu.Lock()
+	track := !s.bgClosed
+	if track {
+		s.bgWG.Add(1)
+	}
+	s.bgMu.Unlock()
+	go func() {
+		if track {
+			defer s.bgWG.Done()
+		}
+		fn()
+	}()
+}
 
 // NewServer 创建新服务器
 func NewServer(cfg *config.Config) *Server {
@@ -242,25 +272,25 @@ func (s *Server) Start() error {
 	log.Printf("Web UI: http://%s", s.addr)
 
 	// 启动清理协程
-	go s.cleanupLoop()
+	s.goBg(s.cleanupLoop)
 
 	// 启动警告检查协程
-	go s.alertCheckLoop()
-	go s.driftScanLoop()         // 漂移定时巡检（见 drift-design.md M2）
-	go s.smartScanLoop()         // SMART 磁盘健康巡检（见 disk-health-design.md D8）
-	go s.ddnsScanLoop()          // DDNS 定时同步（见 ddns-design.md D6）
-	go s.acmeScanLoop()          // ACME 证书自动续期巡检（见 acme-design.md D7）
-	go s.serviceHealthScanLoop() // 服务健康探针归集（见 service-health-design.md D8）
-	go s.nasScanLoop()           // NAS 存储巡检（见 nas-design.md D5）
+	s.goBg(s.alertCheckLoop)
+	s.goBg(s.driftScanLoop)         // 漂移定时巡检（见 drift-design.md M2）
+	s.goBg(s.smartScanLoop)         // SMART 磁盘健康巡检（见 disk-health-design.md D8）
+	s.goBg(s.ddnsScanLoop)          // DDNS 定时同步（见 ddns-design.md D6）
+	s.goBg(s.acmeScanLoop)          // ACME 证书自动续期巡检（见 acme-design.md D7）
+	s.goBg(s.serviceHealthScanLoop) // 服务健康探针归集（见 service-health-design.md D8）
+	s.goBg(s.nasScanLoop)           // NAS 存储巡检（见 nas-design.md D5）
 	// 启动系统指标清理协程
-	go s.metricsCleanupLoop()
+	s.goBg(s.metricsCleanupLoop)
 	// server 重启孤儿清扫：无推进者的 pending/running Job 与 running run
 	// 收敛为 failed（先于 HTTP 接流，见 orphan_run.go）
 	s.recoverOrphanRuns()
 	// 启动备份调度循环
 	s.startBackupLoop()
 	// 启动 server 自身数据库备份循环（见 server-backup-design.md）
-	go s.serverBackupLoop()
+	s.goBg(s.serverBackupLoop)
 
 	return server.ListenAndServe()
 }
@@ -348,9 +378,21 @@ func (s *Server) authService() *auth.Service {
 	return s.auth
 }
 
-// Shutdown 关闭服务器
+// Shutdown 关闭服务器。先 cancel 再等后台清扫循环与在途后台任务全部
+// 退出，最后才关 DB（先停清扫再关库）：循环只在自身 select 的 ctx.Done
+// 分支退出，不等待就会 mid-sweep 打到已关闭的库，测试侧还会与
+// TempDir RemoveAll 竞态（CI 曾见 "Agent expiry sweep failed: sql:
+// database is closed" 与 "directory not empty"）。
 func (s *Server) Shutdown() {
-	s.cancel()
+	if s.cancel != nil {
+		s.cancel()
+	}
+	// 关闭已开始：此后新起的后台任务照跑但不入计数（不拖住收尾）
+	s.bgMu.Lock()
+	s.bgClosed = true
+	s.bgMu.Unlock()
+	s.bgWG.Wait()
+	s.backupTrackWG.Wait()
 	if s.inventorySync != nil {
 		s.inventorySync.Stop()
 	}

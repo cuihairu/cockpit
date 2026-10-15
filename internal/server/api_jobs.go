@@ -28,7 +28,7 @@ import (
 type jobCreatePayload struct {
 	Type       string                 `json:"type"`
 	Target     string                 `json:"target"`
-	Targets    []string               `json:"targets,omitempty"`   // 多目标扇出（M2b F1）：仅 workflow steps 合法
+	Targets    []string               `json:"targets,omitempty"`    // 多目标扇出（M2b F1）：仅 workflow steps 合法
 	DependsOn  []string               `json:"depends_on,omitempty"` // 依赖门控（M2e G1）：仅 workflow steps 合法
 	Parameters map[string]interface{} `json:"parameters"`
 }
@@ -97,7 +97,7 @@ func (s *Server) submitJob(p *jobCreatePayload, actor string) (*jobView, *submit
 	view := toJobView(job)
 
 	// 后台派发：终态回写 + 审计在 goroutine 内完成（HTTP 请求即时返回）
-	go s.dispatchJobAsync(job, *p, actor)
+	s.goBg(func() { s.dispatchJobAsync(job, *p, actor) })
 	return &view, nil
 }
 

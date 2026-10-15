@@ -246,7 +246,7 @@ func (s *Server) startRecording(session *TerminalSession) *castRecorder {
 			log.Printf("Recording finish failed for session %s: %v", session.ID, err)
 		}
 		// M2 D16：回填后异步归档，不拖会话出口路径（.cast 已关闭完整可推）
-		go s.pushRecordingRemote(session.ID)
+		s.goBg(func() { s.pushRecordingRemote(session.ID) })
 	}
 	return rec
 }

@@ -543,7 +543,7 @@ func (s *Server) handleWorkflowRun(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 
-	go s.advanceWorkflow(wf, run, username)
+	s.goBg(func() { s.advanceWorkflow(wf, run, username) })
 
 	s.writeJSON(w, http.StatusCreated, toWorkflowRunView(run))
 }

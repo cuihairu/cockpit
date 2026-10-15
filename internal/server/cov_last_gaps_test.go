@@ -38,7 +38,6 @@ func covROServer(t *testing.T) (*Server, string) {
 	}
 	t.Cleanup(func() { db.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	s := &Server{
 		registry:       NewRegistry(),
 		db:             db,
@@ -49,6 +48,7 @@ func covROServer(t *testing.T) (*Server, string) {
 		ctx:            ctx,
 		cfg:            &config.Config{Database: &config.DatabaseConfig{Path: dbPath}},
 	}
+	covCancelAndWait(t, s, cancel)
 	return s, dbPath
 }
 

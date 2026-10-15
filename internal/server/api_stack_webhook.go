@@ -78,7 +78,7 @@ func (s *Server) handleStackWebhook(w http.ResponseWriter, r *http.Request) {
 	triggered := make([]string, 0, len(targets))
 	for _, agentID := range targets {
 		triggered = append(triggered, agentID)
-		go s.runStackWebhookDeploy(agentID, rpcParams)
+		s.goBg(func() { s.runStackWebhookDeploy(agentID, rpcParams) })
 	}
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{"triggered": triggered})
 }

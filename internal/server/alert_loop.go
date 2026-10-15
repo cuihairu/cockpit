@@ -106,13 +106,16 @@ func (s *Server) alertCheckLoop() {
 	// 启动时立即执行一次（延迟先读到局部量：该 goroutine 不再读包级变量，
 	// 测试注入/恢复与之并发安全；ctx 取消时不再补跑）
 	delay := alertCheckStartDelay
-	go func() {
+	// 一次性延迟任务入 bgWG 计数：它比 alertCheckLoop 本体活得久（外层循环
+	// 收到 ctx.Done 就退出，这个 goroutine 才刚跑 runAlertChecks），不跟踪
+	// 就会在 DB 关闭后写库
+	s.goBg(func() {
 		select {
 		case <-time.After(delay):
 			s.runAlertChecks()
 		case <-s.ctx.Done():
 		}
-	}()
+	})
 
 	ticker := time.NewTicker(alertCheckInterval)
 	defer ticker.Stop()
@@ -171,8 +174,14 @@ func (s *Server) metricsCleanupLoop() {
 	ticker := time.NewTicker(metricsCleanupInterval)
 	defer ticker.Stop()
 
-	// 启动时先等待到下次清理时间
-	time.Sleep(metricsCleanupFirstWait())
+	// 启动时先等待到下次清理时间（最长近 24h，必须可被 ctx 打断：
+	// 该 goroutine 在 bgWG 里被 Shutdown 等待，裸 Sleep 会让关闭挂到
+	// 次日凌晨 3 点）
+	select {
+	case <-time.After(metricsCleanupFirstWait()):
+	case <-s.ctx.Done():
+		return
+	}
 
 	for {
 		// 清理30天前的数据

@@ -107,7 +107,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// 服务健康探针配置补推（service-health D3）：注册上线即对齐配置——
 	// 保存时 agent 离线的配置在这里落到 agent 侧
-	go s.pushServiceHealthConfig(agent.ID)
+	s.goBg(func() { s.pushServiceHealthConfig(agent.ID) })
 }
 
 func decodeRegisterForWebSocket(msg *protocol.Message) (protocol.RegisterPayload, error) {

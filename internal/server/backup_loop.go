@@ -119,7 +119,7 @@ func NextBackupRunAt(schedule string, now time.Time) int64 {
 
 // startBackupLoop 启动备份调度循环
 func (s *Server) startBackupLoop() {
-	go func() {
+	s.goBg(func() {
 		ticker := time.NewTicker(backupCheckInterval)
 		defer ticker.Stop()
 
@@ -132,7 +132,7 @@ func (s *Server) startBackupLoop() {
 				return
 			}
 		}
-	}()
+	})
 }
 
 // recoverOrphanBackupRuns server 重启后把遗留的 running 记录标记为失败

@@ -99,7 +99,7 @@ func (s *Server) handleVaultEntry(w http.ResponseWriter, r *http.Request) {
 			audit.StatusSuccess, ip, ua, entryPath, map[string]string{"kind": req.Kind})
 		// NAS 目标变更即对在线 agent 补推（vault-design.md V6）
 		if strings.HasPrefix(entryPath, nasVaultPrefix) {
-			go s.pushNasTargetsAll()
+			s.goBg(s.pushNasTargetsAll)
 		}
 		s.writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "path": entryPath})
 
@@ -124,7 +124,7 @@ func (s *Server) handleVaultEntry(w http.ResponseWriter, r *http.Request) {
 		s.auditVaultAction(audit.ActionDelete, userInfo.UserID, userInfo.Username,
 			audit.StatusSuccess, ip, ua, entryPath, nil)
 		if strings.HasPrefix(entryPath, nasVaultPrefix) {
-			go s.pushNasTargetsAll()
+			s.goBg(s.pushNasTargetsAll)
 		}
 		s.writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 	}

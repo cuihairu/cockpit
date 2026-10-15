@@ -317,7 +317,7 @@ func (s *Server) startStackDeployment(agentID, stackName, auditAction, taskID st
 		fmt.Printf("create stack deployment %s/%s: %v\n", agentID, stackName, err)
 		return
 	}
-	go s.trackStackTask(agentID, taskID, rec.ID)
+	s.goBg(func() { s.trackStackTask(agentID, taskID, rec.ID) })
 }
 
 // trackStackTask 轮询 agent 任务状态直到终态/超时/server 关闭，回填历史。

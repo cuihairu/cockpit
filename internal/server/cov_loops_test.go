@@ -26,7 +26,7 @@ func covLoopServer(t *testing.T) *Server {
 	t.Helper()
 	s := covNewServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	covCancelAndWait(t, s, cancel)
 	s.ctx = ctx
 	s.cancel = cancel
 	s.cfg = &config.Config{

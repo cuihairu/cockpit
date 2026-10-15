@@ -39,7 +39,7 @@ func TestCovStartFull(t *testing.T) {
 	s := covNewServer(t)
 	covWSReady(s)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	covCancelAndWait(t, s, cancel)
 	s.ctx = ctx
 	s.cancel = cancel
 	s.cfg = config.Normalize(&config.Config{})

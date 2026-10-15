@@ -87,9 +87,9 @@ type GuacamoleSession struct {
 	// 里放的是中继地址
 	relay    *guacRelay
 	ClientWS *websocket.Conn
-	guacd     net.Conn
-	guacdRd   *bufio.Reader // 握手阶段建立，guacdToWS 复用（select 响应不丢）
-	Created   time.Time
+	guacd    net.Conn
+	guacdRd  *bufio.Reader // 握手阶段建立，guacdToWS 复用（select 响应不丢）
+	Created  time.Time
 
 	writeMu sync.Mutex // gorilla WS 单写者
 	done    chan struct{}
@@ -263,7 +263,7 @@ func (s *Server) collectGuacRecording(gs *GuacamoleSession) {
 		log.Printf("Guacamole: finish recording meta %s failed: %v", gs.ID, err)
 	}
 	// 异地归档（不拖会话出口路径，与 .cast M2 D16 同款）
-	go s.pushRecordingRemote(gs.ID)
+	s.goBg(func() { s.pushRecordingRemote(gs.ID) })
 }
 
 // copyFile 跨分区复制（guacd 卷 → recordingsDir 可能不同挂载点，

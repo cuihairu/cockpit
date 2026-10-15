@@ -56,13 +56,14 @@ func withFakeLogsAgent(t *testing.T, s *Server, agentID, hostname string,
 func newLogsSearchTestServer(t *testing.T) *Server {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	return &Server{
+	s := &Server{
 		registry: NewRegistry(),
 		audit:    audit.NewLogger(testServerDB(t)),
 		notifier: notification.NewService(nil),
 		ctx:      ctx,
 	}
+	covCancelAndWait(t, s, cancel)
+	return s
 }
 
 // postLogsSearch 发起检索请求并返回 recorder

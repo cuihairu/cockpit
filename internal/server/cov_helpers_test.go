@@ -17,12 +17,24 @@ import (
 )
 
 // covNewServer 构造 db/audit/registry/ctx 齐全的测试 Server（cfg 为 nil，需要时自行注入）
+// covCancelAndWait 注册 t.Cleanup：先 cancel 再等后台任务全部退出。
+// t.TempDir 的 RemoveAll 清理不能与仍在写库/写文件的清扫竞态——
+// database/sql 的 Close 不终止在途事务，journal/recordings 子目录会在
+// 删除过程中出现，RemoveAll 报 "directory not empty"（CI 根因）。
+func covCancelAndWait(t *testing.T, s *Server, cancel context.CancelFunc) {
+	t.Helper()
+	t.Cleanup(func() {
+		cancel()
+		s.bgWG.Wait()
+		s.backupTrackWG.Wait()
+	})
+}
+
 func covNewServer(t *testing.T) *Server {
 	t.Helper()
 	db := testServerDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	return &Server{
+	s := &Server{
 		registry:       NewRegistry(),
 		db:             db,
 		audit:          audit.NewLogger(db),
@@ -31,6 +43,8 @@ func covNewServer(t *testing.T) *Server {
 		ticketMgr:      NewTicketManager(),
 		ctx:            ctx,
 	}
+	covCancelAndWait(t, s, cancel)
+	return s
 }
 
 // covCloseDB 关闭底层数据库以触发各 handler 的 db 错误分支
