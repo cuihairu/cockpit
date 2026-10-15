@@ -39,6 +39,10 @@
 - [ ] vault 硬验收：真 persona 服务端实测 provider 切换（单测已证切换不破坏 local 存量，cc51840）〔外部阻塞=缺 persona 服务端地址与 token｜解锁=用户提供地址+凭据〕
 - [ ] jenkins/external endpoint 凭据 vault 引用：随链接功能立项〔待立项=无独立开工条件｜解锁=链接功能立项〕
 
+### 文档
+
+- [ ] docs 双语配对第二批：子目录 guide 37、design 5、operations 1、research 1 篇 + 首页英文版精修〔第一批=docs 根目录 9 篇（8 篇翻译 + home 英文落地页）已完成；archive 5 篇为历史归档，是否双语待定〕
+
 ## 已完成
 
 ### 架构与 agent

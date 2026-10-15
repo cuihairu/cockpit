@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Cockpit
   text: 个人混合基础设施控制台
-  tagline: Server + Agent 的轻量资源视图、监控与远程连接入口
+  tagline: Server + Agent 的轻量资源视图、监控与远程连接入口 · [English](/index.en)
   actions:
     - theme: brand
       text: 快速开始

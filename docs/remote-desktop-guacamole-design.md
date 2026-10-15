@@ -1,5 +1,7 @@
 # 远程桌面设计：Apache Guacamole 集成（guacd + guacamole-common-js）
 
+> 语言：**中文** ｜ [English](./remote-desktop-guacamole-design.en.md)
+
 > 2026-09-23 用户拍板立项。此前远控桌面走自行开发路线（grdp 纯 Go RDP 客户端 +
 > 自行开发 canvas 渲染/扫描码输入/剪贴板），本设计定案**集成 Apache Guacamole**
 > 替换之。本文档只做方案设计，实现另行确认。

@@ -1,7 +1,7 @@
 [English](README.md) | [中文](README.zh.md)
 
 <p align="center">
-  <img src="web/public/logo.svg" alt="Cockpit Logo" width="120" height="120">
+  <img src="web/public/logo.svg" alt="Cockpit Logo" width="64" height="64">
 </p>
 
 <h1 align="center">Cockpit</h1>
