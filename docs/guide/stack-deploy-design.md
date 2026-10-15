@@ -47,7 +47,7 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 ### Provider 注册
 
 - 挂在既有 `docker-api` capability 下：`setupProviders`（`internal/agent/providers.go`）检测到该 capability 且 `docker compose version` 可用时，注册 `stack` provider
-- compose CLI 不可用则不注册 → server 对该 agent 返回 404 语义 → UI 灰显「此 Agent 不支持应用部署」，容器管理不受影响
+- compose CLI 不可用则不注册 → server 对该 agent 返回 502（agent 回 `unknown provider: stack`）→ UI 报错提示，容器管理不受影响
 
 ### 文件布局（compose-file-first）
 
@@ -57,7 +57,7 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
     ├── compose.yml             # 真相源，UI 可编辑
     ├── .env                    # 可选，UI 可编辑（敏感）
     └── .cockpit/
-        └── last-deploy.log     # 最近一次任务的合并输出（stdout+stderr）
+        └── last-task.json      # 最近一次任务元数据（action/status/finishedAt）
 ```
 
 约束：
@@ -92,9 +92,9 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 
 实现要点：
 
-- **任务模型**：provider 内存维护 `map[taskID]*Task` + 每 stack 一把互斥锁；同 stack 并发 `up/down` 时第二个请求直接报 `stack busy` 错误（server 转 409）。任务日志同时写入内存环形缓冲（取最近 ~200KB）与 `last-deploy.log`
+- **任务模型**：provider 内存维护 `map[taskID]*Task` + 每 stack 一把互斥锁；同 stack 并发 `up/down` 时第二个请求直接报 `stack busy` 错误（server 转 409）。任务日志只写入内存环形缓冲（取最近 ~200KB），不落盘
 - **状态查询零改动**：复用 `docker.Client.ListContainers(true)`（`internal/docker/client.go`），按 `Labels["com.docker.compose.project"] == name` 客户端侧过滤，不动 DockerAPI 接口签名；规模大后再加 Filters 参数
-- **`compose.yml` 与 `compose.yaml`**：读写优先 `compose.yml`，兼容识别 `compose.yaml`/`docker-compose.yml`（只读兼容，保存时统一规范为 `compose.yml`）
+- **`compose.yml` 与 `compose.yaml`**：读写优先 `compose.yml`，兼容识别 `compose.yaml`/`docker-compose.yml`/`docker-compose.yaml`（只读兼容，保存时统一规范为 `compose.yml`）
 
 ## Server 侧设计
 
@@ -117,16 +117,16 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 | `POST /api/stacks/webhook` | `stack.git.deploy` | forge 回调入口：头 `X-Cockpit-Token` 常量时间比对配置 `stacks.webhook_token`；body 可选 `{agentId, branch}`，缺省扇出全部在线 agent；响应 `{triggered:[...]}` 即返回、部署异步（审计 username=webhook）（P2 ②；不走认证中间件，令牌空 = 端点 404 关闭） |
 | `GET /api/stacks/agents/{agentId}/git` | `stack.git.status` | stacks 仓库接入状态 + drift（P2 ①；不记审计） |
 | `POST /api/stacks/agents/{agentId}/git/pull` | `stack.git.pull` | 拉取远端（首次即接入；body 可选 `{remote, branch}`；审计 stack_git_pull）（P2 ①） |
-| `DELETE /api/stacks/agents/{agentId}/{name}` | `stack.remove` | 删 stack（body 可选 `{force}`） |
+| `DELETE /api/stacks/agents/{agentId}/{name}` | `stack.remove` | 删 stack（body 仅 `{name}`） |
 
-约定：404 = agent 不在线/无 stack provider；409 = stack busy；502/504 沿用 `api_docker.go` 的 RPC 错误映射。P2 ① 追加：409 亦用于 git pull 冲突（本地改动/分叉被 `--ff-only` 拒绝）；agent 报「remote branch not found」（空仓库/分支写错）→ 404。
+约定：404 = agent 不存在/无 docker 能力；502 = 有 docker 能力但 stack provider 未注册（compose CLI 不可用，agent 回 `unknown provider: stack`）；409 = stack busy；504 沿用 `api_docker.go` 的 RPC 错误映射。P2 ① 追加：409 亦用于 git pull 冲突（本地改动/分叉被 `--ff-only` 拒绝）；agent 报「remote branch not found」（空仓库/分支写错）→ 404。
 
 ### 存储
 
 `storage` 新增 `stacks` 表（索引缓存，非真相源）：
 
 ```
-Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStatus, UpdatedAt }
+Stack{ ID, AgentID, Name, Running, Total, LastAction, LastStatus, LastDeployedAt, UpdatedAt }
 ```
 
 - agent 上报 list 时 upsert；agent 离线时 `GET /api/stacks` 用它渲染灰态
@@ -135,7 +135,7 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 
 ### 审计
 
-复用 `audit.Logger` 新增事件：`stack.create`（首次 save）、`stack.update`（save）、`stack.up`、`stack.down`、`stack.remove`，detail 记 name + agent + 任务结果。**遵守既有约束：`.env` 内容与 deploy 输出一律不入审计日志**，只记事件与元数据。
+复用 `audit.Logger` 新增事件：`stack_create`（首次 save）、`stack_update`（save）、`stack_up`、`stack_down`、`stack_remove`，detail 记 name + agent + 任务结果。**遵守既有约束：`.env` 内容与 deploy 输出一律不入审计日志**，只记事件与元数据。
 
 ## Web 侧设计
 
@@ -144,7 +144,7 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 - **列表页**：按 agent 分组的卡片/表格（名称、running/total、最后部署时间、状态 Tag）；顶部「新建 Stack」按钮（选 agent + 名称 + 模板：空/Nginx 示例）
 - **详情页**（抽屉或子路由）三个 Tab：
   1. **服务**：服务/容器状态表 + 「启动/停止」主按钮（触发 up/down → 轮询 task → 完成刷新）
-  2. **compose.yml**：等宽 textarea 编辑 + 保存（后端校验失败时展示 `docker compose config` 错误输出）；`.env` 单独折叠区，值默认掩码显示
+  2. **compose.yml**：等宽 textarea 编辑 + 保存（后端校验失败时展示 `docker compose config` 错误输出）；`.env` 单独折叠区，明文展示（内容不落审计）
   3. **部署日志**：任务运行中 2s 轮询 `tasks/{id}`，终端风格深色块（复用 `/docker` 日志 Modal 的样式）
 - agent 离线/compose 不可用：列表置灰，操作禁用并提示原因
 
@@ -235,7 +235,7 @@ Stack{ ID, AgentID, Name, RunningCount, TotalCount, LastDeployedAt, LastTaskStat
 |------|------|
 | compose CLI 行为随 Docker 版本漂移 | 只依赖 `up -d --remove-orphans` / `down` / `logs` / `config -q` 四个稳定子命令；agent 启动时探测版本并上报 |
 | 轮询延迟（部署完成感知最多滞后 2s） | 可接受；P2 流式化。不为此提前扩协议 |
-| agent 进程重启丢失内存任务态 | 任务状态落 `last-deploy.log`，重启后 task.get 返回 `unknown task`，UI 引导查看文件日志 |
+| agent 进程重启丢失内存任务态 | agent 重启丢内存任务态 → task.get 404；历史终态由 server `stack_deployments` 表兜底 |
 | 用户手改文件与 UI 编辑冲突 | compose-file-first 原则：保存即覆盖（带 modifiedAt 乐观提示，不强做 merge） |
 | Windows agent | P1 不支持，provider 注册时检测 `runtime.GOOS`，非 linux/darwin 直接跳过并记日志 |
 
@@ -311,7 +311,7 @@ compose build/pull/profiles/healthcheck 语义、`COCKPIT_STACKS_DIR` 权限实�
 
 **方式**：`run-acceptance.sh` A19 段——同一本地 bare 远端，`stacks.webhook_token` 配置开启；链路 REST（无登录态，`X-Cockpit-Token`）→ webhook 扇出 → WebSocket RPC `stack.git.deploy` → git CLI → compose 假体 → 任务 follow NDJSON 流。62 项断言全部通过，重跑可重复。
 
-**覆盖（A19.1-A19.7）**：无 token 401（默认关）→ 带盘外 `remote` 的恶意 body 受理但参数被剥离（200 + triggered）→ 新 stack 落盘 + 已接入 stack 快进（nginx:webhook）→ 部署历史 action=up → follow 流含 `"eof":true` 帧 → follow 未知任务 404 → 审计含 `stack_webhook_deploy`（username=webhook）。A18.4-A18.7 drift 用例回归同绿。
+**覆盖（A19.1-A19.7）**：未配令牌 404（默认关）→ 已配令牌但缺/错 `X-Cockpit-Token` → 401 → 带盘外 `remote` 的恶意 body 受理但参数被剥离（200 + triggered）→ 新 stack 落盘 + 已接入 stack 快进（nginx:webhook）→ 部署历史 action=up → follow 流含 `"eof":true` 帧 → follow 未知任务 404 → 审计含 `stack_webhook_deploy`（username=webhook）。A18.4-A18.7 drift 用例回归同绿。
 
 **验收中发现并修复**：① `stack_provider.go` Call 分派漏 `git.deploy` case（方法已实现但 RPC 到不了，报 unknown stack action）——单测直调方法掩盖分派缺失，补 case 并将一条用例改走 `Call` 覆盖分发行；② A19.4/A19.5 断言与异步落库竞速（webhook 受理即 200，部署历史行要等 `startStackDeployment` 写入、`trackStackTask` 轮到终态才翻转 status）——改为轮询 `action=up && status!=running` 行后再断言；③ follow 收尾的 `stop` RPC 改即发即忘（goroutine）——同步等应答在 agent 无应答时被 CallAgent 30s 超时拖住 handler 返回（no-flusher 500 路径 race 步实测 30s）。race 步顺带实锤一个**存量**竞态：`RemoteSessionManager.Get/List` 直透存储指针，WS 数据面 goroutine 并发 `UpdateStatus` 写同一会话字段——读侧改锁内浅拷贝快照（独立 fix commit）；server 包 race 插桩本地实测 1004s，CI race 步 timeout 900s→1500s。
 

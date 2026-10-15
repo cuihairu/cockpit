@@ -46,6 +46,9 @@ P1 的同步 RPC 模型（POST 即等待终态）有两个天花板：
 - **M2d 已实现（2026-10-11）**：审批门（M2 候选第四项），设计见「M2 立项：
   审批门」节——前置阻塞点（server 重启孤儿 run）已由 9079b52 重启清扫解掉，
   本批把等待态落库不落 goroutine（D1），高危提交 202 进审批、批准才派发。
+  权限点 `approvals:read/write` 的注册当时漏登记（路由已挂 `approvals` 资源但
+  `resourceActions` 无该键），全角色对 `/api/approvals` 403、web「审批门」菜单
+  永不渲染——2026-10-15 文档审计发现并补齐（含回归测试）。
   审批台账页 + Jobs 页「需审批执行」开关同批落地。DAG 列 M2 剩余序列末位、
   SSE 拍不做。
 - **M2e 已实现（2026-10-12）**：DAG 依赖（M2 候选第五项），设计见「M2 立项：
@@ -364,7 +367,7 @@ M2d 加一道显式二次确认——提交时可声明 `approval="required"`，
 | # | 决策 | 选择 | 理由 |
 |---|------|------|------|
 | D1 | 等待态放哪 | SQLite `approvals` 表，不放 goroutine | M2b 时代立项阻塞点即「等待态 goroutine 不可复活」；落库后 server 重启不丢待批，台账天然可查 |
-| D2 | 提交入口与权限 | `POST /api/jobs` 加 `approval` 字段；提交仍走 `jobs:write`，台账/决策走 `approvals:read/write` | 门槛与执行权同面——审批的价值在「显式二次确认 + 审计分账」，不是权限提升；独立资源点管决策动作 |
+| D2 | 提交入口与权限 | `POST /api/jobs` 加 `approval` 字段；提交仍走 `jobs:write`，台账/决策走 `approvals:read/write`（该权限点 2026-10-15 才补登记，此前端点对全员 403） | 门槛与执行权同面——审批的价值在「显式二次确认 + 审计分账」，不是权限提升；独立资源点管决策动作 |
 | D3 | 校验时机 | 提交时前置 validateJobPayload（坏 payload 400 不进审批；targets 扇出同样拒绝） | 批准后按原 payload 原样派发，校验若后置，批准的可能是执行不了的请求 |
 | D4 | 并发与过期收口 | `DecideApproval` 条件 UPDATE `WHERE status='pending' AND (expires_at IS NULL OR expires_at > ?)` 返回命中行数；0 行 → 409 | 重复批准/批准后驳回/过期批准都在一条 UPDATE 里闭合（C10 同口径）；TTL 过期不依赖清扫任务，惰性清扫只改台账展示 |
 | D5 | 批准时 agent 离线 | 批准终态已落、派发如实 503（不假称已派发）；重试面=重新提交 | 批准不可回滚也不假装成功；提交时不拦离线——等待窗口内 agent 可回线 |
@@ -384,7 +387,8 @@ M2d 加一道显式二次确认——提交时可声明 `approval="required"`，
 - `web/src/pages/Approvals/index.tsx`：审批台账页（5s 轮询 + 状态过滤 +
   批准/驳回 Popconfirm 二次确认，批准弹层带命令摘要）；终态行显示回写
   jobId 可复制；菜单「审批门」（`approvals:read`）、决策按钮
-  `approvals:write`；
+  `approvals:write`（权限点由 `internal/storage/role.go` `resourceActions` 与
+  `allPermissions` 固定序列共同登记，缺一处即口径分裂）；
 - Jobs 页创建弹窗加「需审批执行」开关：走 `createJobWithApproval`，
   toast「已提交审批，批准后开始执行」。
 

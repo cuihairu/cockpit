@@ -42,8 +42,8 @@
 }
 ```
 
-- `protocol` ∈ `ssh | rdp | vnc | telnet`（与 `handleTicketCreate` 白名单一致，
-  `internal/server/api_remote.go:403`）。
+- `protocol` ∈ `ssh | rdp | vnc | telnet`（与 `handleRemoteSessionCreate` 白名单一致，
+  `internal/server/api_remote.go:654-660`）。
 - **无 `username`/`password`/`private_key`/`domain` 字段**——凭据由
   `credential_ref` 命名 vault 条目（local provider path 或 persona 条目
   UUID），会话建立时由服务端注入（E8）。memex 全程接触不到凭据。

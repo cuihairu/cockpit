@@ -30,14 +30,11 @@ cockpit-agent start \
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `COCKPIT_SSH_KEYS` | SSH 私钥目录（覆盖 `-ssh-keys` 和自动检测） | 自动检测 |
-| `SERVER_URL` | Server 地址（systemd wrapper 用） | `wss://cockpit.cuihairu.site/ws` |
-| `REGION` | 地域 | — |
-| `ZONE` | 可用区 | — |
+| `SERVER_URL` | Server 地址（systemd wrapper 用；必填，无代码默认） | — |
+| `REGION` / `ZONE` | 地域 / 可用区（systemd unit 透传用；二进制直读 `COCKPIT_REGION` / `COCKPIT_ZONE`） | — |
 | `AGENT_ID` | Agent ID | — |
 | `SECRET` | 认证密钥 | — |
 | `LABELS` | 标签 | — |
-| `BIAS` | 偏移量 | — |
-| `COCKPIT_AGENT_OPTS` | 额外启动参数（追加到命令行） | — |
 
 ## SSH 密钥路径
 
@@ -61,13 +58,10 @@ Agent 建立远程 SSH 连接时，按以下顺序查找私钥：
 
 ### systemd 部署
 
-Agent 以 root 运行，但自动读取 `SUDO_USER`（实际用户）的密钥：
+Agent 以 `cockpit` 系统用户运行（`ProtectHome=true`，`/home/*` 不可达），用户密钥经 `COCKPIT_SSH_KEYS` 指定目录：
 
 ```bash
-# 密钥放在实际用户目录即可
-/home/cui/.ssh/id_ed25519
-
-# 或在 /etc/default/cockpit-agent 中指定
+# 在 /etc/default/cockpit-agent 中指定
 COCKPIT_SSH_KEYS=/home/cui/.ssh
 ```
 

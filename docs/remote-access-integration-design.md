@@ -91,14 +91,15 @@
    （agent 通道 SSH 私钥用），Guacamole 路线直接复用；票据仍为 5 分钟
    一次性、内存态，凭据不进 URL/日志/审计。
 2. **出口策略**：`matchRemoteEgress`（allow-list / CIDR / per-agent），
-   agent_id 作为策略锚点与审计归属——与 RDP/VNC 语义一致（guacd 从自身
-   网络位置拨目标，agent 不在数据路径上，旧设计 D4）。
+   agent_id 作为策略锚点与审计归属——与 RDP/VNC 语义一致。guacd 只拨本机回环中继
+   （`internal/server/guac_relay.go`），真实目标由 agent 从自己网络位拨出，
+   agent 在数据路径上（2026-10-02 落地，修正旧设计 D4「guacd 直拨」的假设）。
 3. **审计**：`auditRemoteStart/End` 全协议同款；SSH 经 guacd 的会话同样
    记 `Protocol: ssh`，凭据（口令/私钥）绝进审计详情。
 4. **录制**：guacd 的 ssh 插件同样支持 `recording-path/recording-name`
    → `.guac` 收集链路（`collectGuacRecording`，Format=guac）原样生效，
    SSH 会话录制与 RDP/VNC 同一 `/recordings` 页回放。
-5. **权限**：`terminal:write`（RBAC `remote` 资源域），入口按钮的
+5. **权限**：`terminal:write`（RBAC `terminal` 资源域，`/api/remote/*` 统一归并，见 `internal/server/rbac.go`），入口按钮的
    PermGuard 不因通道切换而变。
 
 ## 决策
@@ -180,7 +181,7 @@ guacd 的 ssh 终端是**服务端渲染的图块流**（guacamole 指令编码�
 - `web/src/test/setup.ts` 加 ResizeObserver 可观测桩（jsdom 无实现），
   触发器 `window.__triggerResize(w, h)`。
 
-**真机验收（挂起待验，入 acceptance-checklist）**：
+**真机验收（已于 2026-09-30 通过，见 `docs/guide/acceptance-checklist.md`「远控三协议」节）**：
 
 - 真 guacd + 真 sshd：口令认证 / 私钥认证各一次；
 - 终端渲染（vim/top 全屏程序）、`size` 变更换算列/行；

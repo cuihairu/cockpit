@@ -36,9 +36,9 @@ func DetectSystemd() bool {
 
 - `/run/systemd/system` 存在是经典的"本机 systemd 已启动"判断：排除容器内装了
   systemctl 二进制但无 systemd PID 1 的场景，以及 chroot / 救援环境
-- capability：`{Type: "systemd", Version: "1"}`，追加在 agent.go detectCapabilities
+- capability：`{Type: "service", Version: "2", Metadata: {"backend": "systemd"}}`，追加在 agent.go detectCapabilities
   （与 cron capability 同款做法，无需专门 detector 包条目）
-- providers.go：`case "systemd"` 注册 `NewServiceProvider(nil)`
+- providers.go：`case "service"` 注册 `NewServiceProvider(nil)`
 - 权限：操作 system 级 unit 需要 root（agent 常规以 root 运行，与备份/nginx reload
   同前提）。非 root 时 systemctl 报错，agent 原样透传 stderr 摘要，不做 sudo 提权
 
@@ -90,7 +90,7 @@ params：`{ "name": "nginx.service", "action": "restart" }`
   disable 更强的封禁，防误启与伪装服务；masked 态在列表 unitFileState
   呈现，前端「屏蔽」Tag 已有渲染。注意 mask 不影响正在运行的服务）
 - **unit 名白名单**：正则 `^[A-Za-z0-9@._+-]+$` 且必须以 `.service` 结尾；
-  排除 `/`、空格、`..` 等一切歧义字符。前端传参自动补 `.service` 后缀
+  排除 `/`、空格、`..` 等一切歧义字符。前端直接透传列表返回的完整 unit 名（systemd 已含 `.service`）
 - 执行 `systemctl <action> <name>`，超时 30s（restart 数据库类服务可能慢）
 - 成功返回 `{ "name": "nginx.service", "action": "restart" }`；失败原样透传
   stderr 摘要（commandErrSummary），如 `Failed to restart nginx.service: ...`
@@ -108,7 +108,7 @@ params：`{ "name": "nginx.service", "action": "restart" }`
 
 ## D5 server REST 端点
 
-挂在 serveAPI 的 `/agents/` 分支下（api.go：`strings.Contains(agentID, "/services/")`），
+挂在 serveAPI 的 `/agents/` 分支下（api.go：`strings.HasSuffix(agentID, "/services") || strings.Contains(agentID, "/services/")`），
 handler 文件 api_service.go，模式照 api_cron.go（纯转发不落库，D9 同款纪律）：
 
 ```
@@ -194,7 +194,7 @@ capability 由 `systemd` 更名为 `service`，后端差异放 metadata：
 
 - 更名理由：agent/server/前端同仓同发无兼容包袱；"systemd" 作为 capability
   名会挡住 Windows 主机，而 `service` 才是能力本身的语义
-- Linux/macOS：沿用 DetectSystemd（systemctl + /run/systemd/system），
+- Linux：沿用 DetectSystemd（systemctl + /run/systemd/system），
   探测通过才上报 capability，backend=systemd
 - Windows：SCM 是操作系统内置组件恒存在，无需文件探测，直接上报
   backend=windows-scm
@@ -429,9 +429,9 @@ RPC 而不塞进 service.action：
 **对齐 `systemctl edit --full`**：
 
 - **读**（`service.unitfile`，params `{name}`）：
-  - `systemctl show -p FragmentPath -p DropInPaths --value <name>` 拿真实路径
+  - `systemctl show -p FragmentPath --value <name>` 拿真实路径
   - `systemctl cat <name>` 有效全文（含 drop-in 内容）
-  - 返回 `{name, fragmentPath, dropInPaths, content}`；unit 未安装（无
+  - 返回 `{name, fragmentPath, content}`；unit 未安装（无
     FragmentPath）报错
 - **写**（`service.unitsave`，params `{name, content}`）：
   - 路径**不收用户参数**——只收 unit 名，写哪由 FragmentPath 决定，路径

@@ -25,7 +25,7 @@ server ← agent 双向转发），**录制挂在 server 侧的转发管道上**
                                                      + SQLite 元数据
 ```
 
-- `api_remote.go:302 HandleTerminalData`：agent → 浏览器的唯一出口，
+- `api_remote.go:341 HandleTerminalData`：agent → 浏览器的唯一出口，
   录制挂钩点；
 - `closeTerminalSession` / `HandleTerminalClose`：会话终态，finalize 回填
   时长与字节数。
@@ -34,7 +34,7 @@ server ← agent 双向转发），**录制挂在 server 侧的转发管道上**
 
 | # | 决策 | 内容 | 理由 / 备注 |
 |---|------|------|------------|
-| D1 | M1 范围 | 仅终端（SSH/telnet 经 `/api/remote/terminal` 的会话）；VNC/RDP 像素流不录 | 终端流天然是字符事件序列，asciinema 格式即为其行业标准；像素流录制体积与回放复杂度高，价值低 |
+| D1 | M1 范围 | 仅终端（SSH/telnet 经 `/api/remote/terminal` 的会话）；VNC/RDP 像素流不录（此判断被 M3 推翻，见下） | 终端流天然是字符事件序列，asciinema 格式即为其行业标准；像素流录制体积与回放复杂度高，价值低 |
 | D2 | 录制位置 | server 侧转发管道，agent 零变更 | 数据已流经 server；agent 侧录会引入文件管理与上传链路 |
 | D3 | 格式 | asciinema v2（`.cast`）：首行 header JSON，之后每事件一行 `[相对秒,"o","数据"]` | 行业开放格式，可脱离 Cockpit 用 `asciinema play` 回放/转换；行式追加写天然适合流式 |
 | D4 | 只录输出 | 输入流不录（不写 `"i"` 事件） | 输入含密码（SSH/sudo）明文，录制即泄漏源；Guacamole 同样只录输出侧。审计要的是「终端上出现了什么」而非「键盘按了什么」 |
@@ -125,6 +125,22 @@ startRecording 元数据登记与管道落盘、开关语义（默认开/"false"
 合法/0/非法回默认）、过期清理（文件+记录同删、0=永久）、API（列表/取内容
 Content-Type/404/405/删除/审计 view+delete 落库）。回放器自行开发：按事件时间差
 setTimeout 调度 term.write，1/2/4/8x 倍速切换即重放，进度展示。
+
+## M3：Guacamole 桌面会话录制（2026-09-30 落地，推翻 M1 D1）
+
+M1 D1 判定「VNC/RDP 像素流不录」，但 guacd 自带 session recording（`recording-path` /
+`recording-name` 两个 connect 参数，`Format=guac`），成本近乎白捡，M3 一并落地：
+
+- **所有 guacd 协议通录**：`internal/server/api_guacamole.go:165-171` 对 RDP/VNC/SSH 一律设置
+  `recording-path` / `recording-name` / `create-recording-path=true`，仅在 `recording.enabled=false` 时关闭；
+  格式为 `.guac`（指令流，非像素帧），回放走 web 端 GuacPlayer（绕开 guacamole-common-js 1.5.0
+  `SessionRecording(Blob)` 上游缺陷，duck tunnel 注入指令流）。
+- **台账统一**：录制元数据会话开始即登记（`Format=guac`，`recording.go` / `storage/recording.go`），
+  终端 asciinema 录制 `Format=cast`（空值兼容旧数据），二者共用 `/recordings` 列表与 `/api/recordings/{sid}/cast` 取内容。
+- **收集链路**：`collectGuacRecording` 从 guacd 容器卷搬到 server 录制目录，与终端录制同落
+  `<db 目录>/recordings`，M2 异地归档（`recording.remote_dest`）两者共享。
+- 验收证据：探针 S10 + 浏览器 CDP C4（2026-09-30，`.acceptance/guac/evidence/`），
+  真机清单见 `docs/guide/acceptance-checklist.md`「远控三协议」节。
 
 ## 参考
 

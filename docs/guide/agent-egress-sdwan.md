@@ -17,7 +17,7 @@ Server 可以向 Agent 发送 `proxy_new` 消息，Agent 收到后连接目标 `
 关键实现：
 
 - `internal/proxy/handler.go`：Agent 端通过 `net.DialTimeout("tcp", target, ...)` 连接目标。
-- `internal/proxy/manager.go`：Server 端可监听本地端口，将客户端连接转发到指定 Agent。
+- `internal/proxy/mgr/manager.go`：Server 端可监听本地端口，将客户端连接转发到指定 Agent。
 - `internal/server/api_remote.go`：远程终端入口通过 ticket 创建到 Agent 的代理连接。
 
 ### 桌面远控（RDP/VNC/SSH，Guacamole）
@@ -49,7 +49,7 @@ ProxyManager 支持在 Server 侧监听端口，并通过某个 Agent 转发到�
 - UDP 代理真实转发
 - 多 Agent 路径选择、链路质量探测和故障切换
 
-仓库中有 WireGuard、Cloudflare Tunnel 和路由信息探测，但这些只是能力检测，不是隧道建立或路由管理。
+仓库中有 WireGuard / ZeroTier / Tailscale 能力检测（`internal/agent/detector/overlay.go`，任一可用即报 `overlay` capability），但这些只是能力检测，不是隧道建立或路由管理；Cloudflare Tunnel 与路由信息探测未实现。
 
 ### 不支持完整的“网段以 Agent 为出口”策略模型
 
@@ -60,14 +60,11 @@ ProxyManager 支持在 Server 侧监听端口，并通过某个 Agent 转发到�
 - `internal/server/remote_audit.go`
 - `config/cockpit.yaml` 的 `remote_control.allowed_targets`
 
-### Web SSH 还不是完整 SSH 客户端
+### Web SSH 已是完整 SSH 客户端
 
-当前 TerminalModal 是浏览器 xterm WebSocket，Server 和 Agent 侧主要做 TCP 字节转发。SSH 协议本身需要客户端完成握手、认证、加密和 PTY 分配，当前代码中没有完整 SSH client 实现。
+TerminalModal（浏览器 xterm WebSocket）的 SSH 链路：Agent 端 `internal/proxy/ssh_session.go` 实现完整 SSH client（握手、认证、加密、PTY 分配、Shell），由 `internal/proxy/handler.go` 在建连时调用；Server 只编排 ticket、审计与 WebSocket 中转，不碰协议栈。
 
-因此需要区分两个目标：
-
-- 本地 SSH 客户端经 Server 代理端口访问内网 SSH：架构可支持。
-- 浏览器内直接 Web SSH 登录：需要补 Agent 端或 Server 端 SSH client。
+因此当前 Web SSH 已具备完整协议能力，不再是缺口；剩余工作在 ACL、错误反馈与审计在两条路径上的统一。
 
 ### UDP 代理未真正落地
 
@@ -111,7 +108,7 @@ remote_control:
 
 协议级远控已由 Guacamole 栈统一落地：RDP/VNC/SSH 桌面经 guacd 终结，浏览器不自行实现协议栈；Agent 不做协议终结、只做 TCP 中继，构建产物无特殊标签要求。
 
-SSH 另有内置终端兜底路径：Agent 端用 `x/crypto/ssh`（`internal/agent/rpc/ssh_provider.go`）完成握手、认证和 PTY 转发，Server 只负责编排、审计和 WebSocket 中转。
+SSH 另有内置终端兜底路径：Agent 端用 `x/crypto/ssh`（`internal/proxy/ssh_session.go`，`ssh_provider.go` 仅提供默认密钥）完成握手、认证和 PTY 转发，Server 只负责编排、审计和 WebSocket 中转。
 
 剩余工作是 ACL、错误反馈和审计在两条路径上的统一，而不是再造协议客户端。
 

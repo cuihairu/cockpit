@@ -144,9 +144,9 @@ Server 与 Agent 的消息统一为：
 
 | 方向 | 类型 |
 | --- | --- |
-| Agent -> Server | `register`, `heartbeat`, `rpc_response`, `proxy_close`, `proxy_error` |
+| Agent -> Server | `register`, `rpc_response`, `proxy_close`, `proxy_error`, `probe_report`, `exec_log` |
 | Server -> Agent | `rpc_request`, `ping`, `proxy_new` |
-| 双向 | `error`, `proxy_data` |
+| 双向 | `heartbeat`（Agent 上报、Server 回 ACK）、`error`, `proxy_data` |
 
 `register` 必须是 Agent 建立 `/ws` 后的第一条消息。RPC 使用请求消息 ID 关联响应。代理数据使用 `proxyId`、`connId` 关联具体连接。
 

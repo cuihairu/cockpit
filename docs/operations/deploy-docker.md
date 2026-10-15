@@ -11,7 +11,7 @@
 | 拉镜像部署（本文） | 生产/长期运行 | `ghcr.io/cuihairu/cockpit:<tag>` | `deployments/docker/docker-compose.yml` |
 | 本地构建 | 改代码自测 | 本机 `docker build` | 仓库根 `docker-compose.yml` |
 
-两份 compose 的服务定义同源（server + 可选 guacd），差别只在镜像来源。
+两份 compose 的服务定义同源（server + 可选 guacd），差别只在镜像来源；仓库根 `docker-compose.yml` 额外映射宿主端口 `9090:9000`（CF Tunnel 回源历史遗留）。
 
 ## 前置要求
 
@@ -53,7 +53,7 @@ openssl rand -base64 32
 | --- | --- |
 | `latest` | `main` 分支最新（每次合入 main 覆盖） |
 | `main` | 同上，显式引用分支名 |
-| `v1.2.3` / `1.2.3` / `1.2` / `1` | 打 `v*` tag 时的语义化版本系列 |
+| `1.2.3` / `1.2` / `1` | 打 `v*` tag 时的语义化版本系列（`docker/metadata-action` 的 `pattern={{version}}` 会剥掉 `v` 前缀） |
 | `<短 sha>` | 每次构建的不可变快照，回滚用这个 |
 | `pr-123` | PR 构建（不推送 registry，仅验证能构建） |
 
@@ -84,7 +84,6 @@ docker compose exec cockpit-server cockpit version
 | `ADMIN_PASSWORD` | 管理员初始口令，≥8 字符，不能是示例值 |
 | `JWT_SECRET` | JWT 签名密钥，长随机串 |
 | `TOTP_ENCRYPTION_KEY` | `PRODUCTION=true` 时必填，≥32 字符。**启用 TOTP 后必须备份**，丢了已有密钥解不开 |
-| `ALLOWED_ORIGINS` | 对外域名，如 `https://cockpit.example.com`（反代部署必填） |
 
 **可选**：
 
@@ -95,10 +94,11 @@ docker compose exec cockpit-server cockpit version
 | `ADMIN_USERNAME` | 缺省 `admin` |
 | `PRODUCTION` | 缺省 `true`（放开 Host/Origin 校验等开发态便利） |
 | `BASE_URL` | 对外基址，邮件/通知里拼链接用 |
+| `ALLOWED_ORIGINS` | 对外域名，如 `https://cockpit.example.com`。未设置时 WS 接受所有 Origin（打 warning），**不会阻止启动但生产必设**；`.env.example` 自带 `http://localhost:9000` 可用默认值 |
 | `TZ` | 缺省 `Asia/Shanghai` |
 | `GUACD_ADDR` | guacd 地址（启用远控时设 `guacd:4822`） |
 | `GUACD_RECORDING_PATH` | guacd 录制目录，缺省 `/var/lib/guacamole` |
-| `AGENT_EXPIRE_MINUTES` | Agent 过期阈值（分钟），缺省 5：心跳超过该时长即判过期——服务端自动标离线并释放连接，列表默认隐藏（密钥/标签保留，物理清除走「清理离线 agent」钮）；负值关闭 |
+| `AGENT_EXPIRE_MINUTES` | Agent 过期阈值（分钟），缺省 5：心跳超过该时长即判过期——服务端自动标离线并释放连接，列表默认隐藏（密钥/标签保留，物理清除走「清理离线 agent」钮）；负值关闭。**当前 Docker compose 未接线该变量**，在 `.env` 里设了不生效 |
 | `GUACD_LOG_LEVEL` | 缺省 `info`，**别开 `debug`**（会打印 connect 指令参数，含口令/私钥） |
 
 ## 远控栈（guacd，可选）
@@ -150,7 +150,7 @@ location ~ ^/api/remote/(terminal|guacamole) {
 }
 ```
 
-仓库里有一份完整可用的站点配置：`deployments/nginx/cockpit.cuihairu.site.conf`。
+仓库里有一份站点配置模板：`deployments/nginx/cockpit.cuihairu.site.conf`（其 `location ~ ^/api/remote/(terminal|desktop|vnc|guacamole)` 仍含已删除的 desktop/vnc 端点，现网如需收敛为 terminal/guacamole 可自行调整，不影响已删除端点的兜底行为）。
 
 HTTPS 下浏览器会用 `wss://`，Go 网关同源反代，无需额外配置。
 

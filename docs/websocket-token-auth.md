@@ -1,6 +1,6 @@
 # WebSocket 认证边界
 
-当前实现已经避免在远程连接 WebSocket URL 中直接携带 JWT。远程终端、VNC、桌面连接统一使用短期 ticket，并通过 `Sec-WebSocket-Protocol` 传递。
+当前实现已经避免在远程连接 WebSocket URL 中直接携带 JWT。远程终端、VNC、桌面连接统一使用短期 ticket：terminal 入口仅经 `Sec-WebSocket-Protocol` 传递，guacamole 入口 URL query `?ticket=` 与子协议双通道（query 优先、子协议兜底）。
 
 ## 当前流程
 
@@ -22,7 +22,7 @@ const ws = new WebSocket('/api/remote/terminal', [ticket])
 - `/api/remote/terminal`
 - `/api/remote/guacamole`
 
-这些入口会从 `Sec-WebSocket-Protocol` 读取 ticket，而不是从 URL query 读取认证 token。
+terminal 入口从 `Sec-WebSocket-Protocol` 读取 ticket；guacamole 入口先读 URL query `?ticket=`、缺失再回退子协议。两者都不把认证 token 放进通用审计。
 
 ## 设计边界
 

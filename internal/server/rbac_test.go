@@ -113,6 +113,13 @@ func TestRBACMatrix(t *testing.T) {
 		{"admin drift config", "admin", "PUT", "/api/drift/config", 200},
 		{"admin overlay join", "admin", "POST", "/api/agents/a1/overlay/networks/8056c2e21c000001/join", 200},
 		{"admin overlay service", "admin", "POST", "/api/agents/a1/overlay/service", 200},
+		// 审批门（workflow-design.md M2d）：队列 read、决策 write。权限点漏登记会让
+		// 全角色 403、web「审批门」菜单永不渲染（2026-10-15 文档审计 D35 回归）
+		{"viewer read approvals", "viewer", "GET", "/api/approvals", 200},
+		{"viewer approve", "viewer", "POST", "/api/approvals/p1/approve", 403},
+		{"operator approve", "operator", "POST", "/api/approvals/p1/approve", 200},
+		{"admin read approvals", "admin", "GET", "/api/approvals", 200},
+		{"admin approve", "admin", "POST", "/api/approvals/p1/approve", 200},
 		// 认证优先于鉴权：无/坏 token 放行给内层 auth（出 401 而非 403）
 		{"no token", "", "GET", "/api/dns", 200},
 		{"bad token", "bad", "GET", "/api/dns", 200},
@@ -173,6 +180,29 @@ func TestRBACOverlayJoinTierD28(t *testing.T) {
 	}
 	if got := rbacPair(t, s, "net-ops", "POST", join); got != http.StatusOK {
 		t.Errorf("net-ops + overlay:admin join = %d, want 200", got)
+	}
+}
+
+// TestRBACRouteResourcesRegistered 路由资源必须登记进权限表且内置角色持有：
+// resourceActions 缺键会让该资源所有权限点被 PermissionValid 拒收、admin 也不
+// 持有，端点对全员 403；权限表有而 allPermissions 固定序列漏列则造出「自定义
+// 角色可授、admin 不可授」的口径分裂。approvals 断链即此类（审计 D35）。
+func TestRBACRouteResourcesRegistered(t *testing.T) {
+	s := newTestServerWithDB(t)
+	admin, err := s.db.GetRole("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range resourceRules {
+		for _, a := range []string{"read", "write", "admin"} {
+			perm := r.res + ":" + a
+			if !storage.PermissionValid(perm) {
+				continue
+			}
+			if !roleCovers(admin.Permissions, perm) {
+				t.Errorf("admin lacks registered permission %s (route %s)", perm, r.prefix)
+			}
+		}
 	}
 }
 

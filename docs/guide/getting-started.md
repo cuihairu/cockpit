@@ -24,7 +24,7 @@ pnpm build
 cd ..
 ```
 
-`cockpit init` 生成的配置默认使用 `server.static_dir: ./web/dist`。如果静态目录不存在，Server 根路径会返回 API 运行提示，而不是 Web UI。
+`cockpit init` 生成的配置默认使用 `server.static_dir: ./web/dist`。仅当 `server.static_dir` 与 `STATIC_DIR` 环境变量**都未设置**时，Server 根路径会返回 API 运行提示；配置了目录但目录不存在（如未执行 web 构建），根路径返回 404。
 
 ## 初始化
 
@@ -32,13 +32,12 @@ cd ..
 ./cockpit init -example
 ```
 
-这会在当前目录创建：
+这会在当前目录创建（`data/` 目录也会建，`cockpit.db` 首次打开数据库时自动创建）：
 
 ```text
 config/
   cockpit.yaml
 data/
-  cockpit.db
 inventory/
   example.yaml
 ```
@@ -213,7 +212,7 @@ OpenWrt 路由器无需手工编译：nightly release 提供多架构
 ```bash
 export ADMIN_PASSWORD='use-a-strong-password'
 export TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)"
-# 密码箱主密钥（未设置时回退 TOTP_ENCRYPTION_KEY，见 docs/guide/vault-design.md 第 5 节）
+# 密码箱主密钥（未设置时回退 TOTP_ENCRYPTION_KEY，见 docs/guide/vault-design.md 第 2 节 V5）
 export COCKPIT_VAULT_KEY="$(openssl rand -base64 32)"
 export ALLOWED_ORIGINS="https://cockpit.cuihairu.site"
 export PRODUCTION=true

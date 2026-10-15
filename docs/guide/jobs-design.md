@@ -12,7 +12,7 @@
   RPC provider（命令 ≤16KB、超时 ≤300s 缺省 60s、输出 64KB 截断、超时按
   进程组 SIGKILL）；`GET|POST /api/jobs` + `GET /api/jobs/{id}`（同步等待终态
   回写）；终态单条审计 `job_run`（details 含 type/target/status/params）；
-  Jobs 页（全机台账 15s 轮询 + 创建即执行弹窗 + 终态详情）；权限点
+  Jobs 页（全机台账 5s 轮询 + 创建即执行弹窗 + 终态详情）；权限点
   `jobs:read`/`jobs:write`（PermGuard 控制创建入口）。
 - **未实现**（按本文「边界（明确不做）」节，立项时再设计，不写进当前能力）：
   输出流式、Action/Event 抽象与 AI 接线（P5）。
@@ -74,7 +74,8 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST /api/jobs` | `{type, target, parameters}` | 创建并执行，同步返回终态视图 |
+| `POST /api/jobs` | `{type, target, parameters}` | 创建并执行，201 返回 pending 视图，后台派发终态 |
+| `POST /api/jobs/{id}/cancel` | — | 取消 pending/running Job（终态 409） |
 | `GET /api/jobs` | — | 最近 50 条台账（倒序） |
 | `GET /api/jobs/{id}` | — | 单条详情（含输出） |
 
@@ -109,9 +110,9 @@ target 非空；exec 需 `parameters.command` 非空且 ≤16KB；`timeout_s` 1-
 
 ## 前端设计
 
-- `web/src/pages/Jobs/index.tsx`：全机台账表（15s 轮询 + 手动刷新），
+- `web/src/pages/Jobs/index.tsx`：全机台账表（5s 轮询 + 手动刷新），
   创建弹窗（在线 agent 下拉 + 命令 + 超时），详情弹窗（状态/退出码/输出尾部）；
-- `web/src/services/jobs.ts`：listJobs/createJob/getJob（axios，Bearer 注入）；
+- `web/src/services/jobs.ts`：listJobs/createJob/getJob/cancelJob/createJobWithApproval（axios，Bearer 注入）；
 - 路由 `/jobs`，菜单「Job 执行」，perm `jobs:read`，创建按钮 `jobs:write`。
 
 ## 测试

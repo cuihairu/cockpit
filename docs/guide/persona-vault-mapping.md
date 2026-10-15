@@ -67,7 +67,7 @@ persona 对外部项目的正式接口是 **HTTP Connect API**（`persona connec
 | 连接失败 / 超时 / 421 / 403 / 其他 5xx | `fmt.Errorf("…: %w", ErrLocked)`——调用方按锁定语义拒绝服务，不降级 local（V7 红线） |
 | 503 `vault_locked`（属主未解锁） | 同上，包 `ErrLocked` |
 | 401 `unauthorized`（token 无效/吊销/过期） | 显式 token 错误（**不包** `ErrLocked`——处置动作是换 token 不是等解锁；确定性失败不重试） |
-| 429 `rate_limited` | 显式限流错误（按分钟窗退避） |
+| 429 `rate_limited` | 显式限流错误（`rate limited (120 req/min per token)`；当前不自动重试，调用方按需退避） |
 | 404 `not_found` | `ErrNotFound`（errors.Is 可判） |
 
 会话口径：复用 `vault.Session`（`internal/vault/session.go:10-52`，TTL 到期

@@ -72,7 +72,7 @@ GUACD_ADDR=192.168.5.10:4822
 guacd 本身不存储密钥。SSH 密钥由 **Cockpit Agent** 管理：
 
 1. Agent 启动时自动检查 `~/.ssh/`，无密钥则生成 Ed25519
-2. 用户通过 Web 发起 SSH 连接时，Server 调用 Agent 的 `ssh.getDefaultKey` RPC 获取私钥
+2. 用户在 Web 发起 SSH 连接且**既未填私钥也未填口令**时，Server 才调用 Agent 的 `ssh.getDefaultKey` RPC 获取默认私钥（显式凭据一律原样透传）
 3. Server 将私钥 PEM 传给 guacd 的 `private-key` 参数
 4. guacd 用该密钥认证连接目标机器
 

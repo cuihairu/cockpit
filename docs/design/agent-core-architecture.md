@@ -6,7 +6,7 @@ title: agent-core 架构重构——core/平台层/插件三层与构建矩阵�
 
 ## 状态
 
-- 状态: **Proposed（架构文档先行，零代码；用户过目后按 §7 批次实施）**。
+- 状态: **P1–P5 已落地（core/ 十包全量存在并接线；2026-10-15 复核）。** 实现进度以 §7 批次表标注为准。
 - 立项口径（用户令，2026-10-09）：
   1. **核心抽取**：通用能力收进 core（注册/心跳/日志指标/配置热更/崩溃留位/重试/上报/执行审计 execlog/探活 system 角色），core 守住百行级文件、能力可裁剪，业务只写插件；
   2. **平台差异分层**：不同平台特性（linux/windows/macos 各自的进程监管、路径、服务集成）放对应系统的独立目录（core / 平台适配层 / 业务插件 三层）；
@@ -16,7 +16,7 @@ title: agent-core 架构重构——core/平台层/插件三层与构建矩阵�
 
 ## 1. 定位：三层架构
 
-**core 不是框架，是零件箱。** 不做 god-object 装配（现状 `internal/agent/agent.go` 778 行的大对象是本次要拆的债），每个能力一个独立小包，main 按需 import——没 import 的能力不参与编译，天然「按需可裁」。
+**core 不是框架，是零件箱。** 不做 god-object 装配（注册/心跳/上报/执行留痕/指标等通用环已按此拆出，`internal/agent/agent.go` 现 696 行），每个能力一个独立小包，main 按需 import——没 import 的能力不参与编译，天然「按需可裁」。
 
 ```text
 core/                 ① 通用能力层：百行级文件、零业务、零平台分支
@@ -48,7 +48,7 @@ cmd/cockpit-agent → internal/agent(插件) → core/* → internal/protocol
 | 5  | 指标采集                 | **已有**     | collector.go：gopsutil v3 CPU/内存/磁盘/负载/host，155 行已是零件形态，原地归位                                                  | `core/metrics`       |
 | 6  | 统一上行                 | **已有**     | protocol.Codec + outbound channel；指标/服务面/注册/心跳全部走它——上收为编解码与通道薄封装                                      | `core/report`        |
 | 7  | 配置拉取与热更           | **新建**     | 现状仅启动 flags（docs/agent-config.md），无拉取热更；泛化「版本号轮询→拉取→热生效」通用件（server 侧 inventory.watch 同口径先例） | `core/configsync`    |
-| 8  | 执行审计（execlog）      | **新建**     | 现状执行审计只在 Server 侧 audit 表；agent 侧每次执行留痕（action/入参/结果/耗时）+ 上行，对齐 jobs 审计口径                     | `core/execlog`       |
+| 8  | 执行审计（execlog）      | **已有**     | `core/execlog`：环 + 攒批上行（`execRecorder` + 30s 攒批），router Handle 单点埋点；协议 `exec_log` 消息类型已注册（P5 落地）                     | `core/execlog`       |
 | 9  | 探活（system 角色）      | **已有（P6 落地）** | `core/healthprobe`：Checker（HTTP/TCP）+ Guard 三语义（Liveness/Readiness/Heartbeat）防抖状态机 + 故障窗口时间线；service_health 策略层已切换（heal→liveness、纯告警→readiness，事件走迁移边沿，窗口随状态上行）；Heartbeat 语义与「探针记录按受监控 system 建模」留待 system 角色批 | `core/healthprobe`   |
 | 10 | 崩溃采集                 | **留位**     | 仅包骨架+接口占位不实现（分级方案届时按调研另批，对标 croupier crash-capture-survey 节奏）                                       | `core/crash`         |
 | 11 | 进程监管/服务集成/路径    | **已有，平台分散** | Windows SCM（service_windows.go 401 行 + svcargs）、darwin launchd（207 行）、openwrt procd（ipk/init.d）、linux systemd（install.sh） | `core/platform/<goos>`（§3） |
@@ -104,7 +104,7 @@ core/                        # ① 通用能力层（同仓同 module，包级�
     darwin/                  #   launchd plist/路径
 internal/agent/              # ③ 插件宿主 + 业务插件（rpc Providers 原地，Provider 注册表/能力检测不动）
 internal/protocol/           # 协议一份（core 唯一可 import 的 internal 包）
-cmd/cockpit-agent/           # main 薄壳：core 零件装配 + 平台层接线（112 行现状，更薄）
+cmd/cockpit-agent/           # main 薄壳：core 零件装配 + 平台层接线（116 行现状，更薄）
 ```
 
 - 不建独立 Go module（单仓单人节奏下独立 module 是纯摩擦，同 croupier 判断）。
@@ -113,7 +113,7 @@ cmd/cockpit-agent/           # main 薄壳：core 零件装配 + 平台层接线
 
 ## 5. 构建矩阵（平台特化产物）
 
-现状已成立的部分不翻案：nightly `build-agent` 7 目标（linux amd64/arm64/arm、windows amd64/arm64、darwin amd64/arm64）+ `build-openwrt` 3 架 ipk + Windows setup.exe（Inno Setup 走查 job）。本次把「矩阵」从打包层升格为**架构承诺**：
+现状已成立的部分不翻案：nightly `build-agent` 7 目标（linux amd64/arm64/arm、windows amd64/arm64、darwin amd64/arm64）+ `build-openwrt` 5 架 ipk（mipsel/mips/aarch64_generic/arm_cortex-a7_neon-vfpv4/x86_64）+ Windows setup.exe（Inno Setup 走查 job）。本次把「矩阵」从打包层升格为**架构承诺**：
 
 | 维度       | 取值                                                                 | 机制                                   |
 | ---------- | -------------------------------------------------------------------- | -------------------------------------- |
@@ -124,7 +124,7 @@ cmd/cockpit-agent/           # main 薄壳：core 零件装配 + 平台层接线
 | 打包形态   | tar.gz（linux/darwin）· zip（windows）· setup.exe（windows）· ipk（openwrt） | 既有打包 job 不动                      |
 | 验证       | 每目标构建绿 + Windows installer 走查 job + 探针真机回归              | 既有 CI + scripts/acceptance/          |
 
-一句话：**同一份 core + 平台层 + 插件，矩阵按 GOOS 特化出 7+3 个产物**；平台差异全部消化在编译期平台层与打包形态，矩阵条目本身不携带平台 if 分支。
+一句话：**同一份 core + 平台层 + 插件，矩阵按 GOOS 特化出 7+5 个产物**；平台差异全部消化在编译期平台层与打包形态，矩阵条目本身不携带平台 if 分支。
 
 ## 6. 验证口径（每批通用）
 
@@ -134,12 +134,13 @@ cmd/cockpit-agent/           # main 薄壳：core 零件装配 + 平台层接线
 
 ## 7. 抽取批次（每批独立提交，CI 绿进下批）
 
-| 批  | 内容                                                                                                                                 | 风险 | 测试策略                                                       |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------ | ---- | -------------------------------------------------------------- |
-| P1  | core/ 骨架 + `backoff`/`logx` 薄壳上收（agent.go 重连退避原地切 import，行为零变化）                                                  | 低   | 现有用例随迁 + 退避时序正反用例（注入点惯例不变）               |
-| P2  | `register`+`heartbeat`+`report` 上收——**agent.go 778 行拆环**：连接/重连/注册/心跳各自归位，agent.go 降为装配壳                        | 中   | agent_ws/agent_handler 既有用例随迁；注册-心跳-重连集成用例     |
-| P3  | `metrics`+`execlog`+`healthprobe`：collector 归位；执行审计落地（本地留痕+上行）；service_health 策略层切换到公共探针（三语义+故障窗口） | 中   | 采集器用例随迁；execlog 先落痕后上行的顺序用例；探针窗口开合/恢复断言 |
-| P4  | `platform/` 收编（SCM/launchd/machineid/路径）+ `configsync` + `crash` 留位；平台文件白名单清零                                        | 高   | 跨平台 CI 矩阵全绿 + installer/ipk/launchd 走查；信号退出语义用例 |
+| 批  | 内容                                                                                                                                 | 风险 | 测试策略                                                       | 状态 |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------ | ---- | -------------------------------------------------------------- | ---- |
+| P1  | core/ 骨架 + `backoff`/`logx` 薄壳上收（agent.go 重连退避原地切 import，行为零变化）                                                  | 低   | 现有用例随迁 + 退避时序正反用例（注入点惯例不变）               | ✅ 已落地 |
+| P2  | `register`+`heartbeat`+`report` 上收——**agent.go 778 行拆环**：连接/重连/注册/心跳各自归位，agent.go 降为装配壳                        | 中   | agent_ws/agent_handler 既有用例随迁；注册-心跳-重连集成用例     | ✅ 已落地 |
+| P3  | `metrics`+`execlog`+`healthprobe`：collector 归位；执行审计落地（本地留痕+上行）；service_health 策略层切换到公共探针（三语义+故障窗口） | 中   | 采集器用例随迁；execlog 先落痕后上行的顺序用例；探针窗口开合/恢复断言 | ✅ 已落地 |
+| P4  | `platform/` 收编（SCM/launchd/machineid/路径）+ `configsync` + `crash` 留位；平台文件白名单清零                                        | 高   | 跨平台 CI 矩阵全绿 + installer/ipk/launchd 走查；信号退出语义用例 | ✅ 已落地（configsync 未做，见 todo） |
+| P5 | 协议 `exec_log` 消息 + 服务检测 agent + 探针上行接线 | — | execlog 先落痕后上行 + probe_report 上报用例 | ✅ 已落地 |
 
 - 与在途工作编排：Workflow M1 验收与探针线先行收尾，P1 在其后启动；批次间不留半成品依赖。
 - **回退策略**：每批 `cmd/cockpit-agent` 仍可从 internal 原路径编译（上收=内部实现切换 import），任一批叫停不留悬空引用。

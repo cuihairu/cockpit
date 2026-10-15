@@ -36,7 +36,7 @@ Web 与移动端各有一套 UI 外观设置。本文是外观体系的实现基
 
 ### 色值表
 
-色板字段含义（两端同名）：
+色板字段含义（两端同名，例外见注）：
 
 - `bg` 页面底色
 - `surface` 卡片 / 面板面
@@ -151,7 +151,7 @@ hover 不会因为底色偏黄而显脏。
 （`resolveSkinTokens`），保证 antd 组件的颜色与手写 CSS 同源：`colorBgLayout`
 取 `bg`、`colorBgContainer` 取 `surface`、`colorFillAlter` 取 `surfaceAlt`、
 `colorBorder` / `colorBorderSecondary`、`colorText` / `colorTextSecondary`、
-`Layout` 的 `headerBg` / `siderBg` / `bodyBg` 取 `chrome`。
+`Layout` 的 `headerBg` / `siderBg` 取 `chrome`，`bodyBg` 取 `bg`（页面底色）。
 
 ### 设置页
 
@@ -191,7 +191,7 @@ Web 端设置整体存 localStorage（沿用既有 settings 通道），`themeSk
 
 「同步」的含义是**口径一致**，不是共享同一份存储：
 
-- 皮肤 key、名称、说明、以及色板全部色值两端完全相同（本文第二节即共同基线），
+- 皮肤 key、名称、说明、以及色板全部色值两端完全相同（本文第二节即共同基线；唯一例外：Web 端 `inputBg` 色板字段在移动端 SkinPalette 中不存在），
   在任意一端切皮肤，另一端选同一个 key 得到同一套颜色。
 - 服务端没有 UI 设置的持久化通道，因此两端各自存本地：Web 端 localStorage，
   移动端 SharedPreferences。不存在「改一处、两端同时变」的实时下发。

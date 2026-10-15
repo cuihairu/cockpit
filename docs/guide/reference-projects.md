@@ -134,7 +134,7 @@ Teleport（[与 Guacamole 的社区对比](https://www.reddit.com/r/selfhosted/c
 
 ## 拨测：Uptime Kuma
 
-[Uptime Kuma](https://uptimekuma.co/) / [louislam/uptime-kuma](https://github.com/louislam/uptime-kuma) — 自托管拨测监控标杆。
+[Uptime Kuma](https://github.com/louislam/uptime-kuma) — 自托管拨测监控标杆（GitHub 为唯一官方来源；uptimekuma.co 为非官方粉丝站，不作引用）。
 
 **优点**
 
@@ -188,4 +188,4 @@ Teleport（[与 Guacamole 的社区对比](https://www.reddit.com/r/selfhosted/c
 - [Teleport/Guacamole 社区对比](https://www.reddit.com/r/selfhosted/comments/1im5ioy/how_to_connect_to_sshrdp_web_based_with_teleport/)
 - [NetBox Labs：The Long War Against Configuration Chaos](https://netboxlabs.com/blog/the-long-war-against-configuration-chaos/)
 - [NetBox GitOps 集成](https://netodata.io/netbox-integration-connecting-dcim-ipam-with-enterprise-infrastructure/)
-- [Uptime Kuma 官网](https://uptimekuma.co/) / [louislam/uptime-kuma](https://github.com/louislam/uptime-kuma)
+- [louislam/uptime-kuma](https://github.com/louislam/uptime-kuma)（GitHub 官方仓库）

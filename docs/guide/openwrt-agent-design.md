@@ -27,9 +27,12 @@ Cgo 绑定），于是 agent 全量继承。agent 运行时根本不开数据库
 拆包后 agent 依赖闭包（`go list -deps ./cmd/cockpit-agent`）仅剩：
 
 ```
-internal/agent{,/detector,/provider,/rdp,/rpc}
+internal/agent{,/detector,/provider,/rpc}
 internal/{docker,openwrt,protocol,proxy,pve}
+core/{backoff,crash,execlog,healthprobe,heartbeat,logx,metrics,platform,register,report}
 ```
+
+（`internal/agent/rdp` 已随 grdp 删除手术移除，D-2026-10-07-1；core/ 十包为 agent-core 三层架构落地后新增。）
 
 无 storage、无 sqlite、无 gorm。**纯 Go 交叉编译一条命令出静态包**，
 不再需要 zig 或各架构 OpenWrt SDK：

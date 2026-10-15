@@ -15,10 +15,10 @@
 | DNS/overlay API token | yaml 字段 + env 覆盖（env-wins 约定「secret 不落文件」） | 服务端构造时读取 |
 | notification（ntfy token/webhook secret/telegram bot_token） | yaml | 服务端发送时读取 |
 | SMTP relay | env `SMTP_PASS` / yaml | 密码重置邮件 |
-| ACME 账户/证书私钥 | DB **明文**列（仅 `json:"-"` 挡 API） | PKI 域，已知欠账（后续单独立项） |
+| ACME 账户/证书私钥 | DB 加密列（`serializer:acmeprivkey`，V6 第二波已收敛；`json:"-"` 挡 API） | PKI 域，已加密（2026-10-12） |
 | SSH 私钥目录 | `~/.ssh` 或 `COCKPIT_SSH_KEYS`（0600） | agent 侧，`getDefaultKey` RPC 回传 PEM |
 | agent 注册 secret | env/CLI/plist/Windows 服务路径 | 部署面（installer 域） |
-| inventory capability `config.api_token` | **明文落 DB**（`agents.capabilities` JSON） | 已知欠账（随 vault 第二波收敛） |
+| inventory capability `config.api_token` | DB 加密（`serializer:capconf` → `agents.capabilities` JSON 整体加密，V6 第二波已收敛） | 已加密（2026-10-12） |
 | jenkins 类外部端点 | **不存在**（todo 预留） | 未来链接/webhook 型端点凭据走 vault ref |
 
 加密基础设施现状：单一全局 AES-256-GCM 密钥 = `sha256(TOTP_ENCRYPTION_KEY)`（`storage/crypto.go`），无版本/无轮换/无 KDF（单轮 sha256）/无解锁仪式；`PRODUCTION=true` 时强制非弱密钥。
@@ -78,7 +78,7 @@ KDF 只在 vault 包定义一处：env key 走 `sha256`（兼容存量密文）�
 ### V6 接入点改造分波
 
 - **第一波（零协议改动）**：①remote-credential 加密/解密调用点改走 vault 收敛后的 crypto core（格式不变、零迁移）；②NAS targets：服务端 vault `nas/<name>` 条目为第一来源，agent 经 RPC 拉取，env 保留为回退与引导（`COCKPIT_NAS_TARGETS` 继续可用）。
-- **第二波（登记后续，不卡 M1）**：DNS/overlay/notification/SMTP token 构造时从 vault 解析（env-wins 之上加 vault 源）；inventory capability token 落库改 ref；ACME 私钥列加密。
+- **第二波（已落地 2026-10-12，`internal/server/vault_secrets.go`）**：①DNS/overlay/notification/SMTP token 构造时经 `vault:<path>` 引用解析（env-wins 之上加 vault 源）；②inventory capability token 加密落库（`serializer:capconf`）；③ACME 私钥列加密（`serializer:acmeprivkey`）。
 - jenkins 类：`links` URL 不嵌凭据，端点凭据走 vault ref（`external/<endpoint>`），第二波随链接功能立项。
 
 ### V7 注册与切换
@@ -131,7 +131,7 @@ vault:
   #     session_ttl: 30m   # token 用 PERSONA_CONNECT_TOKEN env 注入
 ```
 
-#### vault: 引用（V6 第二波）
+#### vault: 引用（V6 第二波，已落地）
 
 各凭据字段的值可写成 `vault:<path>` 显式引用，启动时经 provider 解析为条目 value
 （只进内存 config；解析失败启动即终止，错误只含字段名与 path）：

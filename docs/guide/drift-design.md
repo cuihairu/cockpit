@@ -27,15 +27,15 @@ stack SaveCompose ────────┘  (JSON)  ←逐项对比→  vs �
 | # | 决策 | 内容 | 理由 / 备注 |
 |---|------|------|------------|
 | D1 | M1 边界 | 按需检查（pull），基线只读不改 | 定时巡检 + 告警通知、手动登记基线、inventory 字段一致性（hostname/IP）留 M2 |
-| D2 | 检测对象 | 仅 cockpit 名下对象：nginx `cockpit-site-*.conf` 片段 / cron cockpit 任务段 / stack `compose.yml` + `.env` | 与 nginx「用户已有配置零接触」纪律一致；外部条目不检测 |
+| D2 | 检测对象 | 仅 cockpit 名下对象：nginx `cockpit-site-*.conf` 片段 / traefik `cockpit-site-*.yml` 动态片段 / cron cockpit 任务段 / stack `compose.yml` + `.env` | 与 nginx「用户已有配置零接触」纪律一致；外部条目不检测 |
 | D3 | 基线存储 | agent 本地 JSON `/var/lib/cockpit/drift-baseline.json`（`COCKPIT_DRIFT_BASELINE` 覆盖），mutex + tmp+rename 原子写，0600 | 基线跟着 agent 走；server 不落库（转发纪律）；写路径与基线同进程无网络往返，无不一致窗口 |
-| D4 | 条目 key | `nginx/<name>`、`cron/cockpit`、`stack/<name>/compose.yml`、`stack/<name>/.env`；每条目 `{sha256, updated_at}` | 文件粒度，问题定位直接 |
+| D4 | 条目 key | `nginx/<name>`、`traefik/<name>`、`cron/cockpit`、`stack/<name>/compose.yml`、`stack/<name>/.env`；每条目 `{sha256, updated_at}` | 文件粒度，问题定位直接 |
 | D5 | 状态 | `ok`（hash 一致）/ `drifted`（基线在、当前在、内容变）/ `missing`（基线在、文件没了）/ `no_baseline`（文件在、无基线——面板外存量对象）；实现补充：`error`（读取失败，不影响其他类）、`none`（cron 空段且无基线，不产生噪音条目） | `no_baseline` 提示通过面板保存一次即自动登记；删除对象走 Forget 不产生 missing |
 | D6 | check 算法 | 实时读当前内容算 sha256 与基线比对；nginx **对文件原始字节** hash（meta 注释被改坏同样算漂移）；cron 对 `splitCockpit` 解析出的任务列表 marshal hash（meta 行损坏会掉出任务列表 → hash 变 → 漂移）；stack 逐文件 | 不解析语义，字节级比对最诚实 |
 | D7 | 挂钩注入 | `BaselineRecorder` 接口（`Record(kind, name, content)` / `Forget(kind, name)`）注入三个 provider，字段零值 nil 不记录 | provider 相互独立注册，接口注入改动最小；测试可注入 fake |
 | D8 | 挂钩时机 | **写成功后** Record（nginx 在 reload 成功后；reload 失败回滚不记）；删除成功后 Forget（nginx DeleteSite / stack 删除目录 / cron DeleteJob） | 基线 = 线上实际生效的内容 |
-| D9 | capability | `drift`：nginx-proxy / cron / docker-api（stack）**任一存在**即注册 | 三者全无则 check 无从谈起 |
-| D10 | RPC | `drift.check` 单方法（POST），无用户输入参数 | 校验面为零；结果一次性全量返回 |
+| D9 | capability | `drift`：nginx-proxy / traefik-proxy / cron / docker-api（stack）**任一存在**即注册 | 四者全无则 check 无从谈起 |
+| D10 | RPC | `drift.check` 单方法（POST），无用户输入参数（M3/M4 追加 `drift.diff`/`drift.record`） | 校验面为零；结果一次性全量返回 |
 | D11 | server | `POST /api/agents/{id}/drift/check` 纯转发，不落库；浏览类不记审计 | 与 cron/logs 转发纪律一致 |
 | D12 | Web | `/drift` 页面：agent 选择 + 「检查」按钮 + 汇总（漂移 N 项）+ 四态清单（类型 Tag / 名称 / 状态 Tag / 基线与当前 hash 短码） | 参照 /cron 页面结构 |
 
@@ -74,7 +74,7 @@ drifted 条目从「变没变 + hash 短码」升级为「哪里变了」：基�
 | # | 决策 | 内容 | 理由 / 备注 |
 |---|------|------|------------|
 | D19 | 基线存原文 | `BaselineEntry` 加 `Content string`（omitempty；`Record` 时随 hash 一并写入，单条 >256KB 只存 hash 不存原文）；旧基线无原文时 `drift.diff` 明确报「基线无原文（旧版本记录），到对应管理页重新保存一次即可」 | Record 本来就拿到 content，零额外读；写路径下次保存自动补原文，零迁移；基线文件仍 0600 本地；.env 等内容经 diff 返回与文件管理器 read 同权限面（JWT + agent 在线），无新增泄露 |
-| D20 | `drift.diff` | `{kind, name}`：kind 白名单 {nginx, cron, stack}；expected=基线原文，current=实时读（nginx 片段文件 / stack compose.yml 与 .env / cron 读 crontab 后 splitCockpit 取 jobs）；任一侧缺失或 >256KB 拒绝并报原因；**cron 两侧返回前 MarshalIndent 美化**（hash/基线层保持 compact `json.Marshal` 不动——否则升级后旧基线 hash 失配全量误报 drifted；美化只在 diff 展示层） | current 的取法与 check/Record 完全同源（同 marshal），保证 diff 与 hash 判定一致；JSON 美化让 cron 段可按行 diff |
+| D20 | `drift.diff` | `{kind, name}`：kind 白名单 {nginx, traefik, cron, stack}；expected=基线原文，current=实时读（nginx/traefik 片段文件 / stack compose.yml 与 .env / cron 读 crontab 后 splitCockpit 取 jobs）；任一侧缺失或 >256KB 拒绝并报原因；**cron 两侧返回前 MarshalIndent 美化**（hash/基线层保持 compact `json.Marshal` 不动——否则升级后旧基线 hash 失配全量误报 drifted；美化只在 diff 展示层） | current 的取法与 check/Record 完全同源（同 marshal），保证 diff 与 hash 判定一致；JSON 美化让 cron 段可按行 diff |
 | D21 | server 端点 | `POST /api/agents/{id}/drift/diff`，body `{kind, name}`：kind 白名单 + name 非空 ≤128 双端同规则校验后转发 `drift.diff`；不审计（浏览性质，与 check 一致） | forwardDriftRPC 复用 |
 | D22 | Web diff 渲染 | drifted 行加「差异」按钮 → Modal：自写 LCS 行级 diff（双方先按行截断 1000 行并标注「内容过长，仅对比前 1000 行」）；统一 diff 着色（del 红=基线有当前无，add 绿=当前新增，same 灰）；页脚提示「核对后到对应管理页重新保存可消除漂移」 | 自写 LCS（整数键 + DP 全表 + 回溯，1000 行 O(n²)≤10⁶ 可接受）避免引入依赖；不做双栏对照（行级统一 diff 更适合配置段落场景；后被 M5/D26 推翻） |
 
@@ -89,7 +89,7 @@ drifted 条目从「变没变 + hash 短码」升级为「哪里变了」：基�
 ### Server 侧
 
 - `handleAgentDriftAPI` 加 `sub == "diff"`：POST + body 解码 + kind 白名单
-  {nginx,cron,stack} + name 非空 ≤128 → `forwardDriftRPC(..., "drift.diff", params)`。
+  {nginx,traefik,cron,stack} + name 非空 ≤128 → `forwardDriftRPC(..., "drift.diff", params)`。
 
 ### Web 侧
 

@@ -50,7 +50,7 @@
 ### capability 与注册
 
 - `agent.go` detectCapabilities 无条件追加 `file` capability（metadata 带 M1 支持的
-  maxWrite=1MB / maxUpload=10MB 提示值）；
+  maxReadChunk=1MB / maxWriteChunk=1MB 提示值；上传上限 10MB 由 web 端校验）；
 - `providers.go` 无条件 `RegisterProvider(rpc.NewFileProvider(rpc.FileConfig{}))`
   （无平台判断，与 backup 的 GOOS==linux 形成对照）。
 

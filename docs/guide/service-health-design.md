@@ -34,10 +34,10 @@
 | D6 | 自愈白名单 | per-agent `whitelist[]`（*.service 名单）随配置下发；**双端校验**：server 保存时拒绝 `heal=true` 且目标不在白名单的探针（报错文案指引改 `heal=false` 只告警）；agent 执行前再校验一道，非白名单只告警不动手。`cloudflared.service` 为首个候选 | M3.5 D27「白名单绝不能成为动任意 unit 的口子」纪律的延伸：自愈的破坏半径（无人值守重启）高于人工点击，必须显式点名；双端各挡一道同 D23 写操作纪律 |
 | D7 | 重启风暴退避 | unit 级滑动窗口台账：`backoffWindowSec`（默认 600）内最多 `maxRestartsInWindow`（默认 3）次 restart（含失败）；窗口耗尽只告警不动作，每窗口至多一条 `heal_backoff` 事件 | 用户要求「X 分钟内最多 Y 次」；台账按 unit 记（两个探针指向同一 unit 共享额度）；失败重启同样占额度——防对坏 unit 反复硬敲 |
 | D8 | 事件回传 | 不引新协议消息：agent 事件环形缓冲（256 条，满丢最旧）；server 归集循环每 30s 轮询 `service.health.status` 且 `drain=true`（拉取并清空）；仪表盘 GET 同一 RPC 但 `drain=false` 只窥不取（防浏览器读吞掉归集循环还没落审计的事件）；最新状态快照缓存进 `service_health.state.<agentID>` 供离线灰态 | 协议零改动（agent 无 server 方向 RPC 原语）；drain/peek 分口后事件唯一消费者是归集循环（审计/告警路径不被读路径竞态）；30s 归集延迟对「分钟级自愈链路」无感；轮询节奏固定不配置（探针间隔才是用户旋钮） |
-| D9 | 审计与告警 | 六类事件（probe_down/probe_recovered/heal_restarted/heal_failed/heal_blocked/heal_backoff）分流：自愈三态每条落审计 `service_health_heal / service_health_heal_failed / service_health_heal_blocked`，username=`cockpit-agent`，resourceID=`{agentID}/{unit}`，details 带探针结果摘要；down/blocked/backoff → 告警（title 含 probeId，未读去重，blocked/backoff 为 warning、down 为 error），recovered 不告警；六类全发通知（`service_health.down / .up / .healed / .heal_failed / .heal_blocked / .backoff`，白名单显式启用） | 用户要求「每次自愈落审计」；recovered 与 backoff 不进审计（噪音类不记审计口径），但 backoff 必须「告警+通知」可见——额度耗尽意味着自愈已停摆，用户必须知道 |
+| D9 | 审计与告警 | 六类事件（probe_down/probe_recovered/heal_restarted/heal_failed/heal_blocked/heal_backoff）分流：自愈三态每条落审计 `service_health_heal / service_health_heal_failed / service_health_heal_blocked`，username=`cockpit-agent`，resourceID=`{agentID}/{unit}`，details 带探针结果摘要；down/blocked/backoff → 告警（title 含 probeId，未读去重，blocked/backoff 为 warning、down 为 error），recovered 不告警；六类全发通知（`service_health.down / .up / .healed / .heal_failed / .heal_blocked / .backoff`；需在 `notification.events` 显式启用——默认 config 仅启用 `certificate_*`/`service_down`/`agent_offline`/`domain_expired`） | 用户要求「每次自愈落审计」；recovered 与 backoff 不进审计（噪音类不记审计口径），但 backoff 必须「告警+通知」可见——额度耗尽意味着自愈已停摆，用户必须知道
 | D10 | RBAC | 查看 `services:read`，配置写入（PUT）与立即探测 `services:write` | 权限点清单已有 services 面（storage/role.go resourceActions），策略层不另立权限点；server 侧 PUT/check 用 `userHasPerm` 硬校验 |
 | D11 | 平台边界 | 自愈仅 Linux + systemd（`DetectSystemd()`）；非 systemd 平台带 `heal=true` 的配置在 agent 侧拒绝（server 侧校验先行）。http/tcp 探针 v1 同此边界 | DoAction 的 systemctl 路径即平台边界；Windows SCM/macOS launchd 的自愈后续按需扩（模型已在，只差执行器） |
-| D12 | 配置校验 | `id` 非空且 agent 内唯一（`[a-z0-9-]{1,64}`）；`intervalSec` 5–3600（默认 30）；`timeoutSec` 1–30（默认 5）；`failThreshold` 1–60（默认 3）；`backoffWindowSec` 60–86400、`maxRestartsInWindow` 1–10；unit 名 `*.service` 白名单正则（复用 serviceUnitNameRe）；http target 必须 `http(s)://` URL；tcp target `host:port`（端口 1–65535，不含 scheme/路径） | 双端同规则（server 保存时、agent 装载时各一道，非法整包拒绝——配置是原子的，不做部分应用）；数值上限防「配置出一条 1s 间隔的自愈风暴」 |
+| D12 | 配置校验 | `id` 非空且 agent 内唯一（`^[a-z0-9][a-z0-9-]{0,63}$`）；`intervalSec` 5–3600（默认 30）；`timeoutSec` 1–30（默认 5）；`failThreshold` 1–60（默认 3）；`backoffWindowSec` 60–86400、`maxRestartsInWindow` 1–10；unit 名 `*.service` 白名单正则（复用 serviceUnitNameRe）；http target 必须 `http(s)://` URL；tcp target `host:port`（端口 1–65535，不含 scheme/路径） | 双端同规则（server 保存时、agent 装载时各一道，非法整包拒绝——配置是原子的，不做部分应用）；数值上限防「配置出一条 1s 间隔的自愈风暴」 |
 | D13 | agent 重启的已知边界 | agent 进程重启后连续失败计数清零（重新攒 threshold），事件缓冲清空 | 探针状态不落盘是有意取舍：agent 重启本身罕见，落盘引入「陈旧计数自愈」的新风险面；server 侧告警未读去重保证重攒期间不重复轰炸 |
 
 ## 数据模型
@@ -106,16 +106,16 @@ heal_restarted / heal_failed / heal_blocked / heal_backoff`。`states` 全量
 
 | 方法 | 参数 | 结果 | 说明 |
 |------|------|------|------|
-| `service.health.config` | `{probes:[…], whitelist:[…]}` | `{applied: N, rejected: [...]}` | 全量替换；校验失败**整包拒绝**（D12）；装载即驱动引擎循环 |
+| `service.health.config` | `{probes:[…], whitelist:[…]}` | `{applied: N}` | 全量替换；校验失败**整包拒绝**（D12）；装载即驱动引擎循环 |
 | `service.health.status` | `{}` | `{states, events}` | events drain；无配置时 `{states:{}, events:[]}` |
-| `service.health.now` | `{id}` | `{probe, status, lastError}` | 立即执行一次指定探针（计入连续失败计数与边沿判定，等同调度触发） |
+| `service.health.now` | `{id}` | `{probe, status, lastError, consecutiveFails}` | 立即执行一次指定探针（计入连续失败计数与边沿判定，等同调度触发） |
 
 ## REST API（挂在 `/api/agents/{id}/health`）
 
 | 路由 | 权限 | 审计 | 说明 |
 |------|------|------|------|
 | `GET /api/agents/{id}/health` | services:read | 否 | `{config, states, online}`——在线时实时拉取 agent 运行态，离线回落缓存灰态 |
-| `PUT /api/agents/{id}/health` | services:write | `service_health_config` | 校验（D12 + D6 白名单）→ 落 Setting KV → 在线则推送 → 返回 `{applied}` |
+| `PUT /api/agents/{id}/health` | services:write | `service_health_config` | 校验（D12 + D6 白名单）→ 落 Setting KV → 在线则推送 → 返回 `{applied, pushed}` |
 | `POST /api/agents/{id}/health/probes/{probeId}/check` | services:write | 否 | 转发 `service.health.now`（诊断动作，读语义不记审计） |
 
 agent 离线时 PUT 仍成功（配置已落库，注册上线时补推）——响应带 `pushed:false`

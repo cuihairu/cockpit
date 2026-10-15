@@ -29,11 +29,11 @@
 
 | # | 决策 | 选择 | 理由 |
 |---|------|------|------|
-| D1 | M1 范围 | 仅 **crontab**（agent 运行用户，`crontab -l` 读 / `crontab -` 写回）；systemd timer 只读列表后续 | 个人云定时任务绝大多数在 crontab；多用户 `-u` 与 timer 列表按需后补 |
+| D1 | M1 范围 | 仅 **crontab**（agent 运行用户，`crontab -l` 读 / `crontab <临时文件>` 写回，argv 传文件路径无 stdin）；systemd timer 只读列表后续 | 个人云定时任务绝大多数在 crontab；多用户 `-u` 与 timer 列表按需后补 |
 | D2 | 管理边界 | cockpit 只动自己名下条目：每个任务两行（meta 注释行 + 命令行），写回 = 读全量 → 只替换 cockpit 段 → 其余行**逐行原样保留**；写回前自检非 cockpit 行与旧内容一致，不一致拒绝写 | crontab 是全量替换写回，没有片段文件可用；自检兜底绝不误伤用户手写条目 |
 | D3 | 任务元数据 | meta 注释行 `# cockpit:job {json}` 内嵌（含 name/schedule/command/enabled），回读以 meta 为准 | 与 nginx `# cockpit:meta` 同构，roundtrip 靠解析自己渲染的产物 |
 | D4 | 任务模型 | `{name, schedule, command, enabled}`；enabled=false 时命令行渲染为注释（停用不留痕丢失） | 覆盖个人场景；停用是高频需求（临时关掉而不是删掉） |
-| D5 | 表达式 | 5 字段标准 cron + `@reboot/@hourly/@daily/@weekly/@monthly/@yearly` 白名单；双端同规则校验（字段范围 + 语法） | 前端即时反馈；agent 侧兜底防御 |
+| D5 | 表达式 | 5 字段标准 cron + `@reboot/@hourly/@daily/@weekly/@monthly/@yearly/@annually` 白名单；双端同规则校验（字段范围 + 语法） | 前端即时反馈；agent 侧兜底防御 |
 | D6 | 执行模型 | 全同步 RPC + provider 级 mutex 串行化读改写 | 操作频率极低，异步任务是过度设计；mutex 防 server 并发 apply 交叉写 |
 | D7 | capability | `cron`，`exec.LookPath("crontab")` 探测；未安装的 agent 不出现假能力 | 同 nginx-proxy 模式 |
 | D8 | REST 挂载 | `/api/agents/{id}/cron/...`，复用 serveAPI `/agents/` 分发模式 | 按 agent 作用域 |
@@ -45,7 +45,7 @@
 ### 探测与注册
 
 - `exec.LookPath("crontab")` 通过则追加 `cron` capability（providers.go 按能力注册）；
-- provider 复用 nginx 的 `Commander` 抽象执行 `crontab -l` / `crontab -`，测试可注入。
+- provider 复用 nginx 的 `Commander` 抽象执行 `crontab -l`（读）/ `crontab <临时文件>`（写回），测试可注入。
 
 ### RPC 方法
 
@@ -81,7 +81,7 @@ apply/delete：
     ↓
   自检：新旧内容的非 cockpit 行逐行一致，否则拒绝写回（防御 bug）
     ↓
-  crontab - 写回（stdin）
+  crontab <临时文件> 写回（argv 传路径，无 stdin）
 ```
 
 - 读改写临界区由 provider 级 `sync.Mutex` 串行化；
@@ -89,7 +89,7 @@ apply/delete：
 
 ### cron 表达式校验器
 
-- `@` 开头走白名单（6 个），否则按空白切 5 段；
+- `@` 开头走白名单（7 个），否则按空白切 5 段；
 - 每段匹配 `^(\*|\d+)(-\d+)?(/\d+)?$` 的逗号组合，数字 token 按字段范围校验
   （dow 同时接受 0-7，7 视同 0）；
 - 双端实现同规则（Go `validateCronExpr` / TS `validateCronExpr`）。
@@ -116,8 +116,8 @@ apply/delete：
   - **状态卡**：运行用户 / cockpit 任务数 / 外部条目数；
   - **任务列表** Table：名称 / 表达式（等宽）/ 命令（省略号展开）/ 状态
     （启用 Tag / 停用 Tag）/ 操作（编辑、启停 Switch、删除 Popconfirm）；
-  - **新建/编辑 Modal**：名称、表达式（常用预设下拉：每分钟/每小时/每天 HH:mm/
-    每周一 03:00/自定义，选中自动填）、命令 TextArea（等宽，校验无换行）、启用开关；
+  - **新建/编辑 Modal**：名称、表达式（常用预设下拉：每分钟/每 5 分钟/每小时整点/每天 03:00/
+    每周一 04:00/每月 1 日 05:00/开机时（@reboot），选中自动填）、命令 TextArea（等宽，校验无换行）、启用开关；
   - **外部条目** 折叠面板：只读 pre 展示非 cockpit 名下的原始行（可见不可编辑）。
 
 ## M2：下次触发预览（2026-09-18）
@@ -158,8 +158,8 @@ crontab 之外的第二类定时机制。只读预览：列出系统 timer unit 
 
 ### Agent 侧
 
-- `cron_timers.go`：`listTimers`（两次 exec + 分段解析 + 时间解析
-  `parseSystemdTime`）；`Call` 加 case `timers`。
+- `cron_timers.go`：`ListTimers`（两次 exec + 分段解析 + 时间解析
+  `parseSystemdTime`）；`Call` 加 case `timers`（在 `cron_provider.go`）。
 
 ### Web 侧
 
@@ -189,7 +189,7 @@ postgres 的维护任务）都挂在**该用户的 crontab** 里，当前只能 
   → `readCrontab(user)` / `writeViaFile(content, user)`（argv 拼
   `-u <name>`）；status 的 whoami 仅在缺省视角返回（指定 user 时该字段即 user）。
 - `cron_users.go`：`Users()`（getent 优先 → /etc/passwd fallback）+
-  `Call` 加 case `users`。
+  `Call` 加 case `users`（在 `cron_provider.go`）。
 
 ### Server 侧
 

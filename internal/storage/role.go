@@ -58,6 +58,9 @@ var resourceActions = map[string][]string{
 	"jobs": {"read", "write"},
 	// Workflow 编排（workflow-design.md W9）：read=定义/run 台账，write=CRUD/run/cancel
 	"workflows": {"read", "write"},
+	// 审批门（workflow-design.md M2d；rbac.go /api/approvals 门禁）：
+	// read=审批队列，write=approve/reject。漏登记会让全端点 403、菜单永不渲染。
+	"approvals": {"read", "write"},
 }
 
 // PermissionValid 权限点是否落在 D3 清单内
@@ -83,6 +86,7 @@ func allPermissions() []string {
 		"backup", "acme", "dns", "ddns", "proxy", "overlay", "drift", "nas",
 		"alerts", "audit", "users", "roles", "settings",
 		"services", "smart", "recordings", "jobs", "workflows", "firewall",
+		"approvals",
 	} {
 		for _, a := range resourceActions[res] {
 			out = append(out, res+":"+a)

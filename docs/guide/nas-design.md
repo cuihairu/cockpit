@@ -71,8 +71,9 @@ type NasShare struct {
 M2 网络 API 型的共同纪律（OpenWrt/PVE provider 同款）：
 
 - agent 在内网主动发起 HTTP（agent 本就主动外连 server，内网横向访问成立）
-- 凭据从 agent 环境变量 `COCKPIT_NAS_TARGETS`（JSON 数组）读取，
-  **凭据不落库、不进 config.yaml、绝不出现在快照/日志/审计/错误消息**：
+- 凭据第一来源为 server vault `nas/<name>` 条目（AES-256-GCM 加密落库，经注册响应引导 + `nas.set_targets` RPC 补推，见 `docs/guide/vault-design.md` §5.3/5.4）；
+  `COCKPIT_NAS_TARGETS`（JSON 数组）保留为回退与引导：
+  **凭据不进 config.yaml、绝不出现在快照/日志/审计/错误消息**：
 
   ```json
   [
@@ -81,7 +82,7 @@ M2 网络 API 型的共同纪律（OpenWrt/PVE provider 同款）：
   ]
   ```
 
-  - `type` 不是已实现类型（现仅 `dsm`）的条目直接忽略
+  - `type` 不是已实现类型（现支持 `dsm` / `truenas` / `omv`）的条目直接忽略
   - 解析失败/缺字段（name/addr/username/password）的条目丢弃并 log，不致命
 - 自签证书默认 InsecureTLS（家用 NAS 常态），目标项可关（`insecureTls: false`）
 - 快照映射到同一 NasSnapshot，Source 标来源
@@ -199,7 +200,7 @@ params `{username,password}`（对象）→ `response.sessionid`，失败 HTTP 4
   （纯容器最小系统不注册，避免全量 agent 冗余 capability）
 - capability：`{Type: "nas", Version: "1"}`，detectCapabilities 追加（cron 同款）
 - providers.go：`case "nas"` 注册 `NewNasProvider(NasConfig{})`
-- RPC 单方法：`nas.status` → NasSnapshot（overlay.status 同款全量快照）
+- RPC 两方法：`nas.status` → NasSnapshot（overlay.status 同款全量快照）；`nas.set_targets`（vault V6 第一波②：server 把 `nas/` 条目推送给 agent）
 
 ## D5 server：REST 与巡检告警
 
@@ -218,7 +219,7 @@ PUT  /api/nas/config               保存（巡检配置类不记审计，smart/
 - 告警规则（`CheckNasScan`，真去重——resource+title 未读期间只报一次）：
   - 池 State ∈ {degraded, resync} → warning；failed → error（title 按池名区分）
   - 挂载点使用率 ≥ `nas.usage_warn_percent`（默认 80，50-99）→ warning，
-    title 含挂载路径；单一挂载点恢复后自愈清错（复用告警去重语义）
+    title 含挂载路径；恢复后静默（`createAlertIfNotExists` 只新增不清理，不重复告警；既有告警仍需人工标记已读）
   - available=false 与 unknown 态不告警（观测缺失≠故障，smart D9 同则）
   - 记录 `Host` 非空（网络 NAS）时告警 title 的「主机」位显示设备名
     （`存储池故障：volume_1（主机 home-dsm）`），去重天然隔离不同设备
@@ -242,7 +243,7 @@ PUT  /api/nas/config               保存（巡检配置类不记审计，smart/
 2. argv 直调不经 shell；命令名固定，无参数来自用户输入
 3. 快照不含任何凭据/密钥（SMB 只取共享名与路径，不取账号密码段）
 4. server 纯转发不落库：NAS 本机是唯一事实源；巡检只产出告警
-5. M2 网络 API 型凭据只存 agent 环境变量，与 OpenWrt/PVE 同纪律
+5. M2 网络 API 型凭据以 server vault `nas/<name>` 为第一来源（加密落库），agent 环境变量仅作回退；与 OpenWrt/PVE 同纪律
 
 ## D8 测试策略
 

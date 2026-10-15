@@ -64,6 +64,7 @@ Unknown ──连续成功≥recovery──▶ Healthy ──连续失败≥thre
 // core/healthprobe/window.go
 type Window struct {
     Target    string    `json:"target"`
+    Semantics Semantics `json:"semantics,omitempty"` // 三语义（Liveness/Readiness/Heartbeat）
     StartedAt time.Time `json:"startedAt"`            // Healthy→Faulty 时刻
     EndedAt   time.Time `json:"endedAt,omitempty"`    // 零值 = 仍在故障中
     LastError string    `json:"lastError"`
@@ -77,8 +78,8 @@ type Window struct {
 
 ## 4. 输出面
 
-1. **本地**：内存 Snapshot（`cockpit-probe-agent status` 子命令读）；可选 `-status-file` 落
-   JSON（默认关；开启时建议放 Paths().DataDir）。
+1. **本地**：内存 Snapshot（`-status-file` 落 JSON 后读文件；默认关，开启时建议放
+   Paths().DataDir）。
 2. **上行**：协议新消息 `probe_report`（MessageType 字符串枚举追加），payload =
    `{targets:[{name,state,since,last_checked,last_error}], windows:[近期窗口]}`——状态迁移即发
    + 每 10×interval 全量兜底；复用 core/report Enqueue 队列与 core/register/heartbeat 注册链。
