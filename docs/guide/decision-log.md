@@ -339,3 +339,16 @@ services 表——否决：probe 的枚举/通知/结果落库全套围着 Servi
 **重开条件**：CMDB Service 出现手工 CRUD（考虑 inventory 声明与自动收编
 的冲突规则）；probe 支持 udp（放开 udp 收编）；用户要求某些端口不入账
 （加 compose label 黑名单）。
+
+## D-2026-10-16-1 archive 历史归档不做双语（口径）
+
+**定了什么**：`docs/archive/` 下 5 篇历史归档（plans 2 / specs 2 / 归档说明
+1）只保留中文，不补英文版；todo.md 对应条目按其自带解锁说明关闭（2026-10-16
+R1025PATROL 代拍板，用户事后可推翻）。
+
+**理由**：归档页是历史记录，读者价值在于原始语境而非覆盖面；为已封存的
+文档维护同步翻译是持续成本，无对应读者。同批完成的双语口径只覆盖活跃
+文档（docs 根目录 + guide/design/operations/research）。
+
+**重开条件**：archive 内有文档被重新启用为活跃文档（移出 archive 并随下批
+补双语）；或用户明确要求某篇归档出英文版。

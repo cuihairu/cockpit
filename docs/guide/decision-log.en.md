@@ -444,3 +444,18 @@ already the minimum predictable semantics.
 declarations and automatic incorporation); probe gains udp support (then open up udp
 incorporation); a user requires that certain ports not be recorded (then add a compose label
 blacklist).
+## D-2026-10-16-1 Historical archives stay Chinese-only (stance)
+
+**What was decided**: the 5 historical archive documents under `docs/archive/` (2 plans / 2 specs /
+1 archive note) stay Chinese-only; no English versions will be produced. The corresponding todo.md
+item is closed per its own unlock instruction (decided on behalf of the user on 2026-10-16, may be
+overturned by the user afterwards).
+
+**Rationale**: archive pages are historical records — their reader value lies in the original
+context, not in coverage; maintaining synced translations for sealed documents is a standing cost
+with no corresponding readers. The bilingual scope completed in the same batch covers active
+documents only (docs root + guide/design/operations/research).
+
+**Reopen condition**: an archived document is reactivated as an active document (moved out of
+archive and translated with the next batch); or the user explicitly requests an English version
+of a specific archive page.
