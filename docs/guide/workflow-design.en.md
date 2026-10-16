@@ -4,7 +4,7 @@
 
 > Initiated 2026-10-09; for implementation progress see the "Implementation Status" section of this document (M1 asynchronous Job + linear
 > Workflow landed the same day, M2a variable passing / M2b multi-target fan-out / M2c cancel signal followed).
-> The P1 execution Job model ([jobs-design](./jobs-design)) has already landed the minimal `agent.exec` closed loop;
+> The P1 execution Job model ([jobs-design](./jobs-design.en.md)) has already landed the minimal `agent.exec` closed loop;
 > this design is its next growth point: Job asynchronization + linear
 > Workflow orchestration. The design boundary follows the strategic review ruling: a Workflow is "orchestration of a set of
 > Jobs", doing control-plane wiring only, not rebuilding the underlying scheduler.

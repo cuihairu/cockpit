@@ -262,12 +262,12 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 ```
 
 Full deployment guide (tag strategy, guacd remote access, reverse proxy, backup/rollback, troubleshooting):
-[Docker deployment](/operations/deploy-docker).
+[Docker deployment](/operations/deploy-docker.en.md).
 
 ## Next steps
 
-- [Core concepts](/guide/concepts)
-- [Architecture and boundaries](/guide/architecture)
-- [Agent egress and the SD-WAN capability boundary](/guide/agent-egress-sdwan)
-- [Protocol and API boundary](/guide/protocol)
-- [Docker deployment](/operations/deploy-docker)
+- [Core concepts](/guide/concepts.en.md)
+- [Architecture and boundaries](/guide/architecture.en.md)
+- [Agent egress and the SD-WAN capability boundary](/guide/agent-egress-sdwan.en.md)
+- [Protocol and API boundary](/guide/protocol.en.md)
+- [Docker deployment](/operations/deploy-docker.en.md)

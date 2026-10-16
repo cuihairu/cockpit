@@ -182,7 +182,7 @@ Path rules: lowercase alphanumerics and `/ _ . -`, no leading `/`, no `..` (vali
 ### 5.5 persona Provider (read-only integration, 2026-10-13)
 
 The persona vault is integrated as a second provider through its **HTTP Connect API** (`persona connect serve`, 127.0.0.1 + Bearer token), implemented in `internal/vault/persona.go`; per-operation
-mapping, error classification, and blockers are in [persona-vault-mapping.md](persona-vault-mapping.md).
+mapping, error classification, and blockers are in [persona-vault-mapping.md](persona-vault-mapping.en.md).
 
 - **Read-only**: the persona Connect API has no write/delete endpoints (the write path is not decided upstream) —
   `Write`/`Delete` return an explicit `ErrUnsupported` after the session gate, no silent behavior, no degradation. Entries can only be

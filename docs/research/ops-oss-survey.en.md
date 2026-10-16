@@ -4,7 +4,7 @@
 
 This document records the comparison conclusions for six comparable open-source solutions, following the survey four-piece format (embedded screenshots + sources + referenceable analysis + navigation link). It answers one suspended question: **should Cockpit's liveness collection be developed in-house, or connected to an off-the-shelf data source (a Prometheus / Netdata provider)?**.
 
-Survey date: 2026-10-10. Screenshots are mainly real UI images from official sites/docs/READMEs; the two Netdata ones are real captures from a local container. For the qualitative comparison see [Reference project comparison and takeaways](/guide/reference-projects) (2026-09, covering Komodo/Portainer/Guacamole/Teleport/NetBox/Uptime Kuma) — this document does not repeat those conclusions, it adds six monitoring panels plus the collection-route verdict.
+Survey date: 2026-10-10. Screenshots are mainly real UI images from official sites/docs/READMEs; the two Netdata ones are real captures from a local container. For the qualitative comparison see [Reference project comparison and takeaways](/guide/reference-projects.en.md) (2026-09, covering Komodo/Portainer/Guacamole/Teleport/NetBox/Uptime Kuma) — this document does not repeat those conclusions, it adds six monitoring panels plus the collection-route verdict.
 
 ## Overview
 
@@ -68,7 +68,7 @@ Source: [zabbix.com/product](https://www.zabbix.com/product) official product pa
 
 ## ③ Beszel (lightweight agent)
 
-A hub + agent pair (MIT, Go), isomorphic to Cockpit Server + Agent; the agent runs at about 23MB of memory, with Docker container-level stats, history curves and alerting all present. A prior survey ([Reference project comparison](/guide/reference-projects)) already used it as the primary benchmark for the monitoring domain.
+A hub + agent pair (MIT, Go), isomorphic to Cockpit Server + Agent; the agent runs at about 23MB of memory, with Docker container-level stats, history curves and alerting all present. A prior survey ([Reference project comparison](/guide/reference-projects.en.md)) already used it as the primary benchmark for the monitoring domain.
 
 ![Beszel hub overview (official README image)](./assets/beszel-dashboard.png)
 
@@ -165,7 +165,7 @@ Source: architecture.svg taken from the [prometheus/prometheus official repo doc
 
 ## Specifically answering: in-house liveness collection, or connecting to an existing data source
 
-The suspended question comes from the [service-detect agent design](/design/service-detect-agent) (croupier framing): B1-B6 have already landed the in-house probe agent (black-box http/tcp probing, a three-state machine, failure windows, uplink REST), but "should metrics/liveness data switch to an existing data source" was never written down. The two candidate providers:
+The suspended question comes from the [service-detect agent design](/design/service-detect-agent.en.md) (croupier framing): B1-B6 have already landed the in-house probe agent (black-box http/tcp probing, a three-state machine, failure windows, uplink REST), but "should metrics/liveness data switch to an existing data source" was never written down. The two candidate providers:
 
 **Prometheus provider (integrating with the Prometheus ecosystem)**
 
@@ -185,9 +185,9 @@ The suspended question comes from the [service-detect agent design](/design/serv
 
 ## Cross-references with the croupier designs
 
-- [Service-detect agent (croupier system-role probe)](/design/service-detect-agent): the in-house B1-B6 liveness is exactly the landing of this document's "keep liveness in-house" verdict; its suspended "probing is initiated agent-side, multi-point placement to be discussed separately" has its industry references in the Zabbix proxy tree (②) and the Netdata parent/streaming topology (①).
-- [agent-core architecture](/design/agent-core-architecture): the probe-dedicated artifact reuses the same core parts; benchmarking against the Beszel agent (③) "single binary, small memory" is the yardstick for agent size acceptance.
-- [Workflow and async Jobs](/guide/workflow-design): the Coolify deployment pipeline (⑤) is the interaction reference for "deployment is a Job/Workflow".
+- [Service-detect agent (croupier system-role probe)](/design/service-detect-agent.en.md): the in-house B1-B6 liveness is exactly the landing of this document's "keep liveness in-house" verdict; its suspended "probing is initiated agent-side, multi-point placement to be discussed separately" has its industry references in the Zabbix proxy tree (②) and the Netdata parent/streaming topology (①).
+- [agent-core architecture](/design/agent-core-architecture.en.md): the probe-dedicated artifact reuses the same core parts; benchmarking against the Beszel agent (③) "single binary, small memory" is the yardstick for agent size acceptance.
+- [Workflow and async Jobs](/guide/workflow-design.en.md): the Coolify deployment pipeline (⑤) is the interaction reference for "deployment is a Job/Workflow".
 
 ## Sources
 

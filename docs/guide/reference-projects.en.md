@@ -13,7 +13,7 @@ Cockpit is positioned as a **personal hybrid infrastructure console**, with four
 
 Seven benchmark projects were selected by capability domain. For each project we give pros and cons, distinguishing **directly adoptable** (concrete practices to copy) from **worth borrowing** (design ideas to absorb).
 
-For the extended 2026-10 research (six monitoring dashboards + the liveness-collection route verdict, with live screenshots) see [Ops Open-Source Solutions Survey](/research/ops-oss-survey).
+For the extended 2026-10 research (six monitoring dashboards + the liveness-collection route verdict, with live screenshots) see [Ops Open-Source Solutions Survey](/research/ops-oss-survey.en.md).
 
 ## Monitoring Domain: Beszel
 

@@ -189,13 +189,13 @@ Browser
   -> target host:port
 ```
 
-Both terminal and desktop connections use `proxy_*` messages for TCP data forwarding: the terminal connects directly to the target; RDP/VNC/SSH desktops are relayed via Guacamole (the `guac:` prefix relays to guacd, see [Remote Desktop Guacamole Design](/remote-desktop-guacamole-design)).
+Both terminal and desktop connections use `proxy_*` messages for TCP data forwarding: the terminal connects directly to the target; RDP/VNC/SSH desktops are relayed via Guacamole (the `guac:` prefix relays to guacd, see [Remote Desktop Guacamole Design](/remote-desktop-guacamole-design.en.md)).
 
 Remote targets by default must match hostnames, IPs, or CIDRs explicitly configured in `remote_control.allowed_targets`; development/debugging environments can set `remote_control.allow_arbitrary_target: true` to skip that restriction. The current implementation does not derive remotely controllable targets from the inventory automatically.
 
 RDP/VNC/SSH desktop protocols are terminated by guacd; the Agent only does TCP forwarding — the Agent has no special build-tag requirements, and the default build works on any platform.
 
-The remote-connection Browser WebSocket uses short-lived ticket authentication. See [Protocols and API Boundary](/guide/protocol) for details.
+The remote-connection Browser WebSocket uses short-lived ticket authentication. See [Protocols and API Boundary](/guide/protocol.en.md) for details.
 
 ## Security Concepts
 
@@ -210,4 +210,4 @@ The remote-connection Browser WebSocket uses short-lived ticket authentication. 
 
 ## Differences from Historical Designs
 
-The repository contains some design documents describing a more complete Git-first, directory-split inventory and third-party integration vision. The current implementation already has inventory sync, the Server/Agent control plane, resource queries, monitoring, authentication, auditing, alerts, and remote connections, but the code facts described in this document and [Architecture and Boundaries](/guide/architecture) remain authoritative.
+The repository contains some design documents describing a more complete Git-first, directory-split inventory and third-party integration vision. The current implementation already has inventory sync, the Server/Agent control plane, resource queries, monitoring, authentication, auditing, alerts, and remote connections, but the code facts described in this document and [Architecture and Boundaries](/guide/architecture.en.md) remain authoritative.

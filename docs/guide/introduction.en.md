@@ -57,7 +57,7 @@ Core principles:
 - Agents handle node-side probing and execution.
 - Inventory is the declarative input; SQLite is the runtime query surface.
 
-See [architecture and boundaries](/guide/architecture) for the full boundary.
+See [architecture and boundaries](/guide/architecture.en.md) for the full boundary.
 
 ## Relationship to other tools
 
@@ -75,8 +75,8 @@ For now, understand it as follows:
 
 ## Documentation reading path
 
-1. [Getting started](/guide/getting-started)
-2. [Core concepts](/guide/concepts)
-3. [Architecture and boundaries](/guide/architecture)
-4. [Agent egress and SD-WAN capability boundaries](/guide/agent-egress-sdwan)
-5. [Protocol and API boundaries](/guide/protocol)
+1. [Getting started](/guide/getting-started.en.md)
+2. [Core concepts](/guide/concepts.en.md)
+3. [Architecture and boundaries](/guide/architecture.en.md)
+4. [Agent egress and SD-WAN capability boundaries](/guide/agent-egress-sdwan.en.md)
+5. [Protocol and API boundaries](/guide/protocol.en.md)

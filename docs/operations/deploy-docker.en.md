@@ -4,7 +4,7 @@
 
 Run Cockpit Server on a server using the officially published image (`ghcr.io/cuihairu/cockpit`).
 Aimed at deployers who "have a server and want it running"; for running the service locally while changing code see
-[Quick start](../guide/getting-started.md).
+[Quick start](../guide/getting-started.en.md).
 
 ## Two deployment postures, clarified up front
 
@@ -104,8 +104,8 @@ The complete list is in `deployments/docker/.env.example`.
 
 The remote access entry for the RDP / VNC / SSH protocols needs a `guacd` daemon on the same network
 (browser-side `guacamole-common-js` + a Go gateway reverse proxy; see
-[Remote desktop design](../remote-desktop-guacamole-design.md) and
-[Unified three-protocol stack](../remote-access-integration-design.md)).
+[Remote desktop design](../remote-desktop-guacamole-design.en.md) and
+[Unified three-protocol stack](../remote-access-integration-design.en.md)).
 
 ```bash
 # add one line to .env (a DNS name on the same network, do not write 127.0.0.1 — that is the guacd container itself)
@@ -192,8 +192,8 @@ The pnpm version inside the image is pinned (`pnpm@11.19.0`) to match the lockfi
 
 ## Related documents
 
-- [Quick start](../guide/getting-started.md) —— binary deployment and running locally
+- [Quick start](../guide/getting-started.en.md) —— binary deployment and running locally
 - Deployment asset notes `deployments/docker/README.md` —— an item-by-item explanation of the variables and scripts
-- [Real-machine acceptance checklist](../guide/acceptance-checklist.md) —— functional acceptance after going live
-- [Remote desktop design](../remote-desktop-guacamole-design.md) /
-  [Unified three-protocol stack](../remote-access-integration-design.md) —— guacd integration details
+- [Real-machine acceptance checklist](../guide/acceptance-checklist.en.md) —— functional acceptance after going live
+- [Remote desktop design](../remote-desktop-guacamole-design.en.md) /
+  [Unified three-protocol stack](../remote-access-integration-design.en.md) —— guacd integration details

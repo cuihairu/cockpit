@@ -9,7 +9,7 @@ title: Hypervisor platform capabilities — hypervisor provider layer (unified V
 ## Status
 
 - Status: **Active (user directive 2026-10-10 design follow-up 2: isomorphic with the BMC layer, entering the plugin mechanism)**.
-- Positioning: hypervisor provider layer — unifying PVE / vSphere / local QEMU-KVM into **one set of VM lifecycle interfaces**, sharing the same provider mechanism as [BMC out-of-band management](bmc-capabilities.md) (capability probing + RPC forwarding + credential delivery + audit red lines), with differences only in platform client adaptation.
+- Positioning: hypervisor provider layer — unifying PVE / vSphere / local QEMU-KVM into **one set of VM lifecycle interfaces**, sharing the same provider mechanism as [BMC out-of-band management](bmc-capabilities.en.md) (capability probing + RPC forwarding + credential delivery + audit red lines), with differences only in platform client adaptation.
 - Relationship with the BMC layer: **in-band vs out-of-band complementarity** — BMC manages hardware/power (controllable even with the host powered off); this layer manages VM lifecycle (when the platform is online); the panel presents them in separate sections, with no overlapping semantics (likewise non-overlapping with the service-detect agent's "is the service reachable").
 - Zero code in this batch; implementation batches in §5.
 

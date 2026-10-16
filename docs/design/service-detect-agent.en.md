@@ -10,7 +10,7 @@ title: Service-detect agent — healthprobe standalone probing surface (target f
 
 - Status: **Active — B1-B6 all landed (2026-10-10, the B6 web surface landed as the ProbePanel on the Services page)**.
   User directive 2026-10-09: build a formal probe agent on top of core/healthprobe, brief first, then code.
-- Positioning: a small standalone (probe-dedicated) agent — the same core parts + platform layer + probe business plugin, following the same three-layer discipline as [agent-core](agent-core-architecture.md). In standalone mode (no server) it keeps state locally; once a server is configured it uplinks the full chain via register/heartbeat/report.
+- Positioning: a small standalone (probe-dedicated) agent — the same core parts + platform layer + probe business plugin, following the same three-layer discipline as [agent-core](agent-core-architecture.en.md). In standalone mode (no server) it keeps state locally; once a server is configured it uplinks the full chain via register/heartbeat/report.
 - Relationship with the suspended P6 item: P6 (switching the rpc service_health engine to Liveness/Readiness/Heartbeat semantics) **stays suspended pending a decision**; this agent's failure window is the croupier "system-role probe" framing landing on a **standalone probing surface**. It does not modify the existing service_health engine — the two neither exclude nor block each other.
 
 ## 1. Target format (YAML, yaml.v3 is already a dependency)

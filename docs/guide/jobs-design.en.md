@@ -151,6 +151,6 @@ target non-empty; exec requires a non-empty `parameters.command` ≤16KB; `timeo
 
 | Priority | Direction | Depends on |
 |--------|------|------|
-| P2 | Workflow: Job orchestration (linear chains/retries/cancellation, DAG/approval left to M2) — landed (P2 async-ification + M1 orchestration 2026-10-09; M2a variables/M2b fan-out/M2c cancel signal 2026-10-11, see [workflow-design](./workflow-design)) | This model |
+| P2 | Workflow: Job orchestration (linear chains/retries/cancellation, DAG/approval left to M2) — landed (P2 async-ification + M1 orchestration 2026-10-09; M2a variables/M2b fan-out/M2c cancel signal 2026-10-11, see [workflow-design](./workflow-design.en.md)) | This model |
 | P0′ | Event model: Job terminal-state events enter a unified event bus | The Event abstraction project |
 | P5 | AI wiring: the Job API is AI's execution surface (add structured types beyond agent.exec) | Audit and quotas first |

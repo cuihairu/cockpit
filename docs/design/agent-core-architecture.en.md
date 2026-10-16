@@ -14,7 +14,7 @@ title: agent-core architecture refactor — the core/platform/plugin three layer
   2. **Platform differences layered**: platform-specific features (process supervision, paths, service integration on linux/windows/macos) go into a dedicated directory for each OS (the three layers core / platform adaptation / business plugins);
   3. **Goal**: the same core+plugins compile into platform-specialised agent artifacts (the CI matrix builds per platform).
 - Rhythm benchmark: croupier `docs/design/agent-core-design.md` (core is a parts bin not a framework, prunable capabilities, the hundred-line discipline, batched extraction, same rollback strategy).
-- Source material (authoritative on current state): [Architecture and boundaries](../guide/architecture.md) · [Windows Agent packaging design](../guide/windows-agent-design.md) (SCM service state finalized) · [OpenWrt Agent packaging design](../guide/openwrt-agent-design.md) (ipk/procd landed) · [Service health probe and self-healing design](../guide/service-health-design.md) (the ready-made seed of healthprobe).
+- Source material (authoritative on current state): [Architecture and boundaries](../guide/architecture.en.md) · [Windows Agent packaging design](../guide/windows-agent-design.en.md) (SCM service state finalized) · [OpenWrt Agent packaging design](../guide/openwrt-agent-design.en.md) (ipk/procd landed) · [Service health probe and self-healing design](../guide/service-health-design.en.md) (the ready-made seed of healthprobe).
 
 ## 1. Positioning: the three-layer architecture
 
