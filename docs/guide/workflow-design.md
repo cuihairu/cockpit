@@ -1,5 +1,8 @@
 # P2 方案设计：Workflow 与异步 Job
 
+> 语言：**中文** ｜ [English](./workflow-design.en.md)
+
+
 > 2026-10-09 立项；实现进度以本文「实现状态」节为准（M1 异步 Job + 线性
 > Workflow 当日落地，M2a 变量传递 / M2b 多目标扇出 / M2c 取消信号相继实现）。
 > P1 执行 Job 模型（[jobs-design](./jobs-design)）已落地 `agent.exec` 最小闭环；

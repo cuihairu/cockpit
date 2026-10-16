@@ -42,6 +42,9 @@
 ### 文档
 
 - [ ] docs 双语配对第二批：子目录 guide 37、design 5、operations 1、research 1 篇 + 首页英文版精修〔第一批=docs 根目录 9 篇（8 篇翻译 + home 英文落地页）已完成；archive 5 篇为历史归档，是否双语待定〕
+  - 进度（2026-10-16 巡检 R1016F）：已完成 design 5/5、operations 1/1、research 1/1、guide 28/37（首页英文版精修已随第一批落地）。
+    剩余 guide 9 篇：acceptance-checklist、backup-design、decision-log、drift-design、overlay-design、
+    probe-enhance-design、proxy-design、service-design、workflow-design。
 
 ## 已完成
 

@@ -1,5 +1,8 @@
 # 真机验收清单
 
+> 语言：**中文** ｜ [English](./acceptance-checklist.en.md)
+
+
 > 各功能开发交付时的自动化验证边界：Go 单测（含 `-race`）、web vitest 全绿、
 > 本机端到端脚本（`scripts/e2e-smoke.sh`、`scripts/local-acceptance/`）通过。
 > 以下场景依赖**真实环境**——真机、真凭据、真网络、真版本——无法离线自动化，

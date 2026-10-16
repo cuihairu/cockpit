@@ -1,5 +1,7 @@
 # 服务健康探针与自愈（Service Health）
 
+> 语言：**中文** ｜ [English](./service-health-design.en.md)
+
 > 2026-09-28 立项。目标场景：docker VM（192.168.5.5）的 cloudflared tunnel
 > 反复「进程活着、连接僵死」——systemd 只看到 active，业务早已不通，目前
 > 靠外部 cron 看门狗临时兜底。本设计把这类「systemd 无感知的僵死」的检测

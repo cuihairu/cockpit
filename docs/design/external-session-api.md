@@ -1,5 +1,7 @@
 # 外部新建远程会话接口契约（memex 接入，2026-10-15）
 
+> 语言：**中文** ｜ [English](./external-session-api.en.md)
+
 > 状态：**契约设计，未实现**（本文件先落档，实现随 memex 对接排期）。
 > 远控三协议链路（RDP/VNC/SSH 走 Guacamole，`telnet` 走
 > agent 通道）已全部落地：`docs/remote-access-integration-design.md` D1-D8。

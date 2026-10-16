@@ -1,5 +1,7 @@
 # 防火墙观测设计（iptables/nftables 只读）
 
+> 语言：**中文** ｜ [English](./firewall-design.en.md)
+
 ## 背景
 
 防火墙是安全面最后一块只读观测空白。个人 homelab 控制台「看一圈防火墙状态」是高频巡检动作：默认策略是否被人改过、有没有意外放行的端口、cockpit 自己依赖的入口是否还在。与 SMART/NAS/Overlay 同族——先观测，再告警，写操作远期再议（见 decision-log D-2026-10-07-3）。

@@ -1,5 +1,7 @@
 # 快速开始
 
+> 语言：**中文** ｜ [English](./getting-started.en.md)
+
 ## 环境要求
 
 - Go 1.27 或兼容版本

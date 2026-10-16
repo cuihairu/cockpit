@@ -1,5 +1,8 @@
 # 服务管理设计（systemd + Windows SCM）
 
+> 语言：**中文** ｜ [English](./service-design.en.md)
+
+
 > 状态：M1 设计定稿（systemd）；M2 追加 Windows SCM 后端（D9），capability
 > 统一为 `service`。Agent 侧按平台后端各一个 provider；server 纯转发不落库
 > （systemd / SCM 为各自事实源）；Web /services 页照 cron 页模式。

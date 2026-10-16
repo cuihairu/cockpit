@@ -1,5 +1,7 @@
 # 介绍
 
+> 语言：**中文** ｜ [English](./introduction.en.md)
+
 Cockpit 是一个面向个人混合基础设施的控制台。当前实现重点解决三件事：
 
 - 用 Inventory YAML 和 SQLite 建立统一资源视图。

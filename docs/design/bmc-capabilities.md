@@ -4,6 +4,8 @@ title: BMC/iBMC 带外管理能力——Redfish 为主 IPMI 兜底（能力清�
 
 # BMC/iBMC 带外管理能力设计
 
+> 语言：**中文** ｜ [English](./bmc-capabilities.en.md)
+
 ## 状态
 
 - 状态: **Active（用户令 2026-10-10：封装常见 BMC/iBMS 系统能力，文档先行零代码）**。

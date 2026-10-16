@@ -1,5 +1,7 @@
 # Server 自身数据库备份设计（备份管理补齐项）
 
+> 语言：**中文** ｜ [English](./server-backup-design.en.md)
+
 > 2026-09-15 立项。对应 todo 备份管理遗留项「server 自身 SQLite 备份
 > （VACUUM INTO）」。前置：`backup-design.md` M1/M1.5（Agent 侧文件备份
 > 已闭环）。

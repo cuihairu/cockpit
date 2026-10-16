@@ -1,5 +1,7 @@
 # 核心概念
 
+> 语言：**中文** ｜ [English](./concepts.en.md)
+
 ## 资源模型
 
 Cockpit 使用 Region、Zone、Agent 和资源对象描述个人基础设施：

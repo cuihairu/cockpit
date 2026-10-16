@@ -1,5 +1,7 @@
 # persona 密码箱 → cockpit `vault.Provider` 接口映射
 
+> 语言：**中文** ｜ [English](./persona-vault-mapping.en.md)
+
 > 2026-10-13 接入实现（`internal/vault/persona.go`）的依据文档。persona 侧事实
 > 全部取自仓内源码与 `docs/EXTERNAL_INTEGRATION.md`（2026-10-12 实测版），
 > 逐条带 file:line；行号随 persona 上游演进可能漂移，语义以引用处为准。

@@ -1,5 +1,7 @@
 # P1 方案设计：执行 Job 模型（最小闭环）
 
+> 语言：**中文** ｜ [English](./jobs-design.en.md)
+
 > 2026-10-04。P1「Job」首期落地设计。战略评审（见 reference-projects）把
 > Job/Action/Workflow/Event 列为控制面四个核心抽象，本文只做 Job 的最小
 > 闭环：一条持久化的执行记录 + 一个可执行的内置类型（agent.exec），

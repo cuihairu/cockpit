@@ -1,5 +1,7 @@
 # Windows Agent 打包设计（setup.exe + 服务化 + 图标全链）
 
+> 语言：**中文** ｜ [English](./windows-agent-design.en.md)
+
 > 状态：已落地。产物 `cockpit-agent-setup-<version>.exe` 进 nightly release（含
 > `.sha256`），真 Windows 走查在 nightly 的 **Build Agent Installer** job 内完成。
 > 需求来源：用户催办（B1，见仓库 `BUGS.md`）。

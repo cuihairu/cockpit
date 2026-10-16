@@ -1,5 +1,7 @@
 # P2 方案设计：定时任务管理（Crontab 可视化）
 
+> 语言：**中文** ｜ [English](./cron-design.en.md)
+
 > 2026-09-15。P2「定时任务/Cron 管理」首期设计。todo.md 原文：「Agent 侧 crontab
 > 可视化与调度，支撑自动化运维」。本文只做设计决策与接口定义。
 

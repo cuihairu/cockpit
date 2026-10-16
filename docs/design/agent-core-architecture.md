@@ -4,6 +4,8 @@ title: agent-core 架构重构——core/平台层/插件三层与构建矩阵�
 
 # agent-core 架构重构简档
 
+> 语言：**中文** ｜ [English](./agent-core-architecture.en.md)
+
 ## 状态
 
 - 状态: **P1–P5 已落地（core/ 十包全量存在并接线；2026-10-15 复核）。** 实现进度以 §7 批次表标注为准。

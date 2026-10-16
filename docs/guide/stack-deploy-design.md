@@ -1,5 +1,7 @@
 # P1 方案设计：应用部署（Compose Stack）
 
+> 语言：**中文** ｜ [English](./stack-deploy-design.en.md)
+
 > 2026-09-14。P1 首个功能的设计方案。参考来源与对比结论见[参考项目对比与借鉴](./reference-projects.md)（Komodo「Git-to-deploy」+ Dockge「compose-file-first」）。本文只做设计决策与接口定义，实现按「分期落地」推进。
 
 ## 背景与目标

@@ -1,5 +1,7 @@
 # OpenWrt Agent 打包设计
 
+> 语言：**中文** ｜ [English](./openwrt-agent-design.en.md)
+
 ## 背景与目标
 
 cockpit-agent 面向个人混合基础设施，OpenWrt 路由器是其中最常见的

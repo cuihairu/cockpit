@@ -1,5 +1,8 @@
 # P1 方案设计：拨测增强（探测间隔可配置 + 通知渠道集成）
 
+> 语言：**中文** ｜ [English](./probe-enhance-design.en.md)
+
+
 > 2026-09-14。P1「拨测增强」首期设计。前置：自动健康探测已上线（`internal/probe`，
 > 每 5 分钟一轮硬编码；`internal/alert` 每小时基于库内状态生成告警；`internal/notification`
 > 仅支持 Herald 单渠道）。方案参考：Uptime Kuma（间隔 UI 可配、心跳式状态、恢复通知）、

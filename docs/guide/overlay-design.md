@@ -1,5 +1,8 @@
 # P1 方案设计：Overlay 组网观测（ZeroTier / Tailscale / WireGuard / frp）
 
+> 语言：**中文** ｜ [English](./overlay-design.en.md)
+
+
 > 2026-09-17。个人基础设施跨地域组网观测首期设计。背景：个人设施天然分散在
 > 云上、家里、公司等多地域，ZeroTier/Tailscale/WireGuard/frp 是把它们连成一网
 > 的命脉。本文只做 M1（运行态只读观测）设计决策与接口定义；管理面（控制器

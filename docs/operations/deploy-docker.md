@@ -1,5 +1,7 @@
 # Docker 部署指南
 
+> 语言：**中文** ｜ [English](./deploy-docker.en.md)
+
 用官方发布的镜像（`ghcr.io/cuihairu/cockpit`）在服务器上跑 Cockpit Server。
 面向「拿到一台服务器要把它跑起来」的部署者；改代码 locally 起服务见
 [快速开始](../guide/getting-started.md)。

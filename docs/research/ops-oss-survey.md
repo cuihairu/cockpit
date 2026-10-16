@@ -1,5 +1,7 @@
 # 运维开源方案调研（监控面板 / 探活采集）
 
+> 语言：**中文** ｜ [English](./ops-oss-survey.en.md)
+
 本文按调研四件套口径（截图内嵌 + 来源 + 可参考分析 + 挂导航）记录六家同类开源方案的对照结论，落点回答一个悬置问题：**Cockpit 的探活采集该自研，还是对接现成数据源（Prometheus / Netdata Provider）**。
 
 调研时点 2026-10-10。截图以官网 / 官方文档 / 官方 README 提供的真界面图为主，Netdata 两张为本机容器实截。定性对比见 [参考项目对比与借鉴](/guide/reference-projects)（2026-09，含 Komodo/Portainer/Guacamole/Teleport/NetBox/Uptime Kuma），本文不重复其结论，只补监控面板六家与采集路线裁决。

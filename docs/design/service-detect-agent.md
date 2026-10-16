@@ -4,6 +4,8 @@ title: 服务检测 agent——healthprobe 独立探测面（目标格式+状态
 
 # 服务检测 agent 简档
 
+> 语言：**中文** ｜ [English](./service-detect-agent.en.md)
+
 ## 状态
 
 - 状态: **Active——B1-B6 全部落地（2026-10-10，B6 web 面板块见 Services 页 ProbePanel）**。

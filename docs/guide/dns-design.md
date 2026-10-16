@@ -1,5 +1,7 @@
 # DNS 管理设计（M1：Cloudflare 集成；M2：DNSPod / 阿里云；M3：Domain 台账写联动；M4：批量导入/导出）
 
+> 语言：**中文** ｜ [English](./dns-design.en.md)
+
 > 2026-09-15 立项。对应 todo「DNS 管理：Cloudflare API 集成，域名资源
 > 联动记录增删改」。M2 立项 2026-09-19：DNSPod / 阿里云 provider。
 > M3 立项 2026-09-27：Domain 台账写联动（D5 明写「留 M2」的写联动，

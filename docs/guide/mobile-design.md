@@ -1,5 +1,7 @@
 # 移动端方案：Flutter（iOS + Android）
 
+> 语言：**中文** ｜ [English](./mobile-design.en.md)
+
 > 2026-09-22。用户指定技术栈 Flutter，双端覆盖。本文档定义选型依据、与既有
 > server 的边界、M1 最小可用范围与后续里程碑。
 

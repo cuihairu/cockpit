@@ -1,5 +1,7 @@
 # Agent 出口与 SD-WAN 能力边界
 
+> 语言：**中文** ｜ [English](./agent-egress-sdwan.en.md)
+
 本文记录 Cockpit 当前 Agent 作为内网访问出口的实际能力，以及与完整 SD-WAN 的差距。结论以当前代码实现为准。
 
 ## 结论
