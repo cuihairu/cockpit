@@ -39,7 +39,7 @@ The fact that "a domain serves a service externally" is scattered across four mo
 
 | # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D1 | Resource model | `DomainBinding{domain(唯一), agentID, target(host:port \| docker://服务名), enabled, autoDNS, autoProxy, autoCert}` | The three auto switches decouple the linkage: registering only the relationship without enabling automation is also valid |
+| D1 | Resource model | `DomainBinding{domain(unique), agentID, target(host:port \| docker://service-name), enabled, autoDNS, autoProxy, autoCert}` | The three auto switches decouple the linkage: registering only the relationship without enabling automation is also valid |
 | D2 | target semantics | Unified as "agent-reachable address": host:port (host may be 127.0.0.1/container name/lan IP); `docker://name` resolves to a service name inside that agent's docker network | The reverse proxy upstream is in the agent's own machine network, and the domain resolution record points at the agent host IP; the two layers stay unconfused |
 | D3 | DNS records | When `autoDNS` is on, write an A record via the dns provider (IP = the agent's registered primary address); CNAME/multi-level domains not in phase 1 | The agent's primary address already has a registration path, so no new config is added; wait for a real CNAME need |
 | D4 | Proxy dispatch | When `autoProxy` is on, reuse the existing traefik `ApplySite` (ServerNames=[domain], Upstream=target); the server is a pure forwarder, and the agent renders + self-checks locally | Fully reuses the P1 reverse proxy channel, zero new protocol |

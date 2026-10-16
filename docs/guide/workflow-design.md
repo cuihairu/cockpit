@@ -257,7 +257,7 @@ goroutine 不可复活）未解不开工；SSE 与全仓轮询模式冲突拍不
 | F4 | 重试 | 按目标独立完整重试周期；每次 attempt 仍是独立 Job 行 | W4「尝试历史进台账」逐台保留 |
 | F5 | 取消 | 目标边界检查取消（与既有步骤边界同机制，查 run.Status）；未跑目标记 `cancelled` + stopReason=`run cancelled` | W3「停止推进后续步骤」在更细粒度如实兑现；cancelled 是既有真实态 |
 | F6 | 快照 | 步骤行加 `targets[]`（agentId/status/jobId/attempts/stopReason，omitempty）；步级 Status=聚合（全成功才 success，否则 failed）；单目标步快照形状不变（Target/JobID 仍在步级） | 存量 run JSON 向前兼容（omitempty）；聚合态让时间线不改也自洽；run 详情展开按目标明细 |
-| F7 | 输出 | 扇出步**不提供**步骤输出：`{{steps.NAME.output}}` 解析为空串 | 多台输出拼接是伪精度；按目标取输出（per-target refs）等真实需求再立项；空串与 M2a「缺名取空串」同语义 |
+| F7 | 输出 | 扇出步**不提供**步骤输出：<span v-pre>`{{steps.NAME.output}}`</span> 解析为空串 | 多台输出拼接是伪精度；按目标取输出（per-target refs）等真实需求再立项；空串与 M2a「缺名取空串」同语义 |
 | F8 | 在线校验 | 建 run 前逐台校验 targets 全在线（既有幽灵防线同口径），缺一 503 并指明 steps[i] 的缺席者 | 与单目标 `registry.Get` 同款，扇出只是 N 次 |
 
 ### 不变式

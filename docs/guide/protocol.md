@@ -1,5 +1,7 @@
 # 协议与 API 边界
 
+> 语言：**中文** ｜ [English](./protocol.en.md)
+
 本文记录当前 Server、Agent、Web UI 之间的通信边界。
 
 ## 通信面

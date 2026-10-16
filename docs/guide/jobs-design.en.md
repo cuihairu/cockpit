@@ -19,7 +19,7 @@
 - **Not implemented** (per this document's "Boundaries (explicitly not doing)" section, to be designed
   when the project starts; not written into current capabilities): streaming output, the Action/Event
   abstractions and AI wiring (P5).
-- **Landed by P2 (2026-10-09, [workflow-design](./workflow-design.md) M1)**:
+- **Landed by P2 (2026-10-09, [workflow-design](./workflow-design.en.md) M1)**:
   asynchronous execution/cancellation (`cancelled` terminal state, cancellable while pending, ledger
   filtering) and Workflow orchestration; `POST /api/jobs` semantics changed accordingly to "create
   returns 201 pending immediately, dispatched in the background" (the original synchronous wait
@@ -52,13 +52,13 @@ The same channel model as scheduled tasks: **synchronous RPC + server persistenc
 server is the source of truth.
 
 ```
-┌─ server ───────────────────────┐        ┌─ agent（目标主机）─────────────┐
-│ POST /api/jobs                 │ ─RPC─▶ │ job provider（新）              │
-│ 校验 → 建 Job(pending)         │        │ job.exec：sh -c / cmd /C        │
-│   → CallAgent(job.exec)        │ ◀─RPC─ │ 带超时执行，返回 exit_code/输出  │
-│   → 终态回写 + 审计 job_run    │        │ （输出截尾 64KB，业务字段不炸RPC）│
-│ GET /api/jobs[/{id}] 台账查询  │        └─────────────────────────────────┘
-└────────────────────────────────┘
+┌─ server ───────────────────────────────────┐        ┌─ agent (target host) ─────────────────────────────────────────┐
+│ POST /api/jobs                             │ ─RPC─▶ │ job provider (new)                                            │
+│ validate → create Job(pending)             │        │ job.exec: sh -c / cmd /C                                      │
+│   → CallAgent(job.exec)                    │ ◀─RPC─ │ run with timeout, return exit_code/output                     │
+│   → write back final state + audit job_run │        │ (output truncated at 64KB, business fields never blow up RPC) │
+│ GET /api/jobs[/{id}] ledger query          │        └───────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────┘
 ```
 
 ## Key Decisions
@@ -96,7 +96,7 @@ target non-empty; exec requires a non-empty `parameters.command` ≤16KB; `timeo
 {
   "id": "…", "type": "agent.exec", "target": "agent-id", "actor": "username",
   "status": "success", "parameters": {"command": "uptime"},
-  "output": "…尾部 64KB…", "exitCode": 0, "error": "",
+  "output": "…tail 64KB…", "exitCode": 0, "error": "",
   "createdAt": "…", "startedAt": "…", "finishedAt": "…"
 }
 ```

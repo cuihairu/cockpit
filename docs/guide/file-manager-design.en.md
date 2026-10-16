@@ -24,11 +24,11 @@ server purely forwarding and never touching disk**
 and downloads use streamed chunked pulls).
 
 ```
-┌─ server ─────────────────────┐         ┌─ agent ─────────────────────┐
-│ REST /api/agents/{id}/files  │ ─RPC─▶  │ file provider（新）          │
-│ 参数校验 + 审计（变更类操作） │ ◀─RPC─  │ list/read/write/mkdir/      │
-│ download 流式转发（不落盘）   │         │ delete/rename               │
-└──────────────────────────────┘         └─────────────────────────────┘
+┌─ server ───────────────────────────────────────┐        ┌─ agent ────────────────┐
+│ REST /api/agents/{id}/files                    │ ─RPC─▶ │ file provider (new)    │
+│ param validation + audit (mutating ops)        │ ◀─RPC─ │ list/read/write/mkdir/ │
+│ download streamed through (never touches disk) │        │ delete/rename          │
+└────────────────────────────────────────────────┘        └────────────────────────┘
 ```
 
 ## Key Decisions
@@ -162,7 +162,7 @@ Recursive in-directory text search (D10-D13), locating "which file a config entr
 
 - FileBrowser toolbar gains "Search": a Modal with keyword input (current directory as root) + a case toggle;
 - Result list: hit path (click to jump to its directory and close the Modal) + line number + hit line (keyword highlighted);
-- Bottom status line: `N 处命中 · 已扫描 M 文件`, a hint Tag when truncated/skipped>0.
+- Bottom status line: `N hits · M files scanned`, a hint Tag when truncated/skipped>0.
 
 **Tests**: agent temp directory tree (hits and case toggle / depth cap / binary and large-file skipping /
 truncation at 200 / path validation rejections / empty result is not an error); server forwarding and 400
@@ -306,9 +306,9 @@ parentheses; once the mechanism was simplified, the change surface collapsed to 
 
 ## References
 
-- Internal: [backup-design.md](./backup-design.md) M1.5 (source of the file.read chunking and download
-  stream-forwarding skeleton), [stack-deploy-design.md](./stack-deploy-design.md) (provider
-  registration pattern), [probe-enhance-design.md](./probe-enhance-design.md) (audit and notification
+- Internal: [backup-design.md](./backup-design.en.md) M1.5 (source of the file.read chunking and download
+  stream-forwarding skeleton), [stack-deploy-design.md](./stack-deploy-design.en.md) (provider
+  registration pattern), [probe-enhance-design.md](./probe-enhance-design.en.md) (audit and notification
   patterns), `todo.md` P1 file manager item
 - External: [Filebrowser](https://github.com/filebrowser/filebrowser) (browsing interaction paradigm),
   OWASP Path Traversal (both-end validation and symlink policy)

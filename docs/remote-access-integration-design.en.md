@@ -5,7 +5,7 @@
 > Initiated 2026-09-25. Direction aligned with the other repository: the remote access integration
 > of the three protocols VNC / SSH / RDP is unified on third-party solutions, no longer
 > maintaining separate self-developed protocol chains. RDP / VNC already landed in
-> [remote-desktop-guacamole-design](./remote-desktop-guacamole-design.md)
+> [remote-desktop-guacamole-design](./remote-desktop-guacamole-design.en.md)
 > (the Guacamole route); this document completes **SSH joining the same stack** and provides a
 > selection overview for the three protocols. The old design's "not doing: SSH/telnet via
 > Guacamole" item is **repealed** as of this document

@@ -35,19 +35,19 @@ Current state of the encryption infrastructure: a single global AES-256-GCM key 
 
 ```go
 type Entry struct {
-    Path      string            // 唯一寻址：<域>/<名>，如 remote/<id>、nas/<name>
+    Path      string            // Unique addressing: <domain>/<name>, e.g. remote/<id>, nas/<name>
     Kind      string            // password / private_key / api_token / pair
-    Username  string            // 可选配套用户名
-    Value     string            // 明文，仅内存态
-    Meta      map[string]string // 非敏感元数据（addr/type 等）
+    Username  string            // Optional companion username
+    Value     string            // Plaintext, in-memory state only
+    Meta      map[string]string // Non-sensitive metadata (addr/type etc.)
 }
 type Provider interface {
     Name() string
-    Unlock(passphrase string) error // 幂等；已解锁时重验口令并刷新会话
-    Lock()                          // 立即失效会话
+    Unlock(passphrase string) error // Idempotent; when already unlocked, re-verify the passphrase and refresh the session
+    Lock()                          // Invalidate the session immediately
     Read(path string) (*Entry, error)
     Write(path string, e *Entry) error
-    List(prefix string) ([]EntryMeta, error) // 只回元数据，明文不出库
+    List(prefix string) ([]EntryMeta, error) // Metadata only; plaintext never leaves the store
     Delete(path string) error
 }
 ```
@@ -120,15 +120,15 @@ Ciphertext format unchanged → zero migration for existing remote_credentials/T
 The `vault.providers.*` subtree is **strictly decoded** against known fields: unknown fields (including un-integrated provider names) error at `Load`, preventing silently ineffective misspelled keys. If the `vault.providers` section is missing or empty, the check is skipped, so local-only deployments do not produce an empty section.
 
 ```yaml
-# 密码箱（provider 可替换；密钥只用 env 注入，yaml 中无任何密钥字段）
+# Password vault (provider swappable; secrets are injected only via env, no secret field anywhere in yaml)
 vault:
   provider: local
   session_ttl: 0
-  # providers:            # 仅 provider 选中对应实现时生效（V7）
+  # providers:            # Takes effect only when provider selects the matching implementation (V7)
   #   persona:
   #     endpoint: http://127.0.0.1:8747
   #     timeout: 5s
-  #     session_ttl: 30m   # token 用 PERSONA_CONNECT_TOKEN env 注入
+  #     session_ttl: 30m   # token injected via the PERSONA_CONNECT_TOKEN env
 ```
 
 #### vault: references (V6 wave 2, landed)
@@ -139,7 +139,7 @@ The value of each credential field may be written as an explicit `vault:<path>` 
 ```yaml
 dns:
   cloudflare:
-    api_token: "vault:dns/cloudflare"     # 条目 value=API token
+    api_token: "vault:dns/cloudflare"     # entry value=API token
 notification:
   telegram:
     - bot_token: "vault:notify/telegram"

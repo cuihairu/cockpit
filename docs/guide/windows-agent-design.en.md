@@ -22,11 +22,11 @@ One `scripts/gen-windows-icon.sh` command regenerates the whole chain; all artif
 
 ```text
 web/public/logo.svg
-  └─ magick 7 尺寸光栅化（16/24/32/48/64/128/256）→ packaging/windows/agent.ico
-       ├─ Inno SetupIconFile / UninstallDisplayIcon → 安装器 + 卸载条目图标
-       ├─ [Icons] 快捷方式图标（引用 exe 内嵌图标）
+  └─ magick 7 multi-size rasterization (16/24/32/48/64/128/256) → packaging/windows/agent.ico
+       ├─ Inno SetupIconFile / UninstallDisplayIcon → installer + uninstall entry icon
+       ├─ [Icons] shortcut icon (references the icon embedded in the exe)
        └─ rsrc → cmd/cockpit-agent/rsrc_windows_{amd64,arm64}.syso
-            └─ go build windows/amd64|arm64 自动链接进 PE .rsrc 段
+            └─ go build windows/amd64|arm64 auto-links it into the PE .rsrc section
 ```
 
 Key constraints:
@@ -40,10 +40,10 @@ Key constraints:
 Service registration, start, stop, and removal are all handled by the agent's own subcommands:
 
 ```text
-cockpit-agent service install [-server ...]   # 注册/升级（Automatic + failure actions）+ 启动
-cockpit-agent service uninstall              # 停止并注销
+cockpit-agent service install [-server ...]   # register/upgrade (Automatic + failure actions) + start
+cockpit-agent service uninstall              # stop and unregister
 cockpit-agent service start|stop|status
-cockpit-agent service run                     # SCM 调用入口（勿手动执行）
+cockpit-agent service run                     # SCM invocation entry (do not run manually)
 ```
 
 Service name/display name/description/failure restart policy (5s/10s/20s, count reset after 24h) are byte-for-byte identical to the existing `install.ps1` registration — the two install paths recognize each other and overwrite each other on upgrade.

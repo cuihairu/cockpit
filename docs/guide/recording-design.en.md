@@ -138,7 +138,7 @@ M1 D1 judged "VNC/RDP pixel streams are not recorded", but guacd ships session r
 
 ## References
 
-- Internal: [logs-design.md](./logs-design.md) (the counter-example of server-side forwarding not touching disk —
+- Internal: [logs-design.md](./logs-design.en.md) (the counter-example of server-side forwarding not touching disk —
   this feature is precisely the "does touch disk" side of audit), the audit chapter of architecture.md
 - External: the asciinema v2 format spec (<https://github.com/asciinema/asciinema/blob/develop/doc/asciicast-v2.md>),
   Guacamole session recording, Teleport session recording

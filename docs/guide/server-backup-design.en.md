@@ -55,12 +55,12 @@ M1's local backup and `cockpit.db` are on **the same disk**: mishandling can be 
 ### Execution flow
 
 ```
-serverBackupLoop 到期 / POST /run
-  └─ runServerBackup()          VACUUM INTO 本地档（不变）
-       └─ pushServerBackupRemote(name)   remote_dest 非空时
-            ├─ exec rclone copy（5min 超时）
-            ├─ ok     → [remote] 日志，结束
-            └─ failed → [remote] 日志 + server_backup.remote-failed 通知
+serverBackupLoop expiry / POST /run
+  └─ runServerBackup()          VACUUM INTO local artifact (unchanged)
+       └─ pushServerBackupRemote(name)   when remote_dest is non-empty
+            ├─ exec rclone copy (5min timeout)
+            ├─ ok     → [remote] log, done
+            └─ failed → [remote] log + server_backup.remote-failed notification
 ```
 
 ### M2 checklist
@@ -87,5 +87,5 @@ M1 complete (2026-09-15): 6 server tests all green — the VACUUM INTO artifact 
 
 ## References
 
-- Internal: [backup-design.md](./backup-design.md) (agent-side backup and task model), [recording-design.md](./recording-design.md) (retention cleanup and download audit patterns)
+- Internal: [backup-design.md](./backup-design.en.md) (agent-side backup and task model), [recording-design.md](./recording-design.en.md) (retention cleanup and download audit patterns)
 - External: SQLite documentation Backup API / VACUUM INTO (3.27+)

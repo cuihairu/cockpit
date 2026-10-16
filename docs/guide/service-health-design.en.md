@@ -7,8 +7,8 @@
 > the business has long since been unreachable; currently propped up by an external cron watchdog.
 > This design makes the detection and self-healing of such "wedging that systemd cannot see" a cockpit
 > built-in capability: agent periodic probes (three kinds: HTTP/TCP/systemd) + systemctl self-healing
-> within a whitelist + auditing and dashboard. Along with [service-design](./service-design.md)
-> (the three-backend execution layer) and [overlay-design](./overlay-design.md) M3/M3.5 (daemon
+> within a whitelist + auditing and dashboard. Along with [service-design](./service-design.en.md)
+> (the three-backend execution layer) and [overlay-design](./overlay-design.en.md) M3/M3.5 (daemon
 > service management), it belongs to the service management surface; see the architecture section below.
 >
 > The onboarding manual for the first integration case (cloudflared) is in the "First Integration Case"

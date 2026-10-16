@@ -156,7 +156,7 @@ For manual deployment, service parameters and troubleshooting see [deployments/R
 
 OpenWrt routers need no manual compilation: the nightly release provides multi-architecture
 `.ipk` packages (install with opkg, supervised by procd, configured via UCI); the install steps are in
-[OpenWrt Agent packaging design](/guide/openwrt-agent-design#安装与升级).
+[OpenWrt Agent packaging design](/guide/openwrt-agent-design.en#installation-and-upgrade).
 
 Other cases: download the `cockpit-agent` binary for your platform (or compile it locally)
 and run it on the managed node:

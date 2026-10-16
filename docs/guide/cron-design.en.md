@@ -20,18 +20,18 @@ Same channel model as reverse proxy: **synchronous RPC + server pure forwarding*
 reads/writes take milliseconds, a 30s RPC timeout is more than enough.
 
 ```
-┌─ server ────────────────────┐        ┌─ agent（crontab 所在主机）────────┐
-│ REST /api/agents/{id}/cron  │ ─RPC─▶ │ cron provider（新）                │
-│ 任务 CRUD + 审计            │ ◀─RPC─ │ 读全量 → 替换自己名下段 → 写回     │
-│ 不落库：crontab 即状态      │        │ 用户手写条目零接触（逐行保留）     │
-└─────────────────────────────┘        └───────────────────────────────────┘
+┌─ server ────────────────────┐        ┌─ agent (host where crontab lives) ─────────────────┐
+│ REST /api/agents/{id}/cron  │ ─RPC─▶ │ cron provider (new)                                │
+│ task CRUD + audit           │ ◀─RPC─ │ read all → replace own section → write back        │
+│ no DB: crontab is the state │        │ user-written entries untouched (kept line by line) │
+└─────────────────────────────┘        └────────────────────────────────────────────────────┘
 ```
 
 ## Key Decisions
 
 | # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D1 | M1 scope | Only **crontab** (agent's running user, read with `crontab -l` / write back with `crontab <临时文件>`, argv passes the file path with no stdin); systemd timer read-only listing comes later | The vast majority of personal-cloud scheduled tasks live in crontab; multi-user `-u` and timer listing can be added later as needed |
+| D1 | M1 scope | Only **crontab** (agent's running user, read with `crontab -l` / write back with `crontab <tmpfile>`, argv passes the file path with no stdin); systemd timer read-only listing comes later | The vast majority of personal-cloud scheduled tasks live in crontab; multi-user `-u` and timer listing can be added later as needed |
 | D2 | Management boundary | cockpit only touches its own entries: each task is two lines (a meta comment line + a command line), write-back = read full content → replace only the cockpit section → all other lines **preserved line by line verbatim**; before writing back, self-check that non-cockpit lines match the old content, refuse to write if they differ | crontab is full-replacement write-back, there is no fragment file to use; the self-check backstop guarantees user-handwritten entries are never clobbered |
 | D3 | Task metadata | meta comment line `# cockpit:job {json}` embedded (containing name/schedule/command/enabled), read-back treats meta as authoritative | Structurally identical to nginx `# cockpit:meta`; the roundtrip works by parsing its own rendered output |
 | D4 | Task model | `{name, schedule, command, enabled}`; when enabled=false the command line is rendered as a comment (disabling without losing the entry) | Covers personal scenarios; disabling is a high-frequency need (temporarily off rather than deleted) |
@@ -47,7 +47,7 @@ reads/writes take milliseconds, a 30s RPC timeout is more than enough.
 ### Detection and Registration
 
 - If `exec.LookPath("crontab")` succeeds, append the `cron` capability (providers.go registers by capability);
-- The provider reuses nginx's `Commander` abstraction to run `crontab -l` (read) / `crontab <临时文件>` (write back), injectable in tests.
+- The provider reuses nginx's `Commander` abstraction to run `crontab -l` (read) / `crontab <tmpfile>` (write back), injectable in tests.
 
 ### RPC Methods
 
@@ -70,20 +70,20 @@ reads/writes take milliseconds, a 30s RPC timeout is more than enough.
 ### Rendering and Write-Back Flow
 
 ```
-渲染（每任务两行）：
+Render (two lines per task):
   # cockpit:job {"name":"backup","schedule":"0 3 * * *","command":"/opt/bk.sh","enabled":true}
   0 3 * * * /opt/bk.sh
-  （enabled=false 时命令行为 #0 3 * * * /opt/bk.sh）
+  (when enabled=false the command line is rendered as #0 3 * * * /opt/bk.sh)
 
-apply/delete：
-  crontab -l 读全量（空 crontab 视为空串）
+apply/delete:
+  crontab -l reads the full content (an empty crontab counts as an empty string)
     ↓
-  替换 cockpit 段：扫描 meta 标记行定位任务对，整对替换/删除；
-  新任务追加到段尾；非 cockpit 行保持原序原样
+  Replace the cockpit section: scan the meta marker lines to locate each task pair, replace/delete the whole pair;
+  new tasks are appended to the end of the section; non-cockpit lines keep their original order and content
     ↓
-  自检：新旧内容的非 cockpit 行逐行一致，否则拒绝写回（防御 bug）
+  Self-check: the non-cockpit lines of the old and new content must match line by line, otherwise refuse to write back (bug defense)
     ↓
-  crontab <临时文件> 写回（argv 传路径，无 stdin）
+  crontab <tmpfile> writes back (argv passes the path, no stdin)
 ```
 
 - The read-modify-write critical section is serialized by a provider-level `sync.Mutex`;
@@ -154,7 +154,7 @@ system timer units, no enable/disable or editing (the write path involves the ro
 
 | Decision | Content | Rationale |
 |------|------|------|
-| D18 | Listing and querying use stable APIs: `systemctl list-unit-files --type=timer --no-legend` takes the **first column** of each line (unit name, independent of column count), then **one command** `systemctl show 全部 unit 名 -p Description -p ActiveState -p UnitFileState -p LastTriggerUSec -p NextElapseUSecRealtime -p TimersCalendar -p TimersMonotonic` queries properties, output split into sections by blank lines, each section `Key=Value` | `list-timers` table-style output columns vary across systemd versions (the root cause of the earlier "not doing it"); `show -p` property names are a stable bus API, verified in practice: two stages, one exec each |
+| D18 | Listing and querying use stable APIs: `systemctl list-unit-files --type=timer --no-legend` takes the **first column** of each line (unit name, independent of column count), then **one command** `systemctl show <all unit names> -p Description -p ActiveState -p UnitFileState -p LastTriggerUSec -p NextElapseUSecRealtime -p TimersCalendar -p TimersMonotonic` queries properties, output split into sections by blank lines, each section `Key=Value` | `list-timers` table-style output columns vary across systemd versions (the root cause of the earlier "not doing it"); `show -p` property names are a stable bus API, verified in practice: two stages, one exec each |
 | D19 | Schedule taken as raw text without semantic parsing: the `OnCalendar=` raw text of `TimersCalendar` takes priority, otherwise concatenate the lines of `TimersMonotonic` (OnBootUSec/OnUnitActiveUSec); `NextElapseUSecRealtime`/`LastTriggerUSec` have the trailing timezone abbreviation stripped and are parsed as unix seconds in the **host's local timezone** (`@` prefix = epoch microseconds parsed directly; `n/a`/empty/parse failure map to 0); units where show fails (e.g. template `@.timer`) are listed by name only, properties left empty | systemd's OnCalendar syntax superset is too large to hand-write a parser; systemctl and the agent share the same host and TZ, wall-clock strings match `time.Local`; template units error in practice on show, the fallback is not fatal |
 | D20 | Presentation and read-only boundary: agent cron provider new action `timers` (pure read, capability unchanged — the entry is mounted on the Cron page); server `GET /api/agents/{id}/cron/timers` pure forwarding, no database, no audit; web Cron page adds a "systemd timers" collapse panel (unit/description/schedule/state/last trigger/next trigger, keyword filter, panel not shown on request failure or empty list, times in `dayjs.unix` local format) | The listing is the same nature as the external-entries collapse panel; read-only involves no audit or capability semantic changes |
 
@@ -247,8 +247,8 @@ the user capability is split at the Call layer via `*As` variants.
 
 ## References
 
-- Internal: [proxy-design.md](./proxy-design.md) (structurally identical meta-comment roundtrip and server
+- Internal: [proxy-design.md](./proxy-design.en.md) (structurally identical meta-comment roundtrip and server
   forwarding patterns),
-  [backup-design.md](./backup-design.md) (nameLock concurrency discipline), `todo.md` P2 scheduled-task item
+  [backup-design.md](./backup-design.en.md) (nameLock concurrency discipline), `todo.md` P2 scheduled-task item
 - External: [crontab(5) manual](https://man7.org/linux/man-pages/man5/crontab.5.html)
   (field semantics and @extensions), vixie-cron source (write-back semantics)

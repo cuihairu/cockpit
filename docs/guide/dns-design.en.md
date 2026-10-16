@@ -23,7 +23,7 @@ channels, "server makes outbound calls to external services"), not through the A
 ```
 Web /dns ──REST──▶ server api_dns ──HTTPS──▶ api.cloudflare.com/v4
                         │
-                        └─读 Domain 表做只读联动标注（M1 不回写）
+                        └─reads the Domain table for read-only linkage annotation (M1 does not write back)
 ```
 
 ## Decisions
@@ -93,7 +93,7 @@ import, and distributed resolution checks remain not done.
 
 - Tencent Cloud/Aliyun **console-level** features (DNS resolution tiers, line-based load balancing, batch
   tricks) — only the panel closed loop of record CRUD;
-- Smart-line (record_line) editing: DNSPod Create/Modify pins `record_line=默认`; existing non-default-line
+- Smart-line (record_line) editing: DNSPod Create/Modify pins `record_line=默认` ("default"); existing non-default-line
   records, when edited, fall back to the default line — M2 states this explicitly in the docs, and the edit
   box does not expose line concepts;
 - Write linkage (Domain table write-back), batch import/export, Agent-based distributed resolution checks —
@@ -242,7 +242,7 @@ idempotent.
 
 ## References
 
-- Internal: [probe-enhance-design.md](./probe-enhance-design.md) (server outbound
+- Internal: [probe-enhance-design.md](./probe-enhance-design.en.md) (server outbound
   probing precedent), notification package (token configuration discipline)
 - External: Cloudflare API v4 (zones / dns_records), DNSPod API (dnsapi.cn
   Domain.List / Record.*), Aliyun DNS RPC API (alidns.aliyuncs.com

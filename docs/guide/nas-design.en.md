@@ -217,7 +217,7 @@ Inspection `nasScanLoop` (the same skeleton as smart/ddns/acme):
     with the mount path in the title; silent after recovery (`createAlertIfNotExists` only adds and never clears, so no repeat alerting; existing alerts still need a human to mark them read)
   - available=false and the unknown state are not alerted (missing observation ≠ failure, same rule as smart D9)
   - when a record's `Host` is non-empty (network NAS) the alert title's "host" slot shows the device name
-    (`存储池故障：volume_1（主机 home-dsm）`), and deduplication naturally isolates different devices
+    (`storage pool failure: volume_1 (host home-dsm)`), and deduplication naturally isolates different devices
 
 ## D6 Web /nas page
 

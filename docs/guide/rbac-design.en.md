@@ -23,13 +23,13 @@ RBAC-lite: **user → role → permission points**. Permission decisions converg
 the agent and websocket channels get zero changes (permissions are closed off at the server; the agent only accepts one-way calls from the server).
 
 ```
-┌─ web ─────────────────┐      ┌─ server ──────────────────────────────────┐
-│ 路由守卫 + v-perm 指令 │─JWT─▶│ auth middleware：验签 → UserInfo{Role}     │
-│                       │      │   ↓                                        │
-│ /api/me 返回          │      │ requirePermission(perm)：按 Role 查角色表   │
-│ permissions[]         │      │   ↓（SQLite 本地读，微秒级，不做缓存）      │
-│ 菜单/按钮按权限裁剪    │      │ handler：删除散落的 Role != "admin"         │
-└───────────────────────┘      └────────────────────────────────────────────┘
+┌─ web ───────────────────────────────┐      ┌─ server ────────────────────────────────────────────┐
+│ route guard + v-perm directive      │─JWT─▶│ auth middleware: verify signature → UserInfo{Role}  │
+│                                     │      │   ↓                                                 │
+│ /api/me returns                     │      │ requirePermission(perm): look up role table by Role │
+│ permissions[]                       │      │   ↓ (local SQLite read, microseconds, no caching)   │
+│ menus/buttons trimmed by permission │      │ handler: remove scattered Role != "admin"           │
+└─────────────────────────────────────┘      └─────────────────────────────────────────────────────┘
 ```
 
 ## Key Decisions

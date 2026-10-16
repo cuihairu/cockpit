@@ -2,7 +2,7 @@
 
 > Language: [中文](./stack-deploy-design.md) ｜ **English**
 
-> 2026-09-14. Design for the first P1 feature. For reference sources and comparison conclusions see [Reference Project Comparison and Borrowing](./reference-projects.md) (Komodo "Git-to-deploy" + Dockge "compose-file-first"). This document covers only design decisions and interface definitions; implementation proceeds per "Phased Delivery".
+> 2026-09-14. Design for the first P1 feature. For reference sources and comparison conclusions see [Reference Project Comparison and Borrowing](./reference-projects.en.md) (Komodo "Git-to-deploy" + Dockge "compose-file-first"). This document covers only design decisions and interface definitions; implementation proceeds per "Phased Delivery".
 
 ## Background and Goals
 
@@ -31,17 +31,17 @@ This feature fills that gap in Cockpit:
 Reuse the existing three-segment chain; no new protocol messages:
 
 ```
-Web (Stacks 页面)
+Web (Stacks page)
   │  REST /api/stacks/agents/{agentId}/...
   ▼
-Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
+Server  api_stacks.go ── CallAgent RPC (existing 30s channel)
   │                        │
   │  storage.stacks        ▼
-  │  (索引缓存+审计)    Agent  rpc.Handler ── stack provider
-  │                                        │ ├─ docker.Client（状态查询，label 过滤）
-  │                                        └ ─ docker compose CLI（up/down/logs）
+  │  (index + audit)    Agent  rpc.Handler ── stack provider
+  │                                        │ ├─ docker.Client (status query, label filter)
+  │                                        └ ─ docker compose CLI (up/down/logs)
   ▼                                        ▼
-审计日志                              <stacks_dir>/<name>/compose.yml  ← 真相源
+Audit log                             <stacks_dir>/<name>/compose.yml  ← source of truth
 ```
 
 ## Agent-Side Design
@@ -54,12 +54,12 @@ Server  api_stacks.go ── CallAgent RPC（既有 30s 通道）
 ### File Layout (compose-file-first)
 
 ```
-/var/lib/cockpit/stacks/        # COCKPIT_STACKS_DIR，可覆盖
+/var/lib/cockpit/stacks/        # COCKPIT_STACKS_DIR, overridable
 └── <stack-name>/
-    ├── compose.yml             # 真相源，UI 可编辑
-    ├── .env                    # 可选，UI 可编辑（敏感）
+    ├── compose.yml             # source of truth, editable in UI
+    ├── .env                    # optional, editable in UI (sensitive)
     └── .cockpit/
-        └── last-task.json      # 最近一次任务元数据（action/status/finishedAt）
+        └── last-task.json      # metadata of the most recent task (action/status/finishedAt)
 ```
 
 Constraints:
@@ -88,7 +88,7 @@ Method names follow the existing `<provider>.<action>` format (`internal/agent/r
 | `stack.info` | — | `{dir, dirWritable, dirError?, composeVersion?}`: directory writability probe + compose version (M1.5) | Sync |
 | `stack.git.status` | — | `{enabled, reason?, remote?, branch?, head?, remoteHead?, ahead, behind, changes?: [{code, path}]}`: stacks repo attach status + drift (P2 ①) | Sync |
 | `stack.git.pull` | `remote?, branch?` | Post-attach snapshot same as `git.status`; the first call performs the attach (P2 ①) | Sync |
-| `stack.git.deploy` | `branch?` | `{head, deployed: [{stack, taskId}], skipped: [{stack, reason}]}`: pull + deploy changed stacks (P2 ②, webhook-only; semantics in [P2 ② Design](#p2--设计2026-10-12)) | Sync (includes fetch; slow repos are bound by the CallAgent 30s limit) |
+| `stack.git.deploy` | `branch?` | `{head, deployed: [{stack, taskId}], skipped: [{stack, reason}]}`: pull + deploy changed stacks (P2 ②, webhook-only; semantics in [P2 ② Design](#p2--design-2026-10-12)) | Sync (includes fetch; slow repos are bound by the CallAgent 30s limit) |
 | `stack.task.follow` | `taskId, followId` | `{followId}`: subscribes to task log increments, pushed back via proxy_data (`proxyId="stacktask:<followId>"`); terminal state via proxy_close (P2 ②) | Async session |
 | `stack.task.follow.stop` | `followId` | Stops a follow session (P2 ②) | Sync |
 
@@ -166,8 +166,8 @@ New page `web/src/pages/Stacks/`, nav "Application Deployment", route `/stacks`;
 - [x] Agent: providers.go registration logic + unit tests (fake script simulating the compose CLI)
 - [x] Server: `api_stacks.go` + storage stacks table + audit events
 - [x] Web: Stacks page (list/detail/edit/deploy/log polling)
-- [x] Acceptance (local end-to-end, 2026-09-14): real server/agent binaries + fake Docker Engine (`scripts/local-acceptance/`), 32 assertions all passing and repeatable, covering "create → validation failure not written to disk → up (concurrent 409) → status linkage → logs → down → delete → disconnected grey state → audit closure + .env not leaked"; see [Acceptance Records](#验收记录) below
-- [x] Acceptance (real Docker test machine, 2026-09-28): real image pulls, container health/ports/restart policies, full compose semantics (env/volumes/custom networks/depends_on/pull/profiles/healthcheck), `COCKPIT_STACKS_DIR` 0700 practice — see [Acceptance Records](#验收记录)
+- [x] Acceptance (local end-to-end, 2026-09-14): real server/agent binaries + fake Docker Engine (`scripts/local-acceptance/`), 32 assertions all passing and repeatable, covering "create → validation failure not written to disk → up (concurrent 409) → status linkage → logs → down → delete → disconnected grey state → audit closure + .env not leaked"; see [Acceptance Records](#acceptance-records) below
+- [x] Acceptance (real Docker test machine, 2026-09-28): real image pulls, container health/ports/restart policies, full compose semantics (env/volumes/custom networks/depends_on/pull/profiles/healthcheck), `COCKPIT_STACKS_DIR` 0700 practice — see [Acceptance Records](#acceptance-records)
 
 ### M1.5 — Experience gaps filled (completed 2026-09-14)
 
@@ -178,9 +178,9 @@ New page `web/src/pages/Stacks/`, nav "Application Deployment", route `/stacks`;
 
 ### P2 — Git-to-deploy (Komodo-style upgrade)
 
-- [x] Stacks directory upgraded to a Git worktree: remote repo pull → drift hints (local changes vs repo) (2026-10-12; see [Git-to-deploy ① Design](#p2--git-to-deploy-设计) below)
-- [x] Webhook-triggered deployment; streaming deployment log push (reusing the proxy data channel, replacing polling) (2026-10-12; see [P2 ② Design](#p2--设计2026-10-12) below)
-- [x] Inventory integration: stacks linked to CMDB service entries, probe directly probes ports exposed by stacks (2026-10-13; see [P2 ③ Design](#p2--设计2026-10-13) below)
+- [x] Stacks directory upgraded to a Git worktree: remote repo pull → drift hints (local changes vs repo) (2026-10-12; see [Git-to-deploy ① Design](#p2--git-to-deploy-design-2026-10-12) below)
+- [x] Webhook-triggered deployment; streaming deployment log push (reusing the proxy data channel, replacing polling) (2026-10-12; see [P2 ② Design](#p2--design-2026-10-12) below)
+- [x] Inventory integration: stacks linked to CMDB service entries, probe directly probes ports exposed by stacks (2026-10-13; see [P2 ③ Design](#p2--design-2026-10-13) below)
 
 #### P2 ① Git-to-deploy Design (2026-10-12)
 
@@ -329,4 +329,4 @@ The same script suite, extended, runs the M1.5 new features; all 42 assertions p
 
 - [Komodo Git-to-deploy](https://komo.do/docs/intro) — Core/Periphery isomorphic, automation-first programs (a good comparison for this design's P2)
 - [Dockge](https://github.com/louislam/dockge) — compose-file-first, directory-is-stack
-- Internal: [Reference Project Comparison and Borrowing](./reference-projects.md), [Protocol Definition](./protocol.md), `todo.md` P1 items
+- Internal: [Reference Project Comparison and Borrowing](./reference-projects.en.md), [Protocol Definition](./protocol.en.md), `todo.md` P1 items

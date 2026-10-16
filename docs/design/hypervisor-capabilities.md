@@ -4,6 +4,8 @@ title: 虚拟化平台能力——hypervisor provider 层（PVE/vSphere/本机 Q
 
 # 虚拟化平台能力设计
 
+> 语言：**中文** ｜ [English](./hypervisor-capabilities.en.md)
+
 ## 状态
 
 - 状态: **Active（用户令 2026-10-10 设计补单2：与 BMC 层同构进插件机制）**。

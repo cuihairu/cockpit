@@ -21,11 +21,11 @@ M1 is a query-style viewer (pull type): each query runs journalctl / docker logs
 no collection, no storage, no push — the aggregation collection pipeline (Loki-style) is deferred to M2.
 
 ```
-┌─ server ────────────────────┐        ┌─ agent（日志所在主机）────────────┐
-│ REST /api/agents/{id}/logs  │ ─RPC─▶ │ logs provider（新）                │
-│ 纯转发，不落库              │ ◀─RPC─ │ journalctl / docker logs 实时查询  │
-│ 浏览类操作不记审计          │        │ 白名单校验 + 字节上限 + 超时       │
-└─────────────────────────────┘        └───────────────────────────────────┘
+┌─ server ───────────────────────────┐        ┌─ agent (host where logs live) ────────────┐
+│ REST /api/agents/{id}/logs         │ ─RPC─▶ │ logs provider (new)                       │
+│ pure forwarding, no database       │ ◀─RPC─ │ journalctl / docker logs live query       │
+│ browse-type operations not audited │        │ whitelist validation + byte cap + timeout │
+└────────────────────────────────────┘        └───────────────────────────────────────────┘
 ```
 
 ## Key Decisions
@@ -161,12 +161,12 @@ API shape:
 ```
 POST /api/logs/search
 {"type": "systemd", "source": "nginx.service", "grep": "ERROR",
- "since_minutes": 60, "tail": 200, "agents": ["a1", "a2"]}   // agents 缺省 = 全部
+ "since_minutes": 60, "tail": 200, "agents": ["a1", "a2"]}   // agents omitted = all
 
 200 →
 {"results": [
    {"agentId": "a1", "hostname": "web-1", "ok": true,
-    "truncated": false, "output": "...同 logs.query 形态..."},
+    "truncated": false, "output": "...same shape as logs.query..."},
    {"agentId": "a2", "hostname": "db-1", "ok": false, "error": "timeout"}],
  "skipped": [{"agentId": "a3", "reason": "offline"}]}
 ```
@@ -234,9 +234,9 @@ type + hint bar.
 
 ## References
 
-- Internal: [cron-design.md](./cron-design.md) (Commander + server forwarding pattern, structurally
+- Internal: [cron-design.md](./cron-design.en.md) (Commander + server forwarding pattern, structurally
   identical),
-  [file-manager-design.md](./file-manager-design.md) (Workbench Tab and file-log boundary),
+  [file-manager-design.md](./file-manager-design.en.md) (Workbench Tab and file-log boundary),
   `todo.md` P2 log aggregation viewing item
 - External: [journalctl(1)](https://www.freedesktop.org/software/systemd/man/journalctl.html)
   (-o short-iso / --since semantics), [docker logs](https://docs.docker.com/engine/reference/commandline/logs/)
