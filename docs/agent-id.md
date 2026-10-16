@@ -1,5 +1,7 @@
 # Agent ID 生成策略
 
+> 语言：**中文** ｜ [English](./agent-id.en.md)
+
 ## 概述
 
 Agent ID 是 Cockpit Agent 在 Server 端的唯一标识。ID 在 Agent 生命周期内保持稳定——**重启不变化、重连复用同一 ID**，Server 将其视为同一台机器。

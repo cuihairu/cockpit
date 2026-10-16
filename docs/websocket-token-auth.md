@@ -1,5 +1,7 @@
 # WebSocket 认证边界
 
+> 语言：**中文** ｜ [English](./websocket-token-auth.en.md)
+
 当前实现已经避免在远程连接 WebSocket URL 中直接携带 JWT。远程终端、VNC、桌面连接统一使用短期 ticket：terminal 入口仅经 `Sec-WebSocket-Protocol` 传递，guacamole 入口 URL query `?ticket=` 与子协议双通道（query 优先、子协议兜底）。
 
 ## 当前流程

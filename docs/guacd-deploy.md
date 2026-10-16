@@ -1,5 +1,7 @@
 # guacd 部署指南
 
+> 语言：**中文** ｜ [English](./guacd-deploy.en.md)
+
 ## 概述
 
 guacd（Apache Guacamole Daemon）是 Cockpit 远程桌面网关的协议翻译层。浏览器通过 Cockpit Server（Go 网关）与 guacd 通信，guacd 负责 SSH/VNC/RDP 协议终结。

@@ -127,6 +127,18 @@ docker compose -f deployments/docker/docker-compose.yml up -d
    Cockpit Agent v20261001
    ```
 
+## 本地测试口径
+
+CI 与本地开发按改动面三路分流——改一行文档不该全量编译。
+
+1. **文档改动**（`*.md`、`docs/**`、图片）：不编译。主 CI workflow 的
+   `paths-ignore` 已跳过这些路径。
+2. **代码改动**：只跑改动子集，不全量。
+   - `go test ./internal/agent/<改动包>/...`
+   - `go test ./cmd/cockpit-agent/...`
+3. **全量**（`go test ./internal/agent/... ./cmd/cockpit-agent/...`）：仅以下情形触发——go.mod / go.sum、
+   `.github/**`、Docker/Compose 配置、发布前。
+
 ## 文档
 
 完整安装（一键安装细节 / 平台矩阵 / 源码构建 / OpenWrt ipk）、配置说明、架构与各功能设计文档均在文档站：

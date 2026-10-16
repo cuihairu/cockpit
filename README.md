@@ -125,17 +125,17 @@ Service management: `cockpit-agent service install|uninstall|start|stop|status` 
    ```
 
 
-## 本地测试口径
+## Local Testing Conventions
 
-CI 与本地开发按改动面三路分流——改一行文档不该全量编译。
+CI and local development split into three paths based on what changed — a one-line docs edit should not trigger a full build.
 
-1. **文档改动**（`*.md`、`docs/**`、图片）：不编译。主 CI workflow 的
-   `paths-ignore` 已跳过这些路径。
-2. **代码改动**：只跑改动子集，不全量。
-   - `go test ./internal/agent/<改动包>/...`
+1. **Docs changes** (`*.md`, `docs/**`, images): no build. The main CI workflow's
+   `paths-ignore` already skips these paths.
+2. **Code changes**: run only the changed subset, never the full suite.
+   - `go test ./internal/agent/<changed-package>/...`
    - `go test ./cmd/cockpit-agent/...`
-3. **全量**（`go test ./internal/agent/... ./cmd/cockpit-agent/...`）：仅以下情形触发——go.mod / go.sum、
-   `.github/**`、Docker/Compose 配置、发布前。
+3. **Full suite** (`go test ./internal/agent/... ./cmd/cockpit-agent/...`): only triggered by go.mod / go.sum,
+   `.github/**`, Docker/Compose config changes, or before a release.
 
 ## Documentation
 

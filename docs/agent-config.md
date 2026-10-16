@@ -1,5 +1,7 @@
 # Agent 配置参考
 
+> 语言：**中文** ｜ [English](./agent-config.en.md)
+
 ## 启动参数
 
 | 参数 | 说明 | 默认值 |

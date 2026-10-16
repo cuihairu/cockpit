@@ -1,5 +1,7 @@
 # 远控三协议第三方集成设计：VNC / SSH / RDP 统一 Guacamole 栈
 
+> 语言：**中文** ｜ [English](./remote-access-integration-design.en.md)
+
 > 2026-09-25 立项。方向对齐另一仓库：VNC / SSH / RDP 三协议的远控统一集成
 > 第三方方案，不再各自维护自行开发协议链路。RDP / VNC 已在
 > [remote-desktop-guacamole-design](./remote-desktop-guacamole-design.md)
