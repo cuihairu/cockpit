@@ -60,7 +60,8 @@ func (tm *TicketManager) GenerateTicket(userID, username string, params map[stri
 	}
 
 	tm.tickets[ticketID] = ticket
-	log.Printf("Ticket generated: %s for user %s", ticketID, username)
+	// The ID is a live, one-time credential until consumed; never emit it to logs.
+	log.Printf("Ticket generated for user %s", username)
 
 	return ticket, nil
 }

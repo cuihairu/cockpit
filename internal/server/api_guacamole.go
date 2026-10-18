@@ -377,11 +377,12 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 3.5 目标转发器：guacd 拨回环中继，字节流经 agent WS 通道到 agent、
+	// 3.5 目标转发器：guacd 拨 Server 在该网络路径上的中继地址，字节流经 agent WS 通道到 agent、
 	// 由 agent 拨真实目标（架构：agent 是目标内网的唯一落点，guacd 不直拨
-	// ——设计修正 2026-10-02）。中继起不来按 agent 不可达处理。
-	relay, relayAddr, err := startGuacRelay(agentID, guacRelayPrefix+sessionID,
-		net.JoinHostPort(host, portStr), s.SendToAgent)
+	// ——设计修正 2026-10-02）。默认绑定到 Server→guacd TCP 路由所选本地 IP，
+	// GUAC_RELAY_BIND_ADDR / GUAC_RELAY_HOST 用于分离网络或 NAT 场景覆盖。
+	relay, relayAddr, err := startGuacRelayForGuacd(agentID, guacRelayPrefix+sessionID,
+		net.JoinHostPort(host, portStr), s.SendToAgent, guacdConn.LocalAddr())
 	if err != nil {
 		log.Printf("Guacamole: start target relay failed: %v", err)
 		s.auditRemoteFailure(ticket.UserID, ticket.Username, r.RemoteAddr, r.UserAgent(),

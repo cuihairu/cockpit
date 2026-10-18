@@ -1,6 +1,9 @@
 package server
 
 import (
+	"bytes"
+	"log"
+	"strings"
 	"testing"
 	"time"
 )
@@ -52,6 +55,24 @@ func TestGenerateTicket(t *testing.T) {
 
 	if time.Now().Add(4 * time.Minute).After(ticket.ExpiresAt) {
 		t.Error("Ticket should expire in about 5 minutes")
+	}
+}
+
+func TestGenerateTicketDoesNotLogCredential(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	ticket, err := NewTicketManager().GenerateTicket("user-1", "testuser", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), ticket.ID) {
+		t.Fatalf("ticket ID leaked to logs: %q", output.String())
+	}
+	if !strings.Contains(output.String(), "Ticket generated for user testuser") {
+		t.Fatalf("expected non-sensitive creation log, got %q", output.String())
 	}
 }
 

@@ -363,7 +363,7 @@ func TestGuacamoleSelectWriteFailInjected(t *testing.T) {
 	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
 	old := dialGuacd
 	dialGuacd = func(addr string, timeout time.Duration) (net.Conn, error) {
-		return failWriteConn{c1}, nil
+		return failWriteConn{guacTestTCPAddrConn{Conn: c1}}, nil
 	}
 	t.Cleanup(func() { dialGuacd = old })
 
@@ -398,7 +398,7 @@ func TestGuacamoleSelectReadFailInjected(t *testing.T) {
 	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
 	old := dialGuacd
 	dialGuacd = func(addr string, timeout time.Duration) (net.Conn, error) {
-		return failReadConn{c1}, nil
+		return failReadConn{guacTestTCPAddrConn{Conn: c1}}, nil
 	}
 	t.Cleanup(func() { dialGuacd = old })
 

@@ -31,6 +31,7 @@ func covLoopServer(t *testing.T) *Server {
 	s.cancel = cancel
 	s.cfg = &config.Config{
 		Database: &config.DatabaseConfig{Path: filepath.Join(t.TempDir(), "cockpit.db")},
+		Server:   covTestConfig().Server,
 	}
 	return s
 }

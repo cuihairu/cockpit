@@ -129,16 +129,30 @@
 - P8 configsync（server 配置源面不立项）
 - 移动端 VNC/桌面观看（D7；触发条件见 docs/guide/mobile-design.md）
 - 大规模目录重命名
-- [ ] 审核整改（2026-10-18 独立审核，见 docs/review/luna-review-2026-10-18.md）：
+- [x] 审核整改（2026-10-18 独立审核，见 docs/review/luna-review-2026-10-18.md）：
       按审核报告的三张表逐项处理，**先核对再动手**，每项给 file:line 证据。
       回执：docs/review/luna-review-2026-10-18-response.md
-      进度：表一#1 Agent 注册默认拒绝（fail-closed + enrollment_secret 准入）已修，
-      server/config 包测试与 -race 腿、e2e 冒烟全绿；表一#2-5、表二、表三待办。
+      完成证据：表一#1-5、表二#1-4、表三评估（只评估不实现）全部落地（子项见下）；
+      门禁全绿：全量 `go test ./... -count=1`（非 short，exit 0）+ Go 覆盖率门禁
+      （有效覆盖 100%，新增 websocket.go:31-33 / guac_relay.go:73-74 覆盖，登记表漂移同步），
+      `go test -race -short ./... -timeout 1500s`，web 覆盖率门禁（TZ=UTC，exit 0），
+      `scripts/e2e-smoke.sh`（enrollment 准入链路，exit 0），docs VitePress build（exit 0）。
+      全量 ESLint 仍报 5 个未改文件的既存规则错误（改动前端文件定向 lint 通过）。
       1) 表一「缺陷」：按风险排序修，高风险优先
       2) 表二「文档与实现不一致」：以代码为准改文档，或明确标注为规划中
          **禁止为对齐文档去改业务代码**
       3) 表三「值得补的能力」：只做评估与分期建议，**不实现**（需用户拍板）
       每完成一项勾掉并写证据；全部测试通过后 commit+push；不 bump 版本号。
+      - [x] 表一#1 Agent 注册默认拒绝：`internal/server/websocket.go:144-191,188-264`；bcrypt 持久化失败回滚在线注册；测试 `internal/server/websocket_registration_policy_test.go:19-201` + e2e 通过。准入配置/引导：`config/cockpit.yaml:12-15`、`deployments/docker/config.yaml:5-8`、`deployments/docker/.env.example:9`、`deployments/install-server.sh:72-81`、`deployments/install-server.ps1:68-75`；Agent CLI/GUI 安装器示例：`docs/guide/getting-started.md:107-189`、`packaging/windows/agent.iss:69-97,135-142`。
+      - [x] 表一#2 登录限流：`internal/server/login_limiter.go:1-149`、`internal/server/server.go:563-630`；IP/账号双桶、429/Retry-After；`internal/server/login_limiter_test.go:1-120`（定向测试通过）。
+      - [x] 表一#3 ticket 日志：`internal/server/ticket.go:41-66`；`internal/server/ticket_test.go:58-77`（断言日志无明文 ticket，定向测试通过）。
+      - [x] 表一#4 guacd 中继：`internal/server/guac_relay.go:14-135`、`internal/server/api_guacamole.go:362-399,511-530`；`internal/server/guac_integration_test.go:46-113,344-408`（Docker guacd→Server relay→fake Agent→fake VNC 通过）。
+      - [x] 表一#5 密码重置枚举：`internal/server/password_reset_handlers.go:11-71`、`web/src/pages/ForgotPassword/index.tsx:19-46,128-164`；`internal/server/password_reset_handlers_test.go:84-119`（三态统一响应断言）、web 全量 1123 测试通过。
+      - [x] 表二#1 ticket 通道文档：`docs/guide/architecture.md:121-127`、`docs/guide/protocol.md:167-175` 及英文配对；VitePress build 通过。
+      - [x] 表二#2 Job 异步口径：`docs/guide/jobs-design.md:10-26,127-134` 及英文配对；VitePress build 通过。
+      - [x] 表二#3 guacd 拓扑：`docs/guacd-deploy.md:49-75,127-142`、`docs/guacd-deploy.en.md:49-78,128-145`、`deployments/docker/docker-compose.yml:32-42`；双容器回拨验收通过。
+      - [x] 表二#4 JWT 例外：`docs/guide/architecture.md:100-117` 及英文配对；说明 webhook 的 `X-Cockpit-Token` 例外，VitePress build 通过。
+      - [x] 表三 5 项能力仅评估与 P0/P1/P2 建议：`docs/review/luna-review-2026-10-18-response.md:67-75`；无能力实现。
 - [ ] 文档时效性清理（2026-10-18 用户令：很多文档已过时）：
       在本轮审核整改完成之后执行，避免与整改冲突。
       1) 通读 README / docs，找出与当前代码不符的描述（能力、配置项、命令、路径、版本）

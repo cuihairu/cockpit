@@ -8,10 +8,11 @@
 ;   ISCC.exe /DAppVersion=nightly /DStageDir=<abs>\stage /O<abs> packaging\windows\agent.iss
 ;
 ; 交互安装：勾选「注册 Windows 服务」后向导询问 Cockpit Server 的 WebSocket
-;           地址（服务任务取消勾选则跳过该页，装完可手动
-;           `cockpit-agent.exe service install -server ...`）。
-; 静默安装：服务任务默认勾选，必须带 /SERVER="wss://..."（缺省时 service
-;           install 参数校验失败 → 安装器非零退出）。
+;           地址与可选 Agent 准入口令（服务任务取消勾选则跳过该页，装完可手动
+;           `cockpit-agent.exe service install -server ... -secret ...`）。
+; 静默安装：服务任务默认勾选，必须带 /SERVER="wss://..."；安全默认部署还应带
+;           /SECRET="..."，其值须与 Server 的 enrollment_secret 一致。
+;           缺省 SERVER 时 service install 参数校验失败，安装器非零退出。
 ; 验收：安装到 Program Files、服务 Automatic + Running（开机自启）、开始菜单/
 ;       桌面快捷方式、控制面板卸载条目；静默 卸载 → 服务/文件/快捷方式全清。
 ;       round trip 由 nightly 的 Walkthrough 步骤在真 Windows runner 上走查。
@@ -35,7 +36,7 @@ AppPublisherURL=https://github.com/cuihairu/cockpit
 DefaultDirName={autopf}\Cockpit Agent
 DefaultGroupName=Cockpit Agent
 DisableProgramGroupPage=yes
-; /SERVER=... 静默装机开关：{param:server} 为 Inno 原生常量，无需额外指令
+; /SERVER=... /SECRET=... 静默装机开关：{param:*} 为 Inno 原生常量，无需额外指令
 SetupIconFile=agent.ico
 UninstallDisplayName=Cockpit Agent
 UninstallDisplayIcon={app}\cockpit-agent.exe
@@ -68,7 +69,7 @@ Name: "{autodesktop}\Cockpit Agent"; Filename: "{app}\cockpit-agent.exe"; Workin
 ; 服务注册/升级（agent 侧子命令：Automatic + 失败自动重启 + 立即启动）。
 ; 静默安装的地址来自 /SERVER；交互安装来自向导连接页（ServerUrl 函数分流）
 Filename: "{app}\cockpit-agent.exe"; \
-  Parameters: "service install -server ""{code:ServerUrl}"""; \
+  Parameters: "service install -server ""{code:ServerUrl}"" -secret ""{code:AgentSecret}"""; \
   Tasks: service; Flags: runhidden
 
 [UninstallRun]
@@ -90,6 +91,8 @@ begin
     '服务注册需要服务器地址（安装后可重跑安装包或手动执行 service install 变更）。');
   ServerPage.Add('WebSocket 地址（如 wss://cockpit.example.com/ws）:', False);
   ServerPage.Values[0] := ExpandConstant('{param:server}');
+  ServerPage.Add('Agent 首次注册/认证口令（与 Server 的 enrollment_secret 相同）:', True);
+  ServerPage.Values[1] := ExpandConstant('{param:secret}');
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -126,4 +129,13 @@ begin
       '服务注册需要 Cockpit Server 的 WebSocket 地址。' + #13#10 +
       '静默安装请加：/SERVER="wss://cockpit.example.com/ws"');
   Result := Url;
+end;
+
+function AgentSecret(Param: String): String;
+begin
+  { 静默安装从 /SECRET 读取；交互安装取同一连接页的口令输入框 }
+  if WizardSilent() then
+    Result := Trim(ExpandConstant('{param:secret}'))
+  else
+    Result := Trim(ServerPage.Values[1]);
 end;

@@ -46,7 +46,10 @@ func covROServer(t *testing.T) (*Server, string) {
 		remoteSessions: NewRemoteSessionManager(),
 		ticketMgr:      NewTicketManager(),
 		ctx:            ctx,
-		cfg:            &config.Config{Database: &config.DatabaseConfig{Path: dbPath}},
+		cfg: &config.Config{
+			Database: &config.DatabaseConfig{Path: dbPath},
+			Server:   covTestConfig().Server,
+		},
 	}
 	covCancelAndWait(t, s, cancel)
 	return s, dbPath
@@ -204,14 +207,16 @@ func TestCovReadOnlyDBWriteFailures(t *testing.T) {
 	s.handleRecordingDelete(rec, covReq(http.MethodDelete, "/x", nil), "sess-ro")
 	covWantCode(t, "recording delete write fail", rec, http.StatusInternalServerError)
 
-	// registerAgentConnection：新 agent 入注册表成功 → 持久化失败仅记日志
+	// registerAgentConnection：持久化失败必须回滚在线注册，避免未写入认证状态的 agent 活跃
 	agent, rejection, err := s.registerAgentConnection(nil, &protocol.RegisterPayload{
 		AgentID: "fresh-ro", Hostname: "fh",
 	})
-	if err != nil || rejection != nil || agent == nil {
+	if err != nil || rejection == nil || rejection.code != "registration_failed" || agent != nil {
 		t.Fatalf("register under ro db = %v, %v, %v", agent, rejection, err)
 	}
-	s.registry.Unregister("fresh-ro")
+	if _, exists := s.registry.Get("fresh-ro"); exists {
+		t.Fatal("agent remained registered after persistence failure")
+	}
 
 	// 循环内写失败分支（仅记日志）
 	s.recoverOrphanBackupRuns()  // UpdateBackupRun 失败 → continue

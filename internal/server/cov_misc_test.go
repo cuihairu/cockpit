@@ -102,17 +102,17 @@ func TestCovForgotPasswordBranches(t *testing.T) {
 	s.handleForgotPassword(rec, covReq(http.MethodPost, "/forgot", strings.NewReader(`{"username":"nobody"}`)))
 	covWantCode(t, "unknown user", rec, http.StatusOK)
 
-	// 用户存在但无邮箱 → 200 提示联系管理员
+	// 用户存在但无邮箱 → 与不存在账号相同的 200 提示
 	covSeedResetUser(t, s, "")
 	rec = covRec()
 	s.handleForgotPassword(rec, covReq(http.MethodPost, "/forgot", strings.NewReader(`{"username":"covreset"}`)))
 	covWantCode(t, "no email", rec, http.StatusOK)
-	if !strings.Contains(rec.Body.String(), "未绑定邮箱") {
-		t.Errorf("no-email body = %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "如果该用户存在") || strings.Contains(rec.Body.String(), "未绑定邮箱") {
+		t.Errorf("no-email response is not uniform: %s", rec.Body.String())
 	}
 }
 
-// 有邮箱用户：返回脱敏地址；邮件在 goroutine 内发送（未配置 SMTP → 立即失败，不连网）
+// 有邮箱用户：响应不含地址；邮件在 goroutine 内发送（未配置 SMTP → 立即失败，不连网）
 func TestCovForgotPasswordWithEmail(t *testing.T) {
 	s := covNewServer(t)
 	covSeedResetUser(t, s, "covreset@example.invalid")
@@ -120,8 +120,8 @@ func TestCovForgotPasswordWithEmail(t *testing.T) {
 	rec := covRec()
 	s.handleForgotPassword(rec, covReq(http.MethodPost, "/forgot", strings.NewReader(`{"username":"covreset"}`)))
 	covWantCode(t, "email sent response", rec, http.StatusOK)
-	if !strings.Contains(rec.Body.String(), `"masked_email"`) {
-		t.Errorf("body missing masked email: %s", rec.Body.String())
+	if strings.Contains(rec.Body.String(), `"masked_email"`) || strings.Contains(rec.Body.String(), "covreset@example.invalid") {
+		t.Errorf("response leaked the account email: %s", rec.Body.String())
 	}
 	// 等待异步发送 goroutine 结束（未配置 SMTP → 立即返回错误）
 	time.Sleep(50 * time.Millisecond)

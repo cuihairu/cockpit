@@ -12,8 +12,9 @@
 - **Implemented** (22bd7fd → 4a0660f, six commits): the whole "minimal closed loop" scope of this
   document landed — the `storage.Job` model + AutoMigrate; Job type `agent.exec` going through the
   agent-side `job.exec` RPC provider (command ≤16KB, timeout ≤300s default 60s, 64KB output truncation,
-  SIGKILL the process group on timeout); `GET|POST /api/jobs` + `GET /api/jobs/{id}` (synchronously
-  waiting for terminal-state write-back); a single terminal audit entry `job_run` (details containing
+  SIGKILL the process group on timeout); `GET|POST /api/jobs` + `GET /api/jobs/{id}` (background
+  dispatch after creation, immediate pending response, terminal state written back asynchronously);
+  a single terminal audit entry `job_run` (details containing
   type/target/status/params); the Jobs page (all-machine ledger 5s polling + create-and-run modal +
   terminal-state details); permission points `jobs:read`/`jobs:write` (PermGuard gates the create entry).
 - **Not implemented** (per this document's "Boundaries (explicitly not doing)" section, to be designed
@@ -133,11 +134,10 @@ target non-empty; exec requires a non-empty `parameters.command` ≤16KB; `timeo
 
 ## Boundaries (Explicitly Not Doing)
 
-- **No asynchronous execution** (**redeemed by P2, see the "Landed by P2" note at the top**): create
-  waits synchronously for the terminal state. Async-ification (queueing/cancellation/progress) is designed
-  together when Workflow starts as a project; at that point cancelled/timeout as separate states, the
-  `GET /jobs?status=running` filter, and SSE push will have real consumers (landing criterion: the
-  `cancelled` terminal state + ledger filtering are implemented; SSE remains decided not to do);
+- **Asynchronous dispatch landed in P2; it is not a current non-goal**: `POST /api/jobs`
+  persists `pending`, starts background dispatch, and immediately returns 201. Pending/running
+  cancellation and ledger filtering are implemented. **SSE push remains out of scope**; timeout
+  still ends as `failed` rather than a separate terminal state.
 - **No Workflow/Action**: Workflow is "orchestration of a group of Jobs" (dependencies/parallelism/
   retries), Action is "an idempotent operation with semantics"; both sit on top of Job, and this phase
   has only Job itself;

@@ -46,7 +46,7 @@ docker run -d \
 
 ## 配置
 
-### 环境变量
+### guacd 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
@@ -55,15 +55,25 @@ docker run -d \
 | `GUACD_PORT` | 端口（compose 文件用） | `4822` |
 | `TZ` | 时区 | `Asia/Shanghai` |
 
+### Cockpit Server 中继环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `GUAC_RELAY_BIND_ADDR` | Server 中继监听的具体本地 IP；留空时自动使用 Server 连接 guacd 的路由接口 | 自动 |
+| `GUAC_RELAY_HOST` | 写入 Guacamole connect 指令、供 guacd 回拨的 Server 主机名/IP；留空时使用绑定 IP | 自动 |
+
 ### Cockpit Server 端
 
 Cockpit Server 通过 `GUACD_ADDR` 环境变量连接 guacd：
 
 ```bash
-# 默认值（同机部署）
+# 同一 Docker 网络：使用服务 DNS 名（推荐）
+GUACD_ADDR=guacd:4822
+
+# 非容器、同机部署
 GUACD_ADDR=127.0.0.1:4822
 
-# 跨机部署时指向 guacd 主机内网地址
+# 跨机部署时指向 guacd 主机内网地址；Server 必须可被 guacd 回连
 GUACD_ADDR=192.168.5.10:4822
 ```
 
@@ -119,22 +129,19 @@ docker compose pull
 docker compose up -d
 ```
 
-## 跨机部署
+## 分离网络 / 跨机部署
 
-当 guacd 与 Cockpit Server 不在同一台机器时：
+首选将 Cockpit Server 与 guacd 放在同一个受限 Docker 网络，设置
+`GUACD_ADDR=guacd:4822`。Server 会用连接 guacd 的 TCP 路由接口 IP 创建
+**绑定到具体接口**的临时中继，并把该 IP/端口交给 guacd；中继不是 loopback
+服务，也不会绑定 `0.0.0.0`。
 
-1. 修改 compose 文件绑定内网地址：
-   ```yaml
-   ports:
-     - "192.168.5.10:4822:4822"
-   ```
-
-2. Cockpit Server 设置环境变量：
-   ```bash
-   GUACD_ADDR=192.168.5.10:4822
-   ```
-
-3. 确保防火墙放行 4822 端口（仅内网，不暴露公网）。
+若 guacd 位于另一主机或两者不共享可路由网络，除 Server 可访问 guacd 的
+`GUACD_ADDR` 外，还必须设置 Server 侧 `GUAC_RELAY_BIND_ADDR` 为 Server 上
+可被 guacd 回连的具体本地 IP，并设置 `GUAC_RELAY_HOST` 为 guacd 可解析、可达
+的 Server 地址。防火墙须仅允许 guacd 到该 Server 地址的中继端口范围；不要将
+中继端口暴露到公网。中继使用系统临时端口，需结合主机/容器网络 ACL 收口。
+仅映射 guacd 的 4822 端口或仅设置 `GUACD_ADDR` 不会自动打通反向回连。
 
 ## 支持的协议
 

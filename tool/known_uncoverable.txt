@@ -52,8 +52,6 @@ internal/agent/rpc/service_windows_scm.go:20,20	2. serviceWindowsMgr 默认闭�
 
 scripts/acceptance/guac/probe/main.go:351,352	3. parseInstr len(Args)==0 防御（strings.Split 非空串恒 ≥1 段，不可达）
 internal/server/api_guacamole.go:249,250	3. collectGuacRecording 稳定后复 Stat 失败防御（loop break 与复 Stat 之间无代码；仅外部并发 unlink 的微秒窗口可触发，单测不可确定性构造；复 Stat 取 info.Size() 供元数据，非冗余可删）
-internal/server/guac_relay.go:66,67	3. net.Listen 回环临时端口失败防御（127.0.0.1:0 由内核分配端口，仅 fd 耗尽才失败，进程内单测不可构造）
-internal/server/api_guacamole.go:377,390	3. startGuacRelay listen 失败分支（同 guac_relay.go:66,67 根因，中继起不来即 listen 失败）
 internal/server/api_guacamole.go:515,521	3. relayAddr SplitHostPort 失败防御（恒为 listener.Addr().String() 的 host:port 形态，不可达）
 scripts/acceptance/agent-backup/probe/main.go:426,427	3. buildTree 回调 filepath.Rel 死防御（p 恒由同一 root 的 filepath.Walk 派生，POSIX 同根不可失败）
 scripts/acceptance/agent-backup/probe/main.go:553,554	3. writeEvilTar WriteHeader 失败分支（tar.Writer→gzip→os.File 纯本地写链，仅磁盘满/fd 级故障可触发，无注入点）
@@ -160,4 +158,4 @@ internal/server/api_stacks.go:242,243	3. CallAgent 传输层错误含 conflict�
 # 2026-10-13 撤销登记——agent 模块独立 100% 门禁不接受登记）
 
 # —— 2026-10-13 persona provider 接入（vault.providers 配置节） ——
-internal/config/config.go:302,303	1. strictVaultProviders 将已解析 yaml.Node 重新编码喂 KnownFields 解码器，节点来自合法 yaml 文档，Encode 不可能失败，防御分支
+internal/config/config.go:312,313	1. strictVaultProviders 将已解析 yaml.Node 重新编码喂 KnownFields 解码器，节点来自合法 yaml 文档，Encode 不可能失败，防御分支

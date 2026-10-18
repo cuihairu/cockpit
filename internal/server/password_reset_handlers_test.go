@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/cuihairu/cockpit/internal/auth"
@@ -77,6 +78,39 @@ func TestHandleForgotPasswordWithEmail(t *testing.T) {
 	s.handleForgotPassword(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestHandleForgotPasswordResponsesDoNotEnumerateUsersOrEmails(t *testing.T) {
+	auth.SetEmailConfig(nil)
+	s := newTestServerWithDB(t)
+	if err := s.db.CreateUser(&storage.User{Username: "bound", Email: "private@example.test", Role: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.CreateUser(&storage.User{Username: "unbound", Role: "user"}); err != nil {
+		t.Fatal(err)
+	}
+
+	responseFor := func(username string) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{"username": username})
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+		s.handleForgotPassword(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status for %q = %d, want 200", username, rec.Code)
+		}
+		return strings.TrimSpace(rec.Body.String())
+	}
+
+	unknown := responseFor("not-present")
+	unbound := responseFor("unbound")
+	bound := responseFor("bound")
+	if unknown != unbound || unknown != bound {
+		t.Fatalf("forgot-password responses differ by account state:\nunknown=%s\nunbound=%s\nbound=%s", unknown, unbound, bound)
+	}
+	if strings.Contains(bound, "private@example.test") || strings.Contains(strings.ToLower(bound), "email") || strings.Contains(bound, "masked_email") {
+		t.Fatalf("forgot-password response contains account/email data: %s", bound)
 	}
 }
 

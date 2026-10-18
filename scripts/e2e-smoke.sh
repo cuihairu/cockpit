@@ -68,6 +68,9 @@ cat > "$WORK_DIR/cockpit.yaml" <<EOF
 server:
   host: ${SERVER_HOST}
   port: ${SERVER_PORT}
+  agent_registration:
+    # 2026-10-18 审核整改后默认 fail-closed：e2e 走 enrollment 准入
+    enrollment_secret: e2e-enroll-token
 database:
   path: ${WORK_DIR}/data/cockpit.db
 jwt:
@@ -172,7 +175,8 @@ done
 
 # ---- 启动 agent ----
 log "Starting agent..."
-"$WORK_DIR/bin/cockpit-agent" start -server "$WS_URL" >"$WORK_DIR/agent.log" 2>&1 &
+# agent 携带 enrollment secret 注册（2026-10-18 审核整改：未知 agent 默认拒绝）
+"$WORK_DIR/bin/cockpit-agent" start -server "$WS_URL" --secret e2e-enroll-token >"$WORK_DIR/agent.log" 2>&1 &
 AGENT_PID=$!
 
 # 等待 agent 注册（最多 15s），通过未授权访问 /api/agents 验证 401 而非 404

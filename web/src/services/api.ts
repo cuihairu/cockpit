@@ -279,8 +279,8 @@ class ApiService {
   // ========== TOTP 二次验证 ==========
 
   // 忘记密码 - 发送重置邮件
-  async forgotPassword(username: string): Promise<{ email: string; masked_email: string; message: string }> {
-    return this.client.post<unknown, { email: string; masked_email: string; message: string }>('/auth/forgot-password', { username })
+  async forgotPassword(username: string): Promise<{ message: string }> {
+    return this.client.post<unknown, { message: string }>('/auth/forgot-password', { username })
   }
 
   // 重置密码

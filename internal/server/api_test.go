@@ -50,6 +50,14 @@ func callWithAuth(s *Server, handler http.HandlerFunc, r *http.Request) *httptes
 
 // newTestServerWithDB creates a Server with a real in-memory SQLite DB
 func newTestServerWithDB(t *testing.T) *Server {
+	// 测试舰队默认显式 dev-mode 准入，等价整改前的自由注册；安全默认
+	// （fail-closed）由 websocket_registration_policy_test.go 用
+	// newTestServerWithRegistrationPolicy 覆盖。
+	return newTestServerWithRegistrationPolicy(t, covTestRegistrationPolicy)
+}
+
+// newTestServerWithRegistrationPolicy 以指定注册准入策略构造测试 Server。
+func newTestServerWithRegistrationPolicy(t *testing.T, policy *config.AgentRegistrationConfig) *Server {
 	t.Helper()
 
 	db, err := storage.Open(storage.Config{Path: ":memory:"})
@@ -67,6 +75,7 @@ func newTestServerWithDB(t *testing.T) *Server {
 		auth:           authService,
 		remoteSessions: NewRemoteSessionManager(),
 		audit:          audit.NewLogger(db),
+		cfg:            &config.Config{Server: &config.ServerConfig{AgentRegistration: policy}},
 	}
 }
 

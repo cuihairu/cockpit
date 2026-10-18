@@ -106,6 +106,11 @@ The default admin username is `admin` and can be changed via `ADMIN_USERNAME`.
 
 ## Start an Agent
 
+First configure `server.agent_registration.enrollment_secret` on the Server. New Agent
+registration is rejected by default, so installers, service registration, and manual starts
+must provide the same `-secret`; after enrollment it becomes that Agent's authentication key.
+For Docker deployments, use `AGENT_ENROLLMENT_SECRET` in `.env`.
+
 ### One-line install (recommended)
 
 One command per platform (anonymous direct download from the nightly release, with automatic OS and CPU architecture detection; after installing it automatically runs `cockpit-agent --version` to verify; re-running upgrades):
@@ -120,13 +125,13 @@ Windows graphical install (recommended, an Inno Setup installer): download
 `cockpit-agent-setup-nightly.exe` (a `.sha256` checksum file of the same name is provided alongside) from the
 [nightly release](https://github.com/cuihairu/cockpit/releases/latest) and double-click
 to run it: installs to `%ProgramFiles%\Cockpit Agent`, adds Start Menu + desktop shortcuts (with the agent
-icon), the install wizard asks for the Server WebSocket address, offers to "register as a Windows service and
+icon), the install wizard asks for the Server WebSocket address and Agent enrollment secret, offers to "register as a Windows service and
 start at boot" (auto-restart on crash at 5s/10s/20s), and adds a standard Add/Remove Programs entry. Silent
 install:
 
 ```powershell
-# silent install (service mode with auto-start; /SERVER is mandatory, otherwise service registration parameter validation fails)
-.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws
+# Silent install (also pass /SECRET in the default secure mode; it must match the Server enrollment_secret)
+.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws /SECRET=%AGENT_ENROLLMENT_SECRET%
 ```
 
 For headless Windows / fleet provisioning use the PowerShell script (PowerShell 5.1+ / pwsh):
@@ -140,12 +145,12 @@ together with `--with-service`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | \
-  bash -s -- --with-service --server wss://cockpit.cuihairu.site/ws
+  bash -s -- --with-service --server wss://cockpit.cuihairu.site/ws --secret "$AGENT_ENROLLMENT_SECRET"
 ```
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1))) `
-  -WithService -ServerUrl "wss://cockpit.cuihairu.site/ws"
+  -WithService -ServerUrl "wss://cockpit.cuihairu.site/ws" -Secret $env:AGENT_ENROLLMENT_SECRET
 ```
 
 Supported matrix: Linux amd64 / arm64 / armv7, macOS amd64 / arm64, Windows
@@ -158,11 +163,13 @@ OpenWrt routers need no manual compilation: the nightly release provides multi-a
 `.ipk` packages (install with opkg, supervised by procd, configured via UCI); the install steps are in
 [OpenWrt Agent packaging design](/guide/openwrt-agent-design.en#installation-and-upgrade).
 
-Other cases: download the `cockpit-agent` binary for your platform (or compile it locally)
-and run it on the managed node:
+Other cases: download the `cockpit-agent` binary for your platform (or compile it locally).
+The Server must configure `server.agent_registration.enrollment_secret`; use the same value
+for the first registration, then keep using it as that Agent's authentication secret. Inject
+it securely through an environment variable and run on the managed node:
 
 ```bash
-./cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+./cockpit-agent start -server wss://cockpit.cuihairu.site/ws -secret "$AGENT_ENROLLMENT_SECRET" -region home -zone datacenter
 ```
 
 The main binary also offers a compatible entry point with the same parameters as `cockpit-agent start`:
@@ -186,7 +193,7 @@ Common parameters:
 Key points:
 
 - `-server` must point at the Server's agent WebSocket entry, usually ending in `/ws`.
-- `-secret` is optional but recommended; once a secret is configured for that agent in the Server, subsequent registrations must provide it.
+- `-secret` is required in the default secure mode. The first-registration value must match the Server's enrollment secret; after registration, reconnects continue using this Agent secret. New Agents are rejected by default if the Server has no enrollment secret configured.
 - Without `-region` / `-zone`, the Agent tries to read `COCKPIT_REGION` / `COCKPIT_ZONE`, otherwise uses `unknown`.
 
 ### Windows service management

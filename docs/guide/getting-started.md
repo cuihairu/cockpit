@@ -106,6 +106,10 @@ $env:ADMIN_PASSWORD = 'change-this-password'
 
 ## 启动 Agent
 
+先在 Server 配置 `server.agent_registration.enrollment_secret`。Agent 首次注册
+默认被拒绝，安装器、服务注册和手动启动都必须传入相同的 `-secret`；注册后该值
+成为 Agent 的认证密钥。Docker 部署请使用 `.env` 中的 `AGENT_ENROLLMENT_SECRET`。
+
 ### 一键安装（推荐）
 
 三平台各一行命令（从每日构建 nightly release 匿名直链下载，自动检测
@@ -121,12 +125,12 @@ Windows 图形化安装（推荐，Inno Setup 安装器）：从
 [nightly release](https://github.com/cuihairu/cockpit/releases/latest) 下载
 `cockpit-agent-setup-nightly.exe`（同名 `.sha256` 校验文件一并提供），双击
 运行：装到 `%ProgramFiles%\Cockpit Agent`、开始菜单 + 桌面快捷方式（带 agent
-图标）、安装向导填写 Server WebSocket 地址、可勾选「注册 Windows 服务并开机
+图标）、安装向导填写 Server WebSocket 地址与 Agent enrollment secret、可勾选「注册 Windows 服务并开机
 自启」（崩溃自动重启 5s/10s/20s）、控制面板标准卸载条目。静默装机：
 
 ```powershell
-# 静默安装（服务化开机自启；/SERVER 必填，否则服务注册参数校验失败）
-.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws
+# 静默安装（安全默认下同时传 /SECRET；值与 Server enrollment_secret 一致）
+.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws /SECRET=%AGENT_ENROLLMENT_SECRET%
 ```
 
 Windows 无 GUI / 批量装机走 PowerShell 脚本（PowerShell 5.1+ / pwsh）：
@@ -140,12 +144,12 @@ irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1 | iex
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | \
-  bash -s -- --with-service --server wss://cockpit.cuihairu.site/ws
+  bash -s -- --with-service --server wss://cockpit.cuihairu.site/ws --secret "$AGENT_ENROLLMENT_SECRET"
 ```
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/cuihairu/cockpit/main/install.ps1))) `
-  -WithService -ServerUrl "wss://cockpit.cuihairu.site/ws"
+  -WithService -ServerUrl "wss://cockpit.cuihairu.site/ws" -Secret $env:AGENT_ENROLLMENT_SECRET
 ```
 
 支持矩阵：Linux amd64 / arm64 / armv7、macOS amd64 / arm64、Windows
@@ -158,11 +162,12 @@ OpenWrt 路由器无需手工编译：nightly release 提供多架构
 `.ipk` 安装包（opkg 即装、procd 托管、UCI 配置），安装步骤见
 [OpenWrt Agent 打包设计](/guide/openwrt-agent-design#安装与升级)。
 
-其余场景：下载对应平台 `cockpit-agent` 二进制（或本地编译），
-在被管理节点上运行：
+其余场景：下载对应平台 `cockpit-agent` 二进制（或本地编译）。Server 必须配置
+`server.agent_registration.enrollment_secret`；首次注册时使用相同的密钥，之后
+该密钥作为此 Agent 的认证密钥继续使用。将值安全注入环境变量后，在被管理节点上运行：
 
 ```bash
-./cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+./cockpit-agent start -server wss://cockpit.cuihairu.site/ws -secret "$AGENT_ENROLLMENT_SECRET" -region home -zone datacenter
 ```
 
 主二进制也提供兼容入口，参数与 `cockpit-agent start` 相同：
@@ -186,7 +191,7 @@ OpenWrt 路由器无需手工编译：nightly release 提供多架构
 要点：
 
 - `-server` 必须指向 Server 的 Agent WebSocket 入口，通常以 `/ws` 结尾。
-- `-secret` 可选但推荐；当 Server 中该 Agent 已配置 secret 后，后续注册必须提供。
+- `-secret` 在默认安全模式下必需，首次注册值须匹配 Server 的 enrollment secret；成功注册后，重连仍须提供该 Agent 的 secret。未配置该 Server 密钥时新 Agent 默认拒绝注册。
 - 未指定 `-region` / `-zone` 时，Agent 会尝试读取 `COCKPIT_REGION` / `COCKPIT_ZONE`，否则使用 `unknown`。
 
 ### Windows 服务管理

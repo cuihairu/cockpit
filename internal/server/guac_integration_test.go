@@ -7,9 +7,11 @@ import (
 	"net"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/gorilla/websocket"
 )
 
@@ -42,7 +44,7 @@ func findContainerRuntime(t *testing.T) string {
 }
 
 // startGuacdContainer 起 guacamole/guacd:1.5.5 容器，返回 127.0.0.1:<port>
-func startGuacdContainer(t *testing.T) string {
+func startGuacdContainer(t *testing.T) (addr, hostGateway, runtime, container string) {
 	t.Helper()
 	rt := findContainerRuntime(t)
 
@@ -68,13 +70,48 @@ func startGuacdContainer(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("start guacd container: %v\n%s", err, out)
 	}
+	hosts, err := exec.Command(rt, "exec", name, "cat", "/etc/hosts").CombinedOutput()
+	if err != nil {
+		t.Fatalf("read guacd host gateway mapping: %v\n%s", err, hosts)
+	}
+	for _, line := range strings.Split(string(hosts), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		hasHost := false
+		for _, host := range fields[1:] {
+			if host == "host.internal" {
+				hasHost = true
+				break
+			}
+		}
+		if !hasHost {
+			continue
+		}
+		ip := net.ParseIP(fields[0])
+		if ip == nil || ip.IsUnspecified() {
+			t.Fatalf("invalid host.internal mapping in guacd /etc/hosts: %q", line)
+		}
+		hostGateway = ip.String()
+		break
+	}
+	if hostGateway == "" {
+		t.Fatalf("host.internal mapping missing from guacd /etc/hosts:\n%s", hosts)
+	}
 	t.Cleanup(func() {
 		_ = exec.Command(rt, "rm", "-f", name).Run()
 	})
+	t.Cleanup(func() {
+		if t.Failed() {
+			logs, _ := exec.Command(rt, "logs", name).CombinedOutput()
+			t.Logf("guacd container logs:\n%s", logs)
+		}
+	})
 
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	addr = fmt.Sprintf("127.0.0.1:%d", port)
 	waitForTCP(t, addr, "guacd 4822")
-	return addr
+	return addr, hostGateway, rt, name
 }
 
 // waitForTCP 等 TCP 端口可连
@@ -95,28 +132,118 @@ func waitForTCP(t *testing.T, addr, desc string) {
 // fakeVNC 假 VNC server：RFB 握手（None auth）+ 一帧 framebuffer。
 // guacd 作为 VNC client 连它，验证协议会话建立。
 type fakeVNC struct {
-	ln    net.Listener
-	conns int32
+	ln        net.Listener
+	connected chan struct{}
 }
 
-func startFakeVNC(t *testing.T) string {
+func startFakeVNC(t *testing.T) (string, *fakeVNC) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeVNC{ln: ln}
+	f := &fakeVNC{ln: ln, connected: make(chan struct{}, 1)}
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
+			select {
+			case f.connected <- struct{}{}:
+			default:
+			}
 			go f.serve(c)
 		}
 	}()
 	t.Cleanup(func() { _ = ln.Close() })
-	return ln.Addr().String()
+	return ln.Addr().String(), f
+}
+
+// startFakeTCPAgent exercises the real relay message path while replacing only
+// the remote Agent process. It dials proxy_new targets and shuttles TCP bytes
+// through Server.handleProxyData/Close/Error.
+func startFakeTCPAgent(t *testing.T, s *Server, agentID string) {
+	t.Helper()
+	agent := NewAgent(agentID, nil)
+	if err := s.registry.Register(agent); err != nil {
+		t.Fatalf("register fake relay agent: %v", err)
+	}
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	var conns sync.Map // connID -> net.Conn
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			case msg, ok := <-agent.Send:
+				if !ok {
+					return
+				}
+				switch msg.Type {
+				case protocol.MessageTypeProxyNew:
+					p, err := protocol.DecodeProxyNew(msg)
+					if err != nil {
+						continue
+					}
+					conn, err := net.DialTimeout("tcp", p.Target, 3*time.Second)
+					if err != nil {
+						s.handleProxyError(agent, protocol.NewMessage(protocol.MessageTypeProxyError, map[string]interface{}{
+							"proxyId": p.ProxyID, "connId": p.ConnID, "error": err.Error(),
+						}))
+						continue
+					}
+					conns.Store(p.ConnID, conn)
+					wg.Add(1)
+					go func(proxyID, connID string, conn net.Conn) {
+						defer wg.Done()
+						defer conns.Delete(connID)
+						defer conn.Close()
+						buf := make([]byte, 32*1024)
+						for {
+							n, err := conn.Read(buf)
+							if n > 0 {
+								s.handleProxyData(agent, protocol.NewMessage(protocol.MessageTypeProxyData, map[string]interface{}{
+									"proxyId": proxyID, "connId": connID, "data": append([]byte(nil), buf[:n]...),
+								}))
+							}
+							if err != nil {
+								return
+							}
+						}
+					}(p.ProxyID, p.ConnID, conn)
+				case protocol.MessageTypeProxyData:
+					p, err := protocol.DecodeProxyData(msg)
+					if err != nil {
+						continue
+					}
+					if value, ok := conns.Load(p.ConnID); ok {
+						_, _ = value.(net.Conn).Write(p.Data)
+					}
+				case protocol.MessageTypeProxyClose:
+					p, err := protocol.DecodeProxyClose(msg)
+					if err != nil {
+						continue
+					}
+					if value, ok := conns.LoadAndDelete(p.ConnID); ok {
+						_ = value.(net.Conn).Close()
+					}
+				}
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		close(done)
+		s.registry.Unregister(agentID)
+		conns.Range(func(_, value interface{}) bool {
+			_ = value.(net.Conn).Close()
+			return true
+		})
+		wg.Wait()
+	})
 }
 
 // serve RFB 3.8 握手：None 认证 → ServerInit → 一帧 framebuffer update
@@ -192,7 +319,7 @@ func TestGuacIntegrationGuacdContainer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("guacd integration: skip in -short (CI)")
 	}
-	addr := startGuacdContainer(t)
+	addr, _, _, _ := startGuacdContainer(t)
 	t.Setenv("GUACD_ADDR", addr)
 
 	s := covRemoteSetup(t)
@@ -214,23 +341,28 @@ func TestGuacIntegrationGuacdContainer(t *testing.T) {
 	covWaitHandlerExit(t, "guacd container session", tDone)
 }
 
-// TestGuacIntegrationVNC 完整链路：Go 网关 → guacd 容器 → 假 VNC（loopback）
+// TestGuacIntegrationVNC 完整链路：Go 网关 → guacd 容器 → 假 VNC（host-gateway）
 func TestGuacIntegrationVNC(t *testing.T) {
 	if testing.Short() {
 		t.Skip("guacd integration: skip in -short (CI)")
 	}
 	defer covClearSessions()
 
-	vncAddr := startFakeVNC(t)
+	vncAddr, fakeVNCServer := startFakeVNC(t)
 	_, portStr, _ := net.SplitHostPort(vncAddr)
-	host := "host.internal" // 容器内解析为宿主网关 IP（--add-host 注入）
 
-	guacdAddr := startGuacdContainer(t)
+	guacdAddr, hostGateway, _, _ := startGuacdContainer(t)
 	t.Setenv("GUACD_ADDR", guacdAddr)
+	// This host-process integration test uses Docker's host-gateway mapping.
+	// Bind the relay to that concrete host interface so guacd can call it back.
+	t.Setenv("GUAC_RELAY_BIND_ADDR", hostGateway)
+	t.Setenv("GUAC_RELAY_HOST", hostGateway)
+	t.Logf("using guacd host gateway %s for relay bind/advertise", hostGateway)
 
 	s := covRemoteSetup(t)
+	startFakeTCPAgent(t, s, "ag-vnc")
 	ticket := covTicket(t, s, map[string]string{
-		"agent_id": "ag-vnc", "host": host, "port": portStr, "protocol": "vnc",
+		"agent_id": "ag-vnc", "host": "127.0.0.1", "port": portStr, "protocol": "vnc",
 		"password": "vncpw",
 	})
 	conn, _, tDone := covDirectWSJoined(t, s.handleGuacamoleWebSocket, "/api/remote/guacamole", ticket)
@@ -243,6 +375,11 @@ func TestGuacIntegrationVNC(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(uuidFrame), "0.,") {
 		t.Errorf("tunnel uuid frame should be INTERNAL_DATA, got %q", uuidFrame)
+	}
+	select {
+	case <-fakeVNCServer.connected:
+	case <-time.After(guacIntegrationWait):
+		t.Fatal("guacd did not connect back through the Server relay to the fake VNC target")
 	}
 
 	// guacd 连上假 VNC 并建立 RFB 会话后，会推指令流（sync/loop 等）。

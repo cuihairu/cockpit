@@ -99,7 +99,7 @@ Server 的 `inventory.watch: true` 会监听单个 inventory 文件并热加载�
 
 ### HTTP API 与 Web UI
 
-Web UI 默认请求 `/api`。公开接口包括登录、Token 刷新、TOTP 验证、密码重置和 `/health`。其他 `/api/` 资源接口通过 JWT 中间件保护。
+Web UI 默认请求 `/api`。登录、Token 刷新、TOTP 验证、密码重置和 `/health` 是公开接口；`POST /api/stacks/webhook` 不走 JWT，而以 `X-Cockpit-Token` 验证。其他 `/api/` 资源接口通过 JWT 中间件保护。
 
 主要 API 面：
 
@@ -122,7 +122,7 @@ Web UI 默认请求 `/api`。公开接口包括登录、Token 刷新、TOTP 验�
 
 1. 浏览器先携带 JWT 请求 `POST /api/remote/tickets`。
 2. Server 生成 5 分钟有效、单次使用 ticket。
-3. 浏览器连接 `/api/remote/terminal` 或 `/api/remote/guacamole`，把 ticket 放在 `Sec-WebSocket-Protocol`。
+3. 浏览器建立 WebSocket：terminal 把 ticket 放在 `Sec-WebSocket-Protocol`；Guacamole 优先放在 URL 的 `?ticket=`，缺少 query 时兼容从 `Sec-WebSocket-Protocol` 读取。
 4. Server 校验 ticket 后，把连接请求转成 `proxy_*` 消息发给对应 Agent（终端直连目标；桌面经 `guac:` 中继到 guacd）。
 5. Agent 连接目标服务并把数据通过 Server 转发回浏览器。
 
@@ -158,7 +158,7 @@ Server 与 Agent 的消息统一为：
 - 生产环境应设置 `PRODUCTION=true` 和强随机 `TOTP_ENCRYPTION_KEY`。
 - `ALLOWED_ORIGINS` 控制 WebSocket Origin；未设置时会接受所有来源，仅适合开发环境。
 - Web UI 静态目录由 `STATIC_DIR` 或 `server.static_dir` 指定；未设置时根路径只返回 API 运行提示。
-- Agent secret 是可选但推荐的 Agent 认证边界；已配置 secret 的 Agent 重连必须提供匹配密钥。
+- Agent secret 是 Agent 认证边界。2026-10-18 起注册默认 fail-closed：未知 Agent 仅在携带 `server.agent_registration.enrollment_secret`（或开发环境显式 `allow_unknown`）时可注册，注册成功后其携带的 secret 即固化为该 Agent 的认证密钥；无 secret 的存量 Agent 重连默认拒绝，需显式 `allow_secretless`。已配置 secret 的 Agent 重连必须提供匹配密钥。
 - 远程连接 ticket 是内存态、5 分钟有效、单次使用；Server 重启后失效。
 
 ## 当前实现边界

@@ -12,9 +12,24 @@ import (
 
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
+	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/notification"
 	"github.com/cuihairu/cockpit/internal/protocol"
 )
+
+// covTestRegistrationPolicy 测试队列的显式 dev-mode 注册准入：等价整改前
+// 的自由注册（未知 agent 与无 secret 存量 agent 均放行）。fail-closed 安全
+// 默认由 websocket_registration_policy_test.go 单独覆盖，勿在此放开。
+var covTestRegistrationPolicy = &config.AgentRegistrationConfig{
+	AllowUnknown:    true,
+	AllowSecretless: true,
+}
+
+func covTestConfig() *config.Config {
+	// Normalize 补齐 Database/JWT 等段：部分代码路径（如 recordingsDir）
+	// 只判 s.cfg 非 nil 而直接解引用子段，半截 cfg 会 nil panic。
+	return config.Normalize(&config.Config{Server: &config.ServerConfig{AgentRegistration: covTestRegistrationPolicy}})
+}
 
 // covNewServer 构造 db/audit/registry/ctx 齐全的测试 Server（cfg 为 nil，需要时自行注入）
 // covCancelAndWait 注册 t.Cleanup：先 cancel 再等后台任务全部退出。
@@ -41,6 +56,7 @@ func covNewServer(t *testing.T) *Server {
 		notifier:       notification.NewService(nil),
 		remoteSessions: NewRemoteSessionManager(),
 		ticketMgr:      NewTicketManager(),
+		cfg:            covTestConfig(),
 		ctx:            ctx,
 	}
 	covCancelAndWait(t, s, cancel)

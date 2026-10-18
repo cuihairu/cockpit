@@ -46,7 +46,7 @@ docker run -d \
 
 ## Configuration
 
-### Environment variables
+### guacd environment variables
 
 | Variable | Description | Default |
 |------|------|--------|
@@ -55,15 +55,25 @@ docker run -d \
 | `GUACD_PORT` | Port (used by the compose file) | `4822` |
 | `TZ` | Timezone | `Asia/Shanghai` |
 
+### Cockpit Server relay environment variables
+
+| Variable | Description | Default |
+|------|------|--------|
+| `GUAC_RELAY_BIND_ADDR` | Specific local IP for the Server relay; empty uses the route interface selected for the guacd connection | automatic |
+| `GUAC_RELAY_HOST` | Server hostname/IP advertised to guacd in the connect instruction; empty uses the bind IP | automatic |
+
 ### Cockpit Server side
 
 Cockpit Server connects to guacd via the `GUACD_ADDR` environment variable:
 
 ```bash
-# Default value (same-machine deployment)
+# Same Docker network: use the service DNS name (recommended)
+GUACD_ADDR=guacd:4822
+
+# Non-container, same-machine deployment
 GUACD_ADDR=127.0.0.1:4822
 
-# For cross-machine deployment, point at the guacd host's internal address
+# Cross-machine: point at guacd's internal address; guacd must be able to call back to Server
 GUACD_ADDR=192.168.5.10:4822
 ```
 
@@ -120,22 +130,20 @@ docker compose pull
 docker compose up -d
 ```
 
-## Cross-machine deployment
+## Separated networks / cross-machine deployment
 
-When guacd and Cockpit Server are not on the same machine:
+Prefer placing Cockpit Server and guacd on the same restricted Docker network and
+setting `GUACD_ADDR=guacd:4822`. Server creates a temporary relay bound to the
+specific local IP selected by its TCP route to guacd, then advertises that IP/port
+to guacd. The relay is not a loopback service and does not bind `0.0.0.0`.
 
-1. Modify the compose file to bind the internal address:
-   ```yaml
-   ports:
-     - "192.168.5.10:4822:4822"
-   ```
-
-2. Set the environment variable on Cockpit Server:
-   ```bash
-   GUACD_ADDR=192.168.5.10:4822
-   ```
-
-3. Make sure the firewall allows port 4822 (internal network only; do not expose it to the public internet).
+For another host or networks without a shared route, in addition to a reachable
+`GUACD_ADDR`, set Server-side `GUAC_RELAY_BIND_ADDR` to a concrete local Server IP
+that guacd can reach, and `GUAC_RELAY_HOST` to the Server address resolvable and
+reachable from guacd. Restrict the firewall to guacd and the relay port range; do
+not expose relay ports publicly. Relays use system ephemeral ports, so apply host
+or container network ACLs. Publishing guacd port 4822 or setting only `GUACD_ADDR`
+does not establish the reverse callback path.
 
 ## Supported protocols
 

@@ -4,6 +4,15 @@
 server:
   host: "0.0.0.0"  # 监听所有接口，支持局域网和 Cloudflare Tunnel 访问
   port: 9090
+  # agent 注册准入（2026-10-18 审核整改：默认 fail-closed）
+  # - 未知 agent 默认拒绝注册；放行须携带 enrollment_secret，或开发环境显式 allow_unknown
+  # - 无 secret 的存量 agent 重连默认拒绝；兼容旧部署可显式 allow_secretless
+  # - agent 侧用 cockpit-agent start --secret <enrollment_secret> 完成首次注册，
+  #   注册成功后该 secret 即固化为该 agent 的认证密钥（enrollment 口令轮换不影响已注册 agent）
+  agent_registration:
+    allow_unknown: false
+    allow_secretless: false
+    enrollment_secret: "${AGENT_ENROLLMENT_SECRET}"  # 生成：openssl rand -hex 24；未设置=拒绝新 agent
 
 # 数据库配置
 database:

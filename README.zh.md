@@ -34,6 +34,9 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 
 ### Linux
 
+Agent 注册默认 fail-closed。Server 端配置 `server.agent_registration.enrollment_secret`，
+新 Agent 启动时用 `-secret` 传入相同值（不要提交到代码仓库）。
+
 1. 下载并安装（自动检测架构，从每日构建匿名直链下载，装完自动验证）：
 
    ```bash
@@ -43,7 +46,7 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 2. 连接服务器（示例用本站域名，替换为你的 Cockpit 服务端地址）：
 
    ```bash
-   cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+    cockpit-agent start -server wss://cockpit.cuihairu.site/ws -secret "$AGENT_ENROLLMENT_SECRET" -region home -zone datacenter
    ```
 
 3. 验证安装：
@@ -71,7 +74,7 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 2. 连接服务器：
 
    ```bash
-   cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+    cockpit-agent start -server wss://cockpit.cuihairu.site/ws -secret "$AGENT_ENROLLMENT_SECRET" -region home -zone datacenter
    ```
 
 3. 验证安装：
@@ -91,11 +94,11 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 **图形化安装器（推荐）**：从 [nightly release](https://github.com/cuihairu/cockpit/releases/latest)
 下载 `cockpit-agent-setup-nightly.exe`（同名 `.sha256` 为校验文件），双击运行：
 装到 `%ProgramFiles%\Cockpit Agent`、开始菜单 + 桌面快捷方式（带 agent 图标）、
-向导内填写 Server 地址、可勾选「注册 Windows 服务并开机自启」、控制面板标准
+向导内填写 Server 地址和 Agent enrollment secret、可勾选「注册 Windows 服务并开机自启」、控制面板标准
 卸载条目。静默装机：
 
 ```powershell
-.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws
+.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws /SECRET=%AGENT_ENROLLMENT_SECRET%
 ```
 
 服务管理：`cockpit-agent service install|uninstall|start|stop|status`（服务名
@@ -112,7 +115,7 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 2. 连接服务器（新开一个终端使 PATH 生效）：
 
    ```powershell
-   cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+    cockpit-agent start -server wss://cockpit.cuihairu.site/ws -secret $env:AGENT_ENROLLMENT_SECRET -region home -zone datacenter
    ```
 
 3. 验证安装：

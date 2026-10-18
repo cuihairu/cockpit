@@ -160,6 +160,9 @@ if [ ! -f /etc/cockpit/config.yaml ]; then
 server:
   host: 127.0.0.1
   port: 9000
+  agent_registration:
+    # Local development only: allow unsigned throwaway agents.
+    allow_unknown: true
   static_dir: /opt/cockpit/web
 
 database:

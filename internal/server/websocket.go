@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/storage"
 	"github.com/gorilla/websocket"
@@ -17,6 +19,19 @@ import (
 type registrationRejection struct {
 	code    string
 	message string
+}
+
+// hashAgentSecretForRegistration 注册时落库密钥的哈希注入点（测试可换实现
+// 覆盖哈希失败分支；bcrypt 对合法输入不失败，错误分支仅供测试覆盖）。
+var hashAgentSecretForRegistration = storage.HashAgentSecret
+
+// agentRegistrationPolicy nil 安全的准入策略读取：测试直构 Server 无 cfg、
+// 历史配置文件无该段时按零值处理（默认拒绝，见 2026-10-18 审核表一#1）。
+func (s *Server) agentRegistrationPolicy() config.AgentRegistrationConfig {
+	if s.cfg == nil || s.cfg.Server == nil || s.cfg.Server.AgentRegistration == nil {
+		return config.AgentRegistrationConfig{}
+	}
+	return *s.cfg.Server.AgentRegistration
 }
 
 func getEnv(key, defaultValue string) string {
@@ -157,26 +172,61 @@ func (s *Server) registerAgentConnection(conn *websocket.Conn, reg *protocol.Reg
 		}, nil
 	}
 
-	if err := s.persistRegisteredAgent(agent, existingAgent); err != nil {
+	// 新注册且携带 secret 的 agent：落库其哈希（enrollment 或 dev 模式
+	// 自带密钥均适用；存量记录由 persistRegisteredAgent 保留原哈希）。
+	enrollSecret := ""
+	if existingAgent == nil && reg.Secret != "" {
+		enrollSecret = reg.Secret
+	}
+	if err := s.persistRegisteredAgent(agent, existingAgent, enrollSecret); err != nil {
 		log.Printf("Failed to persist agent to database: %v", err)
+		s.registry.Unregister(agent.ID)
+		return nil, &registrationRejection{
+			code:    "registration_failed",
+			message: "Agent registration could not be persisted",
+		}, nil
 	}
 
 	return agent, nil, nil
 }
 
 func (s *Server) authenticateAgentRegistration(reg *protocol.RegisterPayload) (*storage.Agent, *registrationRejection, error) {
+	policy := s.agentRegistrationPolicy()
+
 	existingAgent, err := s.db.GetAgent(reg.AgentID)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			return nil, nil, nil
+			// 2026-10-18 审核表一#1：未知 agent 默认拒绝。放行仅两条
+			// 显式路径——allow_unknown（开发环境）或携带 enrollment_secret
+			// 的首次注册（常量时间比较，防时序侧信道）。
+			if policy.AllowUnknown {
+				return nil, nil, nil
+			}
+			if policy.EnrollmentSecret != "" &&
+				subtle.ConstantTimeCompare([]byte(reg.Secret), []byte(policy.EnrollmentSecret)) == 1 {
+				return nil, nil, nil
+			}
+			return nil, &registrationRejection{
+				code: "registration_forbidden",
+				message: "Unknown agent: configure server.agent_registration.enrollment_secret " +
+					"or allow_unknown (dev only) to permit registration",
+			}, nil
 		}
 		return nil, nil, fmt.Errorf("load existing agent %s: %w", reg.AgentID, err)
 	}
 
 	if existingAgent.SecretHash == "" {
-		// 兼容历史数据：已有 Agent 但未配置密钥时仍允许注册。
-		log.Printf("Agent %s exists but has no secret configured", reg.AgentID)
-		return existingAgent, nil, nil
+		// 历史存量 agent 未配置密钥：默认拒绝（可被冒充的入口，表一#1），
+		// 兼容旧部署走显式 allow_secretless。
+		if policy.AllowSecretless {
+			log.Printf("Agent %s has no secret configured; reconnected under allow_secretless", reg.AgentID)
+			return existingAgent, nil, nil
+		}
+		return existingAgent, &registrationRejection{
+			code: "authentication_required",
+			message: "Agent has no secret configured; provision one via the agent secret API " +
+				"or enable allow_secretless explicitly",
+		}, nil
 	}
 
 	if reg.Secret == "" {
@@ -195,10 +245,19 @@ func (s *Server) authenticateAgentRegistration(reg *protocol.RegisterPayload) (*
 	return existingAgent, nil, nil
 }
 
-func (s *Server) persistRegisteredAgent(agent *Agent, existingAgent *storage.Agent) error {
+func (s *Server) persistRegisteredAgent(agent *Agent, existingAgent *storage.Agent, enrollSecret string) error {
 	storageAgent := toStorageAgent(agent)
-	if existingAgent != nil && existingAgent.SecretHash != "" {
+	switch {
+	case existingAgent != nil && existingAgent.SecretHash != "":
 		storageAgent.SecretHash = existingAgent.SecretHash
+	case enrollSecret != "":
+		// 新 agent 经 enrollment_secret 准入：把其哈希落库，重连走
+		// 既有 per-agent 校验（enrollment 口令轮换不影响已注册 agent）。
+		hash, err := hashAgentSecretForRegistration(enrollSecret)
+		if err != nil {
+			return fmt.Errorf("hash enrollment secret for agent %s: %w", agent.ID, err)
+		}
+		storageAgent.SecretHash = hash
 	}
 	return s.db.UpsertAgent(storageAgent)
 }

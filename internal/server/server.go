@@ -48,6 +48,7 @@ type Server struct {
 	notifier       *notification.Service
 	remoteSessions *RemoteSessionManager
 	ticketMgr      *TicketManager
+	loginLimiter   *loginAttemptLimiter
 	inventorySync  *inventorysync.Manager
 	probeRunner    *probe.Runner
 	dns            dns.Provider
@@ -170,6 +171,7 @@ func NewServer(cfg *config.Config) *Server {
 		notifier:       notifier,
 		remoteSessions: NewRemoteSessionManager(),
 		ticketMgr:      NewTicketManager(),
+		loginLimiter:   newLoginAttemptLimiter(),
 		cfg:            cfg,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:     isOriginAllowed,
@@ -577,9 +579,22 @@ func (s *Server) handleLoginWithAudit(w http.ResponseWriter, r *http.Request) {
 
 	// 创建一个 ResponseRecorder 来捕获响应状态码
 	recorder := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-
-	// 调用原始的登录处理函数
-	s.authService().HandleLogin(recorder, r)
+	limiter := s.getLoginLimiter()
+	ip := remoteAddrIP(r.RemoteAddr)
+	if retryAfter := limiter.blocked(ip, username, time.Now()); retryAfter > 0 {
+		recorder.Header().Set("Retry-After", strconv.Itoa(int((retryAfter+time.Second-1)/time.Second)))
+		recorder.Header().Set("Content-Type", "application/json")
+		recorder.WriteHeader(http.StatusTooManyRequests)
+		_, _ = recorder.Write([]byte(`{"error":"Too many login attempts; try again later"}`))
+	} else {
+		// 调用原始的登录处理函数
+		s.authService().HandleLogin(recorder, r)
+		if recorder.statusCode == http.StatusUnauthorized {
+			limiter.failed(ip, username, time.Now())
+		} else if recorder.statusCode == http.StatusOK {
+			limiter.succeeded(ip, username)
+		}
+	}
 
 	// 根据响应状态码记录审计日志
 	if username == "" {
@@ -593,6 +608,15 @@ func (s *Server) handleLoginWithAudit(w http.ResponseWriter, r *http.Request) {
 		s.getClientIP(r),
 		r.UserAgent(),
 	)
+}
+
+func (s *Server) getLoginLimiter() *loginAttemptLimiter {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loginLimiter == nil {
+		s.loginLimiter = newLoginAttemptLimiter()
+	}
+	return s.loginLimiter
 }
 
 // ========== 代理管理相关方法 ==========

@@ -29,11 +29,16 @@ services:
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
       BASE_URL: "${BASE_URL:-}"
       TZ: "${TZ:-Asia/Shanghai}"
+      AGENT_ENROLLMENT_SECRET: "${AGENT_ENROLLMENT_SECRET:-}"
       # 远程桌面/终端网关（guacd）地址：启用 guacd profile 时设为 guacd:4822
       # （同网络 DNS 名）；留空 = 不启用 Guacamole 远控入口
       # 见 docs/remote-desktop-guacamole-design.md 与
       # docs/remote-access-integration-design.md
       GUACD_ADDR: "${GUACD_ADDR:-}"
+      # 中继默认绑定到 Server→guacd 路由选择的具体本地 IP，不共享 loopback；
+      # 分离网络/NAT 时显式配置（不可使用 0.0.0.0），详见 docs/guacd-deploy.md
+      GUAC_RELAY_BIND_ADDR: "${GUAC_RELAY_BIND_ADDR:-}"
+      GUAC_RELAY_HOST: "${GUAC_RELAY_HOST:-}"
       # guacd 录制目录。必须与 guacd 容器里的挂载点**同一个卷同一个路径**：
       # guacd 按 connect 指令的 recording-path 往这儿写 <session>.guac，
       # Go 网关会话结束时从同一路径收走归档到 /data/recordings

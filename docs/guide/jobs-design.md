@@ -12,8 +12,8 @@
 - **已实现**（22bd7fd → 4a0660f 六笔）：本文「最小闭环」范围全链落地——
   `storage.Job` 模型 + AutoMigrate；Job 类型 `agent.exec` 走 agent 侧 `job.exec`
   RPC provider（命令 ≤16KB、超时 ≤300s 缺省 60s、输出 64KB 截断、超时按
-  进程组 SIGKILL）；`GET|POST /api/jobs` + `GET /api/jobs/{id}`（同步等待终态
-  回写）；终态单条审计 `job_run`（details 含 type/target/status/params）；
+  进程组 SIGKILL）；`GET|POST /api/jobs` + `GET /api/jobs/{id}`（创建后后台派发，
+  pending 即返回，终态异步回写）；终态单条审计 `job_run`（details 含 type/target/status/params）；
   Jobs 页（全机台账 5s 轮询 + 创建即执行弹窗 + 终态详情）；权限点
   `jobs:read`/`jobs:write`（PermGuard 控制创建入口）。
 - **未实现**（按本文「边界（明确不做）」节，立项时再设计，不写进当前能力）：
@@ -126,10 +126,9 @@ target 非空；exec 需 `parameters.command` 非空且 ≤16KB；`timeout_s` 1-
 
 ## 边界（明确不做）
 
-- **不做异步执行**（**已由 P2 兑现，见顶部「已由 P2 落地」注记**）：创建即同步
-  等待终态。异步化（排队/取消/进度）等 Workflow 立项时一并设计，届时
-  cancelled/timeout 独立状态、`GET /jobs?status=running` 过滤、SSE 推送才有
-  真实的消费者（落地口径：`cancelled` 终态 + 台账过滤已实现；SSE 仍拍不做）；
+- **异步派发已由 P2 落地，不是当前“不做”项**：`POST /api/jobs` 持久化
+  `pending` 后启动后台派发并立即返回 201；pending/running 取消与台账过滤已实现。
+  **仍不做** SSE 实时推送；timeout 仍落为 `failed`，不设独立终态。
 - **不做 Workflow/Action**：Workflow 是「一组 Job 的编排」（依赖/并行/重试），
   Action 是「带语义的幂等操作」，都在 Job 之上，本期只有 Job 本体；
 - **不做定时触发**：Job 与 cron 是两个平面——cron 是 agent 侧调度面（crontab

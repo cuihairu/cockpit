@@ -8,6 +8,13 @@ import (
 	"github.com/cuihairu/cockpit/internal/storage"
 )
 
+const forgotPasswordPublicMessage = "如果该用户存在，重置邮件已发送"
+
+func writeForgotPasswordResponse(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(auth.ForgotPasswordResponse{Message: forgotPasswordPublicMessage})
+}
+
 // handleForgotPassword 处理忘记密码请求
 func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -29,27 +36,22 @@ func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	// 查找用户
 	user, err := s.db.GetUserByUsername(req.Username)
 	if err != nil {
-		// 为了安全，即使用户不存在也返回成功消息
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": "如果该用户存在，重置邮件已发送",
-		})
+		// 用户不存在与查询错误统一返回，不泄露账号是否存在。
+		writeForgotPasswordResponse(w)
 		return
 	}
 
 	// 检查用户是否有邮箱
 	if user.Email == "" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": "该账户未绑定邮箱，请联系管理员重置密码",
-		})
+		writeForgotPasswordResponse(w)
 		return
 	}
 
 	// 生成重置令牌和验证码
 	token, code, err := authGenerateResetToken(user.ID, user.Email)
 	if err != nil {
-		http.Error(w, `{"error":"Failed to generate reset token"}`, http.StatusInternalServerError)
+		// 令牌生成失败同样不创建可枚举的外部响应分支。
+		writeForgotPasswordResponse(w)
 		return
 	}
 
@@ -61,13 +63,8 @@ func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// 返回脱敏邮箱
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(auth.ForgotPasswordResponse{
-		Email:       user.Email,
-		MaskedEmail: auth.MaskEmail(user.Email),
-		Message:     "重置邮件已发送到您的邮箱",
-	})
+	// 响应不返回邮箱（即使脱敏后仍可用于账号枚举）。
+	writeForgotPasswordResponse(w)
 }
 
 // handleResetPassword 处理密码重置请求

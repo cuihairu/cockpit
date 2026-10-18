@@ -74,6 +74,10 @@ server:
   host: 0.0.0.0
   port: 9000
   static_dir: /var/lib/cockpit/web
+  agent_registration:
+    allow_unknown: false
+    allow_secretless: false
+    enrollment_secret: "${AGENT_ENROLLMENT_SECRET}"
 
 database:
   path: /var/lib/cockpit/cockpit.db
@@ -106,6 +110,7 @@ ADMIN_PASSWORD=change-this-password
 ADMIN_USERNAME=admin
 # PRODUCTION=true
 # TOTP_ENCRYPTION_KEY=replace-with-a-strong-random-key
+# AGENT_ENROLLMENT_SECRET=replace-with-a-random-enrollment-secret
 # ALLOWED_ORIGINS=https://cockpit.example.com
 EOF
     chmod 600 /etc/default/cockpit-server

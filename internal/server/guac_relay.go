@@ -5,6 +5,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -19,9 +21,9 @@ import (
 // HandleProxyNew），agent 从自己网络位拨 host:port。hostname 语义随之变为
 // 「agent 侧可达的地址」。
 //
-// 网络拓扑约束：中继绑 server 本机回环，guacd 必须与 server 同机（或共享
-// 回环可见性）——与录制目录同路径双挂（GUACD_RECORDING_PATH）是同一前提，
-// 见 deployments/guacd/README.md 的部署拓扑。
+// 中继默认绑定到 Server 连接 guacd 时实际使用的本地接口 IP，使独立容器/主机
+// 能沿该网络路径回拨；GUAC_RELAY_BIND_ADDR / GUAC_RELAY_HOST 可分别覆盖绑定
+// 地址和通告主机。绑定地址必须是具体本地 IP（不允许 0.0.0.0/::），缩小暴露面。
 
 // guacRelayPrefix Guacamole 转发会话的 proxyId 前缀。server 侧 proxy_data/
 // proxy_close/proxy_error 按前缀路由（同 logs:/terminal/vnc 惯例），不进
@@ -58,10 +60,54 @@ func guacRelayLookup(proxyID string) *guacRelay {
 	return guacRelayReg[proxyID]
 }
 
-// startGuacRelay 起中继 listener。返回 relay 与「guacd 应拨的地址」
-// （127.0.0.1:<ephemeral>，进 connect 指令的 hostname/port）。
+// startGuacRelay 起仅供同进程/loopback 测试使用的回环中继。
 func startGuacRelay(agentID, proxyID, target string, send func(string, *protocol.Message) error) (*guacRelay, string, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	return startGuacRelayAt(agentID, proxyID, target, send, "127.0.0.1", "127.0.0.1")
+}
+
+// startGuacRelayForGuacd binds to the interface selected by the established
+// Server→guacd TCP connection, which is reachable from guacd on a shared routed
+// network (including the Docker bridge used by the bundled compose deployment).
+func startGuacRelayForGuacd(agentID, proxyID, target string, send func(string, *protocol.Message) error, guacdLocalAddr net.Addr) (*guacRelay, string, error) {
+	bindHost, advertisedHost, err := relayAddressForGuacd(guacdLocalAddr)
+	if err != nil {
+		return nil, "", err
+	}
+	return startGuacRelayAt(agentID, proxyID, target, send, bindHost, advertisedHost)
+}
+
+func relayAddressForGuacd(localAddr net.Addr) (bindHost, advertisedHost string, err error) {
+	tcpAddr, ok := localAddr.(*net.TCPAddr)
+	if !ok || tcpAddr.IP == nil || tcpAddr.IP.IsUnspecified() {
+		return "", "", fmt.Errorf("guacd connection has no concrete local IP")
+	}
+	bindHost = tcpAddr.IP.String()
+	if configured := strings.TrimSpace(os.Getenv("GUAC_RELAY_BIND_ADDR")); configured != "" {
+		ip := net.ParseIP(configured)
+		if ip == nil || ip.IsUnspecified() {
+			return "", "", fmt.Errorf("GUAC_RELAY_BIND_ADDR must be a concrete local IP")
+		}
+		bindHost = ip.String()
+	}
+	advertisedHost = strings.TrimSpace(os.Getenv("GUAC_RELAY_HOST"))
+	if advertisedHost == "" {
+		advertisedHost = bindHost
+	}
+	if strings.ContainsAny(advertisedHost, " \t\r\n/,") {
+		return "", "", fmt.Errorf("GUAC_RELAY_HOST must be a hostname or IP")
+	}
+	return bindHost, advertisedHost, nil
+}
+
+func startGuacRelayAt(agentID, proxyID, target string, send func(string, *protocol.Message) error, bindHost, advertisedHost string) (*guacRelay, string, error) {
+	bindIP := net.ParseIP(bindHost)
+	if bindIP == nil || bindIP.IsUnspecified() {
+		return nil, "", fmt.Errorf("relay bind address must be a concrete local IP")
+	}
+	if strings.TrimSpace(advertisedHost) == "" || strings.ContainsAny(advertisedHost, " \t\r\n/,") {
+		return nil, "", fmt.Errorf("relay advertised host must be a hostname or IP")
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(bindIP.String(), "0"))
 	if err != nil {
 		return nil, "", fmt.Errorf("listen relay: %w", err)
 	}
@@ -77,7 +123,8 @@ func startGuacRelay(agentID, proxyID, target string, send func(string, *protocol
 	guacRelayReg[proxyID] = r
 	guacRelayRegMu.Unlock()
 	go r.acceptLoop()
-	return r, ln.Addr().String(), nil
+	port := ln.Addr().(*net.TCPAddr).Port
+	return r, net.JoinHostPort(advertisedHost, fmt.Sprint(port)), nil
 }
 
 // Close 幂等关闭：listener + 全部 guacd 侧连接（并逐一通知 agent 拆链）。
@@ -105,6 +152,7 @@ func (r *guacRelay) acceptLoop() {
 		if err != nil {
 			return // listener 已关（会话结束）
 		}
+		log.Printf("Guacamole relay accepted guacd connection for %s", r.proxyID)
 		go r.handleConn(conn)
 	}
 }

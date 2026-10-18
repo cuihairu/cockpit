@@ -5,6 +5,9 @@ export default defineConfig({
   description: '个人混合基础设施控制台',
   lang: 'zh-CN',
 
+  // 审核报告与整改回执是内部追溯材料，不作为公开文档站页面构建。
+  srcExclude: ['review/**'],
+
   // GitHub Pages 使用子路径部署
   base: '/cockpit/',
 

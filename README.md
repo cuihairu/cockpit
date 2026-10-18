@@ -34,6 +34,9 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 
 ### Linux
 
+Agent registration is fail-closed by default. Configure `server.agent_registration.enrollment_secret`
+on the Server, then pass the same value to each new Agent with `-secret` (keep it out of source control).
+
 1. Download and install (architecture auto-detected, fetched anonymously from daily builds, verified automatically after install):
 
    ```bash
@@ -43,7 +46,7 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 2. Connect to the server (the example uses this site's domain; replace it with your own Cockpit server address):
 
    ```bash
-   cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+    cockpit-agent start -server wss://cockpit.cuihairu.site/ws -secret "$AGENT_ENROLLMENT_SECRET" -region home -zone datacenter
    ```
 
 3. Verify the installation:
@@ -71,7 +74,7 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 2. Connect to the server:
 
    ```bash
-   cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+    cockpit-agent start -server wss://cockpit.cuihairu.site/ws -secret "$AGENT_ENROLLMENT_SECRET" -region home -zone datacenter
    ```
 
 3. Verify the installation:
@@ -89,10 +92,10 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 ### Windows
 
 **Graphical installer (recommended)**: download `cockpit-agent-setup-nightly.exe` from the [nightly release](https://github.com/cuihairu/cockpit/releases/latest) (the identically named `.sha256` file is for verification) and run it by double-click.
-It installs to `%ProgramFiles%\Cockpit Agent`, creates Start menu and desktop shortcuts (with the agent icon), asks for the Server address in the wizard, offers an optional "Register Windows service with auto-start on boot" checkbox, and registers a standard uninstall entry in Control Panel. For silent installation:
+It installs to `%ProgramFiles%\Cockpit Agent`, creates Start menu and desktop shortcuts (with the agent icon), asks for the Server address and Agent enrollment secret in the wizard, offers an optional "Register Windows service with auto-start on boot" checkbox, and registers a standard uninstall entry in Control Panel. For silent installation:
 
 ```powershell
-.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws
+ .\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws /SECRET=%AGENT_ENROLLMENT_SECRET%
 ```
 
 Service management: `cockpit-agent service install|uninstall|start|stop|status` (service name
@@ -109,7 +112,7 @@ Service management: `cockpit-agent service install|uninstall|start|stop|status` 
 2. Connect to the server (open a new terminal so the PATH takes effect):
 
    ```powershell
-   cockpit-agent start -server wss://cockpit.cuihairu.site/ws -region home -zone datacenter
+    cockpit-agent start -server wss://cockpit.cuihairu.site/ws -secret $env:AGENT_ENROLLMENT_SECRET -region home -zone datacenter
    ```
 
 3. Verify the installation:

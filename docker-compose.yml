@@ -20,11 +20,15 @@ services:
       PRODUCTION: "${PRODUCTION:-true}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
       TZ: "${TZ:-Asia/Shanghai}"
+      AGENT_ENROLLMENT_SECRET: "${AGENT_ENROLLMENT_SECRET:-}"
       # 远程桌面网关（guacd）启用时设为 guacd:4822（同网络 DNS 名）；
       # 留空 = 不启用 Guacamole 远程桌面（RDP/VNC/SSH 入口隐藏）
       # 见 docs/remote-desktop-guacamole-design.md（D1/D2）与
       # docs/remote-access-integration-design.md（D1）
       GUACD_ADDR: "${GUACD_ADDR:-}"
+      # 中继绑定连接 guacd 的路由本地 IP；分离网络/NAT 时可显式覆盖，禁止 0.0.0.0。
+      GUAC_RELAY_BIND_ADDR: "${GUAC_RELAY_BIND_ADDR:-}"
+      GUAC_RELAY_HOST: "${GUAC_RELAY_HOST:-}"
       # guacd 录制目录：须与 guacd 服务的挂载点同卷同路径——guacd 按 connect
       # 指令的 recording-path 写 <session>.guac，Go 网关会话结束时从同一路径
       # 收走归档到 /data/recordings（collectGuacRecording）

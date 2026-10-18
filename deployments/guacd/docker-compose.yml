@@ -16,7 +16,8 @@ services:
     ports:
       # Go 网关同机反代：绑回环，不对外暴露（guacd 不是 HTTP 服务，
       # 也不是浏览器可达的端点——浏览器走 /api/remote/guacamole WS）
-      # 跨机部署时改绑内网地址（如 "192.168.x.x:4822:4822"）并靠防火墙收口
+      # 这里只发布 Server→guacd 的 4822 连接入口。guacd 还要回连 Server 的
+      # relay；跨机时另设 Server 的 GUAC_RELAY_BIND_ADDR/HOST 并限制防火墙。
       - "${GUACD_BIND:-127.0.0.1}:${GUACD_PORT:-4822}:4822"
     volumes:
       # guacd session recording 落盘目录（connect 指令的 recording-path 指向这里，

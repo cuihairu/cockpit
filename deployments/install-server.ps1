@@ -69,6 +69,10 @@ server:
   host: 0.0.0.0
   port: 9000
   static_dir: "C:/ProgramData/Cockpit/web"
+  agent_registration:
+    allow_unknown: false
+    allow_secretless: false
+    enrollment_secret: "`${AGENT_ENROLLMENT_SECRET}"
 
 database:
   path: "C:/ProgramData/Cockpit/cockpit.db"

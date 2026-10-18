@@ -8,10 +8,10 @@ This document records the communication boundaries between the current Server, A
 
 | Surface | Initiator | Entry | Auth |
 | --- | --- | --- | --- |
-| Web UI HTTP API | Browser | `/api/*` | JWT Bearer; except public interfaces like login and password reset |
-| Agent control channel | Agent | `/ws` | First `register` message; optional Agent secret |
+| Web UI HTTP API | Browser | `/api/*` | JWT Bearer; login/password reset are public, Stacks webhook uses `X-Cockpit-Token` |
+| Agent control channel | Agent | `/ws` | First `register` message; unknown Agents need enrollment secret, reconnects need per-Agent secret |
 | Remote terminal | Browser | `/api/remote/terminal` | Short-lived ticket, passed via `Sec-WebSocket-Protocol` |
-| Guacamole desktop (RDP/VNC/SSH) | Browser | `/api/remote/guacamole` | Short-lived ticket, passed via `Sec-WebSocket-Protocol` |
+| Guacamole desktop (RDP/VNC/SSH) | Browser | `/api/remote/guacamole` | Short-lived ticket, passed via `?ticket=` (falls back to `Sec-WebSocket-Protocol`) |
 
 ## Agent WebSocket
 
@@ -45,7 +45,7 @@ Direction: Agent -> Server
   "type": "register",
   "payload": {
     "agentId": "agent-home-server01",
-    "secret": "optional-agent-secret",
+    "secret": "<enrollment-secret-or-agent-secret>",
     "location": {
       "region": "home",
       "zone": "datacenter"
@@ -67,6 +67,11 @@ Direction: Agent -> Server
   }
 }
 ```
+
+Registration is fail-closed by default: an unknown Agent's `secret` must match the
+Server's `server.agent_registration.enrollment_secret`. After registration, that value
+becomes the Agent's authentication secret and is required on reconnect. Anonymous
+registration is only available when `allow_unknown` is explicitly enabled for development.
 
 After the Server accepts, it returns the same message type:
 
@@ -171,7 +176,7 @@ The browser does not put the JWT directly into the remote WebSocket URL. The flo
 
 1. The browser calls `POST /api/remote/tickets` with the JWT.
 2. The Server generates a 5-minute, single-use ticket.
-3. The browser opens a WebSocket, putting the ticket as the first `Sec-WebSocket-Protocol` value.
+3. The browser opens a WebSocket: terminal sends the ticket as the first `Sec-WebSocket-Protocol` value; Guacamole prefers the `?ticket=` URL query and reads the subprotocol only when the query is absent.
 4. The Server validates and consumes the ticket, then starts forwarding.
 
 Creating a ticket:

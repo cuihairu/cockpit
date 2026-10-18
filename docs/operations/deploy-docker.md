@@ -94,6 +94,7 @@ docker compose exec cockpit-server cockpit version
 | `COCKPIT_IMAGE_TAG` | 镜像 tag，缺省 `latest` |
 | `COCKPIT_HTTP_PORT` | 宿主机端口，缺省 9000 |
 | `ADMIN_USERNAME` | 缺省 `admin` |
+| `AGENT_ENROLLMENT_SECRET` | 新 Agent 首次注册口令；建议 `openssl rand -hex 24` 生成，再在 Agent 启动命令加 `--secret`。留空时新 Agent 默认拒绝注册；不要提交 `.env` |
 | `PRODUCTION` | 缺省 `true`（放开 Host/Origin 校验等开发态便利） |
 | `BASE_URL` | 对外基址，邮件/通知里拼链接用 |
 | `ALLOWED_ORIGINS` | 对外域名，如 `https://cockpit.example.com`。未设置时 WS 接受所有 Origin（打 warning），**不会阻止启动但生产必设**；`.env.example` 自带 `http://localhost:9000` 可用默认值 |

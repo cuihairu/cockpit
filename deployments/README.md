@@ -7,7 +7,7 @@
 | 项目 | 默认值 |
 | --- | --- |
 | Server CLI | `cockpit server -config <config.yaml>` |
-| Agent CLI | `cockpit-agent start -server <ws-url>` |
+| Agent CLI | `cockpit-agent start -server <ws-url> -secret <agent-secret>` |
 | Server 端口 | `9000` |
 | Agent WebSocket | `ws://server:9000/ws` 或 `wss://server/ws` |
 | Server 配置 | `/etc/cockpit/config.yaml` 或 `C:\ProgramData\Cockpit\config.yaml` |
@@ -38,6 +38,10 @@ sudo vi /etc/cockpit/config.yaml
 sudo systemctl daemon-reload
 sudo systemctl enable --now cockpit
 ```
+
+Agent 注册默认 fail-closed。首次注册前，在 `/etc/default/cockpit-server` 设置
+`AGENT_ENROLLMENT_SECRET`（可用 `openssl rand -hex 24` 生成），并在 Agent 启动时
+传入相同的 `-secret`；注册后该值成为该 Agent 的认证密钥。不要把口令写进配置文件或提交仓库。
 
 常用命令：
 
@@ -77,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cuihairu/cockpit/main/install.sh | \
-  sudo bash -s -- --with-service --server wss://cockpit.cuihairu.site/ws
+  sudo bash -s -- --with-service --server wss://cockpit.cuihairu.site/ws --secret "$AGENT_ENROLLMENT_SECRET"
 ```
 
 脚本会创建 `/usr/local/bin/cockpit-agent`、`cockpit` 系统用户、`/etc/default/cockpit-agent` 与 `/etc/systemd/system/cockpit-agent.service`；重跑即升级（覆盖二进制并重启既有服务）。
@@ -97,7 +101,7 @@ SERVER_URL=wss://cockpit.cuihairu.site/ws
 REGION=home
 ZONE=datacenter
 AGENT_ID=server01
-SECRET=optional-agent-secret
+SECRET=<server-enrollment-secret>
 LABELS=env=prod
 ```
 
@@ -140,7 +144,7 @@ Stop-Service -Name CockpitServer
 
 ```powershell
 # 静默安装（服务化；/SERVER 必填）
-.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws
+.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws /SECRET=%AGENT_ENROLLMENT_SECRET%
 ```
 
 一键脚本安装（[install.ps1](../install.ps1)，装到当前用户目录并加入用户 PATH，无需管理员）：

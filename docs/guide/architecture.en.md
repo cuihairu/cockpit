@@ -99,7 +99,7 @@ Server `inventory.watch: true` watches a single inventory file and hot-reloads; 
 
 ### HTTP API and Web UI
 
-The Web UI requests `/api` by default. Public endpoints include login, token refresh, TOTP verification, password reset, and `/health`. Other `/api/` resource endpoints are protected by the JWT middleware.
+The Web UI requests `/api` by default. Login, token refresh, TOTP verification, password reset, and `/health` are public endpoints. `POST /api/stacks/webhook` is also outside JWT middleware and authenticates with `X-Cockpit-Token`; other `/api/` resource endpoints use JWT middleware.
 
 Main API surfaces:
 
@@ -122,7 +122,7 @@ Remote terminal and desktop connections (Guacamole tunnels) use short-lived tick
 
 1. The browser first carries its JWT in a `POST /api/remote/tickets` request.
 2. The Server generates a 5-minute-valid, single-use ticket.
-3. The browser connects to `/api/remote/terminal` or `/api/remote/guacamole`, placing the ticket in `Sec-WebSocket-Protocol`.
+3. The browser connects over WebSocket: terminal sends the ticket in `Sec-WebSocket-Protocol`; Guacamole prefers the `?ticket=` URL query and falls back to `Sec-WebSocket-Protocol` when the query is absent.
 4. After validating the ticket, the Server converts the connection request into a `proxy_*` message to the corresponding Agent (terminal connects directly to the target; desktop is relayed via `guac:` to guacd).
 5. The Agent connects to the target service and forwards data back to the browser through the Server.
 
@@ -158,7 +158,7 @@ Current message types:
 - Production should set `PRODUCTION=true` and a strong random `TOTP_ENCRYPTION_KEY`.
 - `ALLOWED_ORIGINS` controls the WebSocket Origin; when unset, all origins are accepted, suitable only for development.
 - The Web UI static directory is specified by `STATIC_DIR` or `server.static_dir`; when unset, the root path returns only an API runtime notice.
-- The Agent secret is an optional but recommended Agent authentication boundary; an Agent with a configured secret must supply the matching key on reconnect.
+- Since 2026-10-18, Agent registration is fail-closed by default: an unknown Agent must present `server.agent_registration.enrollment_secret` (or use explicit development-only `allow_unknown`); its presented secret is then stored as the per-Agent authentication key. Existing Agents without a secret are rejected by default and require explicit `allow_secretless`; Agents with a configured secret must present the matching key on reconnect.
 - Remote connection tickets are in-memory, 5-minute valid, single-use; they expire after a Server restart.
 
 ## Current Implementation Boundaries

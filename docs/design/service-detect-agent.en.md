@@ -19,7 +19,7 @@ title: Service-detect agent — healthprobe standalone probing surface (target f
 # /etc/cockpit-agent/probe.yaml (default path = platform Paths().ConfigDir/probe.yaml,
 # overridable with -config; this is the first consumer of the platform Paths contract)
 server: ws://127.0.0.1:9000/ws   # optional; omit for pure local mode
-secret: ""                        # optional, registration auth
+secret: ""                        # required when the Server has enrollment_secret; empty only for serverless/dev anonymous mode
 interval: 30s                     # global default interval
 timeout: 5s                       # global default timeout
 threshold: 3                      # global default consecutive failures before Faulty (debounce)

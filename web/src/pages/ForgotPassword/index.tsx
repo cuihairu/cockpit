@@ -12,16 +12,14 @@ const ForgotPassword = () => {
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [loading, setLoading] = useState(false)
   const [username, setUsername] = useState('')
-  const [maskedEmail, setMaskedEmail] = useState('')
   const [countdown, setCountdown] = useState(0)
   const [resendLoading, setResendLoading] = useState(false)
 
   const handleSubmitUsername = async (values: { username: string }) => {
     setLoading(true)
     try {
-      const response = await api.forgotPassword(values.username)
+      await api.forgotPassword(values.username)
       setUsername(values.username)
-      setMaskedEmail(response.masked_email)
       setStep(2)
       // 开始60秒倒计时
       startCountdown()
@@ -37,8 +35,7 @@ const ForgotPassword = () => {
     setResendLoading(true)
     try {
       const response = await api.forgotPassword(username)
-      setMaskedEmail(response.masked_email)
-      message.success('重置邮件已重新发送')
+      message.info(response.message)
       startCountdown()
     } catch {
       message.info('如果该用户存在，重置邮件已发送')
@@ -135,10 +132,7 @@ const ForgotPassword = () => {
               <Title level={4}>重置邮件已发送</Title>
 
               <Space direction="vertical" size="small" align="center">
-                <Text>我们已向以下邮箱发送了密码重置邮件：</Text>
-                <Text strong style={{ fontSize: 16 }}>
-                  {maskedEmail}
-                </Text>
+                <Text>如果该账户存在且已绑定邮箱，重置邮件将发送至绑定邮箱。</Text>
                 <Text type="secondary">
                   请查收邮件并点击重置链接，或输入邮件中的验证码
                 </Text>

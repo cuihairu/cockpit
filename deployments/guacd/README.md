@@ -21,9 +21,13 @@ docker compose up -d
 docker compose ps        # 应显示 healthy
 ```
 
-端口默认绑 `127.0.0.1:4822`——**只给本机 Go 网关反代**，不对外暴露。
+端口默认绑 `127.0.0.1:4822`——仅接受本机 Go 网关连接，不对外暴露。
 guacd 不是 HTTP 服务，浏览器永远走 Cockpit 的 `/api/remote/guacamole`
 WebSocket 端点（由 Go 网关反代到此端口）。
+
+推荐部署方式是 Cockpit Server 与 guacd 在同一个受限 Docker 网络，设置
+`GUACD_ADDR=guacd:4822`。Go 网关中继绑定到 Server→guacd 路由选中的具体本地 IP，
+供 guacd 回拨；不会绑定回环或 `0.0.0.0`。
 
 跨机部署（guacd 与 Cockpit server 不同机）：
 
@@ -33,13 +37,18 @@ GUACD_BIND=192.168.5.20    # guacd 主机内网地址
 GUACD_PORT=4822
 ```
 
-并靠防火墙收口——只允许 Cockpit server 的 IP 访问 4822。
+此外还须在 Cockpit Server 的环境中设置 `GUACD_ADDR=192.168.5.20:4822`，并设置
+`GUAC_RELAY_BIND_ADDR`（Server 上 guacd 可回连的具体本地 IP）与
+`GUAC_RELAY_HOST`（guacd 可达的 Server 地址）。防火墙需要限制 4822 的入站连接
+来源为 Server，并限制 guacd 到 Server 系统临时中继端口的回连；仅映射 4822
+不能打通该回连，也不要把中继端口暴露到公网。细节见
+[`docs/guacd-deploy.md`](../../docs/guacd-deploy.md#分离网络--跨机部署)。
 
 ## 配置项（.env）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `GUACD_BIND` | `127.0.0.1` | 端口绑定地址（同机反代用回环；跨机用内网地址） |
+| `GUACD_BIND` | `127.0.0.1` | 仅控制 guacd 4822 的绑定地址；不配置 Server 中继地址 |
 | `GUACD_PORT` | `4822` | 端口（guacd 默认 4822，Go 网关侧 `GUACD_ADDR` 要对应） |
 | `GUACD_LOG_LEVEL` | `info` | **别开 `debug`**——debug 会打印 `connect` 指令参数（含口令） |
 | `TZ` | `Asia/Shanghai` | 时区 |

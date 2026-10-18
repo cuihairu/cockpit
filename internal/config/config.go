@@ -157,9 +157,19 @@ type RemoteEgressPolicy struct {
 
 // ServerConfig 服务器配置
 type ServerConfig struct {
-	Host      string `yaml:"host"`
-	Port      int    `yaml:"port"`
-	StaticDir string `yaml:"static_dir"`
+	Host              string                   `yaml:"host"`
+	Port              int                      `yaml:"port"`
+	StaticDir         string                   `yaml:"static_dir"`
+	AgentRegistration *AgentRegistrationConfig `yaml:"agent_registration"`
+}
+
+// AgentRegistrationConfig agent 注册准入策略（2026-10-18 审核整改：默认
+// fail-closed。未知 agent 仅在携带 enrollment_secret 或显式 allow_unknown
+// 时可注册；无 secret 存量 agent 重连默认拒绝，需显式 allow_secretless）。
+type AgentRegistrationConfig struct {
+	AllowUnknown     bool   `yaml:"allow_unknown"`
+	AllowSecretless  bool   `yaml:"allow_secretless"`
+	EnrollmentSecret string `yaml:"enrollment_secret"`
 }
 
 // DatabaseConfig 数据库配置
@@ -361,6 +371,9 @@ func Normalize(cfg *Config) *Config {
 func applyDefaults(cfg *Config) {
 	if cfg.Server == nil {
 		cfg.Server = &ServerConfig{}
+	}
+	if cfg.Server.AgentRegistration == nil {
+		cfg.Server.AgentRegistration = &AgentRegistrationConfig{}
 	}
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = "127.0.0.1" // 默认仅监听本地，更安全

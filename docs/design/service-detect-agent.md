@@ -23,7 +23,7 @@ title: 服务检测 agent——healthprobe 独立探测面（目标格式+状态
 # /etc/cockpit-agent/probe.yaml（默认路径 = platform Paths().ConfigDir/probe.yaml，
 # -config 覆盖；这是 platform Paths 契约的第一个消费方）
 server: ws://127.0.0.1:9000/ws   # 可选；缺省纯本地模式
-secret: ""                        # 可选，注册认证
+secret: ""                        # Server 已配置 enrollment_secret 时必须填写同值；仅 serverless/dev 匿名场景可留空
 interval: 30s                     # 全局默认间隔
 timeout: 5s                       # 全局默认超时
 threshold: 3                      # 全局默认连续失败判故障（防抖）

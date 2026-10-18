@@ -56,7 +56,7 @@ func TestGuacamoleHandshakeWriteFailInjected(t *testing.T) {
 	c1, c2 := net.Pipe()
 	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
 	mock := &handshakeFailConn{
-		Conn:     c1,
+		Conn:     guacTestTCPAddrConn{Conn: c1},
 		respLeft: []byte("6.select,8.hostname,4.port;"),
 	}
 	old := dialGuacd

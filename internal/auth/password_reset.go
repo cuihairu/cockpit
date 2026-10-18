@@ -303,9 +303,7 @@ type ForgotPasswordRequest struct {
 
 // ForgotPasswordResponse 忘记密码响应
 type ForgotPasswordResponse struct {
-	Email       string `json:"email"`        // 脱敏邮箱
-	MaskedEmail string `json:"masked_email"` // 脱敏邮箱
-	Message     string `json:"message"`
+	Message string `json:"message"`
 }
 
 // ResetPasswordRequest 重置密码请求

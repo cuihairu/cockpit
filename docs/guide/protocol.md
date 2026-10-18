@@ -8,10 +8,10 @@
 
 | 通信面 | 发起方 | 入口 | 认证 |
 | --- | --- | --- | --- |
-| Web UI HTTP API | Browser | `/api/*` | JWT Bearer；登录和密码重置等公开接口除外 |
-| Agent 控制通道 | Agent | `/ws` | 首条 `register` 消息；可选 Agent secret |
+| Web UI HTTP API | Browser | `/api/*` | JWT Bearer；登录/密码重置为公开接口，Stacks webhook 使用 `X-Cockpit-Token` |
+| Agent 控制通道 | Agent | `/ws` | 首条 `register` 消息；未知 Agent 需 enrollment secret，重连需 per-Agent secret |
 | 远程终端 | Browser | `/api/remote/terminal` | 短期 ticket，经 `Sec-WebSocket-Protocol` 传递 |
-| Guacamole 桌面（RDP/VNC/SSH） | Browser | `/api/remote/guacamole` | 短期 ticket，经 `Sec-WebSocket-Protocol` 传递 |
+| Guacamole 桌面（RDP/VNC/SSH） | Browser | `/api/remote/guacamole` | 短期 ticket，经 `?ticket=` 传递（缺省时回退子协议） |
 
 ## Agent WebSocket
 
@@ -45,7 +45,7 @@ cockpit-agent start -server ws://server:9000/ws
   "type": "register",
   "payload": {
     "agentId": "agent-home-server01",
-    "secret": "optional-agent-secret",
+    "secret": "<enrollment-secret-or-agent-secret>",
     "location": {
       "region": "home",
       "zone": "datacenter"
@@ -67,6 +67,10 @@ cockpit-agent start -server ws://server:9000/ws
   }
 }
 ```
+
+默认 fail-closed：未知 Agent 的 `secret` 必须匹配 Server 配置的
+`server.agent_registration.enrollment_secret`；成功注册后该值成为此 Agent 的认证密钥，
+后续重连继续使用。匿名注册仅适用于显式开启 `allow_unknown` 的开发环境。
 
 Server 接受后返回同类型消息：
 
@@ -170,7 +174,7 @@ Browser 不直接把 JWT 放进远程 WebSocket URL。流程是：
 
 1. Browser 携带 JWT 调 `POST /api/remote/tickets`。
 2. Server 生成 5 分钟有效、单次使用 ticket。
-3. Browser 建立 WebSocket，把 ticket 作为 `Sec-WebSocket-Protocol` 的第一个值。
+3. Browser 建立 WebSocket：terminal 把 ticket 作为 `Sec-WebSocket-Protocol` 的第一个值；Guacamole 优先使用 URL `?ticket=`，未提供 query 时才从 `Sec-WebSocket-Protocol` 读取。
 4. Server 校验并消费 ticket，然后开始转发。
 
 创建 ticket：

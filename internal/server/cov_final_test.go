@@ -294,7 +294,7 @@ func TestCovFinalForgotResetTokenErr(t *testing.T) {
 	rec := covRec()
 	s.handleForgotPassword(rec, covReq(http.MethodPost, "/api/auth/forgot-password",
 		strings.NewReader(`{"username":"covfinal-forgot"}`)))
-	covWantCode(t, "forgot reset token err", rec, http.StatusInternalServerError)
+	covWantCode(t, "forgot reset token err is non-enumerating", rec, http.StatusOK)
 }
 
 // TestCovFinalAuditStatsErr 覆盖审计统计查询失败 → 500 分支

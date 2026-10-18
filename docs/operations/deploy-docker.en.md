@@ -91,6 +91,7 @@ The complete list is in `deployments/docker/.env.example`.
 | `COCKPIT_IMAGE_TAG` | image tag, defaults to `latest` |
 | `COCKPIT_HTTP_PORT` | host port, defaults to 9000 |
 | `ADMIN_USERNAME` | defaults to `admin` |
+| `AGENT_ENROLLMENT_SECRET` | first-registration credential for new Agents; generate with `openssl rand -hex 24` and pass it via the Agent's `--secret` flag. New Agents are rejected by default when empty; never commit `.env` |
 | `PRODUCTION` | defaults to `true` (turning it off relaxes the Host/Origin checks and other dev conveniences) |
 | `BASE_URL` | external base URL, used to build links in emails/notifications |
 | `ALLOWED_ORIGINS` | external domain, e.g. `https://cockpit.example.com`. When unset the WS accepts all Origins (with a warning) — **this does not block startup but must be set in production**; `.env.example` ships with `http://localhost:9000` as a usable default |
