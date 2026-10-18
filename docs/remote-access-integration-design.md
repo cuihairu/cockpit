@@ -20,7 +20,7 @@
 | VNC | GuacamoleModal | 同上（protocol=vnc） | guacd（libvncclient）+ guacamole-common-js | 已集成 |
 | SSH | TerminalModal（xterm.js） | `/api/remote/terminal` → agent | agent 内 `x/crypto/ssh`（Go 库，非远控专用栈） | 自行开发链路 |
 | Telnet | TerminalModal | 同上 | agent raw TCP | 维持 |
-| （兜底） | VNCModal（noVNC）/ DesktopModal（grdp） | agent 通道 | noVNC / grdp | 无引用，按 2026-09-24 拍板保留并存期 |
+| （兜底） | VNCModal（noVNC）/ DesktopModal（grdp） | agent 通道 | noVNC / grdp | 2026-09-24 拍板保留并存期；**组件已于 D-2026-10-07-1 删除**（现状表为历史快照） |
 
 缺口只有一项：**SSH 未走第三方远控栈**。VNC/RDP 的痛点论述（自行开发协议
 链路的维护成本、渲染/输入/剪贴板自担）见旧设计文档「痛点」章节，SSH

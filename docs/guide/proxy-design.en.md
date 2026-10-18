@@ -63,6 +63,8 @@ no need for an async task model.
 | `proxy.site.apply` | `{site}` | `{name, file}` | validate → `nginx -t` → write → reload (roll back on failure) |
 | `proxy.site.delete` | `{name}` | `{}` | delete the snippet file → reload; restore the file if reload fails |
 
+**Note**: the implemented wire method prefix is `nginx.*` / `traefik.*` (dispatched by engine, see the implementation-deviation notes in the M2 checklist below); the table above keeps the design-time naming.
+
 ### Site parameters and validation (same rules on both ends)
 
 | Field | Rule |
@@ -89,7 +91,7 @@ reload                        failure → roll back the old content (or delete t
 
 - `nginx -t`: `exec.CommandContext(ctx, "nginx", "-t")`, 10s timeout, with the full stderr truncated
   to 2KB and returned to the UI;
-- reload: `systemctl reload nginx` (5s timeout) failing → `nginx -s reload`; if both fail treat it
+- reload: `systemctl reload nginx` (10s timeout, shared with `nginx -t` via `nginxTestTimeout`) failing → `nginx -s reload`; if both fail treat it
   as a reload failure (roll back);
 - meta comment: single-line compressed JSON, `# cockpit:meta {...}`; contains no sensitive information (certificates are path references).
 

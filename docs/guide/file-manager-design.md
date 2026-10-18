@@ -62,7 +62,7 @@
 |------|------|------|-----------|
 | `file.list` | `{dir}` | `{entries: [{name, size, mode, mtime, isDir, isSymlink, target}]}` | 同步 |
 | `file.read` | `{path, offset, length}` | `{data(base64), size, eof}` | 同步分块 |
-| `file.write` | `{path, data(base64), truncate}` | `{size}`（写入后文件总大小） | 同步 |
+| `file.write` | `{path, data(base64), truncate, mode?}`（mode 可选，白名单 0600/0644，缺省 0644） | `{size}`（写入后文件总大小） | 同步 |
 | `file.mkdir` | `{path}` | `{}` | 同步 |
 | `file.delete` | `{path}` | `{}` | 同步 |
 | `file.rename` | `{path, name}` | `{}`（同目录内改名） | 同步 |

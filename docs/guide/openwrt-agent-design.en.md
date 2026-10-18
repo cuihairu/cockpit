@@ -102,7 +102,7 @@ nightly.yml gains a `build-openwrt` job (ubuntu-latest):
 
 1. Cross-compile the 5-architecture matrix (CGO_ENABLED=0, native Go toolchain)
 2. `scripts/package-ipk.sh` assembles the ipk and tar.gz
-3. upload-artifact (agent-openwrt-\<arch\>, including both formats)
+3. upload-artifact (cockpit-agent-openwrt-\<arch\>, including both formats)
 
 Available via manual trigger (workflow_dispatch already exists), not dependent on the nightly schedule.
 

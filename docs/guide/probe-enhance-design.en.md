@@ -260,7 +260,7 @@ orchestration declaration shouldn't overturn an operator's manual adjustment in 
 **Cross-check against the notification egress red lines** (the notification channel config is in the notification section of `config/cockpit.yaml`):
 `notification.enabled` defaults to false — not configured means zero egress; the channels (herald/ntfy/webhook/telegram)
 are built only from explicit yaml entries; the event whitelist `events` denies everything by default (`IsEventEnabled` returns false with no match);
-the list of enabled channels is made explicit through `GET /api/probe/notification/status` (without credentials).
+the list of enabled channels is made explicit through `GET /api/notification/status` (without credentials).
 
 ## References
 

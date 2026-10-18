@@ -153,10 +153,27 @@
       - [x] 表二#3 guacd 拓扑：`docs/guacd-deploy.md:49-75,127-142`、`docs/guacd-deploy.en.md:49-78,128-145`、`deployments/docker/docker-compose.yml:32-42`；双容器回拨验收通过。
       - [x] 表二#4 JWT 例外：`docs/guide/architecture.md:100-117` 及英文配对；说明 webhook 的 `X-Cockpit-Token` 例外，VitePress build 通过。
       - [x] 表三 5 项能力仅评估与 P0/P1/P2 建议：`docs/review/luna-review-2026-10-18-response.md:67-75`；无能力实现。
-- [ ] 文档时效性清理（2026-10-18 用户令：很多文档已过时）：
+- [x] 文档时效性清理（2026-10-18 用户令：很多文档已过时）：
       在本轮审核整改完成之后执行，避免与整改冲突。
-      1) 通读 README / docs，找出与当前代码不符的描述（能力、配置项、命令、路径、版本）
-      2) 以代码为准修正文档；**禁止为对齐文档去改业务代码**
-      3) 已废弃但仍留在文档里的功能，明确标注「已移除」或删除，不要留成"看起来还能用"
-      4) 命令行示例逐条跑一遍，跑不通的改掉或删掉
-      5) 构建通过后 commit+push，回报改动文件清单
+      完成证据（2026-10-19，30 个文件 / 15 组中英成对）：
+      - 数值/常量对齐代码：nginx reload 超时 5s→10s（`nginxTestTimeout`）、备份跟踪总时限
+        10 分钟→30 分钟（`backupTrackTimeout`）、web 端点数 173→196、launchd 行数
+        207→183、openwrt 工件名补 `cockpit-agent-` 前缀（对照 nightly.yml）。
+      - API 面补齐/纠错：通知状态真实路径 `/api/notification/status`（文档误写
+        `/api/probe/notification/status`）、备份表补 `GET /api/backups/runs`、
+        `file.write` 补可选 `mode`、`/api/probe/windows` 补可选 `agent_id`、
+        RPC 前缀注明实施为 `nginx.*`/`traefik.*`。
+      - 锚点/引用修正：`config/cockpit.yaml` 行号 85→94、`services/api.ts` 行号 124→138、
+        失效章节引用 E8→E7、persona 上游 `EXTERNAL_INTEGRATION.md` 标明不在本仓。
+      - 已废弃/已落地不留假象：guacamole 设计文档补「实现修正」注记（中继绑定路由本地 IP、
+        `connect` 走中继地址、`GUACD_ADDR`/`GUAC_RELAY_BIND_ADDR`/`GUAC_RELAY_HOST`）、
+        镜像名 `apache/guacamole`→`guacamole/guacd`、VNCModal/DesktopModal 标注已按
+        D-2026-10-07-1 删除、reference-projects 已落地借鉴项划掉并指向落地位置、
+        rbac-design 删重标题、acceptance-checklist W10/W10b/W10c 从「验收后回填约定」
+        误挂位移回 Workflow 小节。
+      - 命令示例实跑：`go build ./cmd/cockpit ./cmd/cockpit-agent` + `cockpit-agent version`、
+        `cockpit-agent start -h`、`cockpit version` 全通过（安装类脚本会装系统服务，未代跑，
+        其参数与配置路径已逐项对照脚本源码核对）。
+      - 门禁：`npx vitepress build` exit 0（113 页）；未改任何业务代码。
+      - 剩余已知：`docs/guide/审计-文档一致性.md`（2026-10-08 审计快照）保留为历史记录，
+        其「35 篇」统计已不成立，仅作历史参考。

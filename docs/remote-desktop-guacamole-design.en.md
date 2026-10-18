@@ -40,6 +40,9 @@ guacd speaks only the Guacamole protocol and listens on TCP `4822` by default. O
 
 So a WS gateway is needed: browser WS ↔ Go backend ↔ guacd TCP. This position is exactly where the Cockpit server already sits (the existing `/api/remote/terminal` and `/api/remote/guacamole` are both "browser WS ↔ server ↔ agent WS / guacd TCP" two-hop pipelines; the server is already the remote-access gateway).
 
+> **Implementation correction (2026-10-18)**: guacd does not dial the user's target directly. Per session, the server establishes egress forwarding through the agent and starts a relay listener bound to the local IP selected by the Server→guacd route; the hostname/port in the `connect` instruction is the **relay address**, and the real target is dialed by the agent from its own network position (`internal/server/guac_relay.go`, `api_guacamole.go`). The `GUACD_ADDR`, `GUAC_RELAY_BIND_ADDR`, `GUAC_RELAY_HOST` env vars are documented in [guacd-deploy](./guacd-deploy.md).
+> The skeleton code below (skeleton 2) is kept in its design-time form.
+
 The reasons to put it in Go rather than in guacamole-web are the same as D1: what the gateway does here is more than byte forwarding — there is also **session lifecycle, ticket validation, permission checks, audit persistence** — all capabilities Cockpit already has. guacamole-web's `GuacamoleWebSocketTunnelEndpoint` does the same thing, but with Java sessions + its permission tables, which lands back in two systems.
 
 The concrete shape of the reverse proxy: between the Go backend and guacd **use the native Guacamole TCP protocol** (not guacd's WebSocket mode), because guacd's protocol is already a "instruction stream + base64 chunk" text protocol and TCP forwarding is the most direct; the Go side does bidirectional piping between WS text frames ↔ guacd's TCP stream and **does not parse instruction content** (except that during the handshake the `select`/`size`/`audio`/`video` parameter instructions need to be constructed by Go). This way protocol evolution (new instructions in Guacamole 1.5.x) is aligned between guacamole-common-js and guacd themselves, and the Go gateway does not follow along.
@@ -63,7 +66,7 @@ The query-form ticket does not enter audit/logs (WS paths are skipped by `AuditM
 
 The 401 recursive-refresh chain copies the existing implementation, with precedents on both sides:
 
-- web's 401 interception at `services/api.ts:124` + `refreshToken()` (`/auth/refresh`), and mobile's `api/client.dart:83-91` explicitly documents the **recursive-refresh guard**: requests with `extra['skipRefresh'] == true` (i.e. the refresh request itself) that receive a 401 do not trigger another refresh and go straight to `onUnauthorized` — otherwise a failed refresh would recurse infinitely.
+- web's 401 interception at `services/api.ts:138` + `refreshToken()` (`/auth/refresh`; the interceptor now sits at line 138, refreshToken at 165), and mobile's `api/client.dart:83-91` explicitly documents the **recursive-refresh guard**: requests with `extra['skipRefresh'] == true` (i.e. the refresh request itself) that receive a 401 do not trigger another refresh and go straight to `onUnauthorized` — otherwise a failed refresh would recurse infinitely.
 - The Guacamole tunnel's ticket application goes through the same `remoteClient` (which already has the Bearer interceptor), with identical 401 behavior; the WS handshake itself carries no JWT (the ticket is the credential), so the WS path needs no refresh, and on reconnect `createRemoteTicket` naturally runs through the 401 refresh once.
 
 The point of this "reuse" is **not inventing a second auth-failure semantics**: the behavior after a user's token expires (silent refresh → on failure, log out back to the login page) is the same across ordinary APIs, terminal, desktop, and the Guacamole tunnel.
@@ -80,7 +83,7 @@ This is consistent with the existing discipline in `remote_audit.go`: audit deta
 
 ### D5 guacd deployed with docker-compose
 
-guacd is a standalone C daemon; the official image is `apache/guacamole` (includes guacd). Deploy with docker-compose rather than requiring guacd installed on the host, for these reasons:
+guacd is a standalone C daemon; the official image is `guacamole/guacd` (the guacd-only image). Deploy with docker-compose rather than requiring guacd installed on the host, for these reasons:
 
 - Consistent with Cockpit's stacks/Docker capability (users already have Docker hosts);
 - guacd depends on FreeRDP/VNC client libraries (libguac-client-rdp etc.); building from source has a long dependency chain, and the image already has them compiled;
@@ -178,7 +181,9 @@ type GuacamoleSession struct {
 func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 1. Ticket: Sec-WebSocket-Protocol[0] → ValidateTicket (one-time consumption)
 	// 2. Permissions: terminal:write + matchRemoteEgress(agentID, host, port)
-	// 3. Dial guacd TCP (127.0.0.1:4822, 10s timeout)
+	// 3. Dial guacd TCP (127.0.0.1:4822, 10s timeout) — implementation correction: see the D2 note
+	//    above; in reality the server builds agent egress plus an interface-bound relay, and
+	//    connect uses the relay address
 	// 4. Upgrade WS (Subprotocols echo back the ticketID)
 	// 5. Construct handshake instructions to send to guacd: size / audio / video / connect
 	//    connect parameters: protocol=rdp|vnc, hostname, port, username, password…

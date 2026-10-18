@@ -66,7 +66,7 @@ and downloads use streamed chunked pulls).
 |------|------|------|-----------|
 | `file.list` | `{dir}` | `{entries: [{name, size, mode, mtime, isDir, isSymlink, target}]}` | Sync |
 | `file.read` | `{path, offset, length}` | `{data(base64), size, eof}` | Sync chunked |
-| `file.write` | `{path, data(base64), truncate}` | `{size}` (total file size after write) | Sync |
+| `file.write` | `{path, data(base64), truncate, mode?}` (mode optional, whitelist 0600/0644, default 0644) | `{size}` (total file size after write) | Sync |
 | `file.mkdir` | `{path}` | `{}` | Sync |
 | `file.delete` | `{path}` | `{}` | Sync |
 | `file.rename` | `{path, name}` | `{}` (rename within the same directory) | Sync |

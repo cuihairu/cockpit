@@ -14,7 +14,7 @@
 |------|------|
 | 授权关系存储（谁能用哪台、什么权限） | **memex**（不进本仓，见 E7） |
 | 凭据保管（口令/私钥/TOTP） | **persona**（本仓 vault 经 `docs/guide/persona-vault-mapping.md` 只读消费） |
-| 凭据下发 | **不做**（凭据永不经过 memex，见 E2/E8） |
+| 凭据下发 | **不做**（凭据永不经过 memex，见 E2/E7） |
 | 会话发起、票据、出口策略、录制、审计 | **本仓**（全部复用既有链路，零新增基础设施） |
 
 ## 决策
@@ -48,7 +48,7 @@
   `internal/server/api_remote.go:654-660`）。
 - **无 `username`/`password`/`private_key`/`domain` 字段**——凭据由
   `credential_ref` 命名 vault 条目（local provider path 或 persona 条目
-  UUID），会话建立时由服务端注入（E8）。memex 全程接触不到凭据。
+  UUID），会话建立时由服务端注入（E7 边界）。memex 全程接触不到凭据。
 - `requested_by` 是 memex 侧终端用户标识，只进审计归属，不做鉴权主体
   （鉴权主体是 E3 的 caller token）。
 
@@ -90,7 +90,7 @@
 
 ### E3 调用方身份：命名服务 token
 
-`remote_control` 配置扩一节（`config/cockpit.yaml:85` 起；结构体
+`remote_control` 配置扩一节（`config/cockpit.yaml:94` 起；结构体
 `RemoteControlConfig`，`internal/config/config.go:140-156`）：
 
 ```yaml

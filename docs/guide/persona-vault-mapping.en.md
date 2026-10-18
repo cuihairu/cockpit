@@ -2,7 +2,7 @@
 
 > Language: [中文](./persona-vault-mapping.md) ｜ **English**
 
-> 2026-10-13. Basis document for the integration implementation (`internal/vault/persona.go`). All persona-side facts are taken from the upstream source code and `docs/EXTERNAL_INTEGRATION.md` (the 2026-10-12 empirically tested edition), each with file:line references; line numbers may drift as persona upstream evolves — where they differ, the cited semantics are authoritative.
+> 2026-10-13. Basis document for the integration implementation (`internal/vault/persona.go`). All persona-side facts are taken from the persona upstream repo's source code and its `docs/EXTERNAL_INTEGRATION.md` (the 2026-10-12 empirically tested edition; that document lives in the persona repo, **not in this repo**), each with file:line references; line numbers may drift as persona upstream evolves — where they differ, the cited semantics are authoritative.
 
 ## 1. persona-side interface shape (source of truth)
 

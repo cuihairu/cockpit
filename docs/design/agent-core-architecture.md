@@ -53,7 +53,7 @@ cmd/cockpit-agent → internal/agent(插件) → core/* → internal/protocol
 | 8  | 执行审计（execlog）      | **已有**     | `core/execlog`：环 + 攒批上行（`execRecorder` + 30s 攒批），router Handle 单点埋点；协议 `exec_log` 消息类型已注册（P5 落地）                     | `core/execlog`       |
 | 9  | 探活（system 角色）      | **已有（P6 落地）** | `core/healthprobe`：Checker（HTTP/TCP）+ Guard 三语义（Liveness/Readiness/Heartbeat）防抖状态机 + 故障窗口时间线；service_health 策略层已切换（heal→liveness、纯告警→readiness，事件走迁移边沿，窗口随状态上行）；Heartbeat 语义与「探针记录按受监控 system 建模」留待 system 角色批 | `core/healthprobe`   |
 | 10 | 崩溃采集                 | **留位**     | 仅包骨架+接口占位不实现（分级方案届时按调研另批，对标 croupier crash-capture-survey 节奏）                                       | `core/crash`         |
-| 11 | 进程监管/服务集成/路径    | **已有，平台分散** | Windows SCM（service_windows.go 401 行 + svcargs）、darwin launchd（207 行）、openwrt procd（ipk/init.d）、linux systemd（install.sh） | `core/platform/<goos>`（§3） |
+| 11 | 进程监管/服务集成/路径    | **已有，平台分散** | Windows SCM（service_windows.go 401 行 + svcargs）、darwin launchd（183 行）、openwrt procd（ipk/init.d）、linux systemd（install.sh） | `core/platform/<goos>`（§3） |
 
 > 上收边界（可裁的第一次应用）：`internal/agent/rpc/` 的 20+ Provider **全部留在插件面不进 core**——它们是 cockpit 的业务面；core 系未来任何小 agent 天然没有这些攻击面与体积。
 

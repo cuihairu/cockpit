@@ -136,8 +136,8 @@ type BackupRun struct {
   2. 调 `s.startBackupRun(config, "scheduled")`（与手动运行共用）；
 - `startBackupRun`：校验 agent 在线 + HasCapability("backup") → 下发 `backup.run` →
   创建 BackupRun{running} → 置 Config.LastStatus=running → 起 goroutine
-  `trackBackupTask`（复用 trackStackTask 模式：每 5s 轮询 `backup.task.get`，10 分钟无
-  终态判超时失败）→ 终态回填 BackupRun（file/size/error/finishedAt）+ Config.LastStatus/LastRunAt；
+  `trackBackupTask`（复用 trackStackTask 模式：每 5s 轮询 `backup.task.get`，30 分钟无
+  终态判超时失败，`backupTrackTimeout`）→ 终态回填 BackupRun（file/size/error/finishedAt）+ Config.LastStatus/LastRunAt；
 - 失败终态 → `s.notifier.SendNonBlocking(&notification.Notification{EventType:
   notification.EventBackupFailed, Level: "error", ResourceType: "backup", ...})`；
 - NextRunAt 计算：`daily@HH:mm` → 今天/明天该时刻（server 本地时区）；`every:Nh` →
@@ -153,6 +153,7 @@ type BackupRun struct {
 | PUT | `/api/backups/configs/{id}` | 更新；重算 NextRunAt |
 | DELETE | `/api/backups/configs/{id}` | 删除（级联删 runs） |
 | POST | `/api/backups/configs/{id}/run` | 手动运行（running 状态拒绝 409） |
+| GET | `/api/backups/runs` | 全部配置的运行历史（limit 默认 50，上限 200） |
 | GET | `/api/backups/configs/{id}/runs` | 该配置运行历史（limit 50） |
 | GET | `/api/backups/configs/{id}/files` | 列 agent 备份目录文件（转发 backup.list，dir 取自配置） |
 | POST | `/api/backups/configs/{id}/files/delete` | 删单个备份文件 `{name}`（校验文件名正则后转发 backup.delete） |

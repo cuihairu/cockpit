@@ -137,8 +137,6 @@ Implementation decisions added in commit 2:
 
 ## Things Not Being Done
 
-## Things Not Being Done
-
 - No casbin/ory-style permission framework — the dependency weight doesn't match this project's size
 - No row-level permissions (a certain agent visible only to a certain department) — current deployments
   are personal/small-team self-hosted; revisit row-level isolation when a real need appears

@@ -86,7 +86,7 @@ type Window struct {
    `{targets:[{name,state,since,last_checked,last_error}], windows:[近期窗口]}`——状态迁移即发
    + 每 10×interval 全量兜底；复用 core/report Enqueue 队列与 core/register/heartbeat 注册链。
 3. **server**：handler 收 probe_report 落库（快照表 + 窗口表），REST `GET /api/probe/targets`、
-   `GET /api/probe/windows?target=&limit=` 供面板回查；挂现有鉴权中间件。
+   `GET /api/probe/windows?target=&agent_id=&limit=`（target/agent_id 均可选）供面板回查；挂现有鉴权中间件。
 4. **herald 告警出口（留位不实现）**：`Alerter interface { Alert(ev Transition) }` + noop 默认
    实现——接口先行，推送通道等 herald 对接另批。
 

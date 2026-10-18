@@ -64,6 +64,8 @@
 | `proxy.site.apply` | `{site}` | `{name, file}` | 校验 → `nginx -t` → 写 → reload（失败回滚） |
 | `proxy.site.delete` | `{name}` | `{}` | 删片段文件 → reload；reload 失败恢复文件 |
 
+**注**：实施时 wire method 前缀为 `nginx.*` / `traefik.*`（按引擎分派，见下方 M2 清单的实施偏差记录），上表沿用设计期命名。
+
 ### 站点参数与校验（双端同规则）
 
 | 字段 | 规则 |
@@ -90,7 +92,7 @@ reload                        失败 → 回滚旧内容（或删除新文件）
 
 - `nginx -t`：`exec.CommandContext(ctx, "nginx", "-t")`，10s 超时，stderr 全文截断
   2KB 返回给 UI；
-- reload：`systemctl reload nginx`（5s 超时）失败 → `nginx -s reload`；两者皆失败按
+- reload：`systemctl reload nginx`（10s 超时，与 `nginx -t` 共用 `nginxTestTimeout`）失败 → `nginx -s reload`；两者皆失败按
   reload 失败处理（回滚）；
 - meta 注释：单行压缩 JSON，`# cockpit:meta {...}`；不含敏感信息（证书是路径引用）。
 

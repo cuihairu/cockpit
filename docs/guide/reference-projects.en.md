@@ -150,11 +150,13 @@ Teleport ([community comparison with Guacamole](https://www.reddit.com/r/selfhos
 - Can only probe from its own location, **no distributed agent probing**
 - No CMDB linkage; monitoring targets must be entered by hand
 
-**Worth borrowing** (against Cockpit's just-landed `internal/probe`)
+**Worth borrowing** (against Cockpit's `internal/probe`; "landed" items below were the original borrowing sources)
 
-- Configurable probing intervals (currently hardcoded at 5 minutes)
-- Notification channel integration: the alerting framework exists; add ntfy/webhook/Telegram outputs
-- Heartbeat-bar status history UI, public status pages
+- ~~Configurable probing intervals~~ Landed: UI `probe.interval_seconds` setting / yaml `probe.interval` /
+  `PUT /api/probe/config` (auto-clamped to [30s, 1h])
+- ~~Notification channel integration: add ntfy/webhook/Telegram outputs~~ Landed: notification channels
+  herald/ntfy/webhook/telegram, see the notification section of `config/cockpit.yaml`
+- Heartbeat-bar status history UI, public status pages (still not built)
 - **Cockpit's differentiating advantage**: probe results naturally link to inventory resources and can probe distributedly via the network the Agent sits in — something Uptime Kuma's architecture cannot do, and it should be strengthened head-on rather than avoided
 
 ## Summary Matrix

@@ -150,11 +150,13 @@ Teleport（[与 Guacamole 的社区对比](https://www.reddit.com/r/selfhosted/c
 - 只能从自身位置拨测，**无 agent 分布式探测**
 - 无 CMDB 联动，监控目标需手工录入
 
-**可借鉴**（对照 Cockpit 刚落地的 `internal/probe`）
+**可借鉴**（对照 Cockpit 的 `internal/probe`；下列「已落地」条目为当初借鉴来源）
 
-- 探测间隔可配置（当前硬编码 5 分钟）
-- 通知渠道集成：告警框架已有，补 ntfy/webhook/Telegram 输出
-- 心跳条式状态历史 UI、公开状态页
+- ~~探测间隔可配置~~ 已落地：UI `probe.interval_seconds` Setting / yaml `probe.interval` /
+  `PUT /api/probe/config`（越界自动夹到 [30s, 1h]）
+- ~~通知渠道集成：补 ntfy/webhook/Telegram 输出~~ 已落地：notification 渠道 herald/ntfy/webhook/telegram，
+  见 `config/cockpit.yaml` notification 节
+- 心跳条式状态历史 UI、公开状态页（仍未做）
 - **Cockpit 的差异化优势**：probe 结果天然联动 inventory 资源、且可经 Agent 所在网络分布式探测——这是 Uptime Kuma 架构做不到的，应重点强化而非回避
 
 ## 汇总矩阵

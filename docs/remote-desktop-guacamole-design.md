@@ -85,6 +85,13 @@ guacd 只讲 Guacamole 协议，默认监听 TCP `4822`。浏览器侧
 Cockpit server 已经坐着的（现有 `/api/remote/terminal`、`/api/remote/guacamole`
 都是「浏览器 WS ↔ server ↔ agent WS / guacd TCP」的双跳管道，server 本就是远控网关）。
 
+> **实现修正（2026-10-18）**：guacd 并不直连用户目标。Server 每会话经 agent 建立
+> 出口转发，并为该会话起一个绑定 Server→guacd 路由本地 IP 的中继 listener；
+> `connect` 指令里的 hostname/port 是**中继地址**，真实目标由 agent 从自身网络位
+> 拨出（`internal/server/guac_relay.go`、`api_guacamole.go`）。`GUACD_ADDR`、
+> `GUAC_RELAY_BIND_ADDR`、`GUAC_RELAY_HOST` 环境变量见 [guacd-deploy](./guacd-deploy.md)。
+> 下文骨架代码（骨架 2）保留设计期原貌。
+
 放 Go 而不是放 guacamole-web 的理由同 D1：网关这里要做的不只是字节转发，
 还有**会话生命周期、票据校验、权限判定、审计落库**——全是 Cockpit 已有的
 能力。guacamole-web 的 `GuacamoleWebSocketTunnelEndpoint` 做的是同样的事，
@@ -139,7 +146,7 @@ opcode 是否为空，不解析参数内容），**绝不转发 guacd**（guacd 
 
 401 递归刷新链路照搬现有实现，两侧都有先例：
 
-- web `services/api.ts:124` 的 401 拦截 + `refreshToken()`（`/auth/refresh`），
+- web `services/api.ts:138` 的 401 拦截 + `refreshToken()`（`/auth/refresh`；拦截器现位于 138 行、refreshToken 165 行），
   且 mobile `api/client.dart:83-91` 明确记录了**递归刷新防护**：
   `extra['skipRefresh'] == true` 的请求（即刷新请求自身）收到 401 不再触发
   刷新，直接交给 `onUnauthorized`——否则刷新失败会无限递归。
@@ -171,7 +178,7 @@ guacd 是**无状态协议翻译器**：一次 `connect` 指令建一条 TCP 到
 
 ### D5 guacd 用 docker-compose 部署
 
-guacd 是独立 C 守护进程，官方镜像 `apache/guacamole`（含 guacd）。
+guacd 是独立 C 守护进程，官方镜像 `guacamole/guacd`（guacd 单进程镜像）。
 用 docker-compose 部署而不是要求宿主机装 guacd，理由：
 
 - 与 Cockpit 的 stacks/Docker 能力一致（用户本就有 Docker 主机）；
@@ -291,7 +298,8 @@ type GuacamoleSession struct {
 func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 1. 票据：Sec-WebSocket-Protocol[0] → ValidateTicket（一次性消费）
 	// 2. 权限：terminal:write + matchRemoteEgress(agentID, host, port)
-	// 3. 拨 guacd TCP（127.0.0.1:4822，超时 10s）
+	// 3. 拨 guacd TCP（127.0.0.1:4822，超时 10s）——实现修正：见上文 D2 注记，
+	//    实际为「经 agent 建出口 + 起接口绑定中继，connect 走中继地址」
 	// 4. 升级 WS（Subprotocols 回显 ticketID）
 	// 5. 构造握手指令发 guacd：size / audio / video / connect
 	//    connect 参数：protocol=rdp|vnc, hostname, port, username, password…

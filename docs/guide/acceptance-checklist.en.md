@@ -347,6 +347,15 @@ the W5/W9 entries below are the historical evidence from before the rework, the 
   Evidence: the local instance (:20010) + agent `workflows-acc-a1` executing for real; run success, both step snapshots
   contain output, the Job ledger has 2 entries with actor=workflow, the audit workflow_run resource_id=run id;
   evidence files run-W2/final-W2/jobs-W2/audit-workflow.json (`.acceptance/workflows/evidence/`)
+- [x] Fan-out step: `targets` with multiple machines executes them in order → run success, each machine's snapshot has an independent jobId, the ledger has one entry per machine (W10, M2b)
+  Evidence: W10 two machines [a1,a2] `echo FAN-OK && uptime` → success on each, independent jobId rows,
+  the ledger has 2 entries; the web step editor has multi-select targets and the run timeline aggregates "N machines" with expandable per-machine detail (vitest 22 cases)
+- [x] Fan-out stops on failure: the first machine fails so the run is failed, the next machine stays pending with no Job (the F3 stop-advancement criterion, same as W5) (W10b)
+  Evidence: W10b [a1,a2] `exit 3` → [failed/failed, pending] per machine, step-level StopReason=failed,
+  the ledger has 1 entry (the second machine was never dispatched)
+- [x] A ghost mixed into fan-out: any offline target gives 503 and no run is created (F8 per-machine validation, extending W7) (W10c)
+  Evidence: W10c [a1,ghost] → 503 `agent offline for steps[0]`, the run ledger has 0 entries (no ghost run)
+
 
 ## Mobile (Flutter, iOS + Android)
 
@@ -375,11 +384,3 @@ Design: [mobile-design](./mobile-design.en.md). Prerequisite: a real Android mac
 - Every time an item passes: check it off in this list + remove it from the "Remaining" part of the matching `todo.md` entry, folding the key points into the completion record
 - Defects found during acceptance: file and fix them as separate items per existing discipline (one commit per fix, nothing bundled)
 - Once the whole domain passes, annotate "Completed (date)" at the top of this file and archive it to `docs/archive/` (where applicable)
-- [x] Fan-out step: `targets` with multiple machines executes them in order → run success, each machine's snapshot has an independent jobId, the ledger has one entry per machine (W10, M2b)
-  Evidence: W10 two machines [a1,a2] `echo FAN-OK && uptime` → success on each, independent jobId rows,
-  the ledger has 2 entries; the web step editor has multi-select targets and the run timeline aggregates "N machines" with expandable per-machine detail (vitest 22 cases)
-- [x] Fan-out stops on failure: the first machine fails so the run is failed, the next machine stays pending with no Job (the F3 stop-advancement criterion, same as W5) (W10b)
-  Evidence: W10b [a1,a2] `exit 3` → [failed/failed, pending] per machine, step-level StopReason=failed,
-  the ledger has 1 entry (the second machine was never dispatched)
-- [x] A ghost mixed into fan-out: any offline target gives 503 and no run is created (F8 per-machine validation, extending W7) (W10c)
-  Evidence: W10c [a1,ghost] → 503 `agent offline for steps[0]`, the run ledger has 0 entries (no ghost run)

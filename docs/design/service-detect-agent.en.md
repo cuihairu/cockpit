@@ -76,7 +76,7 @@ type Window struct {
 
 1. **Local**: in-memory Snapshot (`-status-file` writes JSON and the file is read back; off by default, recommended to place under `Paths().DataDir` when enabled).
 2. **Uplink**: a new protocol message `probe_report` (MessageType string enum append), payload = `{targets:[{name,state,since,last_checked,last_error}], windows:[recent windows]}` — sent on each state transition + a full snapshot every 10×interval as a fallback; reuses the core/report Enqueue queue and the core/register/heartbeat registration chain.
-3. **Server**: the handler receives probe_report and persists it (snapshot table + window table); REST `GET /api/probe/targets` and `GET /api/probe/windows?target=&limit=` feed the panel; hooked into the existing auth middleware.
+3. **Server**: the handler receives probe_report and persists it (snapshot table + window table); REST `GET /api/probe/targets` and `GET /api/probe/windows?target=&agent_id=&limit=` (both target and agent_id optional) feed the panel; hooked into the existing auth middleware.
 4. **herald alert egress (slot reserved, not implemented)**: `Alerter interface { Alert(ev Transition) }` plus a noop default implementation — interface first, the delivery channel waits for a separate herald integration batch.
 
 ## 5. Three-layer placement

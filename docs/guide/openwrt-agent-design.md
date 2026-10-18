@@ -102,7 +102,7 @@ nightly.yml 新增 `build-openwrt` job（ubuntu-latest）：
 
 1. 矩阵交叉编译 5 架构（CGO_ENABLED=0，Go 原生工具链）
 2. `scripts/package-ipk.sh` 组装 ipk 与 tar.gz
-3. upload-artifact（agent-openwrt-\<arch\>，含两种格式）
+3. upload-artifact（cockpit-agent-openwrt-\<arch\>，含两种格式）
 
 手动触发即可用（workflow_dispatch 已有），不依赖 nightly 排程。
 

@@ -153,7 +153,7 @@ type BackupRun struct {
 - `startBackupRun`: verify the agent is online + HasCapability("backup") → dispatch `backup.run` →
   create BackupRun{running} → set Config.LastStatus=running → start a goroutine `trackBackupTask`
   (reusing the trackStackTask pattern: poll `backup.task.get` every 5s, declare a timeout failure if
-  there is no terminal state within 10 minutes) → on the terminal state, write back BackupRun
+  there is no terminal state within 30 minutes, `backupTrackTimeout`) → on the terminal state, write back BackupRun
   (file/size/error/finishedAt) + Config.LastStatus/LastRunAt;
 - Failed terminal state → `s.notifier.SendNonBlocking(&notification.Notification{EventType:
   notification.EventBackupFailed, Level: "error", ResourceType: "backup", ...})`;
@@ -171,6 +171,7 @@ type BackupRun struct {
 | PUT | `/api/backups/configs/{id}` | Update; recomputes NextRunAt |
 | DELETE | `/api/backups/configs/{id}` | Delete (cascades to runs) |
 | POST | `/api/backups/configs/{id}/run` | Manual run (rejected with 409 while running) |
+| GET | `/api/backups/runs` | Run history across all configs (limit default 50, max 200) |
 | GET | `/api/backups/configs/{id}/runs` | Run history for that config (limit 50) |
 | GET | `/api/backups/configs/{id}/files` | List files in the agent backup directory (forwards backup.list, dir taken from the config) |
 | POST | `/api/backups/configs/{id}/files/delete` | Delete a single backup file `{name}` (validated against the filename regex, then forwards backup.delete) |

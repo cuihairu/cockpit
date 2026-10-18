@@ -342,6 +342,15 @@ running 取消 200+击杀 cancelled/终态再取消 409、W11 解析+定义留�
   证据：本机实例（:20010）+ agent `workflows-acc-a1` 真机执行；run success、两步快照
   均含输出、Job 台账 2 条 actor=workflow、审计 workflow_run resource_id=run id；
   证据文件 run-W2/final-W2/jobs-W2/audit-workflow.json（`.acceptance/workflows/evidence/`）
+- [x] 扇出步：`targets` 多目标顺序逐台执行 → run success、逐台快照独立 jobId、台账按台独立（W10，M2b）
+  证据：W10 双台 [a1,a2] `echo FAN-OK && uptime` → 逐台 success、jobId 独立成行、
+  台账 2 条；Web 步骤编辑器多选目标 + run 时间线「N 台」聚合展开逐台明细（vitest 22 用例）
+- [x] 扇出失败停：首台失败 run failed、次台 pending 无 Job（F3 同 W5 停推进口径）（W10b）
+  证据：W10b [a1,a2] `exit 3` → 逐台 [failed/failed, pending]、步级 StopReason=failed、
+  台账 1 条（次台从未派发）
+- [x] 扇出 ghost 混入：任一目标离线 503 不建 run（F8 逐台校验，延伸 W7）（W10c）
+  证据：W10c [a1,ghost] → 503 `agent offline for steps[0]`、run 台账 0 条（不落幽灵 run）
+
 
 ## 移动端（Flutter，iOS + Android）
 
@@ -370,11 +379,3 @@ running 取消 200+击杀 cancelled/终态再取消 409、W11 解析+定义留�
 - 每通过一项：勾选本清单 + 在 `todo.md` 对应条目的「剩余」中移除该项，要点补进完成记录
 - 验收发现的缺陷：按既有纪律单独立项修复（一笔一提交，不夹带）
 - 全域通过后在本文件顶部标注「已完成（日期）」并归档到 `docs/archive/`（如适用）
-- [x] 扇出步：`targets` 多目标顺序逐台执行 → run success、逐台快照独立 jobId、台账按台独立（W10，M2b）
-  证据：W10 双台 [a1,a2] `echo FAN-OK && uptime` → 逐台 success、jobId 独立成行、
-  台账 2 条；Web 步骤编辑器多选目标 + run 时间线「N 台」聚合展开逐台明细（vitest 22 用例）
-- [x] 扇出失败停：首台失败 run failed、次台 pending 无 Job（F3 同 W5 停推进口径）（W10b）
-  证据：W10b [a1,a2] `exit 3` → 逐台 [failed/failed, pending]、步级 StopReason=failed、
-  台账 1 条（次台从未派发）
-- [x] 扇出 ghost 混入：任一目标离线 503 不建 run（F8 逐台校验，延伸 W7）（W10c）
-  证据：W10c [a1,ghost] → 503 `agent offline for steps[0]`、run 台账 0 条（不落幽灵 run）

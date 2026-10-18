@@ -24,7 +24,7 @@ Cockpit web UI 是桌面优先（antd 数据密集表格、多栏工作台），
   （xterm.dart）等原生组件 Flutter 侧更成熟。Flutter 代价是引入第三语言栈
   （Go / TS / Dart），以 M1 功能面窄（只读为主 + 少量操作）换取长期维护面可控。
 
-- **D2 不建独立 BFF，直连既有 `/api/*`**：web 端 `services/api.ts` 已收敛 173 个
+- **D2 不建独立 BFF，直连既有 `/api/*`**：web 端 `services/api.ts` 已收敛 196 个
   端点调用，认证（JWT + TOTP 双步）、agent、告警、Docker、审计全部现成。移动端
   只做薄客户端；server 侧仅在确有聚合需求时补端点（M1 预计零新增）。API 对齐
   纪律同 web：**字段以 Go model json tag 为准**，不从记忆或互相抄。

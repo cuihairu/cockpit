@@ -255,7 +255,7 @@ yaml 值只在没有 UI 保存值时作为基线；UI 保存过则 YAML 声明�
 **通知外发红线对照**（notification 渠道配置见 `config/cockpit.yaml` notification 节）：
 `notification.enabled` 默认 false——不配置即零外发；渠道（herald/ntfy/webhook/telegram）
 仅由显式 yaml 条目构建；事件白名单 `events` 默认全拒（`IsEventEnabled` 无命中即 false）；
-已启用渠道清单经 `GET /api/probe/notification/status` 明示（不含凭据）。
+已启用渠道清单经 `GET /api/notification/status` 明示（不含凭据）。
 
 ## 参考
 

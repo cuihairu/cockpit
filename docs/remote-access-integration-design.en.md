@@ -23,7 +23,7 @@
 | VNC | GuacamoleModal | Same as above (protocol=vnc) | guacd (libvncclient) + guacamole-common-js | Integrated |
 | SSH | TerminalModal (xterm.js) | `/api/remote/terminal` → agent | `x/crypto/ssh` inside agent (a Go library, not a remote-access-specific stack) | Self-developed chain |
 | Telnet | TerminalModal | Same as above | agent raw TCP | Unchanged |
-| (fallback) | VNCModal (noVNC) / DesktopModal (grdp) | agent channel | noVNC / grdp | No references; kept for a coexistence period per the 2026-09-24 decision |
+| (fallback) | VNCModal (noVNC) / DesktopModal (grdp) | agent channel | noVNC / grdp | Kept for a coexistence period per the 2026-09-24 decision; **the components were deleted by D-2026-10-07-1** (this table is a historical snapshot) |
 
 There is only one gap: **SSH does not ride the third-party remote-access stack**. For the
 pain-point discussion of VNC/RDP (the maintenance cost of self-developed protocol chains,

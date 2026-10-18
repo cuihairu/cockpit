@@ -15,7 +15,7 @@
 |------|------|
 | Authorization relationship storage (who can use which machine, with what permission) | **memex** (not in this repo, see E7) |
 | Credential custody (passwords/keys/TOTP) | **persona** (this repo's vault consumes it read-only via `docs/guide/persona-vault-mapping.md`) |
-| Credential delivery | **Not done** (credentials never traverse memex, see E2/E8) |
+| Credential delivery | **Not done** (credentials never traverse memex, see E2/E7) |
 | Session initiation, tickets, egress policy, recording, audit | **This repo** (all reuse existing chains, zero new infrastructure) |
 
 ## Decisions
@@ -43,7 +43,7 @@ That file is the **review record of landed implementation** (D1-D8 all carry rea
 ```
 
 - `protocol` ∈ `ssh | rdp | vnc | telnet` (identical to the `handleRemoteSessionCreate` whitelist, `internal/server/api_remote.go:654-660`).
-- **No `username`/`password`/`private_key`/`domain` fields** — credentials are named by `credential_ref` pointing at a vault entry (a local provider path or a persona entry UUID) and are injected server-side when the session is established (E8). memex never touches credentials.
+- **No `username`/`password`/`private_key`/`domain` fields** — credentials are named by `credential_ref` pointing at a vault entry (a local provider path or a persona entry UUID) and are injected server-side when the session is established (E7 boundary). memex never touches credentials.
 - `requested_by` is the memex-side end-user identifier, used only for audit attribution and never as the authentication principal (the principal is E3's caller token).
 
 **Returns 201**:
@@ -78,7 +78,7 @@ That file is the **review record of landed implementation** (D1-D8 all carry rea
 
 ### E3 Caller identity: named service tokens
 
-The `remote_control` config gains a section (`config/cockpit.yaml:85` onward; struct `RemoteControlConfig`, `internal/config/config.go:140-156`):
+The `remote_control` config gains a section (`config/cockpit.yaml:94` onward; struct `RemoteControlConfig`, `internal/config/config.go:140-156`):
 
 ```yaml
 remote_control:
