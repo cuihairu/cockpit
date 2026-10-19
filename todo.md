@@ -12,23 +12,23 @@
 
 ## 待办
 
-> 2026-10-16 复核（PATROL1016）：19 条解锁条件逐条复核仍全部成立，无仓内可开工项；已裁决项不重开。每条尾注〔阻塞｜解锁〕。
+> 2026-10-19 复核（FIRE1019R2）：19 条解锁条件逐条复核仍全部成立，无仓内可开工项；已裁决项不重开。本轮另修正本表 11 处 `checklist:` 行号漂移（清单整体后移 3 行，原指针落到已完成项或章节标题行）与 `docs/guide/acceptance-checklist.md:127` 内联指针。每条尾注〔阻塞｜解锁〕。
 
 ### 真机验收（等硬件/真实环境/凭据）
 
 - [ ] service-health 生产接入：docker VM agent 已装但停用，改 SERVER_URL 指生产后 enable〔阻塞=宿主 docker VM 的配置动作，非仓内改动｜解锁=用户在生产 VM 改 SERVER_URL 并 enable〕
-- [ ] Windows SCM 服务管理：列表/启停/自启/无权限透传〔阻塞=缺 Windows 主机｜解锁=真机到位按 checklist:246 验收〕
-- [ ] macOS launchd 服务管理：列表/启停/自启/kickstart 回退〔阻塞=缺 macOS 主机｜解锁=真机到位按 checklist:247 验收〕
-- [ ] NAS：DSM 6/7、TrueNAS CORE/SCALE、OMV 真机 API；mdadm 降级演练；ZFS/SMB/NFS 主机〔阻塞=缺 NAS 设备与账号｜解锁=真机到位按 checklist:220-224 验收〕
-- [ ] 备份云远端：真实 S3/B2、限速、GB 级完整链（server 侧 rclone 需宿主安装）〔阻塞=缺真实 S3/B2 凭据（checklist:48,49 明标不可本机验证）｜解锁=凭据与宿主 rclone 到位〕
-- [ ] 录制异地：rclone 真远端推送〔阻塞=缺 rclone 真远端（checklist:58,59,65,66 标阻塞）｜解锁=远端配置到位〕
-- [ ] ACME：staging/production 签发、自动续期、签发→部署→浏览器信任链〔阻塞=缺真实 ACME 账号与 DNS 凭据｜解锁=凭据到位按 checklist:108-114 验收〕
-- [ ] DDNS：真 Cloudflare token、家庭侧 agent 出口 IP 多源〔阻塞=缺真实 Cloudflare token｜解锁=token 到位按 checklist:120-123 验收〕
-- [ ] overlay：真 ZT/TS token 授权/除名、join/leave、systemctl 单元态、第二台主机合并观测〔阻塞=缺真实 ZT/TS token 与第二台主机｜解锁=token+主机到位按 checklist:163-165 验收〕
-- [ ] SMART：带 attr 表主机读数、FAILED 端到端翻转〔阻塞=缺带 SMART 属性表的真实磁盘｜解锁=真机到位按 checklist:181 验收〕
-- [ ] DNS 真账号：DNSPod/阿里云 SRV 与 TTL 下限、台账联动全链、M4 跨 provider 迁移演练〔阻塞=缺真实 DNSPod/阿里云账号｜解锁=账号到位按 checklist:130-132 验收〕
+- [ ] Windows SCM 服务管理：列表/启停/自启/无权限透传〔阻塞=缺 Windows 主机｜解锁=真机到位按 checklist:249 验收〕
+- [ ] macOS launchd 服务管理：列表/启停/自启/kickstart 回退〔阻塞=缺 macOS 主机｜解锁=真机到位按 checklist:250 验收〕
+- [ ] NAS：DSM 6/7、TrueNAS CORE/SCALE、OMV 真机 API；mdadm 降级演练；ZFS/SMB/NFS 主机〔阻塞=缺 NAS 设备与账号｜解锁=真机到位按 checklist:223-227 验收〕
+- [ ] 备份云远端：真实 S3/B2、限速、GB 级完整链（server 侧 rclone 需宿主安装）〔阻塞=缺真实 S3/B2 凭据（checklist:51,52 明标不可本机验证）｜解锁=凭据与宿主 rclone 到位〕
+- [ ] 录制异地：rclone 真远端推送〔阻塞=缺 rclone 真远端（checklist:61,62,68,69 标阻塞）｜解锁=远端配置到位〕
+- [ ] ACME：staging/production 签发、自动续期、签发→部署→浏览器信任链〔阻塞=缺真实 ACME 账号与 DNS 凭据｜解锁=凭据到位按 checklist:111-117 验收〕
+- [ ] DDNS：真 Cloudflare token、家庭侧 agent 出口 IP 多源〔阻塞=缺真实 Cloudflare token｜解锁=token 到位按 checklist:123-126 验收〕
+- [ ] overlay：真 ZT/TS token 授权/除名、join/leave、systemctl 单元态、第二台主机合并观测〔阻塞=缺真实 ZT/TS token 与第二台主机｜解锁=token+主机到位按 checklist:166-168 验收〕
+- [ ] SMART：带 attr 表主机读数、FAILED 端到端翻转〔阻塞=缺带 SMART 属性表的真实磁盘｜解锁=真机到位按 checklist:180,184 验收〕
+- [ ] DNS 真账号：DNSPod/阿里云 SRV 与 TTL 下限、台账联动全链、M4 跨 provider 迁移演练〔阻塞=缺真实 DNSPod/阿里云账号｜解锁=账号到位按 checklist:133-135 验收〕
 - [ ] Guacamole 音频真机：RDP 音频 mimetype 与 L8/L16 编解码确认（D4，静音按钮已实现）〔阻塞=缺 Windows RDP 主机｜解锁=真机确认编解码〕
-- [ ] 移动端：Android release 安装/splash/R8/签名升级、生物识别、ntfy 送达、SSH 终端〔阻塞=缺 Android 真机与签名/ntfy 凭据｜解锁=真机+凭据到位按 checklist 移动端一节（:343 起）验收〕
+- [ ] 移动端：Android release 安装/splash/R8/签名升级、生物识别、ntfy 送达、SSH 终端〔阻塞=缺 Android 真机与签名/ntfy 凭据｜解锁=真机+凭据到位按 checklist 移动端一节（:355 起）验收〕
 - [ ] web 移动端触屏与 Workbench 触屏交互〔阻塞=缺真机触屏设备；地基已随 web 移动适配交付（1076 用例），仓内无代码缺口｜解锁=触屏真机验收〕
 - [ ] iOS 签名与装机（低优先级；编译验证已在 CI）〔阻塞=缺 Apple 开发者账号与 Mac｜解锁=凭据到位装机验收〕
 
