@@ -78,6 +78,11 @@ jobs:
             go build -ldflags="-s -w" -o dist/cockpit.exe ./cmd/cockpit
             go build -ldflags="-s -w" -o dist/cockpit-agent.exe ./cmd/cockpit-agent
           else
+            if [ "${{ matrix.os }}" = "darwin" ]; then
+              # darwin-only 探针（scripts/acceptance/services/launchd-probe 等
+              # 带 //go:build darwin）同样不被 cmd 两包依赖树覆盖
+              CGO_ENABLED=0 go build ./...
+            fi
             go build -ldflags="-s -w" -o dist/cockpit ./cmd/cockpit
             go build -ldflags="-s -w" -o dist/cockpit-agent ./cmd/cockpit-agent
           fi

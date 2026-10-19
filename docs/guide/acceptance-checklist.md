@@ -247,7 +247,9 @@
 - [x] systemd：服务行「日志」跳转 journalctl 历史可查（含未加载 unit）
   证据（2026-10-01，R3 轮）：T5（`cockpit-acc-jlog.service` 样本，装 `/usr/lib` 永不 enable）——PUT 换带唯一 marker 的 oneshot ExecStart（dogfood 覆盖位 + 捆绑 reload：start 执行的正是 PUT 后内容）→ start 产 journal 历史 → stop + daemon-reload 后成未加载安装项（三面证据：`systemctl list-units --all` 无、服务表 `loadState=""`+`unitFileState=disabled`、`/logs/sources` 不含）→ `POST /agents/{id}/logs/query {"type":"systemd","source":"cockpit-acc-jlog.service"}` 200 且 `lines` 含 marker（`journalctl -u` 不关心加载态）；Web 链路同款：服务行「日志」按钮开 Drawer 内嵌 LogsPanel（`Services/index.tsx:506-514`），`initialSource` 对 unit 名无条件优先派生不回落（`LogsPanel.tsx:124-126`，未加载服务不在 `logs.sources` 列表仍可查）；非 root daemon-reload 502 Access denied 透传（对照记录）
 - [ ] Windows SCM：列表/启停/自启切换/restart 等待 30s 超时路径实测；无权限服务报错透传；reload 按钮确认隐藏
+  仓内预备（2026-10-19，f4a8ae5 + 367fa27）：免提权探针 `scripts/acceptance/services/scm-probe/main.go`（`//go:build windows`，经 `WindowsServiceProvider` 生产链）——校验层 3 项（reload 被动词白名单拒 / 非法 unit 名被拒=路径穿越面 / 未知动词拒）+ 非提权会话的 SCM `Access is denied` 原文透传 T4；`mgr.Connect` 需 SC_MANAGER_ALL_ACCESS，故 list / 启停 / 自启 / restart 30s 超时面标 BLOCKED 待提权 agent 复验。Build windows 腿已加整模块编译门禁（该文件带 windows build tag，只编 cmd 两包会漏检）。
 - [ ] macOS launchd：列表/启停/自启切换；`kickstart` 失败回退 `bootstrap` 路径；无权限报错透传
+  仓内预备（2026-10-19，98f2cc8）：免提权探针 `scripts/acceptance/services/launchd-probe/main.go`（`//go:build darwin`，经 `LaunchdServiceProvider` 生产链）——校验层 4 项（路径穿越 label 被拒 / 未知动词拒 / reload 被动词白名单拒 / `launchctl kickstart` 错误原文透传）；root 侧 list 观测与启停、自启切换 + `kickstart`→`bootstrap` 回退标 BLOCKED 待 root 会话 + 临时 LaunchDaemon 复验。Build darwin 腿已加整模块编译门禁。
 
 ## 统一 Job 执行（agent.exec）
 
