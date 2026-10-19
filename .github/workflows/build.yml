@@ -72,6 +72,9 @@ jobs:
         run: |
           mkdir -p dist
           if [ "${{ matrix.os }}" = "windows" ]; then
+            # 整模块编译门禁：cmd 两包的依赖树不含 windows-only 探针
+            # （scripts/acceptance/... 带 //go:build windows），只编 cmd 会漏检
+            go build ./...
             go build -ldflags="-s -w" -o dist/cockpit.exe ./cmd/cockpit
             go build -ldflags="-s -w" -o dist/cockpit-agent.exe ./cmd/cockpit-agent
           else
