@@ -1,7 +1,7 @@
 //go:build darwin
 
 // macOS launchd 服务管理真实环境验收探针（acceptance-checklist「服务管理（三后端）」
-// macOS launchd 行、cockpit todo.md「macOS launchd 服务管理」条目、checklist:250）。
+// macOS launchd 行、cockpit todo.md「macOS launchd 服务管理」条目、checklist:251）。
 // 经 provider 入口 LaunchdServiceProvider 走生产同一条链。按提权需求分两层：
 //
 //	【校验层·无需提权】validateLaunchdUnit 在任何 launchctl 执行之前
@@ -92,7 +92,7 @@ func main() {
 		block("T5", "list 观测层（launchctl list + plist 扫描合并、ActiveState 值域）",
 			"非 root 会话（euid!=0）launchctl list 仅用户域，system 域观测需 root agent 复验")
 	}
-	block("T6", "启停/自启切换 + kickstart 失败回退 bootstrap 路径实测（checklist:250）",
+	block("T6", "启停/自启切换 + kickstart 失败回退 bootstrap 路径实测（checklist:251）",
 		"需 root 会话 + 临时 LaunchDaemon（不碰系统服务），真机复验")
 
 	fmt.Printf("\n=== RESULT %d PASS / %d FAIL / %d BLOCKED ===\n", pass, fail, blocked)
