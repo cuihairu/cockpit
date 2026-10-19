@@ -145,7 +145,7 @@
          **禁止为对齐文档去改业务代码**
       3) 表三「值得补的能力」：只做评估与分期建议，**不实现**（需用户拍板）
       每完成一项勾掉并写证据；全部测试通过后 commit+push；不 bump 版本号。
-      - [x] 表一#1 Agent 注册默认拒绝：`internal/server/websocket.go:144-191,188-264`；bcrypt 持久化失败回滚在线注册；测试 `internal/server/websocket_registration_policy_test.go:19-201` + e2e 通过。准入配置/引导：`config/cockpit.yaml:12-15`、`deployments/docker/config.yaml:5-8`、`deployments/docker/.env.example:9`、`deployments/install-server.sh:72-81`、`deployments/install-server.ps1:68-75`；Agent CLI/GUI 安装器示例：`docs/guide/getting-started.md:107-189`、`packaging/windows/agent.iss:69-97,135-142`。
+      - [x] 表一#1 Agent 注册默认拒绝：`internal/server/websocket.go:144-191,188-264`；bcrypt 持久化失败回滚在线注册；测试 `internal/server/websocket_registration_policy_test.go:19-218` + e2e 通过。准入配置/引导：`config/cockpit.yaml:12-15`、`deployments/docker/config.yaml:5-8`、`deployments/docker/.env.example:9`、`deployments/install-server.sh:72-81`、`deployments/install-server.ps1:68-75`；Agent CLI/GUI 安装器示例：`docs/guide/getting-started.md:107-189`、`packaging/windows/agent.iss:69-97,134-141`。
       - [x] 表一#2 登录限流：`internal/server/login_limiter.go:1-149`、`internal/server/server.go:563-630`；IP/账号双桶、429/Retry-After；`internal/server/login_limiter_test.go:1-120`（定向测试通过）。
       - [x] 表一#3 ticket 日志：`internal/server/ticket.go:41-66`；`internal/server/ticket_test.go:58-77`（断言日志无明文 ticket，定向测试通过）。
       - [x] 表一#4 guacd 中继：`internal/server/guac_relay.go:14-135`、`internal/server/api_guacamole.go:362-399,511-530`；`internal/server/guac_integration_test.go:46-113,344-408`（Docker guacd→Server relay→fake Agent→fake VNC 通过）。
