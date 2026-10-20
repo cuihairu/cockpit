@@ -56,6 +56,19 @@
 - [ ] P1 资源池与容量 / Go Reconciler / 云网络 / 预算策略引擎 / 双重控制边界裁定〔待拍板=P0 闭环后；其中「谁对同一资源有写入权（OpenTofu vs Reconciler）」需先裁定〕
 - [ ] P2 智能调度 / 成本优化 / 控制面高可用〔待拍板=按真实需求〕
 
+### 竞品功能强化（2026-10-20 评审导入，未立项待拍板）
+
+> 8 竞品（Tactical RMM/Zabbix Agent 2/Teleport/Beszel/Portainer/Tailscale/RustDesk/MeshCentral）
+> 全景分析导入：核心结论「补 Agent 可靠性/安全边界/跨平台一致性/资源管理体系，不横向堆功能」。
+> 全文+逐项核验表+落地跟踪见 `docs/review/competitor-landscape-2026-10-20.md`。
+> 核验要点：12 项建议里 4 项已覆盖大半（隧道/服务三后端/定时任务/审计留痕）、
+> 6 项部分强化、3 项全新缺口（Capability 协议/离线缓冲/轻量模式）；
+> **Provider Adapter 独立层归并入上方多云工作流，不单开线**。
+
+- [ ] P0 Agent 侧四件：Capability 协议 / 调度资源隔离（限流·优先级·超时）/ 升级回滚 / 任务可靠性（重试·窗口·幂等）〔待拍板=评审核心建议：先把 Agent Core 做小、契约做稳；四件可拆四单按序排｜解锁=拍板即排单〕
+- [ ] P0 安全两件：短期凭据+资源级权限（Teleport 式，依托既有 vault）/ 轻量运行模式（最小构建+资源预算）〔待拍板〕
+- [ ] P1 离线数据缓冲 / 远程协作（会话共享）/ 统一电源控制（WoL+PVE；云电源随多云片）/ 四套源码深读笔记（Zabbix Agent 2·Teleport·Portainer Edge·Tactical RMM）〔待拍板=P0 后〕
+
 ### 文档
 
 - [x] archive 5 篇是否双语：历史归档（plans 2 / specs 2 / 归档说明 1）当前仅中文〔已定 2026-10-16（R1025PATROL 代拍板，用户事后可推翻）：归档是历史记录，英文版无读者价值，只保留中文不补英文版；决策记录 docs/guide/decision-log.md D-2026-10-16-1〕
