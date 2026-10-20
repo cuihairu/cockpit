@@ -13,7 +13,11 @@ const (
 	MessageTypeProxyClose  MessageType = "proxy_close"  // 关闭代理连接
 	MessageTypeProxyError  MessageType = "proxy_error"  // 代理错误
 	MessageTypeProbeReport MessageType = "probe_report" // 探针 agent 观测上报（服务检测 agent B5）
-	MessageTypeExecLog     MessageType = "exec_log"     // agent 执行留痕上报（agent-core P5）
+	// 带外探活上报（OpenWrt 自举节点片B，docs/design/oob-openwrt-bootstrap.md）：
+	// 网络层三源判定（ARP/ICMP/TCP）独立于 probe_report 的服务面语义，
+	// 不混用 probe_report——两源回答的问题不同，混流会让消费方误读在位语义。
+	MessageTypeLivenessReport MessageType = "liveness_report"
+	MessageTypeExecLog        MessageType = "exec_log" // agent 执行留痕上报（agent-core P5）
 
 	// Server → Agent
 	MessageTypeRPCRequest MessageType = "rpc_request"

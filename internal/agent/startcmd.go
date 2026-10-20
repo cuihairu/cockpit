@@ -26,6 +26,10 @@ type StartCmd struct {
 	// Version 二进制版本，由 cmd/cockpit-agent 注入（无 CLI flag）：
 	// 随注册上报，Server 侧主机列表展示版本列
 	Version string
+	// Liveness 带外探活（OpenWrt 自举节点片B）：配置后周期推送 liveness_report
+	LivenessTargets  string
+	LivenessPorts    string
+	LivenessInterval int // 秒，<=0 用缺省
 }
 
 // StartUsage customizes shared flag descriptions.
@@ -38,6 +42,10 @@ type StartUsage struct {
 	Labels  string
 	Bias    string
 	SSHKeys string
+
+	LivenessTargets  string
+	LivenessPorts    string
+	LivenessInterval string
 }
 
 var defaultStartUsage = StartUsage{
@@ -49,6 +57,10 @@ var defaultStartUsage = StartUsage{
 	Labels:  "Labels, e.g. env=prod,services=[docker,k8s],gpu=true",
 	Bias:    "Agent ID bias for multiple agents on the same machine (default 0)",
 	SSHKeys: "SSH private key directory (default ~/.ssh/)",
+
+	LivenessTargets:  "Liveness probe targets, comma-separated IPs (OpenWrt bootstrap node)",
+	LivenessPorts:    "Liveness TCP probe ports, comma-separated (e.g. 22,80)",
+	LivenessInterval: "Liveness probe interval in seconds (default 60)",
 }
 
 // Bind registers shared agent start flags on the provided FlagSet.
@@ -66,6 +78,12 @@ func (c *StartCmd) BindWithUsage(fs *flag.FlagSet, usage StartUsage) {
 	fs.StringVar(&c.Labels, "labels", "", fallbackUsage(usage.Labels, defaultStartUsage.Labels))
 	fs.IntVar(&c.Bias, "bias", 0, fallbackUsage(usage.Bias, defaultStartUsage.Bias))
 	fs.StringVar(&c.SSHKeys, "ssh-keys", "", fallbackUsage(usage.SSHKeys, defaultStartUsage.SSHKeys))
+	fs.StringVar(&c.LivenessTargets, "liveness-targets", "",
+		fallbackUsage(usage.LivenessTargets, defaultStartUsage.LivenessTargets))
+	fs.StringVar(&c.LivenessPorts, "liveness-ports", "",
+		fallbackUsage(usage.LivenessPorts, defaultStartUsage.LivenessPorts))
+	fs.IntVar(&c.LivenessInterval, "liveness-interval", 0,
+		fallbackUsage(usage.LivenessInterval, defaultStartUsage.LivenessInterval))
 }
 
 // Validate checks command arguments.
@@ -82,16 +100,28 @@ func (c *StartCmd) BuildConfig() (Config, error) {
 		return Config{}, err
 	}
 
+	targets, err := parseLivenessTargets(c.LivenessTargets)
+	if err != nil {
+		return Config{}, err
+	}
+	ports, err := parseLivenessPorts(c.LivenessPorts)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
-		ServerURL: c.Server,
-		AgentID:   c.ID,
-		Secret:    c.Secret,
-		Region:    c.Region,
-		Zone:      c.Zone,
-		Labels:    parseLabels(c.Labels),
-		Bias:      c.Bias,
-		SSHKeys:   c.SSHKeys,
-		Version:   c.Version,
+		ServerURL:               c.Server,
+		AgentID:                 c.ID,
+		Secret:                  c.Secret,
+		Region:                  c.Region,
+		Zone:                    c.Zone,
+		Labels:                  parseLabels(c.Labels),
+		Bias:                    c.Bias,
+		SSHKeys:                 c.SSHKeys,
+		Version:                 c.Version,
+		LivenessTargets:         targets,
+		LivenessPorts:           ports,
+		LivenessIntervalSeconds: c.LivenessInterval,
 	}, nil
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/cuihairu/cockpit/core/report"
 	"github.com/cuihairu/cockpit/internal/agent/detector"
 	"github.com/cuihairu/cockpit/internal/agent/rpc"
+	"github.com/cuihairu/cockpit/internal/oob/liveness"
 	"github.com/cuihairu/cockpit/internal/protocol"
 	"github.com/cuihairu/cockpit/internal/proxy"
 	"github.com/gorilla/websocket"
@@ -64,6 +65,9 @@ type Agent struct {
 
 	// 配置
 	config *Config
+
+	// liveness 带外探活调度（OpenWrt 自举节点片B）：配置了目标清单才装配
+	liveness *liveness.Scheduler
 }
 
 // Agent 时序参数。做成包级变量仅为测试可注入（cov_* 测试缩短等待），
@@ -121,6 +125,13 @@ type Config struct {
 	// Version 二进制版本（由 cmd/cockpit-agent 的 version 注入），
 	// 随注册上报，Server 侧主机列表展示
 	Version string `json:"version,omitempty"`
+	// LivenessTargets 带外探活目标（OpenWrt 自举节点片B）：配置后 agent
+	// 周期对目标跑 ARP/ICMP/TCP 三源探测并推送 liveness_report
+	LivenessTargets []liveness.Target `json:"liveness_targets,omitempty"`
+	// LivenessPorts 全局 TCP 探测端口清单，回填给未自带端口的目标
+	LivenessPorts []int `json:"liveness_ports,omitempty"`
+	// LivenessIntervalSeconds 探活周期（秒），<=0 用 liveness.DefaultInterval
+	LivenessIntervalSeconds int `json:"liveness_interval_seconds,omitempty"`
 }
 
 // NewAgent 创建新 Agent
@@ -206,6 +217,9 @@ func NewAgent(cfg Config) *Agent {
 	})
 	// 执行留痕装配（core/execlog）：router Handle 单点埋点，攒批经统一上行
 	a.execRecorder = execlog.New(execlog.DefaultCapacity, a.upstream.Enqueue)
+	// 带外探活调度（OpenWrt 自举节点片B）：配置了目标清单才装配，
+	// 推送走上行队列（未注册/队列满时按队列策略丢弃，不影响心跳）
+	a.liveness = newLivenessScheduler(cfg, a.sendMessage)
 	a.rpc.SetExecLogger(a.execRecorder)
 	return a
 }
@@ -312,6 +326,7 @@ func (a *Agent) Start() error {
 	go a.heartbeatLoop()
 	go a.servicesRefreshLoop()
 	go a.execRecorder.Run(a.ctx, execlogFlushInterval)
+	go a.livenessLoop()
 
 	// 5. 启动消息循环
 	go a.messageLoop()
@@ -567,6 +582,15 @@ func (a *Agent) register() error {
 // heartbeatLoop 心跳循环（core/heartbeat：间隔在 Run 时读包级 var）
 func (a *Agent) heartbeatLoop() {
 	a.heartbeats.Run(heartbeatInterval)
+}
+
+// livenessLoop 带外探活调度循环（OpenWrt 自举节点片B）：未配置目标清单时
+// no-op；已配置则周期探测并推送，随 agent ctx 取消退出。
+func (a *Agent) livenessLoop() {
+	if a.liveness == nil {
+		return
+	}
+	a.liveness.Run(a.ctx)
 }
 
 // sendHeartbeat 发送心跳（core/heartbeat：未注册静默跳过，失败触发重连）

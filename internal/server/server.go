@@ -82,6 +82,10 @@ type Server struct {
 	// vaultProvider 密码箱 provider（vault-design.md V7；NAS/外部端点
 	// 凭据接入点逐步改走此实例）
 	vaultProvider vault.Provider
+
+	// livenessStore 带外探活内存最新态（oob-openwrt-bootstrap.md 片B：
+	// agent 推送 liveness_report，查询走 GET /api/oob/liveness）
+	livenessStore *livenessStore
 }
 
 // logFatalf 注入点：NewServer 启动防御（坏库路径/弱密码/生产密钥校验）以
@@ -172,6 +176,7 @@ func NewServer(cfg *config.Config) *Server {
 		remoteSessions: NewRemoteSessionManager(),
 		ticketMgr:      NewTicketManager(),
 		loginLimiter:   newLoginAttemptLimiter(),
+		livenessStore:  newLivenessStore(),
 		cfg:            cfg,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:     isOriginAllowed,

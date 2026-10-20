@@ -23,6 +23,8 @@ func (s *Server) handleMessage(agent *Agent, msg *protocol.Message) {
 		s.handleProxyError(agent, msg)
 	case protocol.MessageTypeProbeReport:
 		s.handleProbeReport(agent, msg)
+	case protocol.MessageTypeLivenessReport:
+		s.handleLivenessReport(agent, msg)
 	case protocol.MessageTypeExecLog:
 		s.handleExecLogReport(agent, msg)
 	default:

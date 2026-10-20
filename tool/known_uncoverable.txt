@@ -159,3 +159,6 @@ internal/server/api_stacks.go:242,243	3. CallAgent 传输层错误含 conflict�
 
 # —— 2026-10-13 persona provider 接入（vault.providers 配置节） ——
 internal/config/config.go:312,313	1. strictVaultProviders 将已解析 yaml.Node 重新编码喂 KnownFields 解码器，节点来自合法 yaml 文档，Encode 不可能失败，防御分支
+
+# —— 2026-10-20 OpenWrt 自举节点片B-2：带外探活调度与推送 ——
+internal/server/liveness.go:129,130	3. decodeLivenessReport json.Marshal(payload) 失败防御（payload 来自 JSON 解码，值恒为 string/number/bool/nil/map/slice，契约上不可失败；同 probe_report 91,92 口径）
