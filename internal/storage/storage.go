@@ -126,6 +126,8 @@ func (d *DB) migrate() error {
 		&DDNSConfig{},
 		&AcmeAccount{},
 		&AcmeCert{},
+		&CloudAccount{},
+		&CloudInstance{},
 		&AcmeDeployTarget{},
 		&DomainBinding{},
 		&Role{},

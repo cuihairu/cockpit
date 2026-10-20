@@ -85,7 +85,7 @@ first (P1 decision point — documented here, no mechanism in this slice).
 | Slice | Content | Gate |
 |---|---|---|
 | **1 (this)** | `internal/cloud`: interfaces, capability declaration + registry validation, Operation state machine, resource/cost types | `go build ./...`, `go test ./internal/cloud/...`, 100% package coverage per registry policy |
-| 2 | `cloud_account` / `cloud_instance` tables + storage layer + vault reference wiring | same + migrations |
+| **2 (done 2026-10-20)** | `cloud_accounts` / `cloud_instances` tables (GORM AutoMigrate runs inside Open, no separate migration script) + storage layer `internal/storage/cloud.go` (account upsert/list/delete, instance upsert/list/delete, all idempotent on their business unique keys) + credential red line enforced: only `${VAR}` references stored (form validation rejects plaintext and concatenation), resolved at runtime via env, fail-closed when unset | same + `go test ./internal/storage/...` |
 | 3 | Aliyun adapter (Compute+Quota; reuse `sign.go`) + fake-server contract tests | same + vendor contract tests |
 | 4 | Tencent Cloud adapter + two-vendor closed-loop acceptance (needs user AccessKeys) | on-machine acceptance checklist |
 

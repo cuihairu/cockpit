@@ -83,7 +83,7 @@ Operation{ ID, Kind(create/start/stop/delete), NativeID(资源 ID 或厂商句�
 | 片 | 内容 | 门禁 |
 |---|---|---|
 | **1（本片）** | `internal/cloud`：接口、能力声明+注册表校验、Operation 状态机、资源/成本类型 | `go build ./...`、`go test ./internal/cloud/...`、包覆盖率 100%（登记制口径） |
-| 2 | `cloud_account`/`cloud_instance` 表 + 存储层 + vault 凭据引用接入 | 同上 + 迁移脚本 |
+| **2（已落 2026-10-20）** | `cloud_accounts`/`cloud_instances` 表（GORM AutoMigrate 随 Open 自动迁移，无独立迁移脚本）+ 存储层 `internal/storage/cloud.go`（账号 upsert/list/delete、实例 upsert/list/delete，均按业务唯一键幂等）+ 凭据红线落地：表内只存 `${VAR}` 引用（形态校验拒绝明文与拼接），运行时经 env 解析、未设值 fail-closed | 同上 + `go test ./internal/storage/...` |
 | 3 | 阿里云适配器（Compute+Quota；复用 `sign.go`）+ 适配器测试（fake server） | 同上 + 厂商契约测试 |
 | 4 | 腾讯云适配器 + 双厂商闭环验收（需用户 AccessKey） | 真机验收 checklist |
 
