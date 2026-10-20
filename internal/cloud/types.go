@@ -91,12 +91,15 @@ type Instance struct {
 
 // InstanceSpec 是创建实例的意图描述。
 type InstanceSpec struct {
-	Name        string      `json:"name"`
-	Region      string      `json:"region"`
-	Zone        string      `json:"zone,omitempty"`
-	Spec        string      `json:"spec"`
-	ImageID     string      `json:"image_id"`
-	BillingMode BillingMode `json:"billing_mode"`
+	Name    string `json:"name"`
+	Region  string `json:"region"`
+	Zone    string `json:"zone,omitempty"`
+	Spec    string `json:"spec"`
+	ImageID string `json:"image_id"`
+	// SecurityGroupID 是创建时入组的网络安全组（阿里云 SecurityGroupId /
+	// 腾讯云 SecurityGroupIds 的单组形态）；多数厂商把安全组设为创建必需项。
+	SecurityGroupID string      `json:"security_group_id,omitempty"`
+	BillingMode     BillingMode `json:"billing_mode"`
 }
 
 // CostKind 区分成本三层：预计（报价）、运行估算、实际账单。
