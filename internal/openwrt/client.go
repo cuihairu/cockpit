@@ -422,6 +422,34 @@ func (c *Client) GetFirewallRedirects() ([]FirewallRedirect, error) {
 	return redirects, nil
 }
 
+// ListFirewallRedirects 读当前全部转发规则，返回与设备同形的 map 列表
+// （展示侧用，不绑定 Go 结构体，字段随固件演进不脆化）。
+func (c *Client) ListFirewallRedirects() ([]map[string]interface{}, error) {
+	body, err := c.call("firewall", "get_redirects")
+	if err != nil {
+		return nil, err
+	}
+	var redirects []map[string]interface{}
+	if err := json.Unmarshal(body, &redirects); err != nil {
+		return nil, fmt.Errorf("parse redirects: %w", err)
+	}
+	return redirects, nil
+}
+
+// AddFirewallRedirect 下发一条转发规则（ubus firewall.add_redirect，fw4）。
+// 规则对象没有 expiry 字段，过期账由规则名携带（internal/oob/redirect）。
+// 参数由调用方装配好传入，本方法只做调用，不校验字段。
+func (c *Client) AddFirewallRedirect(params map[string]interface{}) error {
+	_, err := c.call("firewall", "add_redirect", params)
+	return err
+}
+
+// RemoveFirewallRedirect 按规则名拆除转发规则（ubus firewall.del_redirect）。
+func (c *Client) RemoveFirewallRedirect(name string) error {
+	_, err := c.call("firewall", "del_redirect", map[string]interface{}{"name": name})
+	return err
+}
+
 // WirelessRadio wireless radio config
 type WirelessRadio struct {
 	Name      string `json:"name"`

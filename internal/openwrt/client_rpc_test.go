@@ -2,6 +2,7 @@ package openwrt
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -539,4 +540,85 @@ func TestGetWirelessStatus(t *testing.T) {
 		t.Fatalf("GetWirelessStatus() error = %v", err)
 	}
 	_ = result
+}
+
+// TestAddFirewallRedirect 写转发规则：走 firewall.add_redirect 并透传参数。
+func TestAddFirewallRedirect(t *testing.T) {
+	loginDone := false
+	var gotMethod string
+	var gotParams map[string]interface{}
+	c := newTestOpenWrt(t, func(w http.ResponseWriter, r *http.Request) {
+		if !loginDone {
+			loginDone = true
+			json.NewEncoder(w).Encode(loginResponse("sess1"))
+			return
+		}
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		params, _ := req["params"].([]interface{})
+		if len(params) >= 4 {
+			gotMethod = fmt.Sprintf("%v.%v", params[1], params[2])
+			gotParams, _ = params[3].([]interface{})[0].(map[string]interface{})
+		}
+		json.NewEncoder(w).Encode(callResponse(nil))
+	})
+
+	params := map[string]interface{}{"name": "cockpit_a_1", "proto": "tcp", "dest_ip": "10.0.0.5", "dest_port": "16992"}
+	if err := c.AddFirewallRedirect(params); err != nil {
+		t.Fatalf("AddFirewallRedirect() error = %v", err)
+	}
+	if gotMethod != "firewall.add_redirect" {
+		t.Fatalf("method = %s", gotMethod)
+	}
+	if gotParams["name"] != "cockpit_a_1" || gotParams["dest_port"] != "16992" {
+		t.Fatalf("params = %v", gotParams)
+	}
+}
+
+// TestRemoveFirewallRedirect 拆规则走 firewall.del_redirect 且只带规则名。
+func TestRemoveFirewallRedirect(t *testing.T) {
+	loginDone := false
+	var gotMethod string
+	var gotParams map[string]interface{}
+	c := newTestOpenWrt(t, func(w http.ResponseWriter, r *http.Request) {
+		if !loginDone {
+			loginDone = true
+			json.NewEncoder(w).Encode(loginResponse("sess1"))
+			return
+		}
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		params, _ := req["params"].([]interface{})
+		if len(params) >= 4 {
+			gotMethod = fmt.Sprintf("%v.%v", params[1], params[2])
+			gotParams, _ = params[3].([]interface{})[0].(map[string]interface{})
+		}
+		json.NewEncoder(w).Encode(callResponse(nil))
+	})
+
+	if err := c.RemoveFirewallRedirect("cockpit_a_1"); err != nil {
+		t.Fatalf("RemoveFirewallRedirect() error = %v", err)
+	}
+	if gotMethod != "firewall.del_redirect" {
+		t.Fatalf("method = %s", gotMethod)
+	}
+	if len(gotParams) != 1 || gotParams["name"] != "cockpit_a_1" {
+		t.Fatalf("params = %v", gotParams)
+	}
+}
+
+// TestFirewallRedirectWriteCallError 调用失败原样透传。
+func TestFirewallRedirectWriteCallError(t *testing.T) {
+	if err := covWrtCallError(t).AddFirewallRedirect(map[string]interface{}{"name": "a"}); err == nil {
+		t.Fatal("call error should propagate")
+	}
+	if err := covWrtCallError(t).RemoveFirewallRedirect("a"); err == nil {
+		t.Fatal("call error should propagate")
+	}
 }
