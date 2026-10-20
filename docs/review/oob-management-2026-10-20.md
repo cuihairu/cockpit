@@ -89,7 +89,7 @@ Cockpit — Out-of-Band Management
 
 - [x] P0 OOB 统一 Provider 框架（能力三态 supported/enabled/reachable + 发现与协商；并入 internal/cloud 同款拆分思路）〔已落 42241d4：`internal/oob`（六能力/三态+Usable/秩仲裁/Registry+并发 ProbeAll/Merge 来源可溯），包测试 10 项绿 + 包覆盖率 100%〕
 - [x] P0 Redfish Provider（服务器线，基于 bmc-capabilities 设计基座）〔已落：`internal/oob/redfish` 只读发现探测（service root 门禁 + System/Manager/Bios 三态核实，缺证据能力不猜、401 如实报「可达未定」），httptest 契约测试 13 项绿 + 包覆盖率 100%；边界=凭据面（vault→Basic/Session）与电源/传感器操作面随 bmc-capabilities §7 BMC-B3/B4 片落位，本片不自研 quirk〕
-- [ ] P0 Intel AMT Provider（vPro 商用机）
+- [x] P0 Intel AMT Provider（vPro 商用机）〔已落（发现片）：`internal/oob/wsman`（WS-Management Identify 1.0 免认证共用层，DASH 同源）+ `internal/oob/amt`（无 scheme 默认 http、无 port 默认 :16992、产品匹配拒错认 DASH/通用 WBEM、401 如实报可达未定）；httptest 契约 21 用例绿 + 两包覆盖率 100%；Identify 只证固件在位+可达，**不报能力**——启用态（Provisioning）与 power/KVM/SOL 能力面需认证 wsman，随凭据片经 vault 落位〕
 - [ ] P0 AMD DASH Provider（优先 DASH CLI + Manageability API 集成）
 - [ ] P0 OpenWrt 自举节点：探活层 + WOL + 兜底转发编排 + 自启动可靠性（衔接 internal/openwrt）
 - [ ] P1 支持机型矩阵文档（每行三态实测，未实测不入表）
