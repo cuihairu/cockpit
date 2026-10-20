@@ -544,6 +544,13 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		})
 	}
 
+	// oob capability：带外兜底动作面（WOL 魔术包发送，UDP 出站零外部依赖，
+	// 全平台可用，无需 detector；见 oob-openwrt-bootstrap.md 片A）
+	capabilities = append(capabilities, protocol.Capability{
+		Type:    "oob",
+		Version: "1",
+	})
+
 	return capabilities
 }
 

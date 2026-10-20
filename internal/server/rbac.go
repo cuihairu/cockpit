@@ -30,6 +30,7 @@ var resourceRules = []resourceRule{
 	{"/api/docker", "docker", ""},
 	{"/api/stacks", "stack", ""},
 	{"/api/backups", "backup", ""},
+	{"/api/oob", "inventory", ""}, // 带外兜底动作（WOL）：动作落在库存主机上，归 inventory 写门禁
 	{"/api/server-backups", "backup", ""},
 	{"/api/probe", "alerts", ""},
 	{"/api/notification", "alerts", ""},

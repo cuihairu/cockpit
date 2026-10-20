@@ -78,6 +78,9 @@ const (
 	// resource=执行面 provider）。与 service_health 自愈归集同口径：审计
 	// 由 server 落库，来源标记 cockpit-agent。
 	ActionExec = "exec"
+	// 带外兜底动作（见 docs/design/oob-openwrt-bootstrap.md 片A）：WOL 魔术包
+	// 由 agent 在局域网内发送，server 转发并记目标 MAC 与实际发送目标。
+	ActionOobWol = "oob_wol"
 )
 
 // ResourceStack Compose Stack 资源类型
@@ -155,6 +158,9 @@ const ResourceOverlayNetwork = "overlay_network"
 
 // ResourceDomainBinding 服务域名绑定资源类型（见 domain-binding-design.md）
 const ResourceDomainBinding = "domain_binding"
+
+// ResourceOob 带外兜底动作资源类型（WOL 唤醒等，见 oob-openwrt-bootstrap.md）
+const ResourceOob = "oob"
 
 // Status 状态
 const (

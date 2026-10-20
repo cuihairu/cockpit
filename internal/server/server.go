@@ -318,6 +318,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 注册备份管理 API
 	s.registerBackupsAPI(mux)
 
+	// 注册带外兜底动作 API（见 api_oob.go，oob-openwrt-bootstrap.md 片A）
+	s.registerOobAPI(mux)
+
 	// 注册远程连接 API
 	s.registerRemoteAPI(mux)
 
