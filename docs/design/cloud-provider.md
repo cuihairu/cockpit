@@ -84,7 +84,7 @@ Operation{ ID, Kind(create/start/stop/delete), NativeID(资源 ID 或厂商句�
 |---|---|---|
 | **1（本片）** | `internal/cloud`：接口、能力声明+注册表校验、Operation 状态机、资源/成本类型 | `go build ./...`、`go test ./internal/cloud/...`、包覆盖率 100%（登记制口径） |
 | **2（已落 2026-10-20）** | `cloud_accounts`/`cloud_instances` 表（GORM AutoMigrate 随 Open 自动迁移，无独立迁移脚本）+ 存储层 `internal/storage/cloud.go`（账号 upsert/list/delete、实例 upsert/list/delete，均按业务唯一键幂等）+ 凭据红线落地：表内只存 `${VAR}` 引用（形态校验拒绝明文与拼接），运行时经 env 解析、未设值 fail-closed | 同上 + `go test ./internal/storage/...` |
-| 3 | 阿里云适配器（Compute+Quota；复用 `sign.go`）+ 适配器测试（fake server） | 同上 + 厂商契约测试 |
+| 3（Compute 已落 2026-10-20，Quota 子片待排） | 阿里云 ECS 适配器：**Compute 已落**（`internal/cloud/aliyun`：RPC V1 签名复用抽出的 `internal/alisign` 中立包（原 `internal/dns/sign.go` 迁移，dns 同步改用）；DescribeInstances 分页列表 + 状态/计费归一（过渡态归 unknown 且原文保留、BillingContinues 只按计费模式事实填充）；RunInstances 创建（`InstanceSpec` 增 `SecurityGroupID`，多数厂商创建必需）；启停删同构动作；GetOperation 以目标实例状态推断完成态，ECS 失败同步发生在请求时不制造 failed 态）+ fake server 契约测试（桩侧复算签名）包覆盖 100%；**Quota 子片待排**〔统一配额服务 API 契约未经真实账号核对，不硬造，随片 4 验收解锁〕 | 同上 + 厂商契约测试 |
 | 4 | 腾讯云适配器 + 双厂商闭环验收（需用户 AccessKey） | 真机验收 checklist |
 
-**外部阻塞（片 3/4）**：真实云账号 AccessKey 由用户提供（凭据经 vault 配置，不进聊天不进仓）。
+**外部阻塞（片 4 与片 3 的 Quota 子片）**：真实云账号 AccessKey 由用户提供（凭据经 vault 配置，不进聊天不进仓）。片 3 的 Compute 部分已按厂商契约测试（fake server）落地；真实账号连通性验证并入片 4 双厂商闭环验收。

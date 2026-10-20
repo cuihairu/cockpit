@@ -86,8 +86,11 @@ first (P1 decision point — documented here, no mechanism in this slice).
 |---|---|---|
 | **1 (this)** | `internal/cloud`: interfaces, capability declaration + registry validation, Operation state machine, resource/cost types | `go build ./...`, `go test ./internal/cloud/...`, 100% package coverage per registry policy |
 | **2 (done 2026-10-20)** | `cloud_accounts` / `cloud_instances` tables (GORM AutoMigrate runs inside Open, no separate migration script) + storage layer `internal/storage/cloud.go` (account upsert/list/delete, instance upsert/list/delete, all idempotent on their business unique keys) + credential red line enforced: only `${VAR}` references stored (form validation rejects plaintext and concatenation), resolved at runtime via env, fail-closed when unset | same + `go test ./internal/storage/...` |
-| 3 | Aliyun adapter (Compute+Quota; reuse `sign.go`) + fake-server contract tests | same + vendor contract tests |
+| 3 (Compute done 2026-10-20; Quota sub-slice pending) | Aliyun ECS adapter: **Compute landed** (`internal/cloud/aliyun`: RPC V1 signing reuses the extracted neutral package `internal/alisign` (migrated from `internal/dns/sign.go`, dns switched to it); paginated DescribeInstances listing + status/billing normalization (transitional states map to unknown with the raw string preserved; BillingContinues only states billing-model facts); RunInstances creation (`InstanceSpec` gains `SecurityGroupID`, required by most vendors); start/stop/delete sharing one action shape; GetOperation infers completion from the target instance state — ECS failures surface synchronously at request time, so this surface never fabricates a failed state) + fake-server contract tests (stub recomputes the signature), 100% package coverage; **Quota sub-slice pending** (the unified quota service API contract is unverified against a real account — not fabricated; unlocks with slice 4 acceptance) | same + vendor contract tests |
 | 4 | Tencent Cloud adapter + two-vendor closed-loop acceptance (needs user AccessKeys) | on-machine acceptance checklist |
 
-**External blockage (slices 3/4)**: real cloud AccessKeys are provided by the user
-(configured through the vault; never in chat, never in the repo).
+**External blockage (slice 4 and slice 3's Quota sub-slice)**: real cloud AccessKeys
+are provided by the user (configured through the vault; never in chat, never in the
+repo). Slice 3's Compute part landed against vendor contract tests (fake server);
+real-account connectivity verification folds into slice 4's two-vendor closed-loop
+acceptance.

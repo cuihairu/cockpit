@@ -211,12 +211,12 @@ Cockpit 的扩展价值反而更大，因为它没有必要成为游戏专用平
 
 ## 落地跟踪
 
-> 每项落地后勾选并附 commit hash + 测试证据。全部条目当前状态：**未立项**（待用户拍板优先级后按 P0→P1→P2 排单）。
+> 每项落地后勾选并附 commit hash + 测试证据。P0 已拍板开工（2026-10-20，todo.md:55；首批厂商已代决：阿里云+腾讯云）。
 
-- [ ] P0 云账号接入（CloudAccount 模型 + 凭据入 vault + 权限范围）
+- [ ] P0 云账号接入（CloudAccount 模型 + 凭据入 vault + 权限范围）〔片2 已落 CloudAccount 表 + `${VAR}` 引用形态校验（8825a29）；vault 配置入口与权限范围随接线片〕
 - [ ] P0 云资源自动发现与原生 ID 关联（Inventory 扩展）
-- [ ] P0 Provider Framework（拆分接口 + 能力声明 + 异步 Operation 语义）
-- [ ] P0 计算生命周期闭环（先选两家实际在用的云：接入→发现→创建→关联 Agent→停止/释放→成本归集）
+- [x] P0 Provider Framework（拆分接口 + 能力声明 + 异步 Operation 语义）〔已落 cfeee64：`internal/cloud` 拆分接口/能力声明+注册表 fail-closed 校验/Operation 状态机，包测试绿 + 覆盖 100%〕
+- [ ] P0 计算生命周期闭环（先选两家实际在用的云：接入→发现→创建→关联 Agent→停止/释放→成本归集）〔片3 Compute 适配器已落：`internal/cloud/aliyun` ECS ComputeProvider，fake server 契约测试绿 + 包覆盖 100%（hash 见 todo.md:55）；账号/实例接线与腾讯云片4 待做〕
 - [ ] P0 成本地基（预计/估算/实际三层 + 资源状态与计费状态分离 + 归属链）
 - [ ] P1 资源池与容量（已持有 + 弹性两种容量）
 - [ ] P1 Go Reconciler（期望/实际/协调记录；不碰 CRD）
