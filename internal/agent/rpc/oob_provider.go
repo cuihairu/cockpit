@@ -66,6 +66,8 @@ func (p *OobProvider) Call(action string, params map[string]interface{}) (interf
 		return p.RemoveRedirect(params)
 	case "redirect.list":
 		return p.ListRedirects(params)
+	case "redirect.sweep":
+		return p.SweepRedirects(params)
 	}
 	return nil, fmt.Errorf("unknown action: %s", action)
 }
@@ -406,4 +408,36 @@ func (p *OobProvider) ListRedirects(params map[string]interface{}) (interface{},
 		return nil, fmt.Errorf("oob.redirect.list: failed to list redirects: %w", err)
 	}
 	return map[string]interface{}{"redirects": body}, nil
+}
+
+// SweepRedirects 清扫设备上已过期的兜底转发规则（action "redirect.sweep"）：
+// 过期账在规则名里（cockpit_ 前缀 + 过期 Unix 时刻，见 internal/oob/redirect），
+// 只拆前缀所属且时刻已过的规则——用户自建与未到期的都不碰；单条拆除失败
+// 即中止并报错（不静默吞掉，宁可再生清扫一次）。返回实际拆除的规则名。
+func (p *OobProvider) SweepRedirects(params map[string]interface{}) (interface{}, error) {
+	if params == nil {
+		return nil, fmt.Errorf("oob.redirect.sweep: params required")
+	}
+	conn, err := parseRedirectConn(params)
+	if err != nil {
+		return nil, fmt.Errorf("oob.redirect.sweep: %w", err)
+	}
+	exec := newRedirectExecutor(conn.config())
+	rules, err := exec.ListFirewallRedirects()
+	if err != nil {
+		return nil, fmt.Errorf("oob.redirect.sweep: failed to list redirects: %w", err)
+	}
+	now := time.Now()
+	removed := []string{}
+	for _, rule := range rules {
+		name, _ := rule["name"].(string)
+		if !redirect.Owned(name) || !redirect.IsExpired(name, now) {
+			continue
+		}
+		if err := exec.RemoveFirewallRedirect(name); err != nil {
+			return nil, fmt.Errorf("oob.redirect.sweep: failed to remove %q: %w", name, err)
+		}
+		removed = append(removed, name)
+	}
+	return map[string]interface{}{"removed": removed, "count": len(removed)}, nil
 }

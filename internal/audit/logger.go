@@ -91,6 +91,9 @@ const (
 	// 手动拆除转发规则：拆之前同样二次确认（confirm_name 必须等于规则名），
 	// 与 TTL 自动失效并列的两条退出路径。
 	ActionOobRedirectRemove = "oob_redirect_remove"
+	// 清扫设备上全部已过期规则：TTL 失效账在规则名里（cockpit_ 前缀 +
+	// 过期 Unix 时刻），清扫只拆前缀所属且名字时刻已过的规则。
+	ActionOobRedirectSweep = "oob_redirect_sweep"
 )
 
 // ResourceStack Compose Stack 资源类型

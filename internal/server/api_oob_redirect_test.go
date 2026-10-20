@@ -6,6 +6,7 @@ package server
 // 无真实 ubus 调用（规则读写在 agent 侧 provider 与 openwrt 客户端，已单测）。
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -88,6 +89,8 @@ func oobRedirectSuccessServer(t *testing.T) (*Server, map[string]interface{}) {
 			return map[string]interface{}{"name": "cockpit_amtbmc_1", "expiry": 1800, "ttl_seconds": 1800}, ""
 		case "oob.redirect.remove":
 			return map[string]interface{}{"name": "cockpit_amtbmc_1"}, ""
+		case "oob.redirect.sweep":
+			return map[string]interface{}{"removed": []interface{}{"cockpit_amtbmc_1", 42}, "count": 1}, ""
 		}
 		return nil, "unknown method " + method
 	})
@@ -590,5 +593,146 @@ func TestVaultOobTargetGenericError(t *testing.T) {
 	s := &Server{vaultProvider: &oobFakeVault{err: errors.New("backend down")}}
 	if _, err := s.vaultOobTarget("gw"); err == nil || !strings.Contains(err.Error(), "backend down") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// ============ 清扫 ============
+
+func TestOobRedirectSweepValidation(t *testing.T) {
+	s, _ := oobRedirectSuccessServer(t)
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"bad json", `nope`, http.StatusBadRequest},
+		{"missing agent and oob", `{}`, http.StatusBadRequest},
+		{"missing oob", `{"agent_id":"a1"}`, http.StatusBadRequest},
+		{"confirm mismatch", `{"agent_id":"a1","oob":"gw","confirm_oob":"other"}`, http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := covRec()
+			s.handleOobRedirectSweep(rec, covReq(http.MethodPost, "/api/oob/redirect/sweep", strings.NewReader(c.body)))
+			covWantCode(t, c.name, rec, c.want)
+		})
+	}
+}
+
+func TestOobRedirectSweepOfflineCapabilityAndVault(t *testing.T) {
+	s := newTestServerWithDB(t)
+	s.vaultProvider = &oobFakeVault{entries: map[string]*vault.Entry{"oob/gw": gwEntry(nil)}}
+	rec := covRec()
+	s.handleOobRedirectSweep(rec, covReq(http.MethodPost, "/api/oob/redirect/sweep",
+		strings.NewReader(`{"agent_id":"a1","oob":"gw","confirm_oob":"gw"}`)))
+	covWantCode(t, "offline", rec, http.StatusServiceUnavailable)
+
+	s2 := newTestServerWithDB(t)
+	s2.vaultProvider = &oobFakeVault{entries: map[string]*vault.Entry{"oob/gw": gwEntry(nil)}}
+	withFakeBackupAgentCap(t, s2, "a1", []protocol.Capability{{Type: "backup", Version: "1"}}, nil)
+	rec = covRec()
+	s2.handleOobRedirectSweep(rec, covReq(http.MethodPost, "/api/oob/redirect/sweep",
+		strings.NewReader(`{"agent_id":"a1","oob":"gw","confirm_oob":"gw"}`)))
+	covWantCode(t, "no oob cap", rec, http.StatusNotFound)
+
+	s3 := newTestServerWithDB(t)
+	s3.vaultProvider = &oobFakeVault{locked: true}
+	oobFakeAgent(t, s3, "a1", func(string, map[string]interface{}) (interface{}, string) {
+		return nil, "must not reach agent"
+	})
+	rec = covRec()
+	s3.handleOobRedirectSweep(rec, covReq(http.MethodPost, "/api/oob/redirect/sweep",
+		strings.NewReader(`{"agent_id":"a1","oob":"gw","confirm_oob":"gw"}`)))
+	covWantCode(t, "vault locked", rec, http.StatusServiceUnavailable)
+}
+
+func TestOobRedirectSweepForwards(t *testing.T) {
+	s, got := oobRedirectSuccessServer(t)
+	rec := covRec()
+	s.handleOobRedirectSweep(rec, covReq(http.MethodPost, "/api/oob/redirect/sweep",
+		strings.NewReader(`{"agent_id":"a1","oob":"gw","confirm_oob":"gw"}`)))
+	covWantCode(t, "sweep", rec, http.StatusOK)
+	if got["host"] != "10.0.0.9" {
+		t.Fatalf("conn params = %v", got)
+	}
+	if !strings.Contains(rec.Body.String(), "cockpit_amtbmc_1") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	logs, _, err := s.db.GetAuditLogs(0, 50, map[string]interface{}{"action": audit.ActionOobRedirectSweep})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("audit = %+v", logs)
+	}
+	var details map[string]interface{}
+	if err := json.Unmarshal([]byte(logs[0].Details), &details); err != nil {
+		t.Fatalf("audit details not json: %v (%s)", err, logs[0].Details)
+	}
+	// agent 回传里混入的非字符串项跳过（42 不进拆除清单）
+	if details["count"] != float64(1) {
+		t.Fatalf("details = %v", details)
+	}
+	if removed, ok := details["removed"].([]interface{}); !ok || len(removed) != 1 || removed[0] != "cockpit_amtbmc_1" {
+		t.Fatalf("removed = %v", details["removed"])
+	}
+}
+
+func TestOobRedirectSweepAgentError(t *testing.T) {
+	s := newTestServerWithDB(t)
+	s.vaultProvider = &oobFakeVault{entries: map[string]*vault.Entry{"oob/gw": gwEntry(nil)}}
+	oobFakeAgent(t, s, "a1", func(string, map[string]interface{}) (interface{}, string) {
+		return nil, "oob.redirect.sweep: failed to list redirects: conn refused"
+	})
+	rec := covRec()
+	s.handleOobRedirectSweep(rec, covReq(http.MethodPost, "/api/oob/redirect/sweep",
+		strings.NewReader(`{"agent_id":"a1","oob":"gw","confirm_oob":"gw"}`)))
+	covWantCode(t, "agent error", rec, http.StatusBadGateway)
+	// 拒绝同走 ActionOobRedirect 留痕（与下发/拆除一致）
+	logs, _, err := s.db.GetAuditLogs(0, 50, map[string]interface{}{"action": audit.ActionOobRedirect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("refusal must be audited: %+v", logs)
+	}
+}
+
+func TestOobRedirectSweepCallAgentError(t *testing.T) {
+	s := newTestServerWithDB(t)
+	s.vaultProvider = &oobFakeVault{entries: map[string]*vault.Entry{"oob/gw": gwEntry(nil)}}
+	agent := NewAgent("a1", nil)
+	agent.Capabilities = []protocol.Capability{{Type: "oob"}}
+	if err := s.registry.Register(agent); err != nil {
+		t.Fatal(err)
+	}
+	rec := covRec()
+	s.handleOobRedirectSweep(rec, covReq(http.MethodPost, "/api/oob/redirect/sweep",
+		strings.NewReader(`{"agent_id":"a1","oob":"gw","confirm_oob":"gw"}`)))
+	covWantCode(t, "call error", rec, http.StatusBadGateway)
+}
+
+// TestOobRedirectSweepViaMux 路由分发走 handleOobAPI 的 sweep 分支，
+// 且鉴权上下文下审计 username 为登录用户。
+func TestOobRedirectSweepViaMux(t *testing.T) {
+	s, _ := oobRedirectSuccessServer(t)
+	token, err := s.authService().GenerateToken("1", "admin", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	s.registerOobAPI(mux)
+	req := covReq(http.MethodPost, "/api/oob/redirect/sweep",
+		strings.NewReader(`{"agent_id":"a1","oob":"gw","confirm_oob":"gw"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := covRec()
+	mux.ServeHTTP(rec, req)
+	covWantCode(t, "sweep", rec, http.StatusOK)
+	logs, _, err := s.db.GetAuditLogs(0, 50, map[string]interface{}{"action": audit.ActionOobRedirectSweep})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].Username != "admin" {
+		t.Fatalf("sweep audit = %+v", logs)
 	}
 }

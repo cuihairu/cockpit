@@ -6,6 +6,7 @@ package rpc
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,12 +17,15 @@ import (
 
 var errBoom = errors.New("boom")
 
-// fakeExecutor 记录调用并回放错误。
+// fakeExecutor 记录调用并回放错误。rules 非空时列表返回它（缺省两条），
+// removeErr 只作用于拆除（清扫单条失败分支用）。
 type fakeExecutor struct {
-	added   []map[string]interface{}
-	removed []string
-	listed  bool
-	err     error
+	added     []map[string]interface{}
+	removed   []string
+	listed    bool
+	err       error
+	rules     []map[string]interface{}
+	removeErr error
 }
 
 func (f *fakeExecutor) AddFirewallRedirect(p map[string]interface{}) error {
@@ -32,6 +36,9 @@ func (f *fakeExecutor) AddFirewallRedirect(p map[string]interface{}) error {
 	return nil
 }
 func (f *fakeExecutor) RemoveFirewallRedirect(name string) error {
+	if f.removeErr != nil {
+		return f.removeErr
+	}
 	if f.err != nil {
 		return f.err
 	}
@@ -43,6 +50,9 @@ func (f *fakeExecutor) ListFirewallRedirects() ([]map[string]interface{}, error)
 		return nil, f.err
 	}
 	f.listed = true
+	if f.rules != nil {
+		return f.rules, nil
+	}
 	return []map[string]interface{}{{"name": "cockpit_a_1"}, {"name": "user_rule"}}, nil
 }
 
@@ -255,11 +265,73 @@ func TestOobRedirectListErrors(t *testing.T) {
 	}
 }
 
+// ============ 清扫 ============
+
+// TestOobRedirectSweepForwards 只拆过期且 cockpit 前缀的规则：未到期、
+// 用户自建、名字字段残缺的一律不动。
+func TestOobRedirectSweepForwards(t *testing.T) {
+	f := &fakeExecutor{}
+	withFakeRedirectExecutor(t, f)
+	f.rules = []map[string]interface{}{
+		{"name": "cockpit_expired_1"}, // 过期时刻 unix 1
+		{"name": fmt.Sprintf("cockpit_fresh_%d", time.Now().Add(time.Hour).Unix())}, // 未到期
+		{"name": "user_rule"}, // 用户自建
+		{"name": 42},          // 名字非字符串
+		{"src": "wan"},        // 无名字
+	}
+	out, err := NewOobProvider(nil, nil, nil).SweepRedirects(map[string]interface{}{"host": "10.0.0.9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := out.(map[string]interface{})
+	if m["count"] != 1 {
+		t.Fatalf("count = %v (removed %v, exec %v)", m["count"], m["removed"], f.removed)
+	}
+	if removed := m["removed"].([]string); len(removed) != 1 || removed[0] != "cockpit_expired_1" {
+		t.Fatalf("removed = %v", removed)
+	}
+	if len(f.removed) != 1 || f.removed[0] != "cockpit_expired_1" {
+		t.Fatalf("exec removed = %v", f.removed)
+	}
+}
+
+func TestOobRedirectSweepErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		params map[string]interface{}
+		f      *fakeExecutor
+	}{
+		{"nil params", nil, &fakeExecutor{}},
+		{"no host", map[string]interface{}{}, &fakeExecutor{}},
+		{"list error", map[string]interface{}{"host": "10.0.0.9"}, &fakeExecutor{err: errBoom}},
+	}
+	for _, c := range cases {
+		withFakeRedirectExecutor(t, c.f)
+		if _, err := NewOobProvider(nil, nil, nil).SweepRedirects(c.params); err == nil {
+			t.Fatalf("%s: want error", c.name)
+		}
+	}
+}
+
+// TestOobRedirectSweepRemoveError 单条拆除失败即中止；错误文案带规则名不带凭据。
+func TestOobRedirectSweepRemoveError(t *testing.T) {
+	f := &fakeExecutor{rules: []map[string]interface{}{{"name": "cockpit_expired_1"}}, removeErr: errBoom}
+	withFakeRedirectExecutor(t, f)
+	params := map[string]interface{}{"host": "10.0.0.9", "password": "secretpw"}
+	_, err := NewOobProvider(nil, nil, nil).SweepRedirects(params)
+	if err == nil || !strings.Contains(err.Error(), `failed to remove "cockpit_expired_1"`) {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(err.Error(), "secretpw") {
+		t.Fatalf("credential leaked into error: %v", err)
+	}
+}
+
 // ============ 分发 ============
 
 func TestOobRedirectDispatch(t *testing.T) {
 	p := NewOobProvider(nil, nil, nil)
-	for _, action := range []string{"redirect", "redirect.remove", "redirect.list"} {
+	for _, action := range []string{"redirect", "redirect.remove", "redirect.list", "redirect.sweep"} {
 		if _, err := p.Call(action, nil); err == nil {
 			t.Fatalf("%s must error on nil params", action)
 		}

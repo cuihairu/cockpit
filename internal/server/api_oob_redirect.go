@@ -285,6 +285,84 @@ func (s *Server) handleOobRedirectList(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, rpcResp.Data)
 }
 
+// oobRedirectSweepRequest 清扫请求：确认字段落在本包凭据条目名上——
+// 清扫的破坏面是「该设备上全部已过期规则」，指认到 vault 条目即指认到设备。
+type oobRedirectSweepRequest struct {
+	AgentID    string `json:"agent_id"`
+	Oob        string `json:"oob"`
+	ConfirmOob string `json:"confirm_oob"`
+}
+
+// handleOobRedirectSweep POST /api/oob/redirect/sweep：双确认后清扫该设备上
+// 全部已过期的 cockpit 规则（拆什么由 agent 按规则名里的过期时刻定，
+// server 只做指认与留痕）。
+func (s *Server) handleOobRedirectSweep(w http.ResponseWriter, r *http.Request) {
+	var req oobRedirectSweepRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.handleError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.AgentID == "" || req.Oob == "" {
+		s.handleError(w, r, http.StatusBadRequest, "agent_id and oob required")
+		return
+	}
+	if req.ConfirmOob != req.Oob {
+		s.handleError(w, r, http.StatusBadRequest, "confirm_oob must match oob")
+		return
+	}
+	agent, ok := s.registry.Get(req.AgentID)
+	if !ok {
+		s.handleError(w, r, http.StatusServiceUnavailable, "agent offline")
+		return
+	}
+	if !agent.HasCapability("oob") {
+		s.handleError(w, r, http.StatusNotFound, "oob capability not available")
+		return
+	}
+	conn, err := s.vaultOobTarget(req.Oob)
+	if err != nil {
+		s.handleError(w, r, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	resp, err := s.CallAgent(req.AgentID, "oob.redirect.sweep", conn)
+	if err != nil {
+		s.handleError(w, r, http.StatusBadGateway, "failed to reach agent: "+err.Error())
+		return
+	}
+	rpcResp, err := protocol.DecodeRPCResponse(resp)
+	if err != nil || rpcResp.Status == "error" {
+		// 拒绝同走 ActionOobRedirect 留痕（与下发/拆除的拒绝同动作）
+		s.auditRedirectRefuse(r, req.AgentID, "", rpcResp.Error)
+		s.handleError(w, r, http.StatusBadGateway, "failed to sweep redirects")
+		return
+	}
+	s.auditOobRedirectSweep(r, req, rpcResp.Data)
+	s.writeJSON(w, http.StatusOK, rpcResp.Data)
+}
+
+// auditOobRedirectSweep 清扫审计：对象 vault 条目 + agent 回传的拆除清单。
+func (s *Server) auditOobRedirectSweep(r *http.Request, req oobRedirectSweepRequest, data interface{}) {
+	username := "unknown"
+	if userInfo, ok := auth.GetUserFromContext(r); ok {
+		username = userInfo.Username
+	}
+	details := map[string]interface{}{"oob": req.Oob}
+	if m, ok := data.(map[string]interface{}); ok {
+		if names, ok := m["removed"].([]interface{}); ok {
+			removed := make([]string, 0, len(names))
+			for _, n := range names {
+				if v, ok := n.(string); ok {
+					removed = append(removed, v)
+				}
+			}
+			details["removed"] = removed
+			details["count"] = len(removed)
+		}
+	}
+	s.audit.LogResource(username, audit.ActionOobRedirectSweep, audit.ResourceOob, req.AgentID,
+		details, s.getClientIP(r), r.UserAgent())
+}
+
 // auditOobRedirect 下发审计：规格 + agent 生成的规则名与过期时刻。
 func (s *Server) auditOobRedirect(r *http.Request, req oobRedirectRequest, data interface{}) {
 	username := "unknown"
