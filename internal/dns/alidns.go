@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cuihairu/cockpit/internal/alisign"
 )
 
 const (
@@ -66,10 +68,10 @@ func (p *aliProvider) do(ctx context.Context, action string, params url.Values) 
 	params.Set("AccessKeyId", p.accessKey)
 	params.Set("SignatureMethod", "HMAC-SHA1")
 	params.Set("SignatureVersion", "1.0")
-	params.Set("SignatureNonce", aliNonce())
+	params.Set("SignatureNonce", alisign.Nonce())
 	params.Set("Timestamp", time.Now().UTC().Format("2006-01-02T15:04:05Z"))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.base+"/?"+aliSignQuery(p.secretKey, params), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.base+"/?"+alisign.SignQuery(p.secretKey, params), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

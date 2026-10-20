@@ -1,75 +1,19 @@
 package dns
 
-// alidns_test.go 阿里云 provider 的测试：RPC V1 签名纯函数表驱动 +
-// 全操作 httptest（桩侧复算签名验证参数配套），M2 D13/D15。
+// alidns_test.go 阿里云 provider 的测试：全操作 httptest（桩侧经
+// internal/alisign 复算签名验证参数配套），M2 D13/D15。
+// 签名纯函数单元测试已随签名器迁至 internal/alisign/sign_test.go。
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha1"
-	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/cuihairu/cockpit/internal/alisign"
 )
-
-// TestAliPercentEncode 阿里云规则：unreserved 不转义、空格 %20、
-// 特殊字符 !'()* 全编码且大写 HEX
-func TestAliPercentEncode(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"abc-_.~123", "abc-_.~123"},
-		{"a b", "a%20b"},
-		{"!", "%21"},
-		{"'", "%27"},
-		{"(", "%28"},
-		{")", "%29"},
-		{"*", "%2A"},
-		{"2015-01-09T15:04:05Z", "2015-01-09T15%3A04%3A05Z"},
-		{"a+b", "a%2Bb"},
-	}
-	for _, c := range cases {
-		if got := aliPercentEncode(c.in); got != c.want {
-			t.Errorf("aliPercentEncode(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// TestAliCanonicalQuery 参数按名称排序后逐个编码
-func TestAliCanonicalQuery(t *testing.T) {
-	q := aliCanonicalQuery(url.Values{
-		"Action":   {"DescribeDomains"},
-		"PageSize": {"50"},
-		"Format":   {"json"},
-	})
-	want := "Action=DescribeDomains&Format=json&PageSize=50"
-	if q != want {
-		t.Errorf("canonical = %q, want %q", q, want)
-	}
-	if got := aliCanonicalQuery(nil); got != "" {
-		t.Errorf("nil params = %q", got)
-	}
-}
-
-// TestAliSign 与独立实现的 HMAC-SHA1(secret+"&") 对拍
-func TestAliSign(t *testing.T) {
-	got := aliSign("GET&%2F&abc", "testsecret")
-	mac := hmac.New(sha1.New, []byte("testsecret&"))
-	mac.Write([]byte("GET&%2F&abc"))
-	want := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-	if got != want {
-		t.Errorf("aliSign = %q, want %q", got, want)
-	}
-}
-
-// TestAliNonce 唯一数非空且两次生成不同
-func TestAliNonce(t *testing.T) {
-	a, b := aliNonce(), aliNonce()
-	if a == "" || a == b {
-		t.Errorf("nonce should be non-empty and unique, got %q %q", a, b)
-	}
-}
 
 // newMockAliDNS 起一个记录请求的 mock API；handle 按 action 分发响应，
 // 桩侧对每次请求复算签名，验证 do() 组装的 query 参数与 Signature 配套
@@ -83,8 +27,8 @@ func newMockAliDNS(t *testing.T, handle func(action string, q url.Values) (int, 
 				params[k] = v
 			}
 		}
-		stringToSign := "GET&%2F&" + aliPercentEncode(aliCanonicalQuery(params))
-		if want := aliSign(stringToSign, "sk-test"); q.Get("Signature") != want {
+		stringToSign := "GET&%2F&" + alisign.PercentEncode(alisign.CanonicalQuery(params))
+		if want := alisign.Sign(stringToSign, "sk-test"); q.Get("Signature") != want {
 			t.Errorf("signature mismatch: got %q, want %q", q.Get("Signature"), want)
 		}
 		code, body := handle(q.Get("Action"), q)
