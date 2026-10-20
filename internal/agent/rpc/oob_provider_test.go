@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/oob/liveness"
 	"github.com/cuihairu/cockpit/internal/oob/wol"
 )
 
@@ -109,14 +110,14 @@ func stubIfaceSeam(t *testing.T, ifaces []net.Interface, seeds map[string]oobIfa
 
 func TestOobProviderType(t *testing.T) {
 	stubIfaceSeam(t, nil, nil)
-	if p := NewOobProvider(newFakeSender(t).sender, nil); p.Type() != "oob" {
+	if p := NewOobProvider(newFakeSender(t).sender, nil, nil); p.Type() != "oob" {
 		t.Fatal("Type must be oob")
 	}
 }
 
 func TestOobUnknownAction(t *testing.T) {
 	stubIfaceSeam(t, nil, nil)
-	p := NewOobProvider(newFakeSender(t).sender, nil)
+	p := NewOobProvider(newFakeSender(t).sender, nil, nil)
 	if _, err := p.Call("wake", map[string]interface{}{"mac": "00:11:22:aa:bb:cc"}); err == nil ||
 		!strings.Contains(err.Error(), "unknown action") {
 		t.Fatalf("unknown action: %v", err)
@@ -133,7 +134,7 @@ func TestOobWolExplicitTarget(t *testing.T) {
 		return nil, errors.New("must not be called")
 	}
 	f := newFakeSender(t)
-	p := NewOobProvider(f.sender, nil)
+	p := NewOobProvider(f.sender, nil, nil)
 	out, err := p.Call("wol", map[string]interface{}{
 		"mac": "00:11:22:aa:bb:cc", "target": "255.255.255.255:9",
 	})
@@ -163,7 +164,7 @@ func TestOobWolExplicitTarget(t *testing.T) {
 func TestOobWolExplicitIPOtherPort(t *testing.T) {
 	stubIfaceSeam(t, nil, nil)
 	f := newFakeSender(t)
-	if _, err := NewOobProvider(f.sender, nil).Call("wol", map[string]interface{}{
+	if _, err := NewOobProvider(f.sender, nil, nil).Call("wol", map[string]interface{}{
 		"mac": "00:11:22:aa:bb:cc", "target": "192.168.1.255", "port": float64(7),
 	}); err != nil {
 		t.Fatalf("wol: %v", err)
@@ -171,7 +172,7 @@ func TestOobWolExplicitIPOtherPort(t *testing.T) {
 	if f.targets[0] != "udp 192.168.1.255:7" {
 		t.Fatalf("target = %v", f.targets)
 	}
-	if _, err := NewOobProvider(f.sender, nil).Call("wol", map[string]interface{}{
+	if _, err := NewOobProvider(f.sender, nil, nil).Call("wol", map[string]interface{}{
 		"mac": "00:11:22:aa:bb:cc", "target": "192.168.1.255", "port": int(8),
 	}); err != nil {
 		t.Fatalf("wol: %v", err)
@@ -194,7 +195,7 @@ func TestOobWolDerivedBroadcast(t *testing.T) {
 		"br-lan":  {addrs: []string{"192.168.1.1/24"}},
 	})
 	f := newFakeSender(t)
-	out, err := NewOobProvider(f.sender, nil).Call("wol", map[string]interface{}{"mac": "00:11:22:aa:bb:cc"})
+	out, err := NewOobProvider(f.sender, nil, nil).Call("wol", map[string]interface{}{"mac": "00:11:22:aa:bb:cc"})
 	if err != nil {
 		t.Fatalf("wol: %v", err)
 	}
@@ -216,7 +217,7 @@ func TestOobWolIfaceFilter(t *testing.T) {
 		"br-vpn": {addrs: []string{"10.10.0.1/24"}},
 	})
 	f := newFakeSender(t)
-	if _, err := NewOobProvider(f.sender, nil).Call("wol", map[string]interface{}{
+	if _, err := NewOobProvider(f.sender, nil, nil).Call("wol", map[string]interface{}{
 		"mac": "00:11:22:aa:bb:cc", "iface": "br-vpn", "port": "7",
 	}); err != nil {
 		t.Fatalf("wol: %v", err)
@@ -242,7 +243,7 @@ func TestOobWolNoBroadcastable(t *testing.T) {
 		"br-raw":   {raw: []string{"10.1.2.3"}},      // 非 IPNet 地址
 	})
 	f := newFakeSender(t)
-	if _, err := NewOobProvider(f.sender, nil).Call("wol", map[string]interface{}{"mac": "00:11:22:aa:bb:cc"}); err == nil ||
+	if _, err := NewOobProvider(f.sender, nil, nil).Call("wol", map[string]interface{}{"mac": "00:11:22:aa:bb:cc"}); err == nil ||
 		!strings.Contains(err.Error(), "no broadcastable") {
 		t.Fatalf("want no-broadcastable error, got %v", err)
 	}
@@ -257,7 +258,7 @@ func TestOobWolParamErrors(t *testing.T) {
 		"br-lan": {addrs: []string{"192.168.1.1/24"}},
 	})
 	f := newFakeSender(t)
-	p := NewOobProvider(f.sender, nil)
+	p := NewOobProvider(f.sender, nil, nil)
 	cases := []struct {
 		name   string
 		params map[string]interface{}
@@ -292,7 +293,7 @@ func TestOobWolInterfaceAndSendErrors(t *testing.T) {
 	orig := netInterfaces
 	t.Cleanup(func() { netInterfaces = orig })
 	netInterfaces = func() ([]net.Interface, error) { return nil, errors.New("boom ifaces") }
-	if _, err := NewOobProvider(newFakeSender(t).sender, nil).Call("wol", map[string]interface{}{"mac": "00:11:22:aa:bb:cc"}); err == nil ||
+	if _, err := NewOobProvider(newFakeSender(t).sender, nil, nil).Call("wol", map[string]interface{}{"mac": "00:11:22:aa:bb:cc"}); err == nil ||
 		!strings.Contains(err.Error(), "list interfaces") {
 		t.Fatalf("iface error: %v", err)
 	}
@@ -301,7 +302,7 @@ func TestOobWolInterfaceAndSendErrors(t *testing.T) {
 		return nil, errors.New("boom dial")
 	}})
 	stubIfaceSeam(t, nil, nil)
-	if _, err := NewOobProvider(dialFail, nil).Call("wol", map[string]interface{}{
+	if _, err := NewOobProvider(dialFail, nil, nil).Call("wol", map[string]interface{}{
 		"mac": "00:11:22:aa:bb:cc", "target": "255.255.255.255:9",
 	}); err == nil || !strings.Contains(err.Error(), "dial") {
 		t.Fatalf("dial error: %v", err)
@@ -310,7 +311,7 @@ func TestOobWolInterfaceAndSendErrors(t *testing.T) {
 	writeFail := wol.New(wol.Options{Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return &oobFakeConn{writeErr: errors.New("boom write")}, nil
 	}})
-	if _, err := NewOobProvider(writeFail, nil).Call("wol", map[string]interface{}{
+	if _, err := NewOobProvider(writeFail, nil, nil).Call("wol", map[string]interface{}{
 		"mac": "00:11:22:aa:bb:cc", "target": "255.255.255.255:9",
 	}); err == nil || !strings.Contains(err.Error(), "send to") {
 		t.Fatalf("write error: %v", err)
@@ -331,7 +332,7 @@ func TestNewOobProviderDefaults(t *testing.T) {
 	ifaceAddrs = func(net.Interface) ([]net.Addr, error) {
 		return oobCIDRs("127.0.0.1/8"), nil
 	}
-	p := NewOobProvider(nil, nil)
+	p := NewOobProvider(nil, nil, nil)
 	if _, err := p.Call("wol", map[string]interface{}{"mac": "00:11:22:aa:bb:cc"}); err == nil ||
 		!strings.Contains(err.Error(), "no broadcastable") {
 		t.Fatalf("want no-broadcastable error, got %v", err)
@@ -356,5 +357,97 @@ func TestIfaceSeamDefaults(t *testing.T) {
 	}
 	if faces == 0 || addrsCount == 0 {
 		t.Fatalf("default seams read no addresses (faces=%d addrs=%d)", faces, addrsCount)
+	}
+}
+
+// TestOobProbeForwards probe 参数转发：ip/ports/timeout 原样传入探活层，
+// Report 原样返回（JSON 数字与字符串两种端口形态）。
+func TestOobProbeForwards(t *testing.T) {
+	want := liveness.Report{IP: "10.0.0.5", ICMP: liveness.Source{Verdict: liveness.VerdictPresent}}
+	var gotIP string
+	var gotOpts liveness.Options
+	probed := false
+	p := NewOobProvider(nil, nil, func(_ context.Context, ip string, opts liveness.Options) liveness.Report {
+		probed = true
+		gotIP = ip
+		gotOpts = opts
+		return want
+	})
+	out, err := p.Call("probe", map[string]interface{}{
+		"ip": "10.0.0.5", "ports": []interface{}{float64(80), "443"}, "timeout": float64(3),
+	})
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if !probed || gotIP != "10.0.0.5" {
+		t.Fatalf("probe args ip=%q probed=%v", gotIP, probed)
+	}
+	if len(gotOpts.Ports) != 2 || gotOpts.Ports[0] != 80 || gotOpts.Ports[1] != 443 {
+		t.Fatalf("ports = %v", gotOpts.Ports)
+	}
+	if gotOpts.Timeout != 3*time.Second {
+		t.Fatalf("timeout = %v", gotOpts.Timeout)
+	}
+	rep, ok := out.(liveness.Report)
+	if !ok || rep.IP != "10.0.0.5" || rep.ICMP.Verdict != liveness.VerdictPresent {
+		t.Fatalf("result = %v", out)
+	}
+}
+
+// TestOobProbeParamErrors probe 参数校验错误分支（桩兜底：非法参数不得触发探测）。
+func TestOobProbeParamErrors(t *testing.T) {
+	p := NewOobProvider(nil, nil, func(context.Context, string, liveness.Options) liveness.Report {
+		t.Fatal("invalid params must not probe")
+		return liveness.Report{}
+	})
+	cases := []struct {
+		name   string
+		params map[string]interface{}
+		want   string
+	}{
+		{"nil params", nil, "params required"},
+		{"missing ip", map[string]interface{}{"ports": []interface{}{float64(80)}}, "ip required"},
+		{"blank ip", map[string]interface{}{"ip": "  "}, "ip required"},
+		{"bad ip", map[string]interface{}{"ip": "999.999.1.1"}, "invalid ip"},
+		{"ip wrong type", map[string]interface{}{"ip": 42}, "ip required"},
+		{"port zero", map[string]interface{}{"ip": "10.0.0.5", "ports": []interface{}{float64(0)}}, "invalid port"},
+		{"port too high", map[string]interface{}{"ip": "10.0.0.5", "ports": []interface{}{float64(65536)}}, "invalid port"},
+		{"port bad type", map[string]interface{}{"ip": "10.0.0.5", "ports": []interface{}{true}}, "invalid port"},
+		{"timeout zero", map[string]interface{}{"ip": "10.0.0.5", "timeout": float64(0)}, "invalid timeout"},
+		{"timeout too long", map[string]interface{}{"ip": "10.0.0.5", "timeout": float64(61)}, "invalid timeout"},
+		{"timeout bad type", map[string]interface{}{"ip": "10.0.0.5", "timeout": "abc"}, "invalid timeout"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := p.Call("probe", c.params); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("want %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+// TestOobProbeDefaultAgainstLocalListener 缺省探活注入点走真实 liveness.Probe：
+// 对本机临时监听端口探 TCP 源，在位判定确定成立（ARP/ICMP 源随机器环境，不断言）。
+func TestOobProbeDefaultAgainstLocalListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	p := NewOobProvider(nil, nil, nil)
+	out, err := p.Call("probe", map[string]interface{}{
+		"ip": "127.0.0.1", "ports": []interface{}{float64(port)}, "timeout": float64(2),
+	})
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	rep, ok := out.(liveness.Report)
+	if !ok || rep.IP != "127.0.0.1" {
+		t.Fatalf("result = %v", out)
+	}
+	if rep.TCP.Verdict != liveness.VerdictPresent || !strings.Contains(rep.TCP.Detail, "connected") {
+		t.Fatalf("tcp source = %+v", rep.TCP)
 	}
 }

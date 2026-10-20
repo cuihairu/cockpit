@@ -57,9 +57,9 @@ func (a *Agent) setupProviders() {
 	// 1.8 Job Provider：统一执行通道（jobs-design.md），exec 平台无关无条件注册
 	a.rpc.RegisterProvider(rpc.NewJobProvider())
 
-	// 1.9 OOB Provider：带外兜底动作（WOL 唤醒，UDP 出站零外部依赖，
-	// 无条件注册，与 oob capability 一致；见 oob-openwrt-bootstrap.md 片A）
-	a.rpc.RegisterProvider(rpc.NewOobProvider(nil, nil))
+	// 1.9 OOB Provider：带外兜底动作（WOL 唤醒 + 三源探活，UDP 出站零外部
+	// 依赖，无条件注册，与 oob capability 一致；见 oob-openwrt-bootstrap.md 片A/片B）
+	a.rpc.RegisterProvider(rpc.NewOobProvider(nil, nil, nil))
 
 	// 2. 按检测到的能力注册
 	for _, cap := range a.capabilities {

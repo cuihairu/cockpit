@@ -6,7 +6,9 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/cuihairu/cockpit/internal/oob/liveness"
 	"github.com/cuihairu/cockpit/internal/oob/wol"
 )
 
@@ -25,19 +27,25 @@ var (
 // 本 provider 不需要凭据；发送由 LAN 内的 agent 直接发 UDP 广播，动作幂等
 // （重复发送无害）。设计：docs/design/oob-openwrt-bootstrap.md 片 A。
 type OobProvider struct {
-	sender *wol.Sender                     // 测试注入假 dialer
-	ifaces func() ([]net.Interface, error) // 测试注入网卡枚举
+	sender *wol.Sender                                                     // 测试注入假 dialer
+	ifaces func() ([]net.Interface, error)                                 // 测试注入网卡枚举
+	probe  func(context.Context, string, liveness.Options) liveness.Report // 测试注入探活桩
 }
 
-// NewOobProvider 创建带外 provider；sender/ifaces 为 nil 时走真实 UDP 与本机网卡。
-func NewOobProvider(sender *wol.Sender, ifaces func() ([]net.Interface, error)) *OobProvider {
+// NewOobProvider 创建带外 provider；任一注入点为 nil 时走真实 UDP、本机网卡
+// 与真实三源探活。
+func NewOobProvider(sender *wol.Sender, ifaces func() ([]net.Interface, error),
+	probe func(context.Context, string, liveness.Options) liveness.Report) *OobProvider {
 	if sender == nil {
 		sender = wol.New(wol.Options{})
 	}
 	if ifaces == nil {
 		ifaces = netInterfaces
 	}
-	return &OobProvider{sender: sender, ifaces: ifaces}
+	if probe == nil {
+		probe = liveness.Probe
+	}
+	return &OobProvider{sender: sender, ifaces: ifaces, probe: probe}
 }
 
 // Type 返回 provider 类型（RPC 方法前缀 oob.<action>）。
@@ -48,6 +56,8 @@ func (p *OobProvider) Call(action string, params map[string]interface{}) (interf
 	switch action {
 	case "wol":
 		return p.WakeOnLan(params)
+	case "probe":
+		return p.ProbeHost(params)
 	}
 	return nil, fmt.Errorf("unknown action: %s", action)
 }
@@ -183,4 +193,54 @@ func (p *OobProvider) WakeOnLan(params map[string]interface{}) (interface{}, err
 		"target": target,
 		"mac":    w.mac,
 	}, nil
+}
+
+// probeParams 探活参数。
+type probeParams struct {
+	ip      string
+	ports   []int
+	timeout time.Duration // 0 → liveness.DefaultTimeout
+}
+
+// parseProbeParams 解析探活参数：ip 必需；ports/timeout（秒）可选。
+func parseProbeParams(params map[string]interface{}) (probeParams, error) {
+	out := probeParams{}
+	if params == nil {
+		return out, fmt.Errorf("oob.probe: params required")
+	}
+	ip, ok := params["ip"].(string)
+	if !ok || strings.TrimSpace(ip) == "" {
+		return out, fmt.Errorf("oob.probe: ip required")
+	}
+	out.ip = strings.TrimSpace(ip)
+	if net.ParseIP(out.ip) == nil {
+		return out, fmt.Errorf("oob.probe: invalid ip %q", out.ip)
+	}
+	if v, ok := params["ports"].([]interface{}); ok {
+		for _, item := range v {
+			port := paramInt(item)
+			if port <= 0 {
+				return out, fmt.Errorf("oob.probe: invalid port %v", item)
+			}
+			out.ports = append(out.ports, port)
+		}
+	}
+	if v, ok := params["timeout"]; ok {
+		secs := paramInt(v)
+		if secs <= 0 || secs > 60 {
+			return out, fmt.Errorf("oob.probe: invalid timeout")
+		}
+		out.timeout = time.Duration(secs) * time.Second
+	}
+	return out, nil
+}
+
+// ProbeHost 三源探活（action "probe"）：liveness.Report 原样返回（三态判定
+// 在 agent 侧产生，server 只转发与审计）。
+func (p *OobProvider) ProbeHost(params map[string]interface{}) (interface{}, error) {
+	q, err := parseProbeParams(params)
+	if err != nil {
+		return nil, err
+	}
+	return p.probe(context.Background(), q.ip, liveness.Options{Timeout: q.timeout, Ports: q.ports}), nil
 }

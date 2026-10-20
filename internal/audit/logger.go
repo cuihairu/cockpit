@@ -30,14 +30,14 @@ const (
 	// 前重验身份，签发短期多次使用的 vault token）
 	ActionVaultVerify = "vault_verify"
 	// Compose Stack 部署（见 docs/guide/stack-deploy-design.md）
-	ActionStackCreate   = "stack_create"
-	ActionStackUpdate   = "stack_update"
-	ActionStackUp       = "stack_up"
-	ActionStackDown     = "stack_down"
-	ActionStackRemove   = "stack_remove"
-	ActionStackRestart  = "stack_restart"
-	ActionStackPull     = "stack_pull"
-	ActionStackGitPull  = "stack_git_pull" // P2 ① Git-to-deploy：stacks 仓库拉取/接入
+	ActionStackCreate        = "stack_create"
+	ActionStackUpdate        = "stack_update"
+	ActionStackUp            = "stack_up"
+	ActionStackDown          = "stack_down"
+	ActionStackRemove        = "stack_remove"
+	ActionStackRestart       = "stack_restart"
+	ActionStackPull          = "stack_pull"
+	ActionStackGitPull       = "stack_git_pull"       // P2 ① Git-to-deploy：stacks 仓库拉取/接入
 	ActionStackWebhookDeploy = "stack_webhook_deploy" // P2 ② webhook 触发拉取+部署（username=webhook）
 	// 服务健康探针与自愈（见 docs/guide/service-health-design.md D9）
 	ActionServiceHealthConfig      = "service_health_config"       // 探针/白名单配置保存
@@ -81,6 +81,9 @@ const (
 	// 带外兜底动作（见 docs/design/oob-openwrt-bootstrap.md 片A）：WOL 魔术包
 	// 由 agent 在局域网内发送，server 转发并记目标 MAC 与实际发送目标。
 	ActionOobWol = "oob_wol"
+	// 带外兜底探活（见同设计 片B）：三源探测在 agent 侧执行，server 转发并记
+	// 目标 IP 与端口清单（判定三态不落审计，结果以响应返回）。
+	ActionOobProbe = "oob_probe"
 )
 
 // ResourceStack Compose Stack 资源类型
