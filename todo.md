@@ -69,6 +69,27 @@
 - [ ] P0 安全两件：短期凭据+资源级权限（Teleport 式，依托既有 vault）/ 轻量运行模式（最小构建+资源预算）〔待拍板〕
 - [ ] P1 离线数据缓冲 / 远程协作（会话共享）/ 统一电源控制（WoL+PVE；云电源随多云片）/ 四套源码深读笔记（Zabbix Agent 2·Teleport·Portainer Edge·Tactical RMM）〔待拍板=P0 后〕
 
+### 带外管理 OOB（2026-10-20 评审+用户裁决导入，未立项待拍板）
+
+> 三条路线统一 Provider：Intel AMT / AMD DASH(AIM-T) / Redfish(服务器含 ARM)，能力三态
+> supported/enabled/reachable；**用户裁决第四线：局域网 OpenWrt 自举节点=网关+探活+
+> 最后兜底控制（WOL/转发），必须自启动可靠**（衔接既有 internal/openwrt ubus 客户端）。
+> 用户另要求：**支持机型矩阵逐型号实测入表，未实测不入表**。
+> 全文/矩阵/落地跟踪见 `docs/review/oob-management-2026-10-20.md`；Redfish 线以既有
+> `docs/design/bmc-capabilities.md`(+en) 为基座合并，不另起炉灶。
+
+- [ ] P0 OOB Provider 框架（三态能力模型+发现协商）/ Redfish / AMT / DASH（优先 DASH CLI+API 集成）/ OpenWrt 自举节点（探活+WOL+兜底转发+自启动）〔待拍板=五件可拆单按序排｜解锁=拍板即排单〕
+- [ ] P1 支持机型矩阵文档（中英，三态实测制）/ Snapdragon Guardian 研究档 / IP-KVM 外置兜底〔待拍板=P0 后〕
+
+### 虚拟化 Provider（2026-10-20 用户裁决，未立项）
+
+> **用户裁决：agent 侧集成 libvirt**（KVM/QEMU 与 LXC 一处调用；libvirt 亦有 Hyper-V driver）。
+> 口径：本地 hypervisor 由驻宿主 agent 经 libvirt socket 调用并经既有 RPC 上报，
+> 不让 Server 直连宿主 libvirt；PVE 沿用既有 REST（internal/pve），Windows Hyper-V 备选
+> hcsshim/HCS；Firecracker/cloud-hypervisor 留给弹性池片再议。
+
+- [ ] agent libvirt 集成：能力探测（hypervisor/LXC）、VM 生命周期（列表/启停/快照/克隆只读先行）、经 agent RPC 上报〔待立项=随 Provider Adapter 工作流排单；写操作先行只读验收闭环（同防火墙写口径）〕
+
 ### 文档
 
 - [x] archive 5 篇是否双语：历史归档（plans 2 / specs 2 / 归档说明 1）当前仅中文〔已定 2026-10-16（R1025PATROL 代拍板，用户事后可推翻）：归档是历史记录，英文版无读者价值，只保留中文不补英文版；决策记录 docs/guide/decision-log.md D-2026-10-16-1〕
