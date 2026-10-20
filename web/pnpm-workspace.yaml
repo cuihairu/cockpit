@@ -1,3 +1,7 @@
+# pnpm 11 起 minimumReleaseAge 默认启用（拒收冷却期内发布的新包版本），dependabot
+# 升级刚发布的包时会撞 `pnpm install --frozen-lockfile`（Docker 腿曾因此红）。
+# 本仓版本已由 lockfile 钉死、更新走 dependabot 审核，冷却期无增量收益，显式关闭。
+minimumReleaseAge: 0
 overrides:
   path-to-regexp: ^8.4.0
   brace-expansion: ^5.0.9
