@@ -43,6 +43,19 @@
 - [ ] vault 硬验收：真 persona 服务端实测 provider 切换（单测已证切换不破坏 local 存量，cc51840）〔外部阻塞=缺 persona 服务端地址与 token｜解锁=用户提供地址+凭据〕
 - [ ] jenkins/external endpoint 凭据 vault 引用：随链接功能立项〔待立项=无独立开工条件｜解锁=链接功能立项〕
 
+### 多云扩展（2026-10-20 评审导入，未立项待拍板）
+
+> 外部评审导入：Cockpit 定位从「Agent 驱动的基础设施管理平台」扩展为「Cloud API 驱动的多云资源
+> 控制与成本管理平台」，两能力域（Personal / Cloud Infrastructure Operations）共用 Inventory，
+> 不拆两套产品。**全文与逐条代码核验见 `docs/review/chatgpt-2026-10-20-multicloud-positioning.md`**
+> （CloudAccount/Billing 现为 0 个 go 文件 = 全新缺口；ComputeInstance 无云原生 ID/计费/配额模型
+> 已对照字段证实）。落地跟踪清单挂在该评审文档尾部，立项拍板后按 P0→P1→P2 从那边逐项勾。
+> 边界注意：Reconciler 用普通 Go 小控制器，不触碰「不做」清单的 K8s CRD 全量模型。
+
+- [ ] P0 云账号接入 / 资源自动发现 / Provider Framework / 计算生命周期闭环 / 成本地基〔待拍板=五项是评审建议的最小闭环（两家云厂商走通 接入→发现→创建→关联 Agent→停/释放→成本归集），等你定优先级与首批云厂商｜解锁=拍板即立项排单〕
+- [ ] P1 资源池与容量 / Go Reconciler / 云网络 / 预算策略引擎 / 双重控制边界裁定〔待拍板=P0 闭环后；其中「谁对同一资源有写入权（OpenTofu vs Reconciler）」需先裁定〕
+- [ ] P2 智能调度 / 成本优化 / 控制面高可用〔待拍板=按真实需求〕
+
 ### 文档
 
 - [x] archive 5 篇是否双语：历史归档（plans 2 / specs 2 / 归档说明 1）当前仅中文〔已定 2026-10-16（R1025PATROL 代拍板，用户事后可推翻）：归档是历史记录，英文版无读者价值，只保留中文不补英文版；决策记录 docs/guide/decision-log.md D-2026-10-16-1〕
