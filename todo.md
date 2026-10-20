@@ -78,7 +78,7 @@
 > 全文/矩阵/落地跟踪见 `docs/review/oob-management-2026-10-20.md`；Redfish 线以既有
 > `docs/design/bmc-capabilities.md`(+en) 为基座合并，不另起炉灶。
 
-- [ ] P0 OOB Provider 框架（三态能力模型+发现协商）/ Redfish / AMT / DASH（优先 DASH CLI+API 集成）/ OpenWrt 自举节点（探活+WOL+兜底转发+自启动）〔待拍板=五件可拆单按序排｜解锁=拍板即排单〕
+- [ ] P0 OOB Provider 框架（三态能力模型+发现协商）/ Redfish / AMT / DASH（优先 DASH CLI+API 集成）/ OpenWrt 自举节点（探活+WOL+兜底转发+自启动）〔2026-10-20 用户拍板开工；**框架片已落**：`internal/oob`（Capability 六项/State 三态+Usable/rank 仲裁/Registry+并发 ProbeAll/Merge 合并来源可溯），go build 绿 + 包覆盖率 100%；剩余=四条厂商/节点实现片〕
 - [ ] P1 支持机型矩阵文档（中英，三态实测制）/ Snapdragon Guardian 研究档 / IP-KVM 外置兜底〔待拍板=P0 后〕
 
 ### 虚拟化 Provider（2026-10-20 用户裁决，未立项）
