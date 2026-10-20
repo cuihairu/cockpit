@@ -67,6 +67,16 @@ func TestTTL(t *testing.T) {
 	}
 }
 
+// TestEffectiveTTL 导出面与 ttl 同口径。
+func TestEffectiveTTL(t *testing.T) {
+	if got := (Spec{}).EffectiveTTL(); got != DefaultTTL {
+		t.Fatalf("default = %v", got)
+	}
+	if got := (Spec{TTL: MaxTTL + time.Hour}).EffectiveTTL(); got != MaxTTL {
+		t.Fatalf("clamp = %v", got)
+	}
+}
+
 // TestRuleName 显式标签与推导标签，过期时刻进名字。
 func TestRuleName(t *testing.T) {
 	at := time.Unix(1_800_000_000, 0)

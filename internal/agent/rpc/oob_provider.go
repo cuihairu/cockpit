@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/oob/liveness"
+	"github.com/cuihairu/cockpit/internal/oob/redirect"
 	"github.com/cuihairu/cockpit/internal/oob/wol"
+	"github.com/cuihairu/cockpit/internal/openwrt"
 )
 
 // netInterfaces / ifaceAddrs 覆盖率注入点（同 agent.localip.go interfaceAddrs
@@ -58,6 +60,12 @@ func (p *OobProvider) Call(action string, params map[string]interface{}) (interf
 		return p.WakeOnLan(params)
 	case "probe":
 		return p.ProbeHost(params)
+	case "redirect":
+		return p.ApplyRedirect(params)
+	case "redirect.remove":
+		return p.RemoveRedirect(params)
+	case "redirect.list":
+		return p.ListRedirects(params)
 	}
 	return nil, fmt.Errorf("unknown action: %s", action)
 }
@@ -243,4 +251,159 @@ func (p *OobProvider) ProbeHost(params map[string]interface{}) (interface{}, err
 		return nil, err
 	}
 	return p.probe(context.Background(), q.ip, liveness.Options{Timeout: q.timeout, Ports: q.ports}), nil
+}
+
+// redirectExecutor 转发规则执行面（与 internal/openwrt 客户端同款能力，
+// 注入点让测试不必起 ubus 端点）。
+type redirectExecutor interface {
+	AddFirewallRedirect(map[string]interface{}) error
+	RemoveFirewallRedirect(string) error
+	ListFirewallRedirects() ([]map[string]interface{}, error)
+}
+
+// newRedirectExecutor 客户端装配注入点：凭据按调用传入，客户端即用即弃
+// （同 SSH 代理口令先例，内存即用即弃，不进日志与错误文案）。
+var newRedirectExecutor = func(cfg openwrt.Config) redirectExecutor {
+	return openwrt.NewClient(cfg)
+}
+
+// redirectConn 单次转发动作的连接参数（host 必需，其余可选）。
+type redirectConn struct {
+	host     string
+	port     int
+	username string
+	password string
+	insecure bool
+}
+
+// parseRedirectConn 从 RPC 参数取连接参数；端口取不到或非正则忽略（回落 http）。
+func parseRedirectConn(params map[string]interface{}) (redirectConn, error) {
+	var out redirectConn
+	host, _ := params["host"].(string)
+	out.host = strings.TrimSpace(host)
+	if out.host == "" {
+		return out, fmt.Errorf("host required")
+	}
+	if p := paramInt(params["port"]); p > 0 {
+		out.port = p
+	}
+	out.username, _ = params["username"].(string)
+	out.password, _ = params["password"].(string)
+	out.insecure, _ = params["insecure_tls"].(bool)
+	return out, nil
+}
+
+// redirectConnConfig 连接参数转客户端配置。
+func (c redirectConn) config() openwrt.Config {
+	return openwrt.Config{
+		Host:        c.host,
+		Port:        c.port,
+		Username:    c.username,
+		Password:    c.password,
+		InsecureTLS: c.insecure,
+	}
+}
+
+// redirectSpecParams 转发规格 + 连接参数（片C）。
+type redirectSpecParams struct {
+	spec redirect.Spec
+	conn redirectConn
+}
+
+// parseRedirectSpecParams 解析下发规格：连接与规格逐字段校验；凭据只留内存。
+func parseRedirectSpecParams(params map[string]interface{}) (redirectSpecParams, error) {
+	var out redirectSpecParams
+	if params == nil {
+		return out, fmt.Errorf("oob.redirect: params required")
+	}
+	conn, err := parseRedirectConn(params)
+	if err != nil {
+		return out, fmt.Errorf("oob.redirect: %w", err)
+	}
+	out.conn = conn
+
+	spec := redirect.Spec{}
+	spec.Label, _ = params["label"].(string)
+	spec.Proto, _ = params["proto"].(string)
+	spec.SrcZone, _ = params["src_zone"].(string)
+	spec.DstZone, _ = params["dst_zone"].(string)
+	spec.SrcIP, _ = params["src_ip"].(string)
+	spec.DstIP, _ = params["dst_ip"].(string)
+	if p := paramInt(params["src_port"]); p >= 0 {
+		spec.SrcPort = p
+	}
+	if p := paramInt(params["dst_port"]); p > 0 {
+		spec.DstPort = p
+	}
+	if secs := paramInt(params["ttl_seconds"]); secs > 0 {
+		spec.TTL = time.Duration(secs) * time.Second
+	}
+	if err := spec.Validate(); err != nil {
+		return out, fmt.Errorf("oob.redirect: %w", err)
+	}
+	out.spec = spec
+	return out, nil
+}
+
+// ApplyRedirect 下发一条兜底转发规则（action "redirect"）：规则名在 agent 侧
+// 由规格与本机时钟生成（过期时刻进名字，重启不丢过期账），返回规则名与过期
+// 时刻供 server 审计与展示。
+func (p *OobProvider) ApplyRedirect(params map[string]interface{}) (interface{}, error) {
+	q, err := parseRedirectSpecParams(params)
+	if err != nil {
+		return nil, err
+	}
+	name := redirect.RuleName(q.spec, time.Now())
+	exec := newRedirectExecutor(q.conn.config())
+	if err := exec.AddFirewallRedirect(redirect.ApplyPayload(q.spec, name)); err != nil {
+		return nil, fmt.Errorf("oob.redirect: failed to apply redirect: %w", err)
+	}
+	_, expiry, _ := redirect.SplitRuleName(name)
+	return map[string]interface{}{
+		"name":        name,
+		"expiry":      expiry.Unix(),
+		"ttl_seconds": int64(q.spec.EffectiveTTL() / time.Second),
+	}, nil
+}
+
+// RemoveRedirect 按规则名拆除（action "redirect.remove"）：只接受 cockpit 前缀
+// 的规则名（命名即归属），不代为删除用户自建规则。
+func (p *OobProvider) RemoveRedirect(params map[string]interface{}) (interface{}, error) {
+	if params == nil {
+		return nil, fmt.Errorf("oob.redirect.remove: params required")
+	}
+	name, _ := params["name"].(string)
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("oob.redirect.remove: name required")
+	}
+	if !redirect.Owned(name) {
+		return nil, fmt.Errorf("oob.redirect.remove: %q is not a cockpit-owned rule", name)
+	}
+	conn, err := parseRedirectConn(params)
+	if err != nil {
+		return nil, fmt.Errorf("oob.redirect.remove: %w", err)
+	}
+	exec := newRedirectExecutor(conn.config())
+	if err := exec.RemoveFirewallRedirect(name); err != nil {
+		return nil, fmt.Errorf("oob.redirect.remove: failed to remove redirect: %w", err)
+	}
+	return map[string]interface{}{"name": name}, nil
+}
+
+// ListRedirects 读设备当前全部转发规则（action "redirect.list"）：
+// 全量返回，展示侧再按 cockpit_ 前缀区分本包创建与用户自建。
+func (p *OobProvider) ListRedirects(params map[string]interface{}) (interface{}, error) {
+	if params == nil {
+		return nil, fmt.Errorf("oob.redirect.list: params required")
+	}
+	conn, err := parseRedirectConn(params)
+	if err != nil {
+		return nil, fmt.Errorf("oob.redirect.list: %w", err)
+	}
+	exec := newRedirectExecutor(conn.config())
+	body, err := exec.ListFirewallRedirects()
+	if err != nil {
+		return nil, fmt.Errorf("oob.redirect.list: failed to list redirects: %w", err)
+	}
+	return map[string]interface{}{"redirects": body}, nil
 }

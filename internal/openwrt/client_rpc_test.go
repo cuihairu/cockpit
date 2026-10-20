@@ -622,3 +622,27 @@ func TestFirewallRedirectWriteCallError(t *testing.T) {
 		t.Fatal("call error should propagate")
 	}
 }
+
+// TestListFirewallRedirects 原样读当前全部规则（不绑定 Go 结构体）。
+func TestListFirewallRedirects(t *testing.T) {
+	loginDone := false
+	c := newTestOpenWrt(t, func(w http.ResponseWriter, r *http.Request) {
+		if !loginDone {
+			loginDone = true
+			json.NewEncoder(w).Encode(loginResponse("sess1"))
+			return
+		}
+		json.NewEncoder(w).Encode(callResponse([]map[string]interface{}{
+			{"name": "cockpit_a_1", "dest_port": "16992"},
+			{"name": "user_rule"},
+		}))
+	})
+
+	redirects, err := c.ListFirewallRedirects()
+	if err != nil {
+		t.Fatalf("ListFirewallRedirects() error = %v", err)
+	}
+	if len(redirects) != 2 || redirects[0]["name"] != "cockpit_a_1" {
+		t.Fatalf("redirects = %v", redirects)
+	}
+}

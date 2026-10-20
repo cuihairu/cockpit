@@ -15,6 +15,9 @@ import (
 //	POST /api/oob/wol      唤醒局域网目标机（agent 侧发 WOL 魔术包，审计留痕）
 //	POST /api/oob/probe    按需三源探活（agent 侧 ARP/ICMP/TCP 独立三态判定，审计留痕）
 //	GET  /api/oob/liveness 读周期探活最新态（agent 推送，内存态，带 stale 标记）
+//	POST /api/oob/redirect 下发兜底转发规则（双确认 + 审计，凭据走 vault oob/）
+//	POST /api/oob/redirect/remove 拆除转发规则（双确认 + 审计）
+//	GET  /api/oob/redirect 读设备当前全部转发规则
 //
 // 边界：端点只做校验/转发/审计；MAC 解析、广播地址推导、UDP 发送与三源
 // 探测全部在 agent 侧（internal/agent/rpc/oob_provider.go），server 不解析
@@ -36,6 +39,12 @@ func (s *Server) handleOobAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleOobProbe(w, r)
 	case len(parts) == 1 && parts[0] == "liveness" && r.Method == http.MethodGet:
 		s.handleOobLiveness(w, r)
+	case len(parts) == 1 && parts[0] == "redirect" && r.Method == http.MethodPost:
+		s.handleOobRedirect(w, r)
+	case len(parts) == 2 && parts[0] == "redirect" && parts[1] == "remove" && r.Method == http.MethodPost:
+		s.handleOobRedirectRemove(w, r)
+	case len(parts) == 1 && parts[0] == "redirect" && r.Method == http.MethodGet:
+		s.handleOobRedirectList(w, r)
 	default:
 		s.handleError(w, r, http.StatusNotFound, "API endpoint not found")
 	}

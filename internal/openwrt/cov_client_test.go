@@ -216,3 +216,13 @@ func TestCovGetLEDStateCallAndParseErrors(t *testing.T) {
 		t.Fatal("numeric body should fail LED state parsing")
 	}
 }
+
+// TestCovListFirewallRedirectsCallAndParseErrors 原样读的 call 错误与解析错误。
+func TestCovListFirewallRedirectsCallAndParseErrors(t *testing.T) {
+	if _, err := covWrtCallError(t).ListFirewallRedirects(); err == nil {
+		t.Fatal("call error should propagate")
+	}
+	if _, err := covWrtBadData(t).ListFirewallRedirects(); err == nil || !strings.Contains(err.Error(), "parse redirects") {
+		t.Fatal("numeric body should fail redirect parsing")
+	}
+}
