@@ -1,6 +1,7 @@
+import { withMermaid } from "vitepress-plugin-mermaid";
 import { defineConfig } from 'vitepress'
 
-export default defineConfig({
+export default withMermaid(defineConfig({
   title: 'Cockpit',
   description: '个人混合基础设施控制台',
   lang: 'zh-CN',
@@ -90,4 +91,4 @@ export default defineConfig({
       provider: 'local'
     }
   }
-})
+}));
