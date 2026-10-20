@@ -159,6 +159,8 @@
 - P8 configsync（server 配置源面不立项）
 - 移动端 VNC/桌面观看（D7；触发条件见 docs/guide/mobile-design.md）
 - 大规模目录重命名
+- 自研 mesh 组网数据面（2026-10-20 用户令：mesh 组网交给 meshlet；本机基础信息由
+  cockpit-agent 只读供给，边界见 meshlet ADR-013，重开需再拍板）
 - [x] 审核整改（2026-10-18 独立审核，见 docs/review/luna-review-2026-10-18.md）：
       按审核报告的三张表逐项处理，**先核对再动手**，每项给 file:line 证据。
       回执：docs/review/luna-review-2026-10-18-response.md
