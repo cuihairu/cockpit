@@ -52,7 +52,7 @@
 > 已对照字段证实）。落地跟踪清单挂在该评审文档尾部，立项拍板后按 P0→P1→P2 从那边逐项勾。
 > 边界注意：Reconciler 用普通 Go 小控制器，不触碰「不做」清单的 K8s CRD 全量模型。
 
-- [ ] P0 云账号接入 / 资源自动发现 / Provider Framework / 计算生命周期闭环 / 成本地基〔待拍板=五项是评审建议的最小闭环（两家云厂商走通 接入→发现→创建→关联 Agent→停/释放→成本归集），等你定优先级与首批云厂商｜解锁=拍板即立项排单〕
+- [ ] P0 云账号接入 / 资源自动发现 / Provider Framework / 计算生命周期闭环 / 成本地基〔2026-10-20 用户拍板开工（首批厂商已代决：阿里云+腾讯云）；**Provider Framework 片1已落**：设计 docs/design/cloud-provider.md(+en)、`internal/cloud`（拆分接口/能力声明+注册表 fail-closed 校验/Operation 状态机 pending→running→succeeded|failed/资源成本类型），go build ./... 绿 + 包覆盖率 100%；剩余=片2 表与存储、片3/4 厂商适配器〔阻塞=真实 AccessKey 由用户提供经 vault｜解锁=凭据到位〕〕
 - [ ] P1 资源池与容量 / Go Reconciler / 云网络 / 预算策略引擎 / 双重控制边界裁定〔待拍板=P0 闭环后；其中「谁对同一资源有写入权（OpenTofu vs Reconciler）」需先裁定〕
 - [ ] P2 智能调度 / 成本优化 / 控制面高可用〔待拍板=按真实需求〕
 
