@@ -65,7 +65,7 @@ never in logs or audit plaintext (same as bmc-capabilities §5.1).
 
 | Slice | Content | Gate |
 | --- | --- | --- |
-| Slice A | WOL action surface: magic-packet pure function + UDP sender injection point + agent RPC method + server forwarding endpoint | Go gate |
+| Slice A (**landed 2026-10-20**, hash in todo.md:81) | WOL action surface: magic-packet pure function + UDP sender injection point + agent RPC method + server forwarding endpoint. Landed in f9210ab: internal/oob/wol (magic packet / MAC parse / subnet broadcast / injectable sender), agent `oob.wol` RPC (explicit ip:port wins, else broadcast address derived from the first broadcast-capable non-loopback subnet), POST /api/oob/wol endpoint (RBAC under inventory write; audit records the target MAC and actual send target). Remaining: Slice B liveness layer. | Go gate ✅ (full short suite + block-coverage gate + full -race green) |
 | Slice B | Liveness layer: ARP/ICMP/TCP probes (injection points each) + scheduling + three-state verdict reporting | Go gate |
 | Slice C | Fallback forwarding orchestration: ubus firewall write extension + double confirmation + audit | Go gate + web confirmation |
 | Slice D | Self-start: procd init script + respawn config + artifact wiring | Go gate + on-machine acceptance |

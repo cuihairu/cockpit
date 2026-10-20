@@ -55,7 +55,7 @@ server 经加密 WS 下发 agent（同 SSH 代理口令先例），agent 内存�
 
 | 片 | 内容 | 门禁 |
 | --- | --- | --- |
-| 片A | WOL 动作面：魔术包纯函数 + UDP 发送注入点 + agent RPC 方法 + server 转发端点 | Go 门禁 |
+| 片A（**已落 2026-10-20**，hash 见 todo.md:81） | WOL 动作面：魔术包纯函数 + UDP 发送注入点 + agent RPC 方法 + server 转发端点〔已落 f9210ab：internal/oob/wol 魔术包/MAC 解析/网段广播/发送注入点 + agent `oob.wol` RPC（显式 ip:port 优先，缺省按首个可广播非回环网段推导广播地址）+ POST /api/oob/wol（RBAC 归 inventory 写门禁，审计记目标 MAC 与实际发送目标）；剩余=片B 探活层〕 | Go 门禁 ✅（全量短测+块覆盖门+全量 -race 绿） |
 | 片B | 探活层：ARP/ICMP/TCP 三源探测器（各自注入点）+ 调度 + 三态判定上报 | Go 门禁 |
 | 片C | 兜底转发编排：ubus firewall 写扩展 + 双确认 + 审计 | Go 门禁 + web 确认 |
 | 片D | 自启动：procd init 脚本 + respawn 配置 + 工件接线 | Go 门禁 + 真机验收 |
