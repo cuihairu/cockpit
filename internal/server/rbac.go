@@ -56,6 +56,7 @@ var resourceRules = []resourceRule{
 	{"/api/approvals", "approvals", ""},     // 审批门（workflow-design M2d：GET=队列 read、approve/reject=write）
 	{"/api/workflows", "workflows", ""},     // Workflow 编排（workflow-design W9：定义 CRUD/run/cancel；GET=read、写=write）
 	{"/api/workflow-runs", "workflows", ""}, // run 详情/取消同归 workflows 面
+	{"/api/cloud", "cloud", ""},             // 多云账号台账与配置（cloud-provider.md 片2）
 	{"/api/agents", "inventory", ""},
 }
 

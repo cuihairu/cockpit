@@ -16,6 +16,7 @@ import (
 
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/auth"
+	"github.com/cuihairu/cockpit/internal/cloud"
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/dns"
 	"github.com/cuihairu/cockpit/internal/notification"
@@ -56,6 +57,7 @@ type Server struct {
 	acmeDNSConfig  func() AcmeDNSConfig
 	overlayZT      *overlay.ZeroTierClient
 	overlayTS      *overlay.TailscaleClient
+	cloudProviders *cloud.Registry
 	cfg            *config.Config
 	upgrader       websocket.Upgrader
 
@@ -177,6 +179,7 @@ func NewServer(cfg *config.Config) *Server {
 		ticketMgr:      NewTicketManager(),
 		loginLimiter:   newLoginAttemptLimiter(),
 		livenessStore:  newLivenessStore(),
+		cloudProviders: cloud.NewRegistry(),
 		cfg:            cfg,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:     isOriginAllowed,
@@ -331,6 +334,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// 注册远控凭据保险箱 API（见 api_vault.go）
 	s.registerVaultAPI(mux)
+
+	// 注册多云账号 API（见 api_cloud.go，cloud-provider.md 片2）
+	s.registerCloudAPI(mux)
 
 	// 注册 Guacamole 桌面隧道 API（guacd + guacamole-common-js 路线，
 	// 见 docs/remote-desktop-guacamole-design.md）

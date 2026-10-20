@@ -61,6 +61,9 @@ var resourceActions = map[string][]string{
 	// 审批门（workflow-design.md M2d；rbac.go /api/approvals 门禁）：
 	// read=审批队列，write=approve/reject。漏登记会让全端点 403、菜单永不渲染。
 	"approvals": {"read", "write"},
+	// 多云账号接入（cloud-provider.md 片2）：read=账号台账（无凭据明文），
+	// write=secret 引用与账号配置维护；真实云资源动作后续按片扩展。
+	"cloud": {"read", "write"},
 }
 
 // PermissionValid 权限点是否落在 D3 清单内
@@ -86,7 +89,7 @@ func allPermissions() []string {
 		"backup", "acme", "dns", "ddns", "proxy", "overlay", "drift", "nas",
 		"alerts", "audit", "users", "roles", "settings",
 		"services", "smart", "recordings", "jobs", "workflows", "firewall",
-		"approvals",
+		"approvals", "cloud",
 	} {
 		for _, a := range resourceActions[res] {
 			out = append(out, res+":"+a)

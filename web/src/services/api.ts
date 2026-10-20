@@ -107,6 +107,8 @@ import type {
   DomainBindingInput,
   DomainApplyStep,
   DomainDriftResponse,
+  CloudAccount,
+  CloudAccountInput,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -1432,6 +1434,31 @@ class ApiService {
       { responseType: 'text' },
     )
     return resp
+  }
+
+  // ========== 多云账号接入（cloud-provider.md 片2） ==========
+
+  async getCloudAccounts(): Promise<CloudAccount[]> {
+    const resp = await this.client.get<unknown, { data: CloudAccount[] }>('/cloud/accounts')
+    return resp.data ?? []
+  }
+
+  async saveCloudAccount(input: CloudAccountInput & { confirmKey: string }): Promise<CloudAccount> {
+    return this.client.put<unknown, CloudAccount>('/cloud/accounts', {
+      vendor: input.vendor,
+      alias: input.alias,
+      secret: input.secret,
+      username: input.username,
+      scopes: input.scopes,
+      enabled: input.enabled,
+      confirm_key: input.confirmKey,
+    })
+  }
+
+  async deleteCloudAccount(id: string): Promise<void> {
+    await this.client.delete(`/cloud/accounts/${encodeURIComponent(id)}`, {
+      data: { confirm_id: id },
+    })
   }
 }
 

@@ -48,11 +48,12 @@
 > 外部评审导入：Cockpit 定位从「Agent 驱动的基础设施管理平台」扩展为「Cloud API 驱动的多云资源
 > 控制与成本管理平台」，两能力域（Personal / Cloud Infrastructure Operations）共用 Inventory，
 > 不拆两套产品。**全文与逐条代码核验见 `docs/review/chatgpt-2026-10-20-multicloud-positioning.md`**
-> （CloudAccount/Billing 现为 0 个 go 文件 = 全新缺口；ComputeInstance 无云原生 ID/计费/配额模型
+> （CloudAccount/Billing 原为 0 个 go 文件 = 全新缺口；ComputeInstance 无云原生 ID/计费/配额模型
 > 已对照字段证实）。落地跟踪清单挂在该评审文档尾部，立项拍板后按 P0→P1→P2 从那边逐项勾。
 > 边界注意：Reconciler 用普通 Go 小控制器，不触碰「不做」清单的 K8s CRD 全量模型。
 
 - [ ] P0 云账号接入 / 资源自动发现 / Provider Framework / 计算生命周期闭环 / 成本地基〔2026-10-20 用户拍板开工（首批厂商已代决：阿里云+腾讯云）；**片1已落 cfeee64**（设计 docs/design/cloud-provider.md(+en)、`internal/cloud`：拆分接口/能力声明+注册表 fail-closed 校验/Operation 状态机 pending→running→succeeded|failed/资源成本类型，go build ./... 绿 + 包覆盖率 100%）；**片2已落**（`internal/storage/cloud.go`：cloud_accounts/cloud_instances 表 AutoMigrate、账号/实例 upsert/list/delete、`${VAR}` 凭据引用形态校验+运行时解析 fail-closed，storage 包测试绿）；**片3 Compute 部分已落 8bf385c**（签名器抽中立包 `internal/alisign`（原 dns/sign.go，dns 同步改用，e862a4f）+ `internal/cloud/aliyun` ECS 适配器：DescribeInstances 分页列表+状态/计费归一（过渡态归 unknown 原文保留）、RunInstances 创建（InstanceSpec 增 SecurityGroupID）、启停删、GetOperation 以实例状态推断完成态，fake server 契约测试（桩侧复算签名）绿 + 包覆盖 100% + 全量门禁绿）；剩余=片3 Quota 子片〔统一配额服务 API 契约未经真实账号核对，不硬造，随片4 验收解锁〕与片4 腾讯云适配器+双厂商闭环验收〔阻塞=真实 AccessKey 由用户提供经 vault｜解锁=凭据到位〕〕
+  - 进度：**账号接线/web 双确认片已落**（`/api/cloud/accounts` 只回 `${VAR}` 引用，secret 经既有 vault `cloud/{vendor}/{alias}` 入库；`cloud:read/write` RBAC、审计、web 云账号页保存/删除逐字双确认；契约/页面测试绿），全量门禁受环境干扰未过；后续=发现/生命周期接线与腾讯云适配器。
 - [ ] P1 资源池与容量 / Go Reconciler / 云网络 / 预算策略引擎 / 双重控制边界裁定〔待拍板=P0 闭环后；其中「谁对同一资源有写入权（OpenTofu vs Reconciler）」需先裁定〕
 - [ ] P2 智能调度 / 成本优化 / 控制面高可用〔待拍板=按真实需求〕
 

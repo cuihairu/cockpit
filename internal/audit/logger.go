@@ -175,6 +175,9 @@ const ResourceDomainBinding = "domain_binding"
 // ResourceOob 带外兜底动作资源类型（WOL 唤醒等，见 oob-openwrt-bootstrap.md）
 const ResourceOob = "oob"
 
+// ResourceCloudAccount 多云账号资源类型（引用台账与 secret 维护）
+const ResourceCloudAccount = "cloud_account"
+
 // Status 状态
 const (
 	StatusSuccess = "success"

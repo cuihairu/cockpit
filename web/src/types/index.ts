@@ -1574,6 +1574,28 @@ export interface DomainApplyStep {
   error?: string
 }
 
+// ========== 多云账号接入（cloud-provider.md 片2） ==========
+
+export interface CloudAccount {
+  id: string
+  vendor: string
+  alias: string
+  credentialRef: string
+  scopes: string[]
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CloudAccountInput {
+  vendor: string
+  alias: string
+  secret: string
+  username?: string
+  scopes?: string[]
+  enabled?: boolean
+}
+
 export interface AuditLog {
   id: number
   user_id: string
