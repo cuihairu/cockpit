@@ -16,7 +16,8 @@
 
 ### 真机验收（等硬件/真实环境/凭据）
 
-- [ ] service-health 生产接入：docker VM agent 已装但停用，改 SERVER_URL 指生产后 enable〔阻塞=宿主 docker VM 的配置动作，非仓内改动｜解锁=用户在生产 VM 改 SERVER_URL 并 enable〕
+- [ ] service-health 生产接入：docker VM agent 已装但停用，改 SERVER_URL 指生产后 enable〔阻塞=生产 server 迁至 dev 仅绑 127.0.0.1，VM 原 SERVER_URL 指向已停用入口；配置新出口需用户提供/授权暴露 SERVER_URL｜解锁=可用生产 WS 地址或批准 LAN 暴露后改 SERVER_URL 并 enable〕
+  - 2026-10-22 复核：VM 192.168.5.5 直连确认 `cockpit-agent.service` 处于 disabled/inactive，`/etc/default/cockpit-agent` 的 SERVER_URL 仍指向本机已停用的 :9000；可达的生产 server 位于 dev（cockpit.cuihairu.site → 106.14.216.177），但生产 `cockpit.service` 仅绑 `127.0.0.1:9000`。未获新 WS 地址/暴露授权前不改生产入口。
 - [ ] Windows SCM 服务管理：列表/启停/自启/无权限透传〔阻塞=连接层四动词需提权 admin 会话（校验层 4 项已两台真机双证）｜解锁=提权会话按 checklist:249 复验〕
   - 2026-10-19 Windows 主机到位部分实测（探针 `scripts/acceptance/services/scm-probe/main.go`，commit f4a8ae50；`go build ./...` 绿）：**校验层 4 项真机 PASS**（validate 在 mgr.Connect 之前 service_windows_scm.go:104，无需提权）——①reload 被动词白名单拒绝（`unsupported action "reload" (allowed: start stop restart enable disable)`，service_windows_model.go:40，即 checklist:249「reload 按钮确认隐藏」后端半；前端半 index.tsx:88 isWindows + :265 仅 isSystemd 渲染重载，`index.test.tsx:302`「Windows 主机」测试过）②非法 unit 名 `../etc/passwd` 被拒（invalid windows service name，路径穿越面）③未知动词 nuke 被拒 ④**无权限报错透传**：SCM connect 返回 `scm connect: Access is denied.` 原文经 %w 透传到 provider 未被吞（scm.go:63）。**仍未验（需提权）**：list/启停/自启切换/restart 30s 超时路径——`mgr.Connect()` 申请 SC_MANAGER_ALL_ACCESS（scm.go:61），本会话非提权（UAC EnableLUA=1，无密码不可 runas）直接 Access is denied，故 checklist:249 连接层四动词实测**待提权 admin agent 会话复验**，不勾此行、不改验收标准。
   - 2026-10-19 补编译门禁（本 commit）：该探针带 `//go:build windows`，linux 上 `go build ./...` 恒跳过（上条「绿」不含此包），且此前所有 CI 腿只编 cmd 两包——探针零编译检查，坏了只会在真机验收现场炸；已实测 `GOOS=windows go build ./...` 全模块绿，并在 Build workflow windows 腿加整模块编译门禁。
