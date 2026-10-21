@@ -160,7 +160,7 @@ amd64 / arm64（全部每日构建产物）；架构不认识时脚本会明确�
 
 OpenWrt 路由器无需手工编译：nightly release 提供多架构
 `.ipk` 安装包（opkg 即装、procd 托管、UCI 配置），安装步骤见
-[OpenWrt Agent 打包设计](/guide/openwrt-agent-design#安装与升级)。
+OpenWrt Agent 打包设计。
 
 其余场景：下载对应平台 `cockpit-agent` 二进制（或本地编译）。Server 必须配置
 `server.agent_registration.enrollment_secret`；首次注册时使用相同的密钥，之后
@@ -267,12 +267,7 @@ docker compose -f deployments/docker/docker-compose.yml up -d
 ```
 
 完整部署指南（tag 策略、远控 guacd、反向代理、备份回滚、排障）：
-[Docker 部署](/operations/deploy-docker)。
+Docker 部署。
 
 ## 下一步
 
-- [核心概念](/guide/concepts)
-- [架构与边界](/guide/architecture)
-- [Agent 出口与 SD-WAN 能力边界](/guide/agent-egress-sdwan)
-- [协议与 API 边界](/guide/protocol)
-- [Docker 部署](/operations/deploy-docker)

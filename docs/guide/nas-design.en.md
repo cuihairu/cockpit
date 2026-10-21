@@ -93,7 +93,7 @@ Shared discipline for M2's network API form (same as the OpenWrt/PVE providers):
 
 | Category | Command | Parsing notes |
 |---|---|---|
-| mdadm RAID | read the `/proc/mdstat` file | `md0 : active raid1 sda1[0] sdb1[2](F)` → the (F) mark flags a failed disk; a resync/recovery progress line → State=resync; a missing U in the `[U_]` bitmap → degraded |
+| mdadm RAID | read the `/proc/mdstat` file | `md0 : active raid1 sda1[0] sdb12` → the (F) mark flags a failed disk; a resync/recovery progress line → State=resync; a missing U in the `[U_]` bitmap → degraded |
 | ZFS pools | `zpool list -H -p -o name,size,alloc,health` | ONLINE in the health column→healthy, other words lowercased as-is; skip when zpool is absent |
 | LVM volume groups | `vgs --noheadings --units b --nosuffix -o vg_name,vg_size,vg_free` | VG capacity and free space; skip when vgs is absent |
 | btrfs | — (no pooling) | single-disk btrfs capacity is visible via the df mount table, M1 does not parse pooling |

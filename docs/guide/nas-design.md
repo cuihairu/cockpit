@@ -93,7 +93,7 @@ M2 网络 API 型的共同纪律（OpenWrt/PVE provider 同款）：
 
 | 类别 | 命令 | 解析要点 |
 |---|---|---|
-| mdadm RAID | `/proc/mdstat` 读文件 | `md0 : active raid1 sda1[0] sdb1[2](F)` → (F) 标记 failed 盘；resync/recovery 进度行 → State=resync；`[U_]` 位图缺 U → degraded |
+| mdadm RAID | `/proc/mdstat` 读文件 | `md0 : active raid1 sda1[0] sdb12` → (F) 标记 failed 盘；resync/recovery 进度行 → State=resync；`[U_]` 位图缺 U → degraded |
 | ZFS 池 | `zpool list -H -p -o name,size,alloc,health` | health 列 ONLINE→healthy，其余原词小写；无 zpool 跳过 |
 | LVM 卷组 | `vgs --noheadings --units b --nosuffix -o vg_name,vg_size,vg_free` | VG 容量与剩余；无 vgs 跳过 |
 | btrfs | —（不池化） | 单盘 btrfs 容量经 df 挂载表可见，M1 不做池化解析 |

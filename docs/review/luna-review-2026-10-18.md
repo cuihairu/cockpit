@@ -509,7 +509,7 @@ require (
     "vitest": "^5.0.1"
   }
 }
-[English](README.md) | [中文](README.zh.md)
+English | 中文
 
 <p align="center">
   <img src="web/public/logo.svg" alt="Cockpit Logo" width="64" height="64">
@@ -658,7 +658,6 @@ Full installation details (one-line installer internals / platform matrix / buil
 - [Protocol and API Boundaries](https://cuihairu.github.io/cockpit/guide/protocol)
 - [Docker Deployment](https://cuihairu.github.io/cockpit/operations/deploy-docker)
 - [Open-Source Ops Panels Survey](https://cuihairu.github.io/cockpit/research/ops-oss-survey)
-- Agent manual deployment and service unit examples: [deployments/README.md](deployments/README.md)
 
 ## Foundations
 
@@ -3774,7 +3773,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    106	
    107	## ACME 证书签发
    108	
-   109	设计：[acme-design](./acme-design.md)。前置：DNS 凭据（Cloudflare / DNSPod / 阿里云任一）+ 公网可解析域名；先 staging 防限频。
+   109	设计：acme-design。前置：DNS 凭据（Cloudflare / DNSPod / 阿里云任一）+ 公网可解析域名；先 staging 防限频。
    110	
    111	- [ ] staging 签发跑通（账号 ECDSA key 惰性注册持久化，二次签发不重复注册）
    112	- [ ] production 真证书签发；到期时间与续期阈值（7-90 天）展示正确
@@ -3786,7 +3785,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    118	
    119	## DDNS 动态域名
    120	
-   121	设计：[ddns-design](./ddns-design.md)。前置：Cloudflare token + 家庭宽带动态 IP 环境（最好含 IPv6）。
+   121	设计：ddns-design。前置：Cloudflare token + 家庭宽带动态 IP 环境（最好含 IPv6）。
    122	
    123	- [ ] agent 出口 IP 多源探测真实生效（主源失败自动切备源；IPv4/IPv6 地址族各自正确）
    124	- [ ] 记录缺失自动创建（TTL auto、无代理）；IP 变化更新保留原 TTL/Proxied
@@ -3796,7 +3795,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    128	
    129	## DNS 域名管理
    130	
-   131	设计：[domain-binding-design](./domain-binding-design.md)。前置：DNSPod 账号（免费版优先，暴露真实限制）。
+   131	设计：domain-binding-design。前置：DNSPod 账号（免费版优先，暴露真实限制）。
    132	
    133	- [ ] DNSPod 免费版 TTL 下限：编辑低于免费下限的 TTL 时 API 真实报错的透传呈现
    134	- [ ] CAA 记录新增/编辑/删除
@@ -3804,7 +3803,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    136	
    137	## 组网观测（Overlay）
    138	
-   139	设计：[overlay-design](./overlay-design.md)。前置：ZeroTier Central / Tailscale 管理 API token；装 ZeroTier/Tailscale/WireGuard/frp 的真实主机若干。
+   139	设计：overlay-design。前置：ZeroTier Central / Tailscale 管理 API token；装 ZeroTier/Tailscale/WireGuard/frp 的真实主机若干。
    140	
    141	- [x] 运行态观测 wg 半：真实 interfaces 快照 + 私钥/预共享密钥不出现
    142	  （2026-10-07，scripts/acceptance/overlay/probe-wg.sh W1-W3 全 PASS——
@@ -3837,7 +3836,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    169	
    170	## 磁盘健康（SMART）
    171	
-   172	设计：[disk-health-design](./disk-health-design.md)。前置：带物理盘的真实主机（smartctl 可用）。
+   172	设计：disk-health-design。前置：带物理盘的真实主机（smartctl 可用）。
    173	
    174	- [x] 盘发现与字段读取：passed/温度/重映射/待定扇区/NVMe media_errors 真实数值合理
    175	  （2026-10-07，scripts/acceptance/smart/probe.sh S1-S4 全 PASS：本机 /dev/sda 真盘、
@@ -3860,7 +3859,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    192	
    193	## 防火墙观测（M1）
    194	
-   195	设计：[firewall-design](./firewall-design.md)。探针：`scripts/acceptance/firewall/probe.sh`（本机三形态 agent：root/无 nft PATH/非 root）与 `scripts/acceptance/firewall/probe-hosts.sh`（容器宿主形态：裸容器/iptables-legacy/超大规则集，H1-H4）。
+   195	设计：firewall-design。探针：`scripts/acceptance/firewall/probe.sh`（本机三形态 agent：root/无 nft PATH/非 root）与 `scripts/acceptance/firewall/probe-hosts.sh`（容器宿主形态：裸容器/iptables-legacy/超大规则集，H1-H4）。
    196	
    197	- [x] capability 上报：nft/iptables 元数据与真实安装一致；双后端选择（D2）真实回落（2026-10-07 本机探针 F1/F3：nft 在走 nftables、PATH 摘除 nft 后 iptables-save + variant 解析 nf_tables）
    198	- [x] 规则快照真读：nft -j JSON 与 iptables-save 双后端解析真实规则集，表/链/规则计数与 nft list ruleset 对照合理（2026-10-07 本机探针 F2/F3：5 表 22 链 114 规则，ipv4+ipv6 双族）
@@ -3873,7 +3872,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    205	
    206	## 日志检索
    207	
-   208	设计：[logs-design](./logs-design.md)。前置：多台 agent（含 systemd 主机与 docker 主机）。
+   208	设计：logs-design。前置：多台 agent（含 systemd 主机与 docker 主机）。
    209	
    210	- [x] 尾随真机项：journalctl 高频输出流畅尾随不重不漏
    211	  证据（2026-09-30）：探针 `scripts/acceptance/logs/`（系统域 transient unit 高频源，本机实验结论：`journalctl -u` 不匹配用户域瞬态单元须 sudo systemd-run 建系统域）T1——tail=2000 回填 500 行 + 600 行/s 实时突发 6000 行，6500 帧序列严格递增、零重复零缺口（序号带每轮唯一基址防 journal 跨轮累积干扰）；验收顺带修通两处流式链路缺陷：① agent 侧 logs POST（query/follow）被 RBAC 按 method 泛化推导成 `logs:write`——合法权限集合只有 `logs:read`，任何角色（含 admin）都 403，端点整体不可达（既有测试直调 handler 绕过中间件故未拦住），修为与 `/api/logs/search` 同口径 fixed read；② 审计中间件 `responseWriter` 包装器丢 `http.Flusher`，生产链路 `w.(http.Flusher)` 断言必失败 → 500「streaming unsupported」（/ws 的 Hijacker 教训同类，修为接口透传保审计）；`probe.log`
@@ -3886,7 +3885,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    218	
    219	## NAS
    220	
-   221	设计：[nas-design](./nas-design.md)。前置：DSM 6.x/7.x、TrueNAS CORE/SCALE、OMV 真机各一（或有则验）。
+   221	设计：nas-design。前置：DSM 6.x/7.x、TrueNAS CORE/SCALE、OMV 真机各一（或有则验）。
    222	
    223	- [ ] DSM 6 与 7 两版本 API 字段差异实测（登录、卷、共享夹）
    224	- [ ] TrueNAS CORE 与 SCALE 字段差异（flexInt 字符串数字形态）
@@ -3906,7 +3905,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    238	
    239	## 服务管理（三后端）
    240	
-   241	设计：[service-design](./service-design.md)。前置：systemd Linux 主机、Windows 主机、macOS 主机各一。
+   241	设计：service-design。前置：systemd Linux 主机、Windows 主机、macOS 主机各一。
    242	
    243	- [x] systemd：列表含未加载 unit；start/stop/restart/enable/disable 实测；mask 后隐藏启动并显解屏蔽、unmask 还原
    244	  证据（2026-10-01）：探针 `scripts/acceptance/services/`（本机 :19993，root/cui 双 agent 对照，测试 unit `cockpit-acc-*` 专属）两轮 9/9 PASS——首轮：T1 列表 total=313>active=72，files-only 未加载项在列（`apport-coredump-hook@.service` 等模板/未加载类，`mergeServiceUnits` 分支）；T2 restart→active/running、enable→enabled；T3 非 root restart/enable 同一 unit 均 502 且体含 `systemctl` 原文（Access denied…interactive authentication）原样透传，对照组非 root 读列表 200（纯权限失败）；T4 stop→inactive、disable→disabled 收尾；验收逮到一处生产缺陷：`serveAPI` 分发器仅 `Contains "/services/"`（要求尾斜杠），裸 `GET /api/agents/{id}/services`（文档与 Web `api.ts:1043` 调的列表端点）掉进 `handleAgentGet` 报 404，Web 服务页列表整体不可达（既有测试直调 handler 绕过分发器故未拦住），修为与 `/health`、`/domains` 行同款 `HasSuffix || Contains` + 分发器回归 `TestServiceListDispatcherRoutesBarePath`（反向验证无修复必 FAIL）；补验轮：ghost 未加载样本（装 `/etc` 永不 enable/start → `loadState` 空 + `activeState=inactive` + `unitFileState=disabled`，运行表/安装表双对照）、start/stop 往返、disable/enable 往返、mask→`masked`（masked 上 restart 502、is-masked 原文透传）→ unmask 还原 `enabled`（列表态同步，Web masked 行隐藏启动/显解屏蔽即由该字段驱动）、审计 `service_action` 落账断言（unit/agent 齐全）；teardown 删 unit 文件 + daemon-reload 可复跑（run-server 归一旧实例 DB，防 `/api/agents` 旧 agent 行污染注册计数）；证据 `probe.log`（两轮）+ `setup.log` + `services-list.json`
@@ -3919,7 +3918,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    251	
    252	## 统一 Job 执行（agent.exec）
    253	
-   254	设计：[jobs-design](./jobs-design.md)。前置：一台在线 Linux agent（命令经 `sh -c` 执行）。
+   254	设计：jobs-design。前置：一台在线 Linux agent（命令经 `sh -c` 执行）。
    255	真机验收（2026-10-05，探针 `scripts/acceptance/jobs/` 五件套 9/9 PASS，证据
    256	`.acceptance/jobs/evidence/`：probe.log + create-J1..J5.json + audit-job_run.json）。
    257	
@@ -3958,7 +3957,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    290	
    291	## Workflow 编排（M1：异步 Job + 线性链）
    292	
-   293	设计：[workflow-design](./workflow-design.md)。前置：一台在线 Linux agent（同 Job 节）；
+   293	设计：workflow-design。前置：一台在线 Linux agent（同 Job 节）；
    294	M2b 扇出验收需两台（run-server.sh 起 `workflows-acc-a1/a2` 双实例）。
    295	M1 已实现并验收（2026-10-09）：探针 `scripts/acceptance/workflows/`（W0-W9，四件套 +
    296	Go probe，对齐 jobs 探针口径）真机 9/9 PASS（端口 20010，agent `workflows-acc-a1`，
@@ -4013,7 +4012,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    345	
    346	## 移动端（Flutter，iOS + Android）
    347	
-   348	设计：[mobile-design](./mobile-design.md)。前置：Android 真机（或模拟器）安装 debug APK（CI `Mobile` workflow artifact 或本地 `flutter build apk --debug`）；server 可达（公网或同网段）。iOS 编译验证已闭环到 CI macOS runner（`Mobile` workflow build-ios job，无签名 debug 构建，见 D8）；iOS 真机安装与上架签名仍需自有 Mac/账号，下述清单 iOS 侧暂以 Android 真机为准。
+   348	设计：mobile-design。前置：Android 真机（或模拟器）安装 debug APK（CI `Mobile` workflow artifact 或本地 `flutter build apk --debug`）；server 可达（公网或同网段）。iOS 编译验证已闭环到 CI macOS runner（`Mobile` workflow build-ios job，无签名 debug 构建，见 D8）；iOS 真机安装与上架签名仍需自有 Mac/账号，下述清单 iOS 侧暂以 Android 真机为准。
    349	
    350	- [ ] 首启引导：输入 server 地址 → `/health` 通过 → 落盘进入登录页；错误地址的失败呈现可读
    351	- [ ] 登录：用户名密码 → 开启 TOTP 的账号进入验证码二步 → 成功后底部四 tab 可用
@@ -4048,7 +4047,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    380	  证据：W10c [a1,ghost] → 503 `agent offline for steps[0]`、run 台账 0 条（不落幽灵 run）
      1	# 架构与边界
      2	
-     3	> 语言：**中文** ｜ [English](./architecture.en.md)
+     3	> 语言：**中文** ｜ English
      4	
      5	本文以当前仓库实现为准，说明 Cockpit 的运行拓扑、模块职责和边界。它不是长期愿景文档；当代码行为变化时，应优先同步这里。
      6	
@@ -4218,7 +4217,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    170	- `docs/archive`（原 `docs/superpowers`）保存 TOTP、通知模块等历史设计稿和实施计划，仅供追溯，不代表当前运行架构；详见 [`docs/archive/README.md`](../archive/README.md)。
      1	# 协议与 API 边界
      2	
-     3	> 语言：**中文** ｜ [English](./protocol.en.md)
+     3	> 语言：**中文** ｜ English
      4	
      5	本文记录当前 Server、Agent、Web UI 之间的通信边界。
      6	
@@ -7637,7 +7636,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
 [0m$ [0mnl -ba docs/guide/jobs-design.md | sed -n '1,260p'; nl -ba docs/guide/remote-access-integration-design.md | sed -n '1,280p'; nl -ba docs/websocket-token-auth.md | sed -n '1,260p'; nl -ba docs/guide/rbac-design.md | sed -n '1,260p'
 1	# P1 方案设计：执行 Job 模型（最小闭环）
      2	
-     3	> 语言：**中文** ｜ [English](./jobs-design.en.md)
+     3	> 语言：**中文** ｜ English
      4	
      5	> 2026-10-04。P1「Job」首期落地设计。战略评审（见 reference-projects）把
      6	> Job/Action/Workflow/Event 列为控制面四个核心抽象，本文只做 Job 的最小
@@ -7655,7 +7654,7 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
     18	  `jobs:read`/`jobs:write`（PermGuard 控制创建入口）。
     19	- **未实现**（按本文「边界（明确不做）」节，立项时再设计，不写进当前能力）：
     20	  输出流式、Action/Event 抽象与 AI 接线（P5）。
-    21	- **已由 P2 落地（2026-10-09，[workflow-design](./workflow-design.md) M1）**：
+    21	- **已由 P2 落地（2026-10-09，workflow-design M1）**：
     22	  异步执行/取消（`cancelled` 终态、pending 可撤、台账过滤）与 Workflow 编排；
     23	  `POST /api/jobs` 语义随之改为「创建即 201 返回 pending，后台派发」（原同步
     24	  等待删除），timeout 仍按设计保持 `failed`（不设独立终态）。取消面再由 M2c
@@ -7779,13 +7778,13 @@ internal/domain/monitor_test.go:126:	script := filepath.Join(dir, "fake-whois")
    142	
    143	| 优先级 | 方向 | 依赖 |
    144	|--------|------|------|
-   145	| P2 | Workflow：Job 编排（线性链/重试/取消，DAG/审批留 M2）——已落地（P2 异步化 + M1 编排 2026-10-09；M2a 变量/M2b 扇出/M2c 取消信号 2026-10-11，见 [workflow-design](./workflow-design)） | 本模型 |
+   145	| P2 | Workflow：Job 编排（线性链/重试/取消，DAG/审批留 M2）——已落地（P2 异步化 + M1 编排 2026-10-09；M2a 变量/M2b 扇出/M2c 取消信号 2026-10-11，见 workflow-design） | 本模型 |
    146	| P0′ | 事件模型：Job 终态事件进统一事件总线 | Event 抽象立项 |
    147	| P5 | AI 接线：Job API 即 AI 的执行面（agent.exec 之外补结构化类型） | 审计与限额先行 |
 nl: docs/guide/remote-access-integration-design.md: No such file or directory
      1	# WebSocket 认证边界
      2	
-     3	> 语言：**中文** ｜ [English](./websocket-token-auth.en.md)
+     3	> 语言：**中文** ｜ English
      4	
      5	当前实现已经避免在远程连接 WebSocket URL 中直接携带 JWT。远程终端、VNC、桌面连接统一使用短期 ticket：terminal 入口仅经 `Sec-WebSocket-Protocol` 传递，guacamole 入口 URL query `?ticket=` 与子协议双通道（query 优先、子协议兜底）。
      6	
@@ -7832,7 +7831,7 @@ nl: docs/guide/remote-access-integration-design.md: No such file or directory
     47	早期文档讨论过 URL query token、短期连接 token、Cookie 认证等方案。当前代码采用“短期 ticket + WebSocket 子协议”的组合方式，是本文档应遵循的实现基线。
      1	# 方案设计：多账号与细粒度权限控制（RBAC）
      2	
-     3	> 语言：**中文** ｜ [English](./rbac-design.en.md)
+     3	> 语言：**中文** ｜ English
      4	
      5	> 2026-09-19。多账号权限控制首期设计。需求原文：「账号权限控制，支持多账号」。
      6	> 本文只做设计决策与接口定义，实现按 P0/P1 分期。
@@ -8560,7 +8559,7 @@ docs/guide/protocol.en.md:248:- `POST /api/remote/tickets`
 docs/guide/persona-vault-mapping.md:72:| 429 `rate_limited` | 显式限流错误（`rate limited (120 req/min per token)`；当前不自动重试，调用方按需退避） |
 docs/guide/workflow-design.en.md:111:| W8 | Concurrency constraint | At most one active run per workflow at a time (rejected with 409); different workflows may run in parallel | At personal scale this prevents re-entrance (double-clicking "Run"); no global rate limiting |
 docs/guide/introduction.md:15:远程操作方面，终端 / VNC / 桌面走短期 ticket 转发，会话录制归档可回放；agent 上能浏览与传输文件；日志既能在单机 tail（journalctl / Docker），也能跨机联邦检索。应用与容器由 Docker 全量管理（容器、镜像、网络、卷），Stacks 按 compose 部署，带模板库与部署历史，restart/pull 就近操作。
-docs/guide/concepts.md:198:远程连接的 Browser WebSocket 使用短期 ticket 认证。详见 [协议与 API 边界](/guide/protocol)。
+docs/guide/concepts.md:198:远程连接的 Browser WebSocket 使用短期 ticket 认证。详见 协议与 API 边界。
 docs/guide/concepts.md:208:| WebSocket Origin | `ALLOWED_ORIGINS` 控制；未设置时适合开发但不适合生产 |
 docs/guide/concepts.md:209:| 远程连接 | 5 分钟、单次使用 ticket |
 docs/guide/introduction.en.md:15:For remote operations, terminal / VNC / desktop go through short-lived ticket forwarding, with session recording archived and replayable; files can be browsed and transferred on agents; logs can be tailed on a single machine (journalctl / Docker) and searched federated across machines. Applications and containers are fully managed by Docker (containers, images, networks, volumes); Stacks deploy via compose with a template library and deployment history; restart/pull are operated locally. 
@@ -11530,7 +11529,7 @@ internal/server/acme_test.go:338:	f.issueErr = errors.New("rate limited")
    190	| --- | --- | --- | --- | --- | --- | --- |
      1	# Documentation-Source Consistency Audit (2026-10-08)
      2	
-     3	> Language: [中文](./审计-文档一致性.md) ｜ **English**
+     3	> Language: 中文 ｜ **English**
      4	
      5	> Executed per the "Documentation-Source Consistency Audit Specification": enumerate the
      6	> document surface → take verifiable technical claims and check them against the code
@@ -11720,7 +11719,7 @@ internal/server/acme_test.go:338:	f.issueErr = errors.New("rate limited")
    190	| D66 | guide/stack-deploy-design.md:97 | Compatible with `compose.yaml`/`docker-compose.yml` | Also compatible with `docker-compose.yaml` | Code ahead of doc | P2 | Add yaml |
      1	# 远控会话录制设计（M1：终端输出录制 + 回放）
      2	
-     3	> 语言：**中文** ｜ [English](./recording-design.en.md)
+     3	> 语言：**中文** ｜ English
      4	
      5	> 2026-09-15 立项。对应 todo「远控会话录制：终端输出录制，补强远控审计
      6	> （当前审计只有会话开始/结束）。方案参考：Guacamole 会话录制、Teleport
@@ -11866,7 +11865,7 @@ internal/server/acme_test.go:338:	f.issueErr = errors.New("rate limited")
    146	
    147	## 参考
    148	
-   149	- 内部：[logs-design.md](./logs-design.md)（server 侧转发不落盘的反例——
+   149	- 内部：logs-design.md（server 侧转发不落盘的反例——
    150	  本功能正是「落盘」侧的审计场景）、architecture.md 审计章节
    151	- 外部：asciinema v2 格式规范（<https://github.com/asciinema/asciinema/blob/develop/doc/asciicast-v2.md>）、
    152	  Guacamole session recording、Teleport session recording
@@ -11977,7 +11976,7 @@ internal/server/acme_test.go:338:	f.issueErr = errors.New("rate limited")
      6	
      7	| 方式 | 镜像来源 | 适用 |
      8	| --- | --- | --- |
-     9	| 本目录 [`docker-compose.yml`](./docker-compose.yml) | 拉 `ghcr.io/cuihairu/cockpit` | 部署机只要有 Docker，不在部署机上编译 |
+     9	| 本目录 `docker-compose.yml` | 拉 `ghcr.io/cuihairu/cockpit` | 部署机只要有 Docker，不在部署机上编译 |
     10	| 仓库根 [`docker-compose.yml`](../../docker-compose.yml) | 本地 `build: .` | 改代码自测 |
     11	
     12	完整部署步骤（镜像 tag 策略、远控 guacd 启用、反向代理、备份回滚、排障）见
@@ -12046,7 +12045,7 @@ internal/server/acme_test.go:338:	f.issueErr = errors.New("rate limited")
     75	要点：guacd 端口不对外暴露（浏览器走 `/api/remote/guacamole`，Go 网关同网络
     76	反代）；`guacd-recordings` 卷必须 server 与 guacd **同卷同路径**（guacd 写
     77	`.guac`，Go 网关收走归档到 `/data/recordings`）；`GUACD_LOG_LEVEL` 别开 debug。
-    78	详见 [deployments/guacd/README.md](../guacd/README.md) 与
+    78	详见 deployments/guacd/README.md 与
     79	[docs/remote-access-integration-design.md](../../docs/remote-access-integration-design.md)。
     80	
     81	## Agent 连接
@@ -12143,7 +12142,7 @@ internal/server/acme_test.go:338:	f.issueErr = errors.New("rate limited")
     75	
     76	真实连接验证见设计文档「阶段 1 验收范围」（浏览器 RDP 连 Windows、
     77	VNC 连 Linux、iPad Safari 触控；Win11 Home 无 RDP server 走 VNC 兜底）。
-     1	[English](README.md) | [中文](README.zh.md)
+     1	English | 中文
      2	
      3	<p align="center">
      4	  <img src="web/public/logo.svg" alt="Cockpit Logo" width="64" height="64">
@@ -12286,12 +12285,12 @@ internal/server/acme_test.go:338:	f.issueErr = errors.New("rate limited")
 [0m$ [0mnl -ba docs/guide/workflow-design.md | sed -n '1,150p'; nl -ba docs/guide/jobs-design.md | sed -n '10,35p;120,150p'; nl -ba docs/guide/architecture.md | sed -n '95,175p'; nl -ba docs/guide/protocol.md | sed -n '208,270p'
 1	# P2 方案设计：Workflow 与异步 Job
      2	
-     3	> 语言：**中文** ｜ [English](./workflow-design.en.md)
+     3	> 语言：**中文** ｜ English
      4	
      5	
      6	> 2026-10-09 立项；实现进度以本文「实现状态」节为准（M1 异步 Job + 线性
      7	> Workflow 当日落地，M2a 变量传递 / M2b 多目标扇出 / M2c 取消信号相继实现）。
-     8	> P1 执行 Job 模型（[jobs-design](./jobs-design)）已落地 `agent.exec` 最小闭环；
+     8	> P1 执行 Job 模型（jobs-design）已落地 `agent.exec` 最小闭环；
      9	> 本设计是它的下一生长点：Job 异步化 + 线性
     10	> Workflow 编排。设计边界遵守战略评审定调：Workflow 是「一组 Job 的编排」，
     11	> 只做控制面接线，不重造底层调度器。
@@ -12445,7 +12444,7 @@ internal/server/acme_test.go:338:	f.issueErr = errors.New("rate limited")
     18	  `jobs:read`/`jobs:write`（PermGuard 控制创建入口）。
     19	- **未实现**（按本文「边界（明确不做）」节，立项时再设计，不写进当前能力）：
     20	  输出流式、Action/Event 抽象与 AI 接线（P5）。
-    21	- **已由 P2 落地（2026-10-09，[workflow-design](./workflow-design.md) M1）**：
+    21	- **已由 P2 落地（2026-10-09，workflow-design M1）**：
     22	  异步执行/取消（`cancelled` 终态、pending 可撤、台账过滤）与 Workflow 编排；
     23	  `POST /api/jobs` 语义随之改为「创建即 201 返回 pending，后台派发」（原同步
     24	  等待删除），timeout 仍按设计保持 `failed`（不设独立终态）。取消面再由 M2c
@@ -12485,7 +12484,7 @@ internal/server/acme_test.go:338:	f.issueErr = errors.New("rate limited")
    142	
    143	| 优先级 | 方向 | 依赖 |
    144	|--------|------|------|
-   145	| P2 | Workflow：Job 编排（线性链/重试/取消，DAG/审批留 M2）——已落地（P2 异步化 + M1 编排 2026-10-09；M2a 变量/M2b 扇出/M2c 取消信号 2026-10-11，见 [workflow-design](./workflow-design)） | 本模型 |
+   145	| P2 | Workflow：Job 编排（线性链/重试/取消，DAG/审批留 M2）——已落地（P2 异步化 + M1 编排 2026-10-09；M2a 变量/M2b 扇出/M2c 取消信号 2026-10-11，见 workflow-design） | 本模型 |
    146	| P0′ | 事件模型：Job 终态事件进统一事件总线 | Event 抽象立项 |
    147	| P5 | AI 接线：Job API 即 AI 的执行面（agent.exec 之外补结构化类型） | 审计与限额先行 |
     95	- Gateways
@@ -12856,7 +12855,7 @@ internal/server/server.go:365:	mux.HandleFunc("/", func(w http.ResponseWriter, r
     40	  guacd-drive:
      1	# guacd 部署指南
      2	
-     3	> 语言：**中文** ｜ [English](./guacd-deploy.en.md)
+     3	> 语言：**中文** ｜ English
      4	
      5	## 概述
      6	

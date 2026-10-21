@@ -4,7 +4,7 @@
 
 本文按调研四件套口径（截图内嵌 + 来源 + 可参考分析 + 挂导航）记录六家同类开源方案的对照结论，落点回答一个悬置问题：**Cockpit 的探活采集该自研，还是对接现成数据源（Prometheus / Netdata Provider）**。
 
-调研时点 2026-10-10。截图以官网 / 官方文档 / 官方 README 提供的真界面图为主，Netdata 两张为本机容器实截。定性对比见 [参考项目对比与借鉴](/guide/reference-projects)（2026-09，含 Komodo/Portainer/Guacamole/Teleport/NetBox/Uptime Kuma），本文不重复其结论，只补监控面板六家与采集路线裁决。
+调研时点 2026-10-10。截图以官网 / 官方文档 / 官方 README 提供的真界面图为主，Netdata 两张为本机容器实截。定性对比见 参考项目对比与借鉴（2026-09，含 Komodo/Portainer/Guacamole/Teleport/NetBox/Uptime Kuma），本文不重复其结论，只补监控面板六家与采集路线裁决。
 
 ## 总览
 
@@ -68,7 +68,7 @@
 
 ## ③ Beszel（轻量 agent）
 
-hub + agent 双件套（MIT，Go），与 Cockpit Server + Agent 同构；agent 约 23MB 内存，Docker 容器级 stats、历史曲线、告警齐全。前次调研（[参考项目对比](/guide/reference-projects)）已作监控域主对标。
+hub + agent 双件套（MIT，Go），与 Cockpit Server + Agent 同构；agent 约 23MB 内存，Docker 容器级 stats、历史曲线、告警齐全。前次调研（参考项目对比）已作监控域主对标。
 
 ![Beszel hub 总览（官方 README 图）](./assets/beszel-dashboard.png)
 
@@ -165,7 +165,7 @@ Prometheus：pull 模型指标采集事实标准（Apache-2.0），exporter 生�
 
 ## 特别回答：探活采集自研，还是对接现成数据源
 
-悬置问题出自 [服务检测 agent 设计](/design/service-detect-agent)（croupier 口径）：B1-B6 已落地自研探针 agent（黑盒 http/tcp 探活、三态状态机、故障窗口、上行 REST），但「指标/探活数据是否改接现成数据源」未成文。两个候选 Provider 的评估：
+悬置问题出自 服务检测 agent 设计（croupier 口径）：B1-B6 已落地自研探针 agent（黑盒 http/tcp 探活、三态状态机、故障窗口、上行 REST），但「指标/探活数据是否改接现成数据源」未成文。两个候选 Provider 的评估：
 
 **Prometheus Provider（对接 prometheus 生态）**
 
@@ -185,9 +185,6 @@ Prometheus：pull 模型指标采集事实标准（Apache-2.0），exporter 生�
 
 ## 与 croupier 设计的交叉引用
 
-- [服务检测 agent（croupier system 角色探针）](/design/service-detect-agent)：B1-B6 自研探活即本文裁决的「探活自研」路线的落地；其「探测从 agent 侧发起、多点位归属另议」的悬置，业界参照即 Zabbix proxy 树（本文②）与 Netdata parent/streaming 拓扑（本文①）。
-- [agent-core 架构](/design/agent-core-architecture)：探测专用产物复用同一份 core 零件，与 Beszel agent（本文③）「单二进制小内存」的量级对标是 agent 体积验收的标尺。
-- [Workflow 与异步 Job](/guide/workflow-design)：Coolify 部署流水线（本文⑤）是「部署即 Job/Workflow」的交互参照。
 
 ## 来源
 

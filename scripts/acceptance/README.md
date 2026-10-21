@@ -15,6 +15,6 @@
   - `voldemo-compose.yaml`：命名卷跨容器共享 + `depends_on` 启动顺序
   - `netdemo-compose.yaml`：自定义 bridge 网络 + 服务间 DNS
 
-背景：[stack-deploy-design](../docs/guide/stack-deploy-design.md)、
-[service-health-design](../docs/guide/service-health-design.md)、
-[acceptance-checklist](../docs/guide/acceptance-checklist.md)。
+背景：stack-deploy-design、
+service-health-design、
+acceptance-checklist。

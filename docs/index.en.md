@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Cockpit
   text: Personal hybrid infrastructure console
-  tagline: Server + Agent for a lightweight resource view, monitoring and remote access · [中文](/index)
+  tagline: Server + Agent for a lightweight resource view, monitoring and remote access · 中文
   actions:
     - theme: brand
       text: Quick start

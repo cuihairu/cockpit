@@ -189,13 +189,13 @@ Browser
   -> target host:port
 ```
 
-终端与桌面连接都使用 `proxy_*` 消息做 TCP 数据转发：终端直连目标，RDP/VNC/SSH 桌面经 Guacamole（`guac:` 前缀中继到 guacd，见 [远控桌面 Guacamole 设计](/remote-desktop-guacamole-design)）。
+终端与桌面连接都使用 `proxy_*` 消息做 TCP 数据转发：终端直连目标，RDP/VNC/SSH 桌面经 Guacamole（`guac:` 前缀中继到 guacd，见 远控桌面 Guacamole 设计）。
 
 远程目标默认必须命中 `remote_control.allowed_targets` 中显式配置的主机名、IP 或 CIDR；开发/调试环境可以设置 `remote_control.allow_arbitrary_target: true` 跳过该限制。当前实现不会自动从 inventory 推导可远控目标。
 
 RDP/VNC/SSH 桌面协议由 guacd 终结，Agent 只做 TCP 转发——Agent 无特殊构建标签要求，任意平台默认构建均可用。
 
-远程连接的 Browser WebSocket 使用短期 ticket 认证。详见 [协议与 API 边界](/guide/protocol)。
+远程连接的 Browser WebSocket 使用短期 ticket 认证。详见 协议与 API 边界。
 
 ## 安全概念
 
@@ -210,4 +210,4 @@ RDP/VNC/SSH 桌面协议由 guacd 终结，Agent 只做 TCP 转发——Agent �
 
 ## 与历史设计的差异
 
-仓库中有一些设计文档描述了更完整的 Git-first、目录拆分 inventory 和第三方集成愿景。当前实现已经具备 inventory 同步、Server/Agent 控制面、资源查询、监控、认证、审计、告警和远程连接，但仍应以本文和 [架构与边界](/guide/architecture) 中描述的代码事实为准。
+仓库中有一些设计文档描述了更完整的 Git-first、目录拆分 inventory 和第三方集成愿景。当前实现已经具备 inventory 同步、Server/Agent 控制面、资源查询、监控、认证、审计、告警和远程连接，但仍应以本文和 架构与边界 中描述的代码事实为准。

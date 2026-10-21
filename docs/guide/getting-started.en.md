@@ -161,7 +161,7 @@ For manual deployment, service parameters and troubleshooting see [deployments/R
 
 OpenWrt routers need no manual compilation: the nightly release provides multi-architecture
 `.ipk` packages (install with opkg, supervised by procd, configured via UCI); the install steps are in
-[OpenWrt Agent packaging design](/guide/openwrt-agent-design.en#installation-and-upgrade).
+OpenWrt Agent packaging design.
 
 Other cases: download the `cockpit-agent` binary for your platform (or compile it locally).
 The Server must configure `server.agent_registration.enrollment_secret`; use the same value

@@ -57,7 +57,7 @@ Cockpit Agent
 - Agent 负责节点侧探测和执行。
 - Inventory 是声明式输入，SQLite 是运行时查询面。
 
-完整边界见 [架构与边界](/guide/architecture)。
+完整边界见 架构与边界。
 
 ## 与其他工具的关系
 
@@ -75,8 +75,3 @@ Cockpit 不要求替代已有控制台。当前代码中已经有 PVE、Docker�
 
 ## 文档阅读路径
 
-1. [快速开始](/guide/getting-started)
-2. [核心概念](/guide/concepts)
-3. [架构与边界](/guide/architecture)
-4. [Agent 出口与 SD-WAN 能力边界](/guide/agent-egress-sdwan)
-5. [协议与 API 边界](/guide/protocol)
