@@ -84,6 +84,9 @@ const (
 	// 带外兜底探活（见同设计 片B）：三源探测在 agent 侧执行，server 转发并记
 	// 目标 IP 与端口清单（判定三态不落审计，结果以响应返回）。
 	ActionOobProbe = "oob_probe"
+	// 只读多 Provider 发现协商：记录尝试的协议路径；能力结论不进审计，
+	// 以发现响应返回给调用方。
+	ActionOobDiscover = "oob_discover"
 	// 带外兜底转发编排（见同设计 片C）：转发规则由 agent 写入 ubus，server
 	// 侧二次确认（confirm_label 必须等于规则标签）后转发，记规格与规则名。
 	// 规则名含过期时刻，便于审计回溯「这条规则何时自动失效」。

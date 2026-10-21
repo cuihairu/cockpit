@@ -20,6 +20,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/dns"
 	"github.com/cuihairu/cockpit/internal/notification"
+	"github.com/cuihairu/cockpit/internal/oob"
 	"github.com/cuihairu/cockpit/internal/overlay"
 	"github.com/cuihairu/cockpit/internal/probe"
 	"github.com/cuihairu/cockpit/internal/protocol"
@@ -88,6 +89,7 @@ type Server struct {
 	// livenessStore 带外探活内存最新态（oob-openwrt-bootstrap.md 片B：
 	// agent 推送 liveness_report，查询走 GET /api/oob/liveness）
 	livenessStore *livenessStore
+	oobProviders  *oob.Registry
 }
 
 // logFatalf 注入点：NewServer 启动防御（坏库路径/弱密码/生产密钥校验）以
@@ -179,6 +181,7 @@ func NewServer(cfg *config.Config) *Server {
 		ticketMgr:      NewTicketManager(),
 		loginLimiter:   newLoginAttemptLimiter(),
 		livenessStore:  newLivenessStore(),
+		oobProviders:   newOOBRegistry(),
 		cloudProviders: cloud.NewRegistry(),
 		cfg:            cfg,
 		upgrader: websocket.Upgrader{

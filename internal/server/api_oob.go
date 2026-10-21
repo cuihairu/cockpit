@@ -14,6 +14,7 @@ import (
 //
 //	POST /api/oob/wol      唤醒局域网目标机（agent 侧发 WOL 魔术包，审计留痕）
 //	POST /api/oob/probe    按需三源探活（agent 侧 ARP/ICMP/TCP 独立三态判定，审计留痕）
+//	POST /api/oob/discover 多 Provider 只读发现协商（三态能力仲裁可溯源）
 //	GET  /api/oob/liveness 读周期探活最新态（agent 推送，内存态，带 stale 标记）
 //	POST /api/oob/redirect 下发兜底转发规则（双确认 + 审计，凭据走 vault oob/）
 //	POST /api/oob/redirect/remove 拆除转发规则（双确认 + 审计）
@@ -38,6 +39,8 @@ func (s *Server) handleOobAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleOobWake(w, r)
 	case len(parts) == 1 && parts[0] == "probe" && r.Method == http.MethodPost:
 		s.handleOobProbe(w, r)
+	case len(parts) == 1 && parts[0] == "discover" && r.Method == http.MethodPost:
+		s.handleOobDiscover(w, r)
 	case len(parts) == 1 && parts[0] == "liveness" && r.Method == http.MethodGet:
 		s.handleOobLiveness(w, r)
 	case len(parts) == 1 && parts[0] == "redirect" && r.Method == http.MethodPost:

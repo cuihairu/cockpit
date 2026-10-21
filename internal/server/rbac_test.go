@@ -120,6 +120,11 @@ func TestRBACMatrix(t *testing.T) {
 		{"operator approve", "operator", "POST", "/api/approvals/p1/approve", 200},
 		{"admin read approvals", "admin", "GET", "/api/approvals", 200},
 		{"admin approve", "admin", "POST", "/api/approvals/p1/approve", 200},
+		// OOB 发现协商沿用兜底动作 inventory 门禁：只读探测仍主动出网，
+		// viewer 只可读台账，不触发协议探测。
+		{"viewer oob discover", "viewer", "POST", "/api/oob/discover", 403},
+		{"operator oob discover", "operator", "POST", "/api/oob/discover", 200},
+		{"admin oob discover", "admin", "POST", "/api/oob/discover", 200},
 		// 认证优先于鉴权：无/坏 token 放行给内层 auth（出 401 而非 403）
 		{"no token", "", "GET", "/api/dns", 200},
 		{"bad token", "bad", "GET", "/api/dns", 200},

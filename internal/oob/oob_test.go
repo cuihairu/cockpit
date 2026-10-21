@@ -51,6 +51,17 @@ func TestRegistryValidation(t *testing.T) {
 	}
 }
 
+func TestRegistryMustRegisterPanics(t *testing.T) {
+	defer func() {
+		recovered := recover()
+		err, ok := recovered.(error)
+		if !ok || !strings.Contains(err.Error(), "name must not be empty") {
+			t.Fatalf("MustRegister panic = %#v", recovered)
+		}
+	}()
+	NewRegistry().MustRegister(fakeProvider{})
+}
+
 func TestListSorted(t *testing.T) {
 	r := NewRegistry()
 	for _, n := range []string{"redfish", "amt"} {

@@ -32,6 +32,14 @@ func (r *Registry) Register(p Provider) error {
 	return nil
 }
 
+// MustRegister registers Provider and panics on invalid input. It is for
+// compile-time provider sets whose names are package constants.
+func (r *Registry) MustRegister(p Provider) {
+	if err := r.Register(p); err != nil {
+		panic(err)
+	}
+}
+
 // List 返回全部 Provider，按名排序（稳定遍历）。
 func (r *Registry) List() []Provider {
 	r.mu.RLock()
