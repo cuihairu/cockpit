@@ -53,7 +53,8 @@
   },
   "pnpm": {
     "overrides": {
-      "follow-redirects@<1.16.1": "1.16.1"
+      "follow-redirects@<1.16.1": "1.16.1",
+      "@vitest/mocker@<5.0.3": "5.0.3"
     }
   }
 }
