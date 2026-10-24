@@ -1,41 +1,40 @@
-# 磁盘健康（SMART）设计
+# Disk Health (SMART) Design
 
-> 语言：**中文** ｜ [English](./disk-health-design.en.md)
 
-## 背景
+## Background
 
-对个人基础设施而言，磁盘是「坏了才发现」损失最大的部件：NAS 用户的第一痛点是数据盘静默损坏。SMART 指标（重映射扇区、待定扇区、介质错误）在盘真正死亡前通常有数周到数月的征兆窗口，及时告警可以换来从容迁移。
+For personal infrastructure, disks are the part where "found out too late" costs the most: a NAS user's first pain point is silent data-disk failure. SMART metrics (reallocated sectors, pending sectors, media errors) usually give a warning window of weeks to months before a disk actually dies; timely alerts buy a calm migration.
 
-Cockpit 现状：
+Cockpit's current state:
 
-- `hardware-monitor` capability（`internal/agent/detector/hardware.go`）**已经探测 smartctl** 并在 metadata 置 `smart: true`，但没有对应的数据面 provider——探测是"有这个工具"，取不到读数；
-- server 侧巡检循环（`internal/server/drift_scan.go`）与告警去重（`internal/alert/generator.go` 的 `CheckXxx` 族）模式成熟，可整体复刻。
+- The `hardware-monitor` capability (`internal/agent/detector/hardware.go`) **already probes smartctl** and sets `smart: true` in metadata, but there is no corresponding data-plane provider — probing means "the tool exists", yet readings cannot be obtained;
+- The server-side inspection loop (`internal/server/drift_scan.go`) and alert deduplication (the `CheckXxx` family in `internal/alert/generator.go`) patterns are mature and can be replicated wholesale.
 
-本任务给 M1 补上数据面：**单盘健康只读观测 + 定时巡检 + 真去重告警 + 跨主机总览页**。
+This task adds the data plane for M1: **single-disk health read-only observation + scheduled inspection + genuinely deduplicated alerts + a cross-host overview page**.
 
-## 决策
+## Decisions
 
-- **D1 复用 hardware-monitor capability，不新建 detector**。`metadata.smart` 已由 `HardwareDetector` 探测（`LookPath` + `smartctl --version` 可运行）。agent 侧 provider 在 `providers.go` 新增 `case "hardware-monitor"` 注册；server 侧巡检按 `metadata.smart == true` 过滤（同一 capability 下只有温度/UPS 的主机自动跳过）。
-- **D2 RPC 单方法 `smart.status`**，只读、无入参、校验面为零（与 `overlay.status` 同风格）。
-- **D3 数据面两条命令**：
-  - `lsblk --json --paths --noheadings -b -o NAME,TYPE,SIZE,MODEL,SERIAL` 发现物理盘（过滤 `TYPE == "disk"`，排除 loop/ram/分区）；`--paths` 让 NAME 直接是 `/dev/sda` 形式，无需拼接；
-  - 每盘 `smartctl --json -H -A /dev/X` 读健康与属性。
-  - 超时：lsblk 5s、单盘 smartctl 10s、整次 RPC 整体 30s；单盘失败不影响其余盘（与 overlay D5 同则）。
-- **D4 字段白名单**。smartctl 的 JSON 输出很大，provider 只解析并输出以下字段，绝不透传完整 JSON：
-  - `smart_status.passed` → 健康结论；
-  - `temperature.current` → 温度（smartctl 7.x 对 ATA/NVMe 统一的顶层字段）；
-  - `ata_smart_attributes.table[]` 中 id=5（Reallocated_Sector_Ct）、id=197（Current_Pending_Sector）、id=9（Power_On_Hours）的 `raw.value`（注意 smartctl 不同版本 raw.value 可能是数字或字符串，解析需兼容两形态）；
-  - NVMe（`device.type == "nvme"`）：`nvme_smart_health_information_log` 的 `power_on_hours`、`media_errors`、`critical_warning`、`percentage_used`。
-- **D5 健康三态**：`passed` / `failed`（`smart_status.passed == false`，即盘已报 FAILING_NOW）/ `unknown`（权限不足、盘不支持 SMART、smartctl 读数失败——`error` 字段带原因给前端展示）。`unknown` 不触发告警（环境问题不是盘的问题）。
-- **D6 权限现实**：smartctl 读盘普遍需要 root。cockpit agent 默认以 root systemd 服务运行；非 root 部署时所有盘会标 `unknown` + 权限错误说明，功能不炸。文档与页面提示这一点。
-- **D7 REST 纯转发不落库**：`GET /api/agents/{id}/smart/status` 透传 RPC 结果，浏览类不记审计（与 overlay D8/D9 同则）；巡检配置走全局路径 `GET/PUT /api/smart/config`（仿 `/api/drift/config`，巡检间隔非 per-agent）。
-- **D8 巡检循环复刻 drift 模式**：1min ticker + lastScan 对比；Setting 键 `smart.scan_interval_seconds`，默认 3600，min 300，max 86400，`0 = 关闭`。范围 = `ListByCapability("hardware-monitor")` ∩ `metadata.smart` ∩ 在线。
-- **D9 告警真去重**：`alert.Generator.CheckDiskHealth(agentID, hostname, issues)`，同主机一条告警（与 `CheckDriftScan` 同构）。分级：任一盘 `failed` → `error` 级；仅重映射/待定/介质扇区 > 0 → `warning` 级；`unknown` 只记日志。
-- **D10 前端 `/disk`「磁盘健康」页**：跨 agent 总览一屏（主机、设备、型号、容量、温度、通电时长、重映射/待定/介质扇区、健康徽标），Collapse 按主机展开单机详情；页内巡检间隔设置（InputNumber + 保存，数据来自 `/api/smart/config`）。菜单名「磁盘健康」，`HddOutlined`，置于「组网观测」之后。
+- **D1 Reuse the hardware-monitor capability, no new detector**. `metadata.smart` is already probed by `HardwareDetector` (`LookPath` + `smartctl --version` runs). The agent-side provider registers `case "hardware-monitor"` in `providers.go`; the server-side inspection filters on `metadata.smart == true` (hosts with only temperature/UPS under the same capability are skipped automatically).
+- **D2 RPC single method `smart.status`**, read-only, no parameters, zero validation surface (same style as `overlay.status`).
+- **D3 Two data-plane commands**:
+  - `lsblk --json --paths --noheadings -b -o NAME,TYPE,SIZE,MODEL,SERIAL` discovers physical disks (filter `TYPE == "disk"`, excluding loop/ram/partitions); `--paths` makes NAME directly `/dev/sda`-shaped, no concatenation needed;
+  - Per disk, `smartctl --json -H -A /dev/X` reads health and attributes.
+  - Timeouts: lsblk 5s, smartctl per disk 10s, whole RPC 30s; a single-disk failure does not affect the rest (same rule as overlay D5).
+- **D4 Field whitelist**. smartctl's JSON output is large; the provider parses and emits only the following fields, never passing through the full JSON:
+  - `smart_status.passed` → the health verdict;
+  - `temperature.current` → temperature (smartctl 7.x's unified top-level field for ATA/NVMe);
+  - From `ata_smart_attributes.table[]`: the `raw.value` of id=5 (Reallocated_Sector_Ct), id=197 (Current_Pending_Sector), and id=9 (Power_On_Hours) (note that raw.value may be a number or a string depending on smartctl version; parsing must tolerate both shapes);
+  - NVMe (`device.type == "nvme"`): `power_on_hours`, `media_errors`, `critical_warning`, `percentage_used` from `nvme_smart_health_information_log`.
+- **D5 Health three states**: `passed` / `failed` (`smart_status.passed == false`, i.e. the disk already reports FAILING_NOW) / `unknown` (insufficient permissions, disk does not support SMART, smartctl read failure — the `error` field carries the reason for frontend display). `unknown` raises no alert (an environmental problem is not a disk problem).
+- **D6 Permission reality**: reading disks with smartctl generally requires root. The cockpit agent runs by default as a root systemd service; with a non-root deployment all disks are marked `unknown` plus a permission-error explanation, and the feature does not crash. Documentation and the page state this.
+- **D7 REST pure forwarding, no persistence**: `GET /api/agents/{id}/smart/status` passes through the RPC result; browsing is not audited (same rule as overlay D8/D9); inspection config uses the global path `GET/PUT /api/smart/config` (following `/api/drift/config`, since the inspection interval is not per-agent).
+- **D8 Inspection loop replicates the drift pattern**: 1min ticker + lastScan comparison; Setting key `smart.scan_interval_seconds`, default 3600, min 300, max 86400, `0 = disabled`. Scope = `ListByCapability("hardware-monitor")` ∩ `metadata.smart` ∩ online.
+- **D9 Genuinely deduplicated alerts**: `alert.Generator.CheckDiskHealth(agentID, hostname, issues)`, one alert per host (isomorphic with `CheckDriftScan`). Grading: any disk `failed` → `error` level; only reallocated/pending/media sectors > 0 → `warning` level; `unknown` is only logged.
+- **D10 Frontend `/disk` "disk health" page**: a cross-agent overview on one screen (host, device, model, capacity, temperature, power-on hours, reallocated/pending/media sectors, health badge), with a Collapse expanding per-host detail; in-page inspection interval setting (InputNumber + save, data from `/api/smart/config`). Menu name "disk health", `HddOutlined`, placed after "network observation".
 
-## 数据结构
+## Data structure
 
-`smart.status` 返回：
+`smart.status` returns:
 
 ```json
 {
@@ -59,20 +58,20 @@ Cockpit 现状：
 }
 ```
 
-- `available: false` 表示 smartctl 缺失（与 metadata.smart 不符的环境，巡检与前端均跳过，不报错）；
-- 数值字段取不到时省略（omitempty），前端展示 `—`；
-- `serial` 用于跨巡检识别同一块盘（盘序号可能变），不做保密处理（本产品单管理员）。
+- `available: false` means smartctl is missing (environments that contradict metadata.smart; both inspection and frontend skip it without error);
+- Numeric fields are omitted (omitempty) when unavailable, and the frontend shows `—`;
+- `serial` identifies the same disk across inspections (disk ordering can change) and is not confidential (single-admin product).
 
-## 实现切分（M1，本任务）
+## Implementation split (M1, this task)
 
-1. **docs**：本文档；
-2. **agent**：`rpc/smart_parse.go`（纯函数解析 lsblk/smartctl JSON）+ `rpc/smart_provider.go`（`SmartProvider`，Commander 可注入）+ `providers.go` 注册 + 测试；
-3. **server**：`api_smart.go`（status 转发 + config GET/PUT）+ `smart_scan.go`（巡检循环）+ `alert` 新增 `CheckDiskHealth` + 测试；
-4. **web**：类型 + api 方法 + `/disk` 页 + 菜单/路由 + `tsc`/build 通过。
+1. **docs**: this document;
+2. **agent**: `rpc/smart_parse.go` (pure-function parsing of lsblk/smartctl JSON) + `rpc/smart_provider.go` (`SmartProvider`, Commander injectable) + `providers.go` registration + tests;
+3. **server**: `api_smart.go` (status forwarding + config GET/PUT) + `smart_scan.go` (inspection loop) + new `CheckDiskHealth` in `alert` + tests;
+4. **web**: types + api method + `/disk` page + menu/route + `tsc`/build passing.
 
-## 测试要点
+## Test points
 
-- 解析器：ATA passed / failed、NVMe、`raw.value` 数字与字符串两形态、缺 `smart_status`（unknown）、全字段缺失不 panic；
-- provider：fake Commander 注入；lsblk 空/坏 JSON；smartctl 缺失 → `available: false`；单盘 smartctl 失败 → 该盘 unknown、其余盘正常；
-- server：Setting 边界校验；巡检过滤（无 smart 标志的 agent 跳过）；告警注入走真 DB（仿 drift 巡检测试）；
-- 前端：`tsc --noEmit` + vite build。
+- Parser: ATA passed / failed, NVMe, `raw.value` as number and as string, missing `smart_status` (unknown), all fields missing without panic;
+- Provider: fake Commander injection; empty/bad lsblk JSON; smartctl missing → `available: false`; single-disk smartctl failure → that disk unknown, the rest normal;
+- Server: Setting boundary validation; inspection filtering (agents without the smart flag are skipped); alert injection through the real DB (following the drift inspection tests);
+- Frontend: `tsc --noEmit` + vite build.

@@ -1,131 +1,100 @@
-# 方案设计：服务域名绑定（Domain Binding）
+# Solution Design: Service Domain Binding
 
-> 语言：**中文** ｜ [English](./domain-binding-design.en.md)
 
-> 2026-09-19。服务域名配置首期设计。需求原文：「可以配置指向服务的域名，这样
-> agent 中可以方便使用域名来配置」。本文只做设计决策与接口定义。
+> 2026-09-19. First-phase design for service domain configuration. Original requirement: "It should be possible to configure a domain that points to a service, so that domains can be used conveniently in agent configurations." This document covers only design decisions and interface definitions.
 
-## 现状与痛点
+## Current state and pain points
 
-一个「域名对外提供服务」的事实分散在四个互不知情的模块里：
+The fact that "a domain serves a service externally" is scattered across four modules that do not know about each other:
 
-| 模块 | 现状 | 配的东西 |
+| Module | Current state | What it configures |
 |------|------|----------|
-| DNS 管理 | `dns` provider 建 A/CNAME 记录 | 域名 → 服务器 IP |
-| 反向代理 | traefik `ProxySite{ServerNames, Upstream}` | 域名 → host:port |
-| 证书 | `cert` 监控按域名列表轮询到期时间 | 域名清单（手工维护，与上两处重复） |
-| 探针 | `probe` 目标按 URL 配置 | 域名 URL（同样重复） |
+| DNS management | the `dns` provider creates A/CNAME records | domain → server IP |
+| Reverse proxy | traefik `ProxySite{ServerNames, Upstream}` | domain → host:port |
+| Certificate | `cert` monitoring polls expiry times against a domain list | domain list (hand-maintained, duplicated with the two above) |
+| Probe | `probe` targets are configured by URL | domain URL (also duplicated) |
 
-| 痛点 | 后果 |
+| Pain point | Consequence |
 |------|------|
-| 开一个新服务要跑 3-4 处配置 | 漏一处就是「解析没建/证书过期/探针没盯」三类经典事故 |
-| 域名与服务的关系只存在于人脑 | 半年后不知道 blog.example.com 指向哪台机器哪个端口 |
-| agent 侧配置只能手抄域名 | 换域名/加域名要逐台 agent 手改 |
+| Standing up a new service requires configuring 3-4 places | Missing one place yields the classic three incident types: "resolution not created / certificate expired / probe not watching" |
+| The domain-to-service relationship exists only in people's heads | Half a year later you no longer know which machine and which port blog.example.com points to |
+| Agent-side configuration can only hand-copy domains | Changing/adding a domain means hand-editing each agent |
 
-## 架构总览
+## Architecture overview
 
-**DomainBinding 一等资源**：登记「域名 → agent 上的目标服务」，一次申请，
-三个下游（DNS / 反代 / 证书监控）自动联动；agent 侧按需引用域名清单。
+**DomainBinding as a first-class resource**: register "domain → target service on an agent", applied once, with three downstream systems (DNS / reverse proxy / certificate monitoring) automatically linked; the agent side references the domain list on demand.
 
 ```
 ┌─ server ────────────────────────────────────────┐
 │ DomainBinding{domain, agent, target, auto*}     │
-│   apply() ──┬─▶ dns provider：A/CNAME 建改记录   │
-│             ├─▶ agent RPC：traefik 站点下发      │
-│             └─▶ cert monitor：自动纳入监控       │
-│ GET /api/agents/{id}/domains  ← agent 按需拉取  │
+│   apply() ──┬─▶ dns provider: A/CNAME create/update │
+│             ├─▶ agent RPC: dispatch traefik site  │
+│             └─▶ cert monitor: auto-enroll          │
+│ GET /api/agents/{id}/domains  ← agent pulls on demand │
 └─────────────────────────────────────────────────┘
 ```
 
-## 关键决策
+## Key decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D1 | 资源模型 | `DomainBinding{domain(唯一), agentID, target(host:port \| docker://服务名), enabled, autoDNS, autoProxy, autoCert}` | 三个 auto 开关解耦联动：只想登记关系不开自动化也合法 |
-| D2 | target 语义 | 统一为「agent 可达地址」：host:port（host 可为 127.0.0.1/容器名/内网 IP）；`docker://name` 解析为该 agent 上 docker 网络内的服务名 | 反代上游就在 agent 本机网络，域名解析记录指向的是 agent 主机 IP，两者分层不混淆 |
-| D3 | DNS 记录 | `autoDNS` 开时经 dns provider 写 A 记录（IP = agent 注册上报的主地址）；CNAME/多级域名首期不做 | agent 主地址已有注册链路，不新增配置；CNAME 场景等真实需求 |
-| D4 | 反代下发 | `autoProxy` 开时复用既有 traefik `ApplySite`（ServerNames=[domain], Upstream=target），server 纯转发、agent 本地渲染+自检 | 完全复用 P1 反代通道，零新协议 |
-| D5 | 证书联动 | `autoCert` 开时域名自动进入 cert 监控清单；反向：Binding 删除时提示（不自动删）监控项 | 监控宁可多盯不可漏盯；自动删除监控是危险默认 |
-| D6 | 一致性检查 | Binding 列表页展示「漂移」：DNS 实际记录 ≠ 期望、站点未下发、监控缺失，逐项标记 | 登记了不等于生效了；漂移可见是自助排障第一步 |
-| D7 | agent 引用 | `GET /api/agents/{id}/domains`（含 `/snippet` 配置片段生成）下发该 agent 的域名清单；probe 目标支持 `binding://` 引用形态，解析点在 server 探测链路 | 换域名只改 Binding，引用键（agent+target）稳定则探测自动跟随 |
-| D8 | 删除语义 | 删 Binding 只删登记，不动已下发的 DNS/站点/监控项（提示手工清理） | 删除自动化连锁是危险操作；先可见后清理 |
-| D9 | 权限 | 增删改需 `dns:write` + `proxy:write`（联动了谁就要谁的权限）；只读沿用 `dns:read` | 与 RBAC 设计（rbac-design.md）权限点清单衔接 |
-| D10 | 存储 | 复用 settings/inventory 现有 SQLite，GORM 单表 `domain_bindings` | 无新依赖；量级（个位数到几十条）不值得独立存储 |
+| D1 | Resource model | `DomainBinding{domain(unique), agentID, target(host:port \| docker://service-name), enabled, autoDNS, autoProxy, autoCert}` | The three auto switches decouple the linkage: registering only the relationship without enabling automation is also valid |
+| D2 | target semantics | Unified as "agent-reachable address": host:port (host may be 127.0.0.1/container name/lan IP); `docker://name` resolves to a service name inside that agent's docker network | The reverse proxy upstream is in the agent's own machine network, and the domain resolution record points at the agent host IP; the two layers stay unconfused |
+| D3 | DNS records | When `autoDNS` is on, write an A record via the dns provider (IP = the agent's registered primary address); CNAME/multi-level domains not in phase 1 | The agent's primary address already has a registration path, so no new config is added; wait for a real CNAME need |
+| D4 | Proxy dispatch | When `autoProxy` is on, reuse the existing traefik `ApplySite` (ServerNames=[domain], Upstream=target); the server is a pure forwarder, and the agent renders + self-checks locally | Fully reuses the P1 reverse proxy channel, zero new protocol |
+| D5 | Certificate linkage | When `autoCert` is on, the domain automatically enters the cert monitoring list; in reverse: when a Binding is deleted, prompt (do not auto-delete) the monitoring item | Monitoring would rather watch too much than miss something; auto-deleting monitoring is a dangerous default |
+| D6 | Consistency check | The Binding list page shows "drift": actual DNS record ≠ expected, site not dispatched, monitoring missing, each item flagged | Registering does not mean it took effect; making drift visible is the first step toward self-service troubleshooting |
+| D7 | agent reference | `GET /api/agents/{id}/domains` (including `/snippet` config snippet generation) delivers the domain list for that agent; probe targets support the `binding://` reference form, with resolution in the server's probe path | Changing a domain only means changing the Binding; as long as the reference key (agent+target) is stable, probing follows automatically |
+| D8 | Deletion semantics | Deleting a Binding only removes the registration; it does not touch already-dispatched DNS/site/monitoring items (prompt to clean up manually) | Chained deletion automation is a dangerous operation; make it visible first, then clean up |
+| D9 | Permissions | Create/update/delete require `dns:write` + `proxy:write` (whoever is linked needs their permission); read-only follows `dns:read` | Connects with the permission-point list in the RBAC design (rbac-design.md) |
+| D10 | Storage | Reuse the existing settings/inventory SQLite, GORM single table `domain_bindings` | No new dependency; the scale (single digits to tens of rows) does not justify a separate store |
 
-## API（server 侧，agent 零协议变更）
+## API (server side, zero agent protocol changes)
 
 ```
-GET    /api/domains?agent=xxx     列表
-GET    /api/domains/drift?agent=xxx  漂移检查（D6，实时逐条检查三路联动）
-POST   /api/domains               登记/更新
-DELETE /api/domains/{domain}      删登记（D8）
-POST   /api/domains/{domain}/apply   执行联动（DNS/反代/证书按 auto* 开关）
-GET    /api/agents/{id}/domains      该 agent 的域名清单（D7）
-GET    /api/agents/{id}/domains/snippet  配置片段（D7，text/plain）
+GET    /api/domains?agent=xxx     list
+GET    /api/domains/drift?agent=xxx  drift check (D6, live per-item check of the three-way linkage)
+POST   /api/domains               register/update
+DELETE /api/domains/{domain}      delete registration (D8)
+POST   /api/domains/{domain}/apply   run the linkage (DNS/proxy/cert per the auto* switches)
+GET    /api/agents/{id}/domains      domain list for that agent (D7)
+GET    /api/agents/{id}/domains/snippet  config snippet (D7, text/plain)
 ```
 
-### D7 agent 引用细化
+### D7 agent reference, refined
 
-早期草案写「只读 RPC `domains.list`」——落地改为 **HTTP 端点**：现有
-RPC 协议是 server→agent 单向（agent 响应），而域名清单的事实源在
-server 库，「下发」的天然形态是 server 端点；agent 本身不消费清单
-（agent 零协议变更保持），消费方是人 / 脚本 / 配置生成。
+The early draft said "read-only RPC `domains.list`" — the implementation changed this to an **HTTP endpoint**: the existing RPC protocol is server→agent one-way (the agent responds), and the source of truth for the domain list is the server's database, so the natural form of "delivery" is a server endpoint; the agent itself does not consume the list (the agent keeps zero protocol changes), and the consumers are people / scripts / config generation.
 
-- **清单**：`GET /api/agents/{id}/domains`，数据源
-  `ListDomainBindingsByAgent`，agent 必须已注册（404）
-- **片段**：`GET /api/agents/{id}/domains/snippet` 返回 text/plain，
-  含 env 行（`COCKPIT_AGENT_DOMAINS="…"`）与 nginx `server_name` 行
-  两段，只取 enabled 绑定——curl 即得、agent 上的任意服务可 source
-- **probe 引用**：`Service.URL` 支持 `binding://{agentID}/{target}`
-  形态（如 `binding://a1/127.0.0.1:8080`、`binding://a1/docker://web`）。
-  探测时 probe Runner 查 binding 表按 agent+target 解析出当前域名，
-  以 `https://{domain}` 探测——引用键稳定，binding 换域名（删旧建新
-  同 agent+target）后探测自动跟随，不再手抄。仅 http/https 类型可用；
-  引用无匹配 / 绑定停用 / 类型不符 → 探测结果记 down 并报错（可见，
-  不静默）
+- **List**: `GET /api/agents/{id}/domains`, data source `ListDomainBindingsByAgent`; the agent must already be registered (404)
+- **Snippet**: `GET /api/agents/{id}/domains/snippet` returns text/plain, containing two sections — an env line (`COCKPIT_AGENT_DOMAINS="…"`) and nginx `server_name` lines — taking only enabled bindings: curl it and you get it, and any service on the agent can source it
+- **probe reference**: `Service.URL` supports the `binding://{agentID}/{target}` form (e.g. `binding://a1/127.0.0.1:8080`, `binding://a1/docker://web`). During probing, the probe Runner looks up the binding table and resolves the current domain by agent+target, then probes with `https://{domain}` — the reference key is stable, so after a binding changes domain (delete old, create new with the same agent+target) probing follows automatically, no more hand-copying. Available only for http/https types; reference with no match / binding disabled / type mismatch → the probe result is recorded as down with an error (visible, not silent)
 
-### D6 漂移检查细化
+### D6 drift check, refined
 
-漂移 = **auto\* 开关承诺的状态**与实际状态的差距；没承诺（开关关）就没漂移。
-实时按需检查（列表不内嵌——每条 DNS 检查要打 provider API、proxy 检查要打
-agent RPC，内嵌会把列表拖到秒级），排障时主动触发。
+Drift = the gap between **the state promised by the auto\* switches** and the actual state; no promise (switch off) means no drift. Checked on demand in real time (not embedded in the list — each DNS check hits the provider API and each proxy check hits agent RPC, so embedding would drag the list out to the seconds scale); triggered manually during troubleshooting.
 
-- 检查范围：`enabled=false` 整条跳过；`autoDNS/autoProxy/autoCert` 关的
-  路不检查（`checked=false`），开的路逐项标记
-- DNS：期望 = agent 注册主地址（与 apply 同源）；实际 = provider 内该域名
-  A 记录。记录缺失 `missing`、内容不符 `mismatch`；provider 未配置 /
-  zone 不匹配 / agent 无地址 → `error`（无法判定，非漂移）
-- Proxy：`site.get` 查 `bindingSiteName(domain)`；站点不存在 `missing`；
-  存在但 upstream（docker:// 前缀归一后）或 serverNames 与登记不符
-  `mismatch`；agent 不可达 / RPC 失败 → `error`
-- Cert：inventory Domain 缺失 `missing`、被其他 agent 占 `foreign`；
-  否则 ok
-- 三态语义：`ok`（无漂移）/ `missing|mismatch|foreign`（确认漂移，附
-  expected/actual）/ `error`（检查失败，不可判定）——前端红黄区分
+- Check scope: `enabled=false` skips the whole row; a path whose `autoDNS/autoProxy/autoCert` is off is not checked (`checked=false`), and a path that is on is flagged item by item
+- DNS: expected = the agent's registered primary address (same source as apply); actual = the A record for that domain in the provider. Record missing → `missing`, content mismatch → `mismatch`; provider not configured / zone mismatch / agent has no address → `error` (indeterminable, not drift)
+- Proxy: `site.get` looks up `bindingSiteName(domain)`; site absent → `missing`; present but upstream (after normalizing the docker:// prefix) or serverNames differs from the registration → `mismatch`; agent unreachable / RPC failure → `error`
+- Cert: inventory Domain missing → `missing`, occupied by another agent → `foreign`; otherwise ok
+- Three-state semantics: `ok` (no drift) / `missing|mismatch|foreign` (confirmed drift, with expected/actual) / `error` (check failed, indeterminable) — the frontend distinguishes red from yellow
 
-## 分期
+## Phasing
 
-| 期 | 内容 | 验收 |
+| Phase | Content | Acceptance |
 |----|------|------|
-| P0 | Binding CRUD + apply 联动 DNS/反代/证书 + 漂移检查 | 登记一个域名到 apply 完成全自动，dashboard 可见 |
-| P1 | agent `domains.list` RPC + probe 目标引用域名 + 一键生成安装/配置片段 | agent 侧配置不再手抄域名 |
-| P2（按需） | CNAME/泛域名、批量 apply、cert 监控自动移除 | 按实际需求排期 |
+| P0 | Binding CRUD + apply with DNS/proxy/cert linkage + drift check | Registering one domain and completing apply is fully automatic, visible in the dashboard |
+| P1 | agent `domains.list` RPC + probe targets referencing domains + one-click generation of install/config snippets | agent-side configuration no longer hand-copies domains |
+| P2 (as needed) | CNAME/wildcard domains, batch apply, automatic removal of cert monitoring | Scheduled according to actual needs |
 
-## 实现状态
+## Implementation status
 
-- 2026-09-20：P0 主体落地——storage 单表 + server 四端点（列表/登记/删除/apply
-  三联动）+ apply 快照回写（`LastApplyStatus/LastError/AppliedAt`）。实现见
-  `internal/storage/domain_binding.go`、`internal/server/api_domain_bindings.go`。
-- 2026-09-20：D6 漂移检查落地——`GET /api/domains/drift` 实时逐条检查三路
-  联动（语义见上节细化）。换绑 cert 监控项走 `UpdateDomainAgentID` 显式
-  更新——GORM `Assign(struct)` 对已存在记录不落库，`UpsertDomain` 承担不了
-  换绑语义（存量坑另记）。
-- 2026-09-20：D7 agent 引用落地——`GET /api/agents/{id}/domains`（+
-  `/snippet` 配置片段）与 probe `binding://` 引用解析（细化见上节）。
-  未含：dashboard 页面（web UI 另行）、D9 权限点（沿用 admin 中间件现状）。
+- 2026-09-20: P0 core landed — storage single table + four server endpoints (list/register/delete/apply with the three-way linkage) + apply snapshot write-back (`LastApplyStatus/LastError/AppliedAt`). Implementation in `internal/storage/domain_binding.go`, `internal/server/api_domain_bindings.go`.
+- 2026-09-20: D6 drift check landed — `GET /api/domains/drift` checks the three-way linkage live per item (semantics in the refinement section above). Re-binding a cert monitoring item uses an explicit `UpdateDomainAgentID` update — GORM `Assign(struct)` does not persist to an existing record, so `UpsertDomain` cannot carry the re-binding semantics (a pre-existing pitfall, recorded separately).
+- 2026-09-20: D7 agent reference landed — `GET /api/agents/{id}/domains` (+ `/snippet` config snippet) and probe `binding://` reference resolution (refinement in the section above). Not included: the dashboard page (web UI separately), D9 permission points (follow the existing admin middleware).
 
-## 不做的事
+## What we do not do
 
-- 不做 DNS 托管全量管理（zones/NS/SOA）——dns provider 已管记录，Binding 只管「服务视角」的那一条
-- 不做内置 DNS server——域名解析始终落在用户已有 DNS 商
-- 不做证书签发的自动触发链（ACME 签发仍由 acme 模块独立决策）——Binding 只保证「被监控」
+- Full DNS hosting management (zones/NS/SOA) — the dns provider already manages records, and Binding only manages that one entry from the "service perspective"
+- No built-in DNS server — domain resolution always stays with the user's existing DNS provider
+- No automatic trigger chain for certificate issuance (ACME issuance is still independently decided by the acme module) — Binding only guarantees "it is monitored"

@@ -1,383 +1,385 @@
-# 真机验收清单
-
-> 语言：**中文** ｜ [English](./acceptance-checklist.en.md)
+# Real-Machine Acceptance Checklist
 
 
-> 各功能开发交付时的自动化验证边界：Go 单测（含 `-race`）、web vitest 全绿、
-> 本机端到端脚本（`scripts/e2e-smoke.sh`、`scripts/local-acceptance/`）通过。
-> 以下场景依赖**真实环境**——真机、真凭据、真网络、真版本——无法离线自动化，
-> 逐功能散记于 `todo.md` 各条目的「剩余」中。本文档将其汇总为一张可勾选清单，
-> 拿到测试机或凭据后按域推进即可，验收一项回填一处。
+> The automated verification boundary at feature delivery: Go unit tests (including `-race`)
+> and web vitest all green, and the local end-to-end scripts
+> (`scripts/e2e-smoke.sh`, `scripts/local-acceptance/`) passing.
+> The scenarios below depend on **real environments**—real machines, real credentials, real
+> network, real versions—which cannot be automated offline, and are scattered per feature in
+> the "Remaining" part of each `todo.md` entry. This document aggregates them into one checkable
+> list, so that once a test machine or credentials are in hand you advance domain by domain,
+> checking one item off and backfilling one place at a time.
 
-## 通用前置
+## General Prerequisites
 
-- [x] server 启动，至少一台 Linux agent 注册在线（`/agents` 页绿标）——e2e smoke 验证通过
-- [x] `scripts/e2e-smoke.sh` 冒烟通过（server→agent→inventory 同步→`/api/resources` 闭环）（2026-09-28，本机连跑两次全绿）
-- [x] 至少配置一个通知渠道（webhook/ntfy 等），验收告警类功能时用「测试通知」按钮核对送达——webhook 渠道本机验收（2026-10-05，探针 `scripts/acceptance/notify/` 五件套 N0-N4 15/15 PASS）：config 双 webhook 渠道（`127.0.0.1:9700` 接收器实收 + `9799` 死端口失败样本），`POST /api/notification/test` 逐渠道返回——活渠道 ok、死渠道 ok=false 带 connection refused（失败呈现不 500 不掩盖），响应不含渠道 secret；接收器实收恰 1 条（`event_type=test`、title「Cockpit 测试通知」、`X-Cockpit-Secret` 鉴权通过）；审计 `notification/test/channels` 恰一条（details sent=1/failed=1）。ntfy/telegram/herald 云端渠道不可本机验证，维持阻塞
-- [x] 习惯性核对：变更类操作在「审计日志」页有留痕——通过 go test ./audit 检查审计路径完整性
-- [x] 敏感字段（证书内容、密钥）不出现在审计 detail——通过审计日志内容检查验证
+- [x] server started, at least one Linux agent registered online (green marker on the `/agents` page) — verified by the e2e smoke test
+- [x] `scripts/e2e-smoke.sh` smoke passes (server→agent→inventory sync→`/api/resources` closed loop) (2026-09-28, ran twice locally, all green)
+- [x] At least one notification channel configured (webhook/ntfy etc.); when accepting alert-type features, use the "Test Notification" button to check delivery — the webhook channel was accepted locally (2026-10-05, probe `scripts/acceptance/notify/` five-piece set N0-N4 15/15 PASS): config with two webhook channels (the `127.0.0.1:9700` receiver actually received + `9799` as a dead-port failure sample), `POST /api/notification/test` returns per channel — the live channel ok, the dead channel ok=false carrying connection refused (the failure is presented without a 500 and without being masked), and the response contains no channel secret; the receiver received exactly 1 message (`event_type=test`, title "Cockpit Test Notification", `X-Cockpit-Secret` auth passed); the audit entry `notification/test/channels` is exactly one (details sent=1/failed=1). The ntfy/telegram/herald cloud channels cannot be verified locally, remains blocked
+- [x] Habitual check: change-type operations leave a trace on the "Audit Log" page — audit path completeness checked via go test ./audit
+- [x] Sensitive fields (certificate content, keys) never appear in audit detail — verified by inspecting the audit log content
 
-## Windows Agent 安装包（setup.exe）
+## Windows Agent Installer (setup.exe)
 
-设计：[windows-agent-design](./windows-agent-design.md)。产物 `cockpit-agent-setup-nightly.exe`（+`.sha256`）进 nightly release；真机验收在 nightly 的 `Build Agent Installer` job（`windows-latest`）内自动走查，证据为该 job 的 artifact 与日志。
+Design: [windows-agent-design](/guide/windows-agent-design). The artifact `cockpit-agent-setup-nightly.exe` (+`.sha256`) goes into the nightly release; real-machine acceptance runs automatically inside the nightly `Build Agent Installer` job (`windows-latest`), with that job's artifacts and logs as evidence.
 
-- [ ] 静默装机 → `%Program Files%\Cockpit Agent` 落地、开始菜单 + 桌面快捷方式存在
-- [ ] 服务 `CockpitAgent`：`Automatic`（开机自启）+ `Running`；`service status` 输出一致
-- [ ] exe 图标：`ExtractAssociatedIcon` 抽出图标（PE `.rsrc` 的 RT_ICON/RT_GROUP_ICON 真机可读），证据 `walkthrough-icon.png`
-- [ ] 桌面截图留档（安装态 UI + 图标可见），证据 `walkthrough-desktop.png`
-- [ ] 静默卸载 → exe/服务/开始菜单/桌面快捷方式/`%ProgramData%\CockpitAgent` 全清
-- [ ] 交互安装走查：任务勾选（服务/桌面快捷方式）+ Server 地址页校验（留空拦截）
+- [ ] Silent install → `%Program Files%\Cockpit Agent` lands on disk, Start Menu + desktop shortcut present
+- [ ] Service `CockpitAgent`: `Automatic` (start on boot) + `Running`; `service status` output is consistent
+- [ ] exe icon: `ExtractAssociatedIcon` extracts an icon (RT_ICON/RT_GROUP_ICON in the PE `.rsrc` readable on a real machine), evidence `walkthrough-icon.png`
+- [ ] Desktop screenshot archived (installed-state UI + visible icon), evidence `walkthrough-desktop.png`
+- [ ] Silent uninstall → exe/service/Start Menu/desktop shortcut/`%ProgramData%\CockpitAgent` all removed
+- [ ] Interactive install walkthrough: task checkboxes (service/desktop shortcut) + Server address page validation (empty input blocked)
 
-## 应用部署（Stacks）
+## Application Deployment (Stacks)
 
-设计：[stack-deploy-design](./stack-deploy-design.md）。前置：一台真实 Docker 主机（agent 在线、docker 可用）。
+Design: [stack-deploy-design](/guide/stack-deploy-design). Prerequisite: a real Docker host (agent online, docker available).
 
-- [x] 新建 stack 粘贴/上传 compose.yml → 部署：镜像真实拉取、容器进入健康状态、状态总览刷新（2026-09-28，docker VM 真实拉取 nginx:alpine，healthcheck healthy，聚合 running=2/total=2）
-- [x] compose 完整语义：环境变量、volumes、自定义网络、depends_on 启动顺序（2026-09-28，.env 注入 printenv 实证；命名卷 db 写 → app 读 + depends_on 顺序；自定义 bridge 网络 + 服务间 DNS）
-- [x] restart / pull 动作真实生效；部署历史时间线与部署日志可对应（2026-09-28，pull/restart 任务 success，历史 finishedAt 回填含诚实 failed）
-- [x] 模板库一键新建与 import 路径（2026-09-28，模板/import 为 UI 填充路径，落库即常规 create+up——真机以原始 compose 等价验证，UI 链路由 vitest 覆盖）
-- [x] stacks 目录不存在/无权限时列表页目录自检告警的呈现（2026-10-07 收口，scripts/acceptance/stacks/probe-dir.sh K1-K4 全 PASS：本机 cui agent 即非 root 形态、`COCKPIT_STACKS_DIR` 指 root:root 0700 目录——K1 单 agent stack.list 失败 → 502 错误体附 info.dirError="write probe: … permission denied"+dirWritable=false；K2 聚合 GET /api/stacks 的 agentInfo 同样带出（web 目录告警实际消费面）；K3/K4 对照目录不存在→agent 自动创建 0700、dirWritable=true+composeVersion。dirError→列表页告警横幅呈现已于 2026-09-29 列表面修复落地（Stacks/index.tsx info.dirError 渲染 + server 侧 dirError 随 info 下发单测），本探针补齐真实非 root agent 的 E2E 场景。此前 2026-09-28 已证：目录不存在自动创建、路径非法报错透传）
+- [x] Create a stack by pasting/uploading compose.yml → deploy: images really pulled, containers reach healthy state, the status overview refreshes (2026-09-28, docker VM really pulled nginx:alpine, healthcheck healthy, aggregate running=2/total=2)
+- [x] Full compose semantics: environment variables, volumes, custom networks, depends_on start order (2026-09-28, .env injection proven via printenv; named volume db written → app read + depends_on ordering; custom bridge network + inter-service DNS)
+- [x] restart / pull actions really take effect; the deployment history timeline corresponds to the deployment log (2026-09-28, pull/restart tasks success, history finishedAt backfilled including an honest failed)
+- [x] One-click creation from the template library and the import path (2026-09-28, the template/import paths are UI fill paths; once persisted they are the regular create+up — verified on the real machine with an equivalent raw compose, the UI chain is covered by vitest)
+- [x] How the list page presents the directory self-check warning when the stacks directory does not exist / is not writable (2026-10-07 close-out, scripts/acceptance/stacks/probe-dir.sh K1-K4 all PASS: the local cui agent is itself in a non-root form, `COCKPIT_STACKS_DIR` points at a root:root 0700 directory — K1 a single agent's stack.list fails → 502 error body carrying info.dirError="write probe: … permission denied"+dirWritable=false; K2 the aggregate GET /api/stacks carries the same agentInfo (the web directory warning's actual consumption surface); K3/K4 by contrast a non-existent directory → the agent auto-creates it 0700, dirWritable=true+composeVersion. dirError → the list page warning banner rendering was already landed on 2026-09-29 (Stacks/index.tsx renders info.dirError + a server-side unit test shipping dirError down together with info), this probe fills in the E2E scenario with a real non-root agent. Already proven on 2026-09-28: a non-existent directory is auto-created, an illegal path reports the error through)
 
-## 备份与恢复（agent 侧）
+## Backup and Restore (agent side)
 
-设计：[backup-design](./backup-design.md）。前置：本机 server+agent 即可验收（打包/恢复为 agent 侧实现，不依赖 Docker 主机）；异地项需 rclone 与真实远端。
+Design: [backup-design](/guide/backup-design). Prerequisite: the local server+agent alone is enough for acceptance (packaging/restore is an agent-side implementation, it does not depend on a Docker host); offsite items need rclone and a real remote.
 
-- [x] 定时调度到点执行一次（daily@HH:mm / every:Nh 任一形态）；停机补跑只补一次——本机验收（2026-10-05，探针 `scripts/acceptance/agent-backup/` 七件套 K0-K11 44/44 PASS，server `:19998` + agent abk-acc-a1）：`daily@` 创建时 due=now+2min，到点后约 +5s 自动执行恰一次、`next_run_at` 顺延 24h±600s；停机补跑——`restart-server.sh 110` 停机 110s 跨过 due，恢复后首 tick 补跑恰一次，再观察 75s 不重放
-- [x] 打包产物：tar.gz 完整、路径穿越防护（构造带 `../` 文件的目录验证拒绝）、符号链接不跟随——同探针：运行产物下载 sha256 与盘上一致、归档逐条目 diff（夹具树 8 条目含 nested 目录）；删除/下载带 `../` 穿越名请求均 400 拒绝；符号链接条目记为链接本身不跟随（`link-to-readme`→`readme.txt`、指向 `/etc/hostname` 的绝对链接均保留为 link）
-- [x] retention 自动清理到期备份；运行历史与失败 `backup.failed` 通知送达——同探针：retention=2 连跑三件后仅留最新两件（run1.File 盘上消失）；`backup.failed` 经 webhook 接收器 `:9701` 实收（事件白名单按 `EventConfig.Type` 字段匹配，yaml 需写 `type: backup.failed`）
-- [x] 恢复双阶段：独立目录解包绝不覆盖原路径；Zip Slip 构造样例被拒；任务日志可读——同探针：恢复到空目录成功且源树 8 条目 sha 零改动；目标非空目录被 agent 拒绝、502 透传原始错误含 `not empty`；Zip Slip 构造样例（`../zipslip-escape-1`、`sub/../../zipslip-escape-2`）跳过不落盘、`ok.txt` 正常解出；restore 需 confirm、相对 dest 请求 400
-- [x] 备份文件下载（分块 RPC 流转发，GB 级不炸内存）——同探针：256MB 样本 1025 块（256KB/块）流式转发，Content-Length=盘上真长、sha256 一致；server `/proc` VmHWM 30.6→47.2MB（上限 300MB）证明无整包缓冲（GB 级行由下方「GB 级完整链」兜底）
-- [x] 异地保留（机制半）：真 rclone 推送成功；推送失败 `backup.remote-failed` 独立通知且不改任务终态；「补传」成功——真机容器验收（2026-10-07，探针 `scripts/acceptance/agent-backup/probe-remote.sh` R0-R3 4/4 PASS，debian:12+rclone 容器建 local 后端远端 `bklocal:/backups`——真 rclone exec 链路全真（argv/正则/RemoteStatus 跟踪/capability 探测），零云凭据）：R1 推送成功 remoteStatus=ok + 远端目录实收归档；R2 ghost remote（config 无 section，rclone 报错）→ run 仍 success（D21 推送失败不改任务终态）+ remoteStatus=failed + remoteError 含 rclone stderr 摘要 + backup.remote-failed webhook 实收（event/resource_id/level=error）+ 本地档完整可下载；R3 删远端产物后 sync-remote 补传恢复。真实 S3/B2 云端点维持挂起（需云凭据；rclone 对 local 与对象存储后端的差异在传输层，推送编排语义已实证）。server 侧异地（清单 58/59）与录制归档推送（65/66）执行在 server 进程——宿主无 rclone 不代装（会改变生产 agent capability 上报），维持阻塞
-- [ ] rclone 网盘限速场景下的超时与错误呈现——Docker 主机+rclone 配置不可本机验证，标记为阻塞
-- [ ] GB 级完整链：大目录打包 → 推送 → 换机恢复——Docker 主机+大存储不可本机验证，标记为阻塞
-- [x] 前置命令钩子：`mysqldump` / `pg_dump` 真库导出产物在备份内；钩子失败中止本次（不打包不推送不清理）——真机容器验收（2026-10-07，探针 `scripts/acceptance/agent-backup/probe-hook.sh` B0-B3 4/4 PASS，双容器 debian:12+mariadb-server 真库 / postgres:16-alpine 真库 + 静态 agent）：pre_hook 经 sh -c 真库导出（`mysqldump accdb` socket 免密、`PGPASSWORD pg_dump -U postgres` TCP）产物落源目录随打包进归档，下载解包逐字节断言 `site/db-acc.sql` 含 INSERT+哨兵行、`site/db-pg.sql` 含 COPY+哨兵行（B1/B3）；失败短路——`echo …>&2; exit 3` → run=failed，Error=`pre-hook failed: exit status 3: hook-boom-stderr`（退出码+stderr 摘要透传），File 空且产物列表 0 件（不打包，D28）（B2）；超时分支单测盖（`backupHookTimeout` 注入 + killHookGroup 整组杀，5min 真等不在探针复刻）；`[hook]` 日志前缀无 API 读取口（备份运行仅 runs 列表无 task log 端点）、单测盖（backup_hook_test.go）
+- [x] The scheduled trigger fires once on time (either daily@HH:mm / every:Nh form); after downtime the catch-up runs exactly once — accepted locally (2026-10-05, probe `scripts/acceptance/agent-backup/` seven-piece set K0-K11 44/44 PASS, server `:19998` + agent abk-acc-a1): `daily@` created with due=now+2min, about +5s after the due time it auto-executes exactly once, `next_run_at` rolls forward 24h±600s; downtime catch-up — `restart-server.sh 110` stops the server for 110s across the due time, after recovery the first tick catches up exactly once, then 75s of observation shows no replay
+- [x] Packaged artifact: tar.gz complete, path traversal protection (construct a directory holding a `../` file to verify rejection), symlinks not followed — same probe: the sha256 of the downloaded run artifact matches the one on disk, the archive is diffed entry by entry (fixture tree of 8 entries including a nested directory); delete/download requests carrying a `../` traversal name are both rejected with 400; symlink entries are recorded as the link itself and not followed (`link-to-readme`→`readme.txt`, absolute links pointing at `/etc/hostname` are both kept as links)
+- [x] retention automatically cleans up expired backups; run history and the `backup.failed` notification are delivered — same probe: with retention=2, after running three times only the latest two remain (run1.File disappears from disk); `backup.failed` is actually received via the webhook receiver `:9701` (the event whitelist matches on the `EventConfig.Type` field, yaml must write `type: backup.failed`)
+- [x] Restore in two phases: unpacking into a separate directory never overwrites the original path; a constructed Zip Slip sample is rejected; the task log is readable — same probe: restoring into an empty directory succeeds with zero sha change across the 8 entries of the source tree; a non-empty target directory is refused by the agent, 502 passes through the original error containing `not empty`; the constructed Zip Slip samples (`../zipslip-escape-1`, `sub/../../zipslip-escape-2`) are skipped and never land on disk, `ok.txt` unpacks normally; restore requires confirm, a relative dest request gets 400
+- [x] Backup file download (chunked RPC stream forwarding, does not blow up memory at GB scale) — same probe: a 256MB sample forwarded as a 1025-chunk stream (256KB/chunk), Content-Length equals the real on-disk length, sha256 matches; the server's `/proc` VmHWM goes 30.6→47.2MB (cap 300MB), proving there is no whole-archive buffering (the GB-scale row is backed by the "GB-scale complete chain" below)
+- [x] Offsite retention (the mechanism, half done): a real rclone push succeeds; on push failure `backup.remote-failed` is a separate notification and does not change the run terminal state; "re-push" succeeds — accepted in a real container (2026-10-07, probe `scripts/acceptance/agent-backup/probe-remote.sh` R0-R3 4/4 PASS, a debian:12+rclone container builds a local backend with remote `bklocal:/backups` — the real rclone exec chain is entirely real (argv/regex/RemoteStatus tracking/capability probing), zero cloud credentials): R1 push succeeds with remoteStatus=ok + the remote directory really receives the archive; R2 a ghost remote (no section in config, rclone errors) → the run is still success (D21 a push failure does not change the run terminal state) + remoteStatus=failed + remoteError carrying a rclone stderr digest + backup.remote-failed actually received via webhook (event/resource_id/level=error) + the local archive stays complete and downloadable; R3 after deleting the remote artifact sync-remote restores it through re-push. Real S3/B2 cloud endpoints stay suspended (they need cloud credentials; rclone's differences between local and object-storage backends lie in the transport layer, and the push orchestration semantics are already proven). Server-side offsite (checklist 58/59) and recorded-archive push (65/66) run inside the server process — the host has no rclone and we do not install it (it would change the production agent capability reporting), remains blocked
+- [ ] Timeout and error presentation under rclone netdisk rate limiting — a Docker host + rclone configuration cannot be verified locally, marked as blocked
+- [ ] GB-scale complete chain: package a large directory → push → restore on another machine — a Docker host + large storage cannot be verified locally, marked as blocked
+- [x] Pre-command hooks: artifacts exported from a real database by `mysqldump` / `pg_dump` land inside the backup; a hook failure aborts this run (no packaging, no push, no cleanup) — accepted in a real container (2026-10-07, probe `scripts/acceptance/agent-backup/probe-hook.sh` B0-B3 4/4 PASS, dual containers debian:12+mariadb-server real database / postgres:16-alpine real database + a static agent): pre_hook really exports the databases through `sh -c` (`mysqldump accdb` over socket with no password, `PGPASSWORD pg_dump -U postgres` over TCP), the artifacts land in the source directory and go into the archive through packaging, and the download+unpack asserts byte by byte that `site/db-acc.sql` contains INSERT + the sentinel row and `site/db-pg.sql` contains COPY + the sentinel row (B1/B3); the failure short-circuit — `echo …>&2; exit 3` → run=failed, Error=`pre-hook failed: exit status 3: hook-boom-stderr` (the exit code + a stderr digest pass through), File empty and 0 entries in the artifact list (no packaging, D28) (B2); the timeout branch is covered by unit test (`backupHookTimeout` injection + killHookGroup killing the whole group; a real 5min wait is not reproduced in the probe); the `[hook]` log prefix has no API read surface (backup runs only expose a runs list, no task log endpoint), covered by unit test (backup_hook_test.go)
 
-## 面板数据库备份（server 侧）
+## Panel Database Backup (server side)
 
-设计：[server-backup-design](./server-backup-design.md)。
+Design: [server-backup-design](/guide/server-backup-design).
 
-- [x] 定时触发 `VACUUM INTO`：产物为紧凑完整副本，`sqlite3` 重新打开并抽查表数据——本机验收（2026-10-05，探针 `scripts/acceptance/server-backup/` 五件套 B0-B9 26/26 PASS，双实例 `:19995`/`:19996`）：生产节奏定时循环（1h tick）在 T+60min 触发，两实例各出一件定时产物（`cockpit-20261005-032956/032958.db`，探针在此之前全程未调 `POST /run`）；`sqlite3` 重开定时产物 integrity_check=ok，users/audit_logs/settings 核心表在（users=1、audit_logs=6），体积与线上 db 一致（483328B）；手动 `/run` 产物经 download API 取回与盘上文件 sha256 一致（8ccbf96a…），重开亦完整
-- [x] retention 按天清理；`0=永久` 形态——同一次 tick 双形态同证：retention=1 实例的老文件（ModTime 2026-07-01，早于 cutoff now-1d）在 tick 后被清（列表与盘上均消失）；retention=0 实例的老文件保留，手动备份后三件共存（老+定时+手动）。校验面：interval=200/retention=-1 均 400，未知名 download/delete 均 404
-- [ ] rclone 真远端（gdrive/S3）推送；失败只记 `[remote]` 日志 + `server_backup.remote-failed` 通知，本地备份不受影响
-- [ ] 「补推」按钮对历史文件生效
+- [x] The scheduled `VACUUM INTO` fires: the artifact is a compact complete copy, reopened with `sqlite3` and spot-checked against table data — accepted locally (2026-10-05, probe `scripts/acceptance/server-backup/` five-piece set B0-B9 26/26 PASS, dual instances `:19995`/`:19996`): the production-cadence timer loop (1h tick) fires at T+60min, both instances produce one scheduled artifact each (`cockpit-20261005-032956/032958.db`; the probe never calls `POST /run` before this point); `sqlite3` reopens the scheduled artifact with integrity_check=ok, the core tables users/audit_logs/settings are present (users=1, audit_logs=6), and the size matches the live db (483328B); the manual `/run` artifact is fetched back through the download API with a sha256 matching the file on disk (8ccbf96a…), and it is also complete when reopened
+- [x] retention cleans up by day; the `0=permanent` form — both forms proven within the same tick: the old file on the retention=1 instance (ModTime 2026-07-01, earlier than the cutoff now-1d) is removed after the tick (gone from both the list and disk); the old file on the retention=0 instance is kept, and after a manual backup the three coexist (old + scheduled + manual). Validation surface: interval=200/retention=-1 both 400, unknown-name download/delete both 404
+- [ ] rclone real remote (gdrive/S3) push; on failure only a `[remote]` log entry + a `server_backup.remote-failed` notification is recorded, local backups unaffected
+- [ ] The "re-push" button takes effect on historical files
 
-## 远程会话录制
+## Remote Session Recording
 
-设计：[recording-design](./recording-design.md)。
+Design: [recording-design](/guide/recording-design).
 
-- [ ] 终端/桌面会话录制归档后异步推送 rclone 真远端成功——rcloud 远端不可本机验证，标记为阻塞
-- [ ] 推送失败发 `recording.remote-failed` 通知，本地档保留、retention 窗口内「补推」成功——rclone 远端不可本机验证，标记为阻塞
+- [ ] After a terminal/desktop session recording is archived, the asynchronous push to a real rclone remote succeeds — an rcloud remote cannot be verified locally, marked as blocked
+- [ ] A push failure sends a `recording.remote-failed` notification, the local archive is kept, and "re-push" succeeds within the retention window — an rclone remote cannot be verified locally, marked as blocked
 
-## 远控三协议（Guacamole SSH 接入）
+## Remote Control: Three Protocols (Guacamole SSH Access)
 
-设计：[remote-access-integration-design](../remote-access-integration-design.md)。
+Design: [remote-access-integration-design](/remote-access-integration-design).
 
-- [x] 真 guacd + 真 sshd：口令认证连上、私钥认证连上（`private-key` **PEM 原文**透传——设计口径的 base64 被实测推翻：guacd 侧 `guac_common_ssh_key_alloc` 零 base64 解码，base64 文本进 libssh2 必失败，A/B 实测 2026-09-30，网关已改原文直传）
-  证据（2026-09-30）：探针 S1–S4 全过——容器 sshd 口令/ed25519 OpenSSH/RSA PEM 三路认证 + 本机真 sshd（127.0.0.1:22 + `~/.ssh/cui` 只读）建连并远端落盘回读 `.acceptance/guac/evidence/probe.log`；浏览器侧 CDP C3 复验（GuacamoleModal 填私钥建连 + 终端打字回读）`.acceptance/guac/evidence/cdp.log` + `cdp-03b-guac-ssh-connected.png`
-- [x] SSH 终端渲染正常（vim/top 全屏程序），窗口 `size` 变更后列/行随之变化
-  证据（2026-09-30）：探针 S5（1280x800 → 1920x1080 → 复原，`stty size` 行列同步三态）+ S6（`vi` 全屏输入穿透落盘）+ S7（`top -d 1` 全屏周期重绘 img/copy/rect/sync 流量统计）`probe.log`；CDP C3 截图 `cdp-04-guac-ssh-top.png`（浏览器内 top 全屏渲染）
-- [x] SSH 会话 `.guac` 录制收集进 `/recordings` 且 SessionRecording 回放正常
-  证据（2026-09-30）：探针 S10（录制元数据入列 + `/api/recordings/{sid}/cast` HTTP 200、bytes≈49K、durationMs>5000，样本存 `evidence/<sid>.guac`）；浏览器侧 CDP C4——Recordings 页 GuacPlayer 播放渲染 canvas（截图 `cdp-05-recording-guac-playback.png`）。修复两处后达成：网关 recording-name 须传 `<sid>.guac`（guacd 原样作文件名）+ Web GuacPlayer 绕开 guacamole-common-js 1.5.0 `SessionRecording(Blob)` 上游缺陷（dist 双构建均缺 `recordingBlob = source` 赋值 → 恒 0 帧；改 duck tunnel 注入指令流）
-- [x] SSH 剪贴板双向（浏览器 ↔ sshd）
-  证据（2026-09-30）：探针 S8（入站 `clipboard`/`blob`/`end` 流指令 + 右键弹起与大写 V+Ctrl 两路粘贴，远端 `read` 收到标记）+ S9（终端跨行拖选弹起 → 服务端 clipboard 流载荷含远端输出文本）`probe.log`
-- [x] 「内置终端（经 Agent）」兜底入口仍可用（guacd 停机时退路）
-  证据（2026-09-30）：探针 S15（terminal WS（subprotocol 票据）connect 帧 + 输入落盘 `FALLBACK_OK`）+ S16（`docker stop guacd` 后 guac 隧道确定失败、内置终端照常建连，验毕恢复容器）`probe.log`；CDP C7 浏览器侧（Workbench SSH Tab「内置终端（经 Agent）」→ TerminalModal 凭据表单 → xterm 渲染 + agent 直连链路发起）`cdp-08a/08b-terminal-fallback*.png`
-- [x] RDP/VNC 既有链路无回归（三协议同栈并存）
-  证据（2026-09-30）：探针 S13（Xvnc:5900 口令认证 + 打字前后 img/copy/rect 增量帧）+ S14（xrdp:3389 建连 + 增量帧）`probe.log`；CDP C5/C6（浏览器 GuacamoleModal VNC/RDP 表单建连、桌面/登录屏 canvas 渲染）`cdp-06-guac-vnc.png`、`cdp-07-guac-rdp.png`。RDP/VNC 目标为验收自建容器（本机无真实 Windows/RDP 主机与物理 VNC 桌面），链路与图形流层面验讫
+- [x] Real guacd + real sshd: connects with password auth, connects with private-key auth (`private-key` passes **PEM plaintext** through — the design's base64 wording was overturned by measurement: guacd's `guac_common_ssh_key_alloc` does zero base64 decoding, base64 text fed into libssh2 must fail, A/B measured on 2026-09-30, the gateway now passes the raw text straight through)
+  Evidence (2026-09-30): probes S1–S4 all pass — container sshd password/ed25519 OpenSSH/RSA PEM three-way auth + a local real sshd (127.0.0.1:22 + read-only `~/.ssh/cui`) connecting and reading back the remotely written `.acceptance/guac/evidence/probe.log`; on the browser side CDP C3 re-verification (GuacamoleModal fills in the private key to connect + typing in the terminal and reading back) `.acceptance/guac/evidence/cdp.log` + `cdp-03b-guac-ssh-connected.png`
+- [x] SSH terminal renders correctly (full-screen programs like vim/top), and the window's `size` change moves columns/rows accordingly
+  Evidence (2026-09-30): probe S5 (1280x800 → 1920x1080 → restore, `stty size` rows/cols follow in all three states) + S6 (`vi` full-screen input passes through and lands on disk) + S7 (`top -d 1` full-screen periodic repaint img/copy/rect/sync traffic statistics) `probe.log`; CDP C3 screenshot `cdp-04-guac-ssh-top.png` (full-screen top rendering inside the browser)
+- [x] SSH session `.guac` recording is collected into `/recordings` and SessionRecording playback works
+  Evidence (2026-09-30): probe S10 (recording metadata written into the table + `/api/recordings/{sid}/cast` HTTP 200, bytes≈49K, durationMs>5000, sample stored at `evidence/<sid>.guac`); on the browser side CDP C4 — the Recordings page's GuacPlayer plays and renders to canvas (screenshot `cdp-05-recording-guac-playback.png`). Reached after fixing two places: the gateway's recording-name must be passed as `<sid>.guac` (guacd uses it verbatim as the filename) + the web GuacPlayer works around the guacamole-common-js 1.5.0 `SessionRecording(Blob)` upstream defect (both dist builds lack the `recordingBlob = source` assignment → always 0 frames; switched to injecting the instruction stream through a duck tunnel)
+- [x] SSH clipboard is bidirectional (browser ↔ sshd)
+  Evidence (2026-09-30): probe S8 (inbound `clipboard`/`blob`/`end` stream instructions + popup from right-click and from uppercase V+Ctrl, two paste paths, the remote `read` receives the marker) + S9 (cross-line drag selection in the terminal pops up → the server-side clipboard stream payload carries the remote output text) `probe.log`
+- [x] The "Built-in Terminal (via Agent)" fallback entry still works (the retreat path when guacd is down)
+  Evidence (2026-09-30): probe S15 (terminal WS (subprotocol ticket) connect frame + input landing on disk `FALLBACK_OK`) + S16 (after `docker stop guacd` the guac tunnel deterministically fails, the built-in terminal still connects, container restored after verification) `probe.log`; CDP C7 on the browser side (Workbench SSH Tab "Built-in Terminal (via Agent)" → TerminalModal credential form → xterm rendering + the agent direct-connection link initiated) `cdp-08a/08b-terminal-fallback*.png`
+- [x] No regression on the existing RDP/VNC paths (three protocols coexisting on the same stack)
+  Evidence (2026-09-30): probe S13 (Xvnc:5900 password auth + incremental img/copy/rect frames before/after typing) + S14 (xrdp:3389 connect + incremental frames) `probe.log`; CDP C5/C6 (browser GuacamoleModal VNC/RDP form connect, desktop/login screen canvas rendering) `cdp-06-guac-vnc.png`, `cdp-07-guac-rdp.png`. The RDP/VNC targets are the acceptance self-built containers (locally there is no real Windows/RDP host and no physical VNC desktop), so the path and the graphics stream layer are verified
 
-## 反向代理
+## Reverse Proxy
 
-设计：[proxy-design](./proxy-design.md)。前置：nginx 宿主机一台（2026-10-07 起以容器宿主形态替代裸装机：nginx 与 agent 同容器，conf.d 与 reload 都发生在 nginx 真正所在的主机）；Traefik 容器挂载宿主动态目录一台。
+Design: [proxy-design](/guide/proxy-design). Prerequisite: one nginx host machine (from 2026-10-07 the container-host form replaces the bare-metal install: nginx and the agent share a container, and both conf.d and reload happen on the machine nginx actually lives on); one Traefik container with a dynamic directory from the host mounted.
 
-- [x] nginx：新建站点全链（渲染 → `nginx -t` → 写片段 → reload），浏览器可达
-  证据（2026-10-07）：探针 `scripts/acceptance/nginx/probe.sh` N1——http 站点（websocket）apply 200 + 片段落盘（meta 注释/proxy_pass/Upgrade 头齐全）+ sites/site.get 回读 + `curl -H Host` 真实可达（marker 上游）；https 站点自签证书 apply + `curl --cacert` 证书验证通过（证书引用真被加载）+ 80→443 301 跳转；delete 200 + 片段移除
-- [x] nginx：语法错误被 `-t` 拦截不落盘；reload 失败回滚后再 reload，站点保持旧配置可用
-  证据（2026-10-07）：探针 N2/N4——拦截者实测是 **reload 的前置解析**（`nginx -s reload` 的 -s 进程发 SIGHUP 前先自解析全量配置，新片段语法错/证书缺失在该进程即 emerg、退出非零 → D4 回滚 → 502 透传「rolled back」+ 片段不落盘；pre-write 的 `-t` 只护存量配置）；同步 reload 失败路径（master 已死）→ 502 + rolled back + 片段未留 + nginx 重启后旧站点恢复服务
-- [x] nginx：systemd reload 与无 systemd 环境 `nginx -s reload` fallback 各验一次
-  证据（2026-10-07）：探针 N3/N5——signal 容器（无 systemctl 无 systemd，reloadMode=signal）全链 apply 即 `nginx -s reload` 路径；systemd 容器（debian:12 基础镜像不带 systemd，启动命令内装 `systemd` 后 `exec /lib/systemd/systemd` 接管 PID 1）reloadMode=systemctl、apply 走 `systemctl reload nginx` 且 unit 保持 active。顺带修 fallback 判据：`systemctlMissing` 补 "not been booted" 变体（容器有 systemctl 二进制但 systemd 未运行时误报不回落）
-- [x] nginx：80/443 端口冲突场景的错误摘要呈现——验收结论改写：nginx 固有语义下 bind 冲突**异步吞错**，无同步错误摘要可呈现
-  证据（2026-10-07）：探针 N4——`nginx -s reload` 的 -s 进程不 bind socket，bind 冲突（80/443 两族实测）apply 返回 200 + 片段留盘，master 侧 bind 失败异步落在 error.log（emerg `Address already in use`），**旧配置继续服役**（数据面安全，「apply 失败站点照旧」仍成立）；systemctl 模式同构（debian nginx.service 的 ExecReload 即 `nginx -s reload`）。上报层若要闭环需 reload 后嗅探 error.log（启发式），记 M2 候选；`probe.log`
-- [x] Traefik：动态目录探测（静态配置 `providers.file.directory` 与缺省路径）；站点文件写入后热加载生效
-  证据（2026-09-30）：探针 `scripts/acceptance/traefik/`（traefik:v3.5.6 容器挂载宿主目录 + host-gateway 回连双上游）T1/T2/T3/T9——env 覆盖探测（`COCKPIT_TRAEFIK_DIR`，D12 生产形态；静态配置解析分支为纯函数、单测覆盖）capability `traefik-proxy` dynamicDir 正确；新增/修改（upstream A→B）/删除（文件/路由/列表三面摘除）均 watch 热加载即时生效，`reloadMode=hot`；`probe.log`
-- [x] Traefik：坏 YAML 自检拒绝不落盘；router→service 引用校验拦截
-  证据（2026-09-30）：自检/引用校验为渲染器防御分支（合法参数渲染恒合法，经 REST 不可达），单测覆盖（`TestTraefikProvider_Render` 系）；真机侧 T6 验 extra 拒绝（报错、不落盘、不入列，D14 注入面）+ T7 实测外来坏文件语义——Traefik 冻结整目录热更新（存量 last-good 照常、新变更拒载 404、日志点名坏文件），rm/面板重下发即自动解冻且积压变更一并生效（D13 口径据此修正）；`probe.log`
-- [x] 双后端主机并存时 capability 分流正确（nginx 优先，旧 agent 回退 nginx.* 前缀）
-  证据（2026-10-07）：探针 N6/N7——nginx + `/etc/traefik/dynamic` 并存容器双 capability 上报（nginx-proxy + traefik-proxy），apply 落 conf.d（`proxyRPCPrefix` nginx 优先实证）；无后端 agent（裸容器）回退 `nginx.` 前缀 → agent `unknown provider: nginx` 502（兼容路径真发得出去）。分流四例至此全部真机验讫（仅 nginx=本批 N1、仅 traefik=2026-09-30、双后端/旧 agent 回退=本批 N6/N7）
+- [x] nginx: the full chain for creating a site (render → `nginx -t` → write the fragment → reload), reachable from a browser
+  Evidence (2026-10-07): probe `scripts/acceptance/nginx/probe.sh` N1 — http site (websocket) apply 200 + fragment written to disk (meta comment/proxy_pass/Upgrade header all present) + sites/site.get read back + real reachability via `curl -H Host` (marker upstream); https site with a self-signed certificate applies + `curl --cacert` certificate verification passes (the certificate reference is genuinely loaded) + 80→443 301 redirect; delete 200 + fragment removed
+- [x] nginx: a syntax error is blocked by `-t` and never lands on disk; after a failed reload rolls back, reloading again leaves the site working on the old config
+  Evidence (2026-10-07): probe N2/N4 — what actually blocks is the **pre-parse of reload** (the -s process of `nginx -s reload` parses the full config itself before the master sends SIGHUP, so a syntax error in the new fragment or a missing certificate hits emerg in that process and exits non-zero → D4 rollback → 502 passing through "rolled back" + the fragment never lands; the pre-write `-t` only protects existing configuration); the synchronous reload failure path (the master is already dead) → 502 + rolled back + no fragment left + after restarting nginx the old site serves again
+- [x] nginx: systemd reload and the `nginx -s reload` fallback in a systemd-less environment are each verified once
+  Evidence (2026-10-07): probe N3/N5 — the signal container (no systemctl, no systemd, reloadMode=signal) uses the `nginx -s reload` path for the whole apply chain; the systemd container (a debian:12 base image with no systemd, `systemd` installed inside the start command then `exec /lib/systemd/systemd` taking over PID 1) has reloadMode=systemctl, apply goes through `systemctl reload nginx` and the unit stays active. Along the way the fallback criterion is fixed: `systemctlMissing` gains the "not been booted" variant (a container with the systemctl binary but systemd not running was wrongly reported without falling back)
+- [x] nginx: the error digest presentation in the 80/443 port conflict scenario — the acceptance conclusion is rewritten: under nginx's inherent semantics a bind conflict **swallows the error asynchronously**, there is no synchronous error digest to present
+  Evidence (2026-10-07): probe N4 — the -s process of `nginx -s reload` does not bind a socket, so a bind conflict (both the 80 and 443 families measured) leaves apply returning 200 + the fragment on disk, while the master's bind failure lands asynchronously in error.log (emerg `Address already in use`) and **the old configuration keeps serving** (the data plane is safe, "if apply fails the site stays as before" still holds); the systemctl mode is isomorphic (the ExecReload of debian's nginx.service is exactly `nginx -s reload`). For the reporting layer to close the loop it would have to sniff error.log after reload (heuristic), recorded as candidate M2; `probe.log`
+- [x] Traefik: dynamic directory probing (static config `providers.file.directory` and the default path); after a site file is written the hot load takes effect
+  Evidence (2026-09-30): probe `scripts/acceptance/traefik/` (a traefik:v3.5.6 container with a host directory mounted + host-gateway loopback to two upstreams) T1/T2/T3/T9 — env override probing (`COCKPIT_TRAEFIK_DIR`, the D12 production form; the static-config parse branch is a pure function, covered by unit test) with the capability `traefik-proxy` dynamicDir correct; add/modify (upstream A→B)/delete (three surfaces: file/route/list all removed) all take effect immediately through watch hot load, `reloadMode=hot`; `probe.log`
+- [x] Traefik: bad YAML is rejected by the self-check and never lands on disk; router→service reference validation blocks it
+  Evidence (2026-09-30): the self-check/reference validation is a defensive branch of the renderer (rendering with legal parameters is always legal, unreachable over REST), covered by unit test (the `TestTraefikProvider_Render` family); on the real-machine side T6 verifies that extra is rejected (error, nothing lands on disk, nothing enters the list, the D14 injection surface) + T7 measures the semantics of an externally bad file — Traefik freezes the whole-directory hot update (existing last-good files keep serving, new changes are rejected with 404, the log names the bad file), and rm / re-distributing from the panel auto-unfreezes while the backlogged changes take effect at the same time (the D13 wording is corrected accordingly); `probe.log`
+- [x] With both backends on one host the capability split is correct (nginx takes priority, old agents fall back to the nginx.* prefix)
+  Evidence (2026-10-07): probe N6/N7 — a container with nginx + `/etc/traefik/dynamic` coexisting reports two capabilities (nginx-proxy + traefik-proxy), apply lands in conf.d (`proxyRPCPrefix` nginx priority proven); an agent with no backend (bare container) falls back to the `nginx.` prefix → agent `unknown provider: nginx` 502 (the compatibility path really goes out). All four split cases are now verified on a real machine (nginx only = this batch's N1, traefik only = 2026-09-30, dual backend/old agent fallback = this batch's N6/N7)
 
-## ACME 证书签发
+## ACME Certificate Issuance
 
-设计：[acme-design](./acme-design.md)。前置：DNS 凭据（Cloudflare / DNSPod / 阿里云任一）+ 公网可解析域名；先 staging 防限频。
+Design: [acme-design](/guide/acme-design). Prerequisite: DNS credentials (Cloudflare / DNSPod / Aliyun, any one) + a publicly resolvable domain; use staging first to avoid rate limiting.
 
-- [ ] staging 签发跑通（账号 ECDSA key 惰性注册持久化，二次签发不重复注册）
-- [ ] production 真证书签发；到期时间与续期阈值（7-90 天）展示正确
-- [ ] 三种 DNS provider 各签发一轮（cloudflare / dnspod / alidns，凭据判定文案指名缺哪个键）
-- [ ] 自动续期：调阈值到临期触发重签；人为失败场景 1h 节流重试不撞 CA 限频
-- [ ] 签发 → 自动部署推送 agent 指定路径（证书 0644 / 私钥 0600）→ nginx 站点引用 → reload → 浏览器信任链完整
-- [ ] 续期后 agent 侧文件同步更新；部署失败只记状态不回滚签发
-- [ ] 下载私钥强制记审计（download_key）；审计 detail 不含 PEM
+- [ ] Staging issuance works end to end (the account ECDSA key is lazily registered and persisted, a second issuance does not re-register)
+- [ ] Production real certificate issuance; the expiry time and the renewal threshold (7-90 days) are displayed correctly
+- [ ] Each of the three DNS providers does one round of issuance (cloudflare / dnspod / alidns, the credential-determination wording names which key is missing)
+- [ ] Auto-renewal: move the threshold close to expiry to trigger re-issuance; a deliberately failing scenario retries with 1h throttling without hitting the CA rate limit
+- [ ] Issuance → auto-deploy pushes to the agent-specified path (certificate 0644 / private key 0600) → the nginx site references it → reload → the browser trust chain is complete
+- [ ] After renewal the agent-side file is updated in sync; a deployment failure only records status and does not roll back the issuance
+- [ ] Downloading a private key always writes an audit entry (download_key); the audit detail contains no PEM
 
-## DDNS 动态域名
+## DDNS Dynamic Domains
 
-设计：[ddns-design](./ddns-design.md)。前置：Cloudflare token + 家庭宽带动态 IP 环境（最好含 IPv6）。
+Design: [ddns-design](/guide/ddns-design). Prerequisite: a Cloudflare token + a home broadband dynamic IP environment (IPv6 preferred).
 
-- [ ] agent 出口 IP 多源探测真实生效（主源失败自动切备源；IPv4/IPv6 地址族各自正确）
-- [ ] 记录缺失自动创建（TTL auto、无代理）；IP 变化更新保留原 TTL/Proxied
-- [ ] 同 zone+type 多记录共享一轮 ListRecords（观察 Cloudflare 后台调用频次无放大）
-- [ ] 失败告警去重（同记录未读期间只报一次）；恢复后静默自愈清错
-- [x] 巡检间隔修改即时生效；`0=关闭` 形态——本机验收（2026-10-07，探针 `scripts/acceptance/ddns/probe-scan.sh` D1-D5 6/6 PASS，零外部依赖形态：配置指 ghost agent + 不配 CF token，检查在 provider/agent 前置校验快速失败但 CheckedAt/LastStatus/LastError 回写任何错误路径都走，用 CheckedAt 推进做扫描观测）：默认 300 回读、59/86401/非数字拒 400 合法值不污染；interval=60 到点扫描（failed 回写 + LastError 非空）→ 连续推进（实测 gap=120s——60s 门槛 × 60s tick 组合下 `Since(lastScan)<60` 偶真跳一拍，门槛语义预期非缺陷）→ PUT 0 后跨 ≥1 原扫描窗 CheckedAt 冻结 → 改回 60 恢复推进（间隔修改即时生效双向实证）。真 CF 记录比对/出口 IP 探测/告警去重维持挂起（123-126 需真 token 与动态 IP 环境）
+- [ ] The agent's egress IP multi-source probing really takes effect (the primary source failing switches to the backup automatically; the IPv4/IPv6 address families are each correct)
+- [ ] A missing record is created automatically (TTL auto, no proxy); an IP change update preserves the original TTL/Proxied
+- [ ] Multiple records in the same zone+type share one round of ListRecords (watch that the Cloudflare backend call frequency is not amplified)
+- [ ] Failure alert deduplication (one report only while the same record stays unread); after recovery it silently self-heals and clears the error
+- [x] Changing the inspection interval takes effect immediately; the `0=off` form — accepted locally (2026-10-07, probe `scripts/acceptance/ddns/probe-scan.sh` D1-D5 6/6 PASS, a zero-external-dependency form: the config points at a ghost agent with no CF token configured, the check fails fast at the provider/agent precondition but CheckedAt/LastStatus/LastError are written back on every error path, and scanning is observed by advancing CheckedAt): the default 300 reads back, 59/86401/non-numeric are rejected with 400 and legal values are not polluted; interval=60 scans when due (failed written back + LastError non-empty) → advancing continuously (measured gap=120s — under the combination of a 60s threshold and a 60s tick, `Since(lastScan)<60` occasionally truly skips a beat, the threshold semantics are expected behavior and not a defect) → after PUT 0 CheckedAt freezes across ≥1 original scan window → changing back to 60 restores advancement (interval changes taking effect immediately proven in both directions). Real CF record comparison / egress IP probing / alert deduplication stay suspended (120-123 need a real token and a dynamic IP environment)
 
-## DNS 域名管理
+## DNS Domain Management
 
-设计：[domain-binding-design](./domain-binding-design.md)。前置：DNSPod 账号（免费版优先，暴露真实限制）。
+Design: [domain-binding-design](/guide/domain-binding-design). Prerequisite: a DNSPod account (the free tier preferred, to expose the real limits).
 
-- [ ] DNSPod 免费版 TTL 下限：编辑低于免费下限的 TTL 时 API 真实报错的透传呈现
-- [ ] CAA 记录新增/编辑/删除
-- [ ] Cloudflare 与 DNSPod 两家 SRV 记录编辑实测（字段映射与回读）
+- [ ] DNSPod free-tier TTL floor: when editing a TTL below the free floor, the real API error is passed through and presented
+- [ ] CAA record add/edit/delete
+- [ ] Measured editing of SRV records on both Cloudflare and DNSPod (field mapping and read-back)
 
-## 组网观测（Overlay）
+## Overlay Network Observation (Overlay)
 
-设计：[overlay-design](./overlay-design.md)。前置：ZeroTier Central / Tailscale 管理 API token；装 ZeroTier/Tailscale/WireGuard/frp 的真实主机若干。
+Design: [overlay-design](/guide/overlay-design). Prerequisites: a ZeroTier Central / Tailscale admin API token; several real hosts running ZeroTier/Tailscale/WireGuard/frp.
 
-- [x] 运行态观测 wg 半：真实 interfaces 快照 + 私钥/预共享密钥不出现
-  （2026-10-07，scripts/acceptance/overlay/probe-wg.sh W1-W3 全 PASS——
-  NET_ADMIN 容器真 wg0（wireguard-tools 建接口，内核 wireguard 模块宿主侧
-  自动加载）：W1 真实快照 wg0/listenPort=51820/peerCount=1/endpoint 与
-  allowed-ips 原样；W2 私钥与预共享密钥 hex 不在响应（D6 白名单）；W3 peer
-  公钥（公开数据）原样。**验收逮到并修复真缺陷**：新版 wireguard-tools
-  （v1.0.20200513+）interface 行多一列 public-key（真机 1.0.20210914 实证
-  `<iface> <私钥> <公钥> <端口> <fwmark>` 五列），旧解析按固定下标取
-  fields[2] 把公钥当 listenPort 渲染——私钥未泄（fields[1] 恒弃），但端口
-  字段显示为一段 base64；修为取倒数第二列（fwmark 恒末列）两代布局兼容 +
-  新布局回归单测，包覆盖保 100.0%）
-- [ ] 运行态观测 ZT/TS 半 + 跨 agent 同节点合并：真实 peers 快照与合并徽标
-  （挂起：需真 zerotier 网络 / tailscale tailnet 登录与第二台主机，云端与
-  daemon 侧不可本机造，随外部资源补；解析/合并逻辑单测已盖）
-- [x] frp 分级观测：零配置只出版本+进程；配 admin 地址后隧道计数出现
-  （2026-10-07，scripts/acceptance/overlay/probe-frp.sh O1-O3 全 PASS——容器内
-  真实 frp 0.61.2（frps bind 7100 + admin 7400、frpc admin 7500 + 一条 tcp
-  proxy、loginFailExit=false 防首连撞未监听即永久退出）：O1 零配置 status=ok +
-  version + 双进程 running 且无 tunnels/proxies 键；O2 双 admin 地址 →
-  frpc.tunnels=1、frps.proxies=1；O3 frpc admin 死端口 → status=degraded +
-  adminError，frps 侧不受影响。**验收逮到并修复真缺陷**：frps 没有 frpc 的
-  `/api/status`（真机 404——原实现调它恒 adminError 404 + degraded，frps
-  admin 从未在真 frp 上工作过）；修为 frps 走 dashboard 稳定路由
-  `/api/serverinfo` 的 proxyTypeCount 求和（fetchFRPSAdminProxyCount）+ 单测
-  （含半截 body 读错分支），overlay-design.md D7 与数据源表措辞同步修正）
-- [ ] 云端管理：真 token 拉取 ZT 网络/成员与 TS 设备列表；授权/取消授权、除名、删除四类变更端到端生效（云端后台复核）
-- [ ] 未纳管设备识别：云端手动加一台不入面板的设备 → 「未纳管」徽标出现
-- [ ] agent 身份上报：本机身份 chip 的 ZT node id / TS device id 与云端同键对照 → 「面板纳管」徽标
+- [x] Runtime observation, wg half: a real interfaces snapshot + private key / pre-shared key absent
+  (2026-10-07, scripts/acceptance/overlay/probe-wg.sh W1-W3 all PASS — a real
+  wg0 in a NET_ADMIN container (wireguard-tools builds the interface, the kernel
+  wireguard module auto-loads on the host side): W1 a real snapshot wg0/listenPort=51820/peerCount=1/endpoint and
+  allowed-ips verbatim; W2 the private key and pre-shared key hex are absent from the response (the D6 whitelist);
+  W3 the peer public key (public data) verbatim. **Acceptance caught and fixed a real defect**:
+  the new wireguard-tools (v1.0.20200513+) interface row has one extra public-key column
+  (proved on a real machine with 1.0.20210914,
+  `<iface> <private-key> <public-key> <port> <fwmark>` five columns), the old parse took
+  fields[2] by a fixed index and rendered the public key as listenPort — the private key did not leak
+  (fields[1] is always discarded), but the port
+  field was displayed as a stretch of base64; fixed to take the second-to-last column (fwmark is always the last column),
+  compatible with both generations of layout +
+  a regression unit test for the new layout, package coverage held at 100.0%)
+- [ ] Runtime observation, ZT/TS half + cross-agent same-node merge: a real peers snapshot and the merge marker
+  (suspended: needs a real zerotier network / tailscale tailnet login and a second host, the cloud and
+  daemon sides cannot be fabricated locally, to be added with external resources; the parse/merge logic is already unit tested)
+- [x] frp graded observation: zero config yields only version+process; with the admin address configured the tunnel counts appear
+  (2026-10-07, scripts/acceptance/overlay/probe-frp.sh O1-O3 all PASS — a real frp 0.61.2 inside the container
+  (frps bind 7100 + admin 7400, frpc admin 7500 + one tcp
+  proxy, loginFailExit=false so the first connect doesn't permanently exit on not-yet-listening): O1 zero config status=ok +
+  version + both processes running with no tunnels/proxies keys; O2 both admin addresses →
+  frpc.tunnels=1, frps.proxies=1; O3 frpc admin dead port → status=degraded +
+  adminError, the frps side is unaffected. **Acceptance caught and fixed a real defect**: frps has no frpc's
+  `/api/status` (404 on a real machine — the original implementation called it and always got adminError 404 + degraded, frps
+  admin had never worked on a real frp); fixed so frps sums the proxyTypeCount of the dashboard's stable route
+  `/api/serverinfo` (fetchFRPSAdminProxyCount) + a unit test
+  (including the truncated-body misread branch), the wording of overlay-design.md D7 and the data source table is corrected in step)
+- [ ] Cloud management: pull ZT networks/members and the TS device list with a real token; authorize/unauthorize, remove member, delete — all four change types take effect end to end (re-checked in the cloud console)
+- [ ] Unmanaged device identification: manually add a device in the cloud that is not in the panel → the "Unmanaged" badge appears
+- [ ] Agent identity reporting: the ZT node id / TS device id of the local identity chip is cross-checked against the cloud by the same key → the "Managed by Panel" badge
 
-## 磁盘健康（SMART）
+## Disk Health (SMART)
 
-设计：[disk-health-design](./disk-health-design.md)。前置：带物理盘的真实主机（smartctl 可用）。
+Design: [disk-health-design](/guide/disk-health-design). Prerequisite: a real host with physical disks (smartctl available).
 
-- [x] 盘发现与字段读取：passed/温度/重映射/待定扇区/NVMe media_errors 真实数值合理
-  （2026-10-07，scripts/acceptance/smart/probe.sh S1-S4 全 PASS：本机 /dev/sda 真盘、
-  agent 以 root 拉起（smartctl 非 root 只回 rc=0 的空壳 JSON）、S1 盘发现
-  available+/dev/sda+model+sizeBytes、S2 health 与 smartctl -H 直读交叉一致（passed）、
-  S3 温度通道一致（VM 盘无传感器 → 双侧同缺，omitempty 0 值不渲染）、S4 attr 缺失
-  不伪造（ground truth 无 attr 表时 realloc/pending 面板同缺，不造 0 值冒充真读）。
-  边界注记：attr 非零真值面（重映射/待定扇区/NVMe media_errors 真实数值）需带真
-  attr 表的主机——本机为 QEMU VM 虚拟盘（health=passed、temp=0、无 attr 表）；
-  解析映射已由 smart_parse 单测覆盖（ATA passed/failed、NVMe、无 smart_status、
-  坏 JSON、raw 数值），真值主机实测随 NAS/物理机资源补）
-- [ ] 巡检告警：FAILED 盘 error 级、扇区/介质异常 warning 级、同盘未读期间只报一次
-  （挂起：真坏盘不可本机造——FAILED/扇区异常分级与 agent 过滤由 smart_scan 单测
-  覆盖（TestScanSmartOnceCreatesAlert/WarningLevel/Filters），告警真去重走 alert
-  管道同 drift；盘健康面 passed → failed 的端到端翻转需物理坏盘，随外部资源补）
-- [ ] （按需）非 root 部署下 sudo 提权读取路径
-  （挂起：需改宿主 sudoers，不做系统级变更——读数链路已按 root 形态实证
-  （探针 S0 root agent + smart.status 全链），sudo -n 包装属部署形态选项，
-  随真实非 root 部署需求补）
+- [x] Disk discovery and field reading: passed/temperature/remapped/pending sectors/NVMe media_errors real values are plausible
+  (2026-10-07, scripts/acceptance/smart/probe.sh S1-S4 all PASS: the local /dev/sda real disk,
+  the agent started as root (as non-root smartctl only returns an empty rc=0 shell JSON), S1 disk discovery
+  available+/dev/sda+model+sizeBytes, S2 health consistent with a direct smartctl -H read (passed),
+  S3 the temperature channel is consistent (the VM disk has no sensor → absent on both sides, the omitempty 0 value is not rendered), S4 a missing attr table
+  is not faked (when the ground truth has no attr table, realloc/pending are absent in the panel too, no 0 value is fabricated to pass for a real read).
+  Boundary note: the surface of non-zero real attr values (remapped/pending sectors/NVMe media_errors real numbers) needs a host with a real
+  attr table — this machine is a QEMU VM virtual disk (health=passed, temp=0, no attr table);
+  the parse mapping is already covered by smart_parse unit tests (ATA passed/failed, NVMe, no smart_status,
+  bad JSON, raw numbers), measurement on a real-value host follows with NAS/physical machine resources)
+- [ ] Inspection alert: a FAILED disk at error level, sector/media anomalies at warning level, one report only while the same disk stays unread
+  (suspended: a genuinely bad disk cannot be fabricated locally — the FAILED/sector-anomaly grading and the agent filter are unit tested by smart_scan
+  (TestScanSmartOnceCreatesAlert/WarningLevel/Filters), and true alert deduplication runs through the same alert
+  pipeline as drift; the end-to-end flip from passed → failed needs a physically bad disk, to be added with external resources)
+- [ ] (As needed) The sudo-elevated read path under a non-root deployment
+  (suspended: needs a host sudoers change, no system-level change will be made — the read chain is already proved in root form
+  (probe S0 root agent + the whole smart.status chain), the sudo -n wrapper is a deployment-form option,
+  added with the real non-root deployment need)
 
-## 防火墙观测（M1）
+## Firewall Observation (M1)
 
-设计：[firewall-design](./firewall-design.md)。探针：`scripts/acceptance/firewall/probe.sh`（本机三形态 agent：root/无 nft PATH/非 root）与 `scripts/acceptance/firewall/probe-hosts.sh`（容器宿主形态：裸容器/iptables-legacy/超大规则集，H1-H4）。
+Design: [firewall-design](/guide/firewall-design). Probes: `scripts/acceptance/firewall/probe.sh` (three agent forms locally: root/no nft in PATH/non-root) and `scripts/acceptance/firewall/probe-hosts.sh` (container-host form: bare container/iptables-legacy/huge rule set, H1-H4).
 
-- [x] capability 上报：nft/iptables 元数据与真实安装一致；双后端选择（D2）真实回落（2026-10-07 本机探针 F1/F3：nft 在走 nftables、PATH 摘除 nft 后 iptables-save + variant 解析 nf_tables）
-- [x] 规则快照真读：nft -j JSON 与 iptables-save 双后端解析真实规则集，表/链/规则计数与 nft list ruleset 对照合理（2026-10-07 本机探针 F2/F3：5 表 22 链 114 规则，ipv4+ipv6 双族）
-- [x] 非 root 说明态：available=false + 真实权限错误透传（2026-10-07 本机探针 F4，"you must be root"）
-- [x] 权限位单一 read 档（D10）：无 firewall:read 自定义角色 403、内置 viewer 200（2026-10-07 本机探针 F5）
-- [x] 浏览器实测页面三态：总览/按主机面板/策略徽标/cockpit 标注在真实数据下的渲染（2026-10-07 probe-web W1-W6：headless Chrome 驱动真实 web/dist——空态 Empty 文案、总览行后端+variant 标注、input accept 徽标、不可读/部分读取状态列、面板规则明细 + cockpit Tag；断言走 DOM innerText，headless-shell 容器无 CJK 字体截图呈 tofu 属容器字形缺失）
-- [x] iptables-legacy 主机（variant=legacy）：真实主机读数与变体标注（2026-10-07 probe-hosts H2 数据面真读 + probe-web W3a/W4 页面 variant 标注与规则明细）
-- [x] 无防火墙工具的裸容器主机：页面空态（2026-10-07 probe-hosts H1 数据面 502 unknown provider + probe-web W2 空态文案渲染）
-- [x] 超大规则集（>4MB）truncated 告警与 meta-only/行界截断呈现（2026-10-07 probe-hosts H3 nft 7.7MB meta-only + H4 iptables 5.1MB 行界截断留 16362 条；probe-web W3d 页顶 4MB 告警 + W6 面板 meta-only 错误说明不误报「规则集为空」）
+- [x] Capability reporting: nft/iptables metadata matches the real installation; the dual-backend selection (D2) really falls back (2026-10-07 local probes F1/F3: nft goes through nftables, after removing nft from PATH iptables-save + variant parsing resolves nf_tables)
+- [x] Rule snapshot really read: both nft -j JSON and iptables-save parse a real rule set, the table/chain/rule counts are plausible against `nft list ruleset` (2026-10-07 local probes F2/F3: 5 tables, 22 chains, 114 rules, ipv4+ipv6 both families)
+- [x] Non-root explanatory state: available=false + the real permission error passed through (2026-10-07 local probes F4, "you must be root")
+- [x] A single read permission tier (D10): a custom role without firewall:read gets 403, the built-in viewer gets 200 (2026-10-07 local probes F5)
+- [x] Browser-measured three states of the page: overview / per-host panel / policy badge / cockpit annotation rendering under real data (2026-10-07 probe-web W1-W6: headless Chrome driving the real web/dist — empty-state Empty copy, overview row backend+variant annotation, input accept badge, unreadable/partially-readable state columns, panel rule detail + cockpit Tag; assertions go through DOM innerText, the headless-shell container has no CJK fonts so the screenshot shows tofu, which is a container glyph gap)
+- [x] iptables-legacy host (variant=legacy): real host readings and the variant annotation (2026-10-07 probe-hosts H2 real data-plane read + probe-web W3a/W4 page variant annotation and rule detail)
+- [x] Bare container host with no firewall tools: the page's empty state (2026-10-07 probe-hosts H1 data-plane 502 unknown provider + probe-web W2 empty-state copy rendering)
+- [x] Huge rule set (>4MB): the truncated alert and the meta-only / line-boundary truncation presentation (2026-10-07 probe-hosts H3 nft 7.7MB meta-only + H4 iptables 5.1MB line-boundary truncation leaving 16362 entries; probe-web W3d a 4MB alert at the page top + W6 the panel's meta-only error message not falsely reporting "rule set is empty")
 
-## 日志检索
+## Log Search
 
-设计：[logs-design](./logs-design.md)。前置：多台 agent（含 systemd 主机与 docker 主机）。
+Design: [logs-design](/guide/logs-design). Prerequisites: several agents (including a systemd host and a docker host).
 
-- [x] 尾随真机项：journalctl 高频输出流畅尾随不重不漏
-  证据（2026-09-30）：探针 `scripts/acceptance/logs/`（系统域 transient unit 高频源，本机实验结论：`journalctl -u` 不匹配用户域瞬态单元须 sudo systemd-run 建系统域）T1——tail=2000 回填 500 行 + 600 行/s 实时突发 6000 行，6500 帧序列严格递增、零重复零缺口（序号带每轮唯一基址防 journal 跨轮累积干扰）；验收顺带修通两处流式链路缺陷：① agent 侧 logs POST（query/follow）被 RBAC 按 method 泛化推导成 `logs:write`——合法权限集合只有 `logs:read`，任何角色（含 admin）都 403，端点整体不可达（既有测试直调 handler 绕过中间件故未拦住），修为与 `/api/logs/search` 同口径 fixed read；② 审计中间件 `responseWriter` 包装器丢 `http.Flusher`，生产链路 `w.(http.Flusher)` 断言必失败 → 500「streaming unsupported」（/ws 的 Hijacker 教训同类，修为接口透传保审计）；`probe.log`
-- [x] docker 容器停止后尾随以 `reason=exited` 正常终止
-  证据（2026-09-30）：T2——alpine 循环输出容器 follow 收 ≥3 行后 `docker stop -t 2`，`docker logs -f` 随容器退出 → eof `reason="exited"`，DOCLINE 序列有序无重；`probe.log`
-- [x] 10 分钟超时兜底生效
-  证据（2026-09-30）：T3——空闲源（prewarm 后完全静默）follow 常驻（`journalctl -f` 对已结束 unit 不自退，本机实测常驻，超时是唯一出口），到点 eof `reason="exited"`、耗时精确 10m0s、沉淀期后零新增帧；单测面 `TestLogsFollowTimeoutKillsIdleSession`（`logsFollowTimeout` 行为中性 var 注入，生产恒 10min）；`probe.log`
-- [x] 跨机联邦检索：多 agent 并行扇出按主机分组返回；offline/无 logs capability/路径不存在三种 skipped 归因正确；单 agent 失败不整体报错
-  证据（2026-09-30）：T4a/T4b——3 agent 拓扑（全量 PATH / 空 PATH 无 logs capability / journalctl 失败 shim 遮蔽有 capability 但查询必败）+ ghost id 四样本齐：a1 ok=true 带 hostname 分组、a4 ok=false error 降级且 HTTP 200 不整体报错、a2 skipped `no-logs`、ghost skipped `offline`，结果按 agentId 排序；全量扇出 skipped 只列在线无 capability 者（离线者天然缺席不列）；口径注明：「路径不存在/not-found」归因已与 offline 合并（`api_logs_search.go` 注册表缺席即离线、不区分 not-found，ghost id 即该形态的现实验证）；原始请求/响应 `search-*.json`
+- [x] The trailing real-machine item: journalctl high-frequency output tails smoothly with no duplication and no gaps
+  Evidence (2026-09-30): probe `scripts/acceptance/logs/` (a high-frequency source in the system domain using transient units, local experiment conclusion: `journalctl -u` does not match user-domain transient units, they must be created in the system domain via sudo systemd-run) T1 — tail=2000 backfills 500 lines + a 600 lines/s live burst of 6000 lines, the 6500-frame sequence is strictly increasing, zero duplicates and zero gaps (each sequence number carries a unique per-round base to guard against cross-round journal accumulation); acceptance incidentally fixed two streaming-chain defects: ① the agent-side logs POST (query/follow) was generalized by RBAC from the method into `logs:write` — the only legal permission set is `logs:read`, so every role (including admin) got 403 and the endpoint was entirely unreachable (existing tests called the handler directly and bypassed the middleware, which is why nothing caught it), fixed to a fixed read matching `/api/logs/search`; ② the audit middleware's `responseWriter` wrapper drops `http.Flusher`, so the production path's `w.(http.Flusher)` assertion always fails → 500 "streaming unsupported" (the same class of lesson as the Hijacker on /ws, fixed by passing the interface through to preserve auditing); `probe.log`
+- [x] After a docker container stops, tailing ends normally with `reason=exited`
+  Evidence (2026-09-30): T2 — an alpine container outputting in a loop, follow collects ≥3 lines then `docker stop -t 2`, `docker logs -f` ends with the container exiting → eof `reason="exited"`, the DOCLINE sequence is ordered with no duplication; `probe.log`
+- [x] The 10-minute timeout fallback takes effect
+  Evidence (2026-09-30): T3 — an idle source (fully silent after prewarm) stays in follow (`journalctl -f` does not exit by itself for a finished unit, measured locally as staying resident, the timeout is the only exit), at the due point eof `reason="exited"` with an elapsed time of exactly 10m0s and zero new frames after the settling period; the unit-test surface `TestLogsFollowTimeoutKillsIdleSession` (`logsFollowTimeout` is injected as a behaviour-neutral var, production is always 10min); `probe.log`
+- [x] Cross-machine federated search: multi-agent parallel fan-out returns grouped by host; offline / no logs capability / path not found — the three skipped attributions are correct; a single agent failing does not error the whole thing
+  Evidence (2026-09-30): T4a/T4b — a 3-agent topology (full PATH / empty PATH with no logs capability / a journalctl failure shim masking a host that has the capability but whose query always fails) + a ghost id sample, all four present: a1 ok=true with hostname grouping, a4 ok=false error degradation with HTTP 200 and no whole-request error, a2 skipped `no-logs`, ghost skipped `offline`, results sorted by agentId; a full fan-out only lists online hosts without the capability (offline hosts are naturally absent and unlisted); note on the criterion: the "path not found/not-found" attribution has been merged into offline (api_logs_search.go treats absence from the registry as offline and does not distinguish not-found, the ghost id is the live proof of exactly that form); raw request/response `search-*.json`
 
 ## NAS
 
-设计：[nas-design](./nas-design.md)。前置：DSM 6.x/7.x、TrueNAS CORE/SCALE、OMV 真机各一（或有则验）。
+Design: [nas-design](/guide/nas-design). Prerequisites: real machines on DSM 6.x/7.x, TrueNAS CORE/SCALE, OMV each (verify if available).
 
-- [ ] DSM 6 与 7 两版本 API 字段差异实测（登录、卷、共享夹）
-- [ ] TrueNAS CORE 与 SCALE 字段差异（flexInt 字符串数字形态）
-- [ ] OMV：`X-Openmediavault-Sessionid` 头认证全流程；`"1.50 GiB"` 容量字符串解析；2FA 账号等同失败降级
-- [ ] mdadm 降级演练：拔盘/标记 fault 后告警送达（真去重）
-- [ ] ZFS / SMB / NFS 主机真实枚举
-- [x] `COCKPIT_NAS_TARGETS` 跳板探测机制：targets 解析→拨号→失联降级→source
-  归一全链（2026-10-07，scripts/acceptance/nas/probe-jump.sh J1-J2 全 PASS——
-  debian:12-slim 裸容器静态 agent：J1 合法 targets（死端口 dsm）→ nas/status
-  200、source=linux 不掺 dsm、pools/shares 空、available 与 df mounts 自洽
-  （失联 target 只 log 跳过不崩不超时）；J2 非 JSON env 整体忽略不崩。
-  形态实证两则：docker bind mount 让宿主真实块设备在容器 df 可见（≥1GB
-  计入 mounts 是正确行为）；/proc 宿主共享 → mdstat 恒存在 → DetectNas
-  mdstat 分支在 Linux 恒真（nas capability 恒上报）——env 注册分支只在
-  Windows/macOS 跳板平台可见，属解析层（单测盖）。真 DSM/TrueNAS/OMV 远端
-  观测维持挂起随真实 NAS）
+- [ ] Measured API field differences between DSM 6 and 7 (login, volumes, shares)
+- [ ] TrueNAS CORE vs SCALE field differences (flexInt string-number form)
+- [ ] OMV: the full `X-Openmediavault-Sessionid` header auth flow; `"1.50 GiB"` capacity string parsing; a 2FA account degrades to an equal failure
+- [ ] mdadm degradation drill: pull a disk / mark it fault and the alert is delivered (true deduplication)
+- [ ] Real enumeration of ZFS / SMB / NFS hosts
+- [x] The `COCKPIT_NAS_TARGETS` jump-host probing mechanism: the full chain targets parse → dial → unreachable degradation → source
+  normalization (2026-10-07, scripts/acceptance/nas/probe-jump.sh J1-J2 all PASS —
+  a static agent in a bare debian:12-slim container: J1 legal targets (a dead port dsm) → nas/status
+  200, source=linux without any dsm mixed in, pools/shares empty, available consistent with df mounts
+  (an unreachable target is only logged and skipped, no crash and no timeout); J2 non-JSON env is ignored wholesale without crashing.
+  Two form proofs: a docker bind mount makes a real host block device visible in the container's df (≥1GB
+  counting into mounts is correct behavior); the shared host /proc → mdstat always exists → the DetectNas
+  mdstat branch is always true on Linux (the nas capability is always reported) — the env registration branch is only
+  visible on Windows/macOS jump-host platforms, so it belongs to the parse layer (unit tested). Real DSM/TrueNAS/OMV remote
+  observation stays suspended pending a real NAS
 
-## 服务管理（三后端）
+## Service Management (Three Backends)
 
-设计：[service-design](./service-design.md)。前置：systemd Linux 主机、Windows 主机、macOS 主机各一。
+Design: [service-design](/guide/service-design). Prerequisites: one systemd Linux host, one Windows host, one macOS host.
 
-- [x] systemd：列表含未加载 unit；start/stop/restart/enable/disable 实测；mask 后隐藏启动并显解屏蔽、unmask 还原
-  证据（2026-10-01）：探针 `scripts/acceptance/services/`（本机 :19993，root/cui 双 agent 对照，测试 unit `cockpit-acc-*` 专属）两轮 9/9 PASS——首轮：T1 列表 total=313>active=72，files-only 未加载项在列（`apport-coredump-hook@.service` 等模板/未加载类，`mergeServiceUnits` 分支）；T2 restart→active/running、enable→enabled；T3 非 root restart/enable 同一 unit 均 502 且体含 `systemctl` 原文（Access denied…interactive authentication）原样透传，对照组非 root 读列表 200（纯权限失败）；T4 stop→inactive、disable→disabled 收尾；验收逮到一处生产缺陷：`serveAPI` 分发器仅 `Contains "/services/"`（要求尾斜杠），裸 `GET /api/agents/{id}/services`（文档与 Web `api.ts:1043` 调的列表端点）掉进 `handleAgentGet` 报 404，Web 服务页列表整体不可达（既有测试直调 handler 绕过分发器故未拦住），修为与 `/health`、`/domains` 行同款 `HasSuffix || Contains` + 分发器回归 `TestServiceListDispatcherRoutesBarePath`（反向验证无修复必 FAIL）；补验轮：ghost 未加载样本（装 `/etc` 永不 enable/start → `loadState` 空 + `activeState=inactive` + `unitFileState=disabled`，运行表/安装表双对照）、start/stop 往返、disable/enable 往返、mask→`masked`（masked 上 restart 502、is-masked 原文透传）→ unmask 还原 `enabled`（列表态同步，Web masked 行隐藏启动/显解屏蔽即由该字段驱动）、审计 `service_action` 落账断言（unit/agent 齐全）；teardown 删 unit 文件 + daemon-reload 可复跑（run-server 归一旧实例 DB，防 `/api/agents` 旧 agent 行污染注册计数）；证据 `probe.log`（两轮）+ `setup.log` + `services-list.json`
-- [x] systemd：daemon-reload 工具栏按钮；unit 文件查看/编辑（包管文件先复制 `/etc/systemd/system` 覆盖位再改，升级不丢）
-  证据（2026-10-01，R3 轮）：同探针扩展至 17/17 PASS——T4 unit 文件全链：GET 有效视图（`systemctl cat` 全文 + `fragmentPath=/usr/lib/systemd/system/...` 包管位）；PUT 改 Description → 包管文件先复制 `/etc/systemd/system` 覆盖位再写（PUT 响应 `path=/etc/...` + `/etc` 落盘 + 复读 `fragmentPath` 换位三证）+ 保存捆绑 daemon-reload（`systemctl show -p Description` 即时反映新值——不 reload 不可能，端到端铁证）；超 256KB+1 内容 413（server `MaxBytesReader` 与 agent 同限双端防御）；拒绝面：白名单外 unit 名（含 `:`）400、`{unit}/file/x` 多余段 404（写哪由 FragmentPath 决定、只收 unit 名，无路径参数即无穿越面）、windows 形名（`zzz-notaservice`）过 server 双后端并集白名单后 agent systemd 兜底拒且 502 透传 `invalid unit name ... expect *.service`（D9.4 设计内行为）；非 root PUT 502 + `permission denied` 原文透传（与 root 同操作 200 对照）；审计 `details.action=unitfile-save` 落账。daemon-reload 端点：`POST /agents/{id}/services/daemon-reload` 200 `{"reloaded":true}` + 审计落账；Web 接线在位——工具栏「重载配置」Popconfirm（`Services/index.tsx:381-386`）与「文件」Modal（`:320-494`）走 `api.ts:1056/1063/1070` 同三端点。本轮无产品缺陷（首轮 c88a48a 已修 serveAPI 分发器 404）
-- [x] systemd：服务行「日志」跳转 journalctl 历史可查（含未加载 unit）
-  证据（2026-10-01，R3 轮）：T5（`cockpit-acc-jlog.service` 样本，装 `/usr/lib` 永不 enable）——PUT 换带唯一 marker 的 oneshot ExecStart（dogfood 覆盖位 + 捆绑 reload：start 执行的正是 PUT 后内容）→ start 产 journal 历史 → stop + daemon-reload 后成未加载安装项（三面证据：`systemctl list-units --all` 无、服务表 `loadState=""`+`unitFileState=disabled`、`/logs/sources` 不含）→ `POST /agents/{id}/logs/query {"type":"systemd","source":"cockpit-acc-jlog.service"}` 200 且 `lines` 含 marker（`journalctl -u` 不关心加载态）；Web 链路同款：服务行「日志」按钮开 Drawer 内嵌 LogsPanel（`Services/index.tsx:506-514`），`initialSource` 对 unit 名无条件优先派生不回落（`LogsPanel.tsx:124-126`，未加载服务不在 `logs.sources` 列表仍可查）；非 root daemon-reload 502 Access denied 透传（对照记录）
-- [ ] Windows SCM：列表/启停/自启切换/restart 等待 30s 超时路径实测；无权限服务报错透传；reload 按钮确认隐藏
-  仓内预备（2026-10-19，f4a8ae5 + 367fa27）：免提权探针 `scripts/acceptance/services/scm-probe/main.go`（`//go:build windows`，经 `WindowsServiceProvider` 生产链）——校验层 3 项（reload 被动词白名单拒 / 非法 unit 名被拒=路径穿越面 / 未知动词拒）+ 非提权会话的 SCM `Access is denied` 原文透传 T4；`mgr.Connect` 需 SC_MANAGER_ALL_ACCESS，故 list / 启停 / 自启 / restart 30s 超时面标 BLOCKED 待提权 agent 复验。Build windows 腿已加整模块编译门禁（该文件带 windows build tag，只编 cmd 两包会漏检）。
-- [ ] macOS launchd：列表/启停/自启切换；`kickstart` 失败回退 `bootstrap` 路径；无权限报错透传
-  仓内预备（2026-10-19，98f2cc8）：免提权探针 `scripts/acceptance/services/launchd-probe/main.go`（`//go:build darwin`，经 `LaunchdServiceProvider` 生产链）——校验层 4 项（路径穿越 label 被拒 / 未知动词拒 / reload 被动词白名单拒 / `launchctl kickstart` 错误原文透传）；root 侧 list 观测与启停、自启切换 + `kickstart`→`bootstrap` 回退标 BLOCKED 待 root 会话 + 临时 LaunchDaemon 复验。Build darwin 腿已加整模块编译门禁。
+- [x] systemd: the list includes unloaded units; start/stop/restart/enable/disable measured; after masking, hide-on-start and explicit unmask appear, and unmask restores
+  Evidence (2026-10-01): probe `scripts/acceptance/services/` (locally :19993, a root/cui dual-agent contrast, test units `cockpit-acc-*` exclusive) two rounds 9/9 PASS — first round: T1 list total=313>active=72, files-only unloaded items are in the list (template/unloaded classes like `apport-coredump-hook@.service`, the `mergeServiceUnits` branch); T2 restart→active/running, enable→enabled; T3 a non-root restart/enable of the same unit both give 502 with the body carrying the `systemctl` original text (Access denied…interactive authentication) passed through verbatim, while the control group's non-root list read gives 200 (a pure permission failure); T4 stop→inactive, disable→disabled to finish up; acceptance caught a production defect: the `serveAPI` dispatcher matched only `Contains "/services/"` (requiring a trailing slash), so a bare `GET /api/agents/{id}/services` (the list endpoint the docs and web `api.ts:1043` call) fell into `handleAgentGet` and returned 404, making the web service page list entirely unreachable (existing tests called the handler directly and bypassed the dispatcher, which is why nothing caught it), fixed with the same `HasSuffix || Contains` as the `/health` and `/domains` rows + a dispatcher regression test `TestServiceListDispatcherRoutesBarePath` (reverse verification: without the fix it must FAIL); the supplementary verification round: a ghost unloaded sample (install to `/etc` and never enable/start → `loadState` empty + `activeState=inactive` + `unitFileState=disabled`, a two-sided check against both the running table and the install table), start/stop round trips, disable/enable round trips, mask→`masked` (restart on a masked unit gives 502, the is-masked original text passes through) → unmask restores `enabled` (the list state updates in sync, the web masked row hiding start and showing explicit unmask is driven by exactly this field), and the `service_action` audit write assertion (unit/agent both present); teardown deletes the unit file + daemon-reload so it can be re-run (run-server normalizes the old instance's DB, preventing old agent rows from polluting the registration count); evidence `probe.log` (two rounds) + `setup.log` + `services-list.json`
+- [x] systemd: the daemon-reload toolbar button; unit file view/edit (a package-managed file is first copied to the override location under `/etc/systemd/system` and only then edited, so upgrades do not lose it)
+  Evidence (2026-10-01, R3 round): the same probe extended to 17/17 PASS — T4 unit file full chain: GET a valid view (`systemctl cat` full text + `fragmentPath=/usr/lib/systemd/system/...` package-managed location); PUT changing Description → the package-managed file is first copied to the `/etc/systemd/system` override location and only then written (PUT response `path=/etc/...` + the file landing under `/etc` + `fragmentPath` reading back with the new location, three proofs) + the save is bundled with daemon-reload (`systemctl show -p Description` reflects the new value immediately — impossible without the reload, end-to-end ironclad proof); content over 256KB+1 gives 413 (the server's `MaxBytesReader` and the agent share the same limit, defence on both ends); the rejection surface: a unit name outside the whitelist (including `:`) gives 400, an extra path segment in `{unit}/file/x` gives 404 (where it writes is decided by FragmentPath, only the unit name is accepted, and with no path parameter there is no traversal surface), a windows-shaped name (`zzz-notaservice`) passes the server's dual-backend union whitelist and is then refused by the agent's systemd fallback with 502 passing through `invalid unit name ... expect *.service` (designed behavior per D9.4); a non-root PUT gives 502 + `permission denied` original text passed through (contrasted against the same operation as root returning 200); audit `details.action=unitfile-save` written. The daemon-reload endpoint: `POST /agents/{id}/services/daemon-reload` returns 200 `{"reloaded":true}` + an audit write; the web wiring is in place — the toolbar "Reload Configuration" Popconfirm (`Services/index.tsx:381-386`) and the "Files" Modal (`:320-494`) go through `api.ts:1056/1063/1070`, the same three endpoints. No product defects in this round (the first round's c88a48a already fixed the serveAPI dispatcher 404)
+- [x] systemd: the "Logs" jump on a service row reaches the journalctl history (including unloaded units)
+  Evidence (2026-10-01, R3 round): T5 (`cockpit-acc-jlog.service` sample, installed to `/usr/lib` and never enabled) — PUT swaps in a oneshot ExecStart carrying a unique marker (the dogfood override position + the bundled reload: what start executes is exactly the content after the PUT) → start produces journal history → stop + daemon-reload turns it into an unloaded install entry (three proofs: not in `systemctl list-units --all`, service table `loadState=""`+`unitFileState=disabled`, not in `/logs/sources`) → `POST /agents/{id}/logs/query {"type":"systemd","source":"cockpit-acc-jlog.service"}` returns 200 and `lines` contains the marker (`journalctl -u` does not care about the load state); the web path is the same shape: the "Logs" button on a service row opens a Drawer with an embedded LogsPanel (`Services/index.tsx:506-514`), `initialSource` unconditionally derives and never falls back for a unit name (`LogsPanel.tsx:124-126`, an unloaded service is not in the `logs.sources` list but is still searchable); a non-root daemon-reload gives 502 with Access denied passed through (recorded as a contrast)
+- [ ] Windows SCM: list/start-stop/autostart toggle/restart 30s timeout path measured; a no-permission service error is passed through; the reload button is confirmed hidden
+- [ ] macOS launchd: list/start-stop/autostart toggle; a `kickstart` failure falls back to the `bootstrap` path; a no-permission error is passed through
 
-## 统一 Job 执行（agent.exec）
+## Unified Job Execution (agent.exec)
 
-设计：[jobs-design](./jobs-design.md)。前置：一台在线 Linux agent（命令经 `sh -c` 执行）。
-真机验收（2026-10-05，探针 `scripts/acceptance/jobs/` 五件套 9/9 PASS，证据
-`.acceptance/jobs/evidence/`：probe.log + create-J1..J5.json + audit-job_run.json）。
+Design: [jobs-design](/guide/jobs-design). Prerequisite: one online Linux agent (the command is executed through `sh -c`).
+Real-machine acceptance (2026-10-05, probe `scripts/acceptance/jobs/` five-piece set 9/9 PASS, evidence
+`.acceptance/jobs/evidence/`: probe.log + create-J1..J5.json + audit-job_run.json).
 
-- [x] 创建 Job（在线 agent，`uptime`）→ 弹窗回显 success、输出非空、退出码 0；台账新增一条（15s 轮询内可见）
-  证据：J1 `echo J1-OUTPUT-MARK && uptime` 82ms 返回 success/exitCode 0/输出 80B 含标记，
-  actor/type/target/parameters 往返一致、startedAt/finishedAt 落定；台账 0→1 条且倒序首位
-  即该条、单条详情含同样输出。Web 接线在位：15s 轮询 `Jobs/index.tsx:51`
-  （refetchInterval 15000）、终态成功提示按 STATUS_META 回显（`:84`）、
-  菜单 perm `jobs:read`（`App.tsx:211`）
-- [x] 非零退出（`exit 3`）→ failed、退出码 3、error 无输出回退
-  证据：J2 `echo J2-BEFORE-OUT; exit 3` → status=failed、exitCode=3、exit 前输出仍带回
-  （D4 业务字段）；error 实际为 `exit status 3`（agent trimExecErr 归一，设计「error
-  为空」的表述按实现修正——非零退出与超时的错误讯息走同一字段）
-- [x] 超时（`sleep 30`，timeout_s=1）→ failed、error 含 timed out；agent 侧进程组 SIGKILL，`ps` 复核无孤儿 sleep 残留
-  证据：J3 `sleep 297` timeout_s=1 → failed、exitCode=-1、error=`timed out after 1s`，
-  墙钟 1.078s（按时返回非等满）；`pgrep -f "sleep 297"` 复核零命中（进程组杀净，
-  无孙进程持管道悬挂）
-- [x] 输出截断：>64KB 大输出 → truncated 标记，业务字段不炸 RPC
-  证据：J4 `seq 1 20000`（全量 ≈108KB）→ success、output 恰 65536B、尾行 20000 保留、
-  首行 1 已截（agent `jobExecMaxOutput` 与 server `storage.JobMaxOutput` 双端同限截尾）。
-  `truncated` 标记在 agent RPC data 内，jobView 视图不暴露（表意按实现修正）
-- [x] 离线 agent：创建弹窗下拉禁用该机；直连 `POST /api/jobs` → 503，不落幽灵 Job 记录
-  证据：J5 目标 `jobs-acc-ghost`（从未注册；与「曾在线后掉线」同一 registry.Get 分支，
-  logs T4 同口径）→ 503 `agent offline`，台账 4→4 条不变、ghost 目标记录 0。Web 下拉
-  `Jobs/index.tsx:65` `disabled: a.status === 'offline'` 且标签标「（离线）」
-- [x] 审计：CreateJob 与终态 `job_run`（resource=job、details 含 type/target/status/params）在审计日志页留痕
-  证据：J7 `GET /api/admin/audit/logs?resource=job&action=job_run` 命中 J1-J4 每 Job
-  恰一条（resource_id=Job ID、username=admin、details 含 type/target/status/params.command）；
-  创建前的 503/400 校验失败不产审计，审计页按 resource=job 可查
-- [x] 权限：无 `jobs:write` 不见「执行命令」入口；无 `jobs:read` 进不了 Jobs 页
-  证据：J8 viewer（jobs:read）GET 列表/详情 200、POST 403；自定义仅 `dns:read` 角色
-  GET/POST 全 403；web 入口 PermGuard `jobs:write`（`Jobs/index.tsx:169`）+ 菜单
-  `jobs:read`（`App.tsx:211`）。**验收逮到真缺陷**：`/api/jobs` 未登记 `resourceRules`
-  → RBAC governed=false 整体放行，viewer 也能执行（与 agent-tags 补规则前同类）；
-  修为 `rbac.go` 补 `{"/api/jobs", "jobs", ""}` + 三角色矩阵 7 例（rbac_test.go）
+- [x] Creating a Job (online agent, `uptime`) → the dialog echoes success, non-empty output, exit code 0; the ledger gains one entry (visible within the 15s poll)
+  Evidence: J1 `echo J1-OUTPUT-MARK && uptime` returns in 82ms with success/exitCode 0/80B of output containing the marker,
+  actor/type/target/parameters round-trip consistently, startedAt/finishedAt land; the ledger goes 0→1 entry and the reverse-order first row
+  is exactly that entry, and the single-entry detail contains the same output. Web wiring in place: 15s polling `Jobs/index.tsx:51`
+  (refetchInterval 15000), the terminal success toast echoes per STATUS_META (`:84`),
+  menu perm `jobs:read` (`App.tsx:211`)
+- [x] Non-zero exit (`exit 3`) → failed, exit code 3, error falls back without output
+  Evidence: J2 `echo J2-BEFORE-OUT; exit 3` → status=failed, exitCode=3, output from before the exit is still carried back
+  (a business field per D4); the error is actually `exit status 3` (normalized by the agent's trimExecErr, the design's "error
+  empty" wording is corrected per the implementation — the error message for a non-zero exit and for a timeout shares one field)
+- [x] Timeout (`sleep 30`, timeout_s=1) → failed, error contains timed out; the agent SIGKILLs the process group, `ps` re-check shows no orphaned sleep residue
+  Evidence: J3 `sleep 297` timeout_s=1 → failed, exitCode=-1, error=`timed out after 1s`,
+  wall clock 1.078s (returns on time rather than waiting it out); `pgrep -f "sleep 297"` re-check has zero hits (the process group is killed clean,
+  no grandchild process holding a pipe open)
+- [x] Output truncation: >64KB of large output → truncated flag, business fields do not blow up the RPC
+  Evidence: J4 `seq 1 20000` (about 108KB in total) → success, output exactly 65536B, the tail line 20000 is preserved,
+  the first line 1 is cut (the agent's `jobExecMaxOutput` and the server's `storage.JobMaxOutput` enforce the same tail truncation on both ends).
+  The `truncated` flag lives inside the agent RPC data and is not exposed by the jobView (the meaning is corrected per the implementation)
+- [x] Offline agent: the create dialog disables that machine in the dropdown; a direct `POST /api/jobs` → 503, no ghost Job record is left
+  Evidence: J5 target `jobs-acc-ghost` (never registered; the same registry.Get branch as "was online then dropped", the same criterion as
+  logs T4) → 503 `agent offline`, the ledger stays 4→4 entries, 0 records for the ghost target. The web dropdown
+  `Jobs/index.tsx:65` `disabled: a.status === 'offline'` and the label is marked "(offline)"
+- [x] Audit: CreateJob and the terminal `job_run` (resource=job, details containing type/target/status/params) leave a trace on the audit log page
+  Evidence: J7 `GET /api/admin/audit/logs?resource=job&action=job_run` hits exactly one entry per Job for J1-J4
+  (resource_id=Job ID, username=admin, details containing type/target/status/params.command);
+  the 503/400 validation failures before creation produce no audit, and the audit page is searchable by resource=job
+- [x] Permissions: without `jobs:write` the "Execute Command" entry is not visible; without `jobs:read` the Jobs page cannot be entered
+  Evidence: J8 viewer (jobs:read) GET list/detail 200, POST 403; a custom role with only `dns:read` gets
+  403 on both GET and POST; the web entry PermGuard `jobs:write` (`Jobs/index.tsx:169`) + menu
+  `jobs:read` (`App.tsx:211`). **Acceptance caught a real defect**: `/api/jobs` had no `resourceRules` registered
+  → RBAC governed=false let everything through and even a viewer could execute (same class as agent-tags before the rule was added);
+  fixed by adding `{"/api/jobs", "jobs", ""}` to `rbac.go` + a three-role 7-case matrix (rbac_test.go)
 
-## Workflow 编排（M1：异步 Job + 线性链）
+## Workflow Orchestration (M1: Async Job + Linear Chain)
 
-设计：[workflow-design](./workflow-design.md)。前置：一台在线 Linux agent（同 Job 节）；
-M2b 扇出验收需两台（run-server.sh 起 `workflows-acc-a1/a2` 双实例）。
-M1 已实现并验收（2026-10-09）：探针 `scripts/acceptance/workflows/`（W0-W9，四件套 +
-Go probe，对齐 jobs 探针口径）真机 9/9 PASS（端口 20010，agent `workflows-acc-a1`，
-证据 `.acceptance/workflows/evidence/` + `probe.log`）。
-M2b 多目标扇出已实现并验收（2026-10-10）：探针扩至 W10，真机 12/12 PASS
-（双在线 agent + ghost 样本）。
-M2c 取消信号已实现并验收（2026-10-11）：探针 W5/W9 语义翻新至 `job.cancel`
-真击杀口径、新增 W11 变量传递场景（M2a 端到端面）——本机双实例 harness
-（run-server.sh，端口 20010）13/13 PASS（W5 击杀=true/台账 cancelled、W9
-running 取消 200+击杀 cancelled/终态再取消 409、W11 解析+定义留原文全实证）；
-下方 W5/W9 两条为翻新前的历史证据，语义以翻新后探针为准。
+Design: [workflow-design](/guide/workflow-design). Prerequisite: one online Linux agent (same as the Job section);
+M2b fan-out acceptance needs two (run-server.sh starts the dual instance `workflows-acc-a1/a2`).
+M1 is implemented and accepted (2026-10-09): probe `scripts/acceptance/workflows/` (W0-W9, four-piece set +
+Go probe, aligned with the jobs probe criterion) 9/9 PASS on a real machine (port 20010, agent `workflows-acc-a1`,
+evidence `.acceptance/workflows/evidence/` + `probe.log`).
+M2b multi-target fan-out is implemented and accepted (2026-10-10): the probe extended to W10, 12/12 PASS on a real machine
+(dual online agents + a ghost sample).
+M2c cancel signal is implemented and accepted (2026-10-11): probe W5/W9 semantics reworked to the real-kill
+criterion of `job.cancel`, new W11 variable-passing scenario (the end-to-end face of M2a) — the local dual-instance harness
+(run-server.sh, port 20010) 13/13 PASS (W5 kill=true/ledger cancelled, W9
+running cancel 200+kill cancelled/cancel-after-terminal 409, W11 parse + definition source all fully evidenced);
+the W5/W9 entries below are the historical evidence from before the rework, the authoritative semantics are those of the reworked probe.
 
-- [x] 异步创建：`POST /api/jobs` 立即 201 返回 pending，台账轮询内见终态；pending 行「取消」可见可点（W1/W9）
-  证据：W1 `uptime` → 201 status=pending（W1 契约，0d065a1 race fix 后确定性）→ 台账轮询
-  success/exit 0/输出标记/params 往返/起止落定；pending 行取消 Web 在位 `Jobs/index.tsx:159`
-  （pending 行「取消」按钮 → `cancelJob`），running 取消被拒 409 `only pending`（W9）
-  （M2c 翻新：running 取消改为 RPC 击杀 200 + `cancelled`——W9 已翻新并复核
-  通过 200+击杀 cancelled+终态再取消 409）
-- [x] 成功链：两步 Workflow run 全步 success，run 台账每步 jobId 可点开看输出/退出码（W2）
-  证据：W2 两步链（uptime → df -h）run success；步骤快照 success 落 run.steps；
-  Job 台账 2 条 actor=workflow、`/api/jobs?workflow_run_id=` 命中；Web run 详情
-  jobId「查看」按钮复用台账 Job 视角（`Workflows/index.tsx:538` openJob）
-- [x] 失败停：中间步失败（非零退出）→ run failed、第三步不执行、断点在快照可读（W3）
-  证据：W3 三步链第 2 步 `exit 3` → run failed；快照 [success/failed/pending] 断点可读；
-  Job 台账恰 2 条（第三步无 Job，未派发）
-- [x] 重试：首试失败重试成功（retry=1）→ 步骤 attempts=2、每次尝试独立 Job 行进台账（W4）
-  证据：W4 marker 文件首试 `cat` 失败（exit 1）、retry=1 重试成功 → steps[0].attempts=2、
-  尝试 2 success 含输出标记、尝试 1 failed exit=1 独立成行；两条 Job 间隔实测 ∈[4s,10s]
-  （workflowRetryInterval=5s 语义）
-- [x] 取消 run：在途步骤自然结束后 run cancelled、后续步骤不推进；再次取消 409（W5）
-  证据：W5 sleep 12 在途 → cancel 200 → run cancelled+finishedAt；12s 后步骤 2 仍无
-  Job（不推进）、台账 1 条；再次 cancel 409 `run is not running`；Web 取消按钮仅
-  running 可见（`Workflows/index.tsx:496`）
-  （M2c 翻新：在途步骤改为被 `job.cancel` 真击杀落 `cancelled`+stopReason=`run
-  cancelled`，不再自然跑满——W5 已翻新待复核）
-- [x] 重入与冻结：同定义重复 run 409；active run 期间定义更新/删除 409（W6）
-  证据：W6 active run 窗口内（8s/12s sleep 期间）触发第二次 run 409、PUT 定义 409、
-  DELETE 定义 409（三 409 冻结面）；cancel 置终态后 DELETE 200 可清（W7 尾段）
-- [x] 离线目标：步骤目标含离线 agent → 503 不建 run（与单条 Job 同口径）（W7）
-  证据：W7 目标 `workflows-acc-ghost`（从未注册，与「曾在线后掉线」同 registry.Get 分支）
-  → 503 含 `agent offline`、run 台账 0 条（不落幽灵）；同口径单条 Job 见 J5
-- [x] 权限与审计：无 `workflows:write` 不见运行/新建入口；`workflow_create/workflow_run/workflow_cancel` 审计留痕（W8）
-  证据：W8 viewer（workflows:read）列表 200/run 详情 200、建/触发/取消全 403；仅
-  `dns:read` 自定义角色全 403（rbac `{"/api/workflows","workflows",""}` 路由层）；
-  审计 create/run/cancel 三动作留痕 resource=workflow；Web 入口 PermGuard
-  `workflows:write`（`Workflows/index.tsx:307,315,334`）+ 菜单 `workflows:read`
-  （`App.tsx:222`）
-- [x] 真机编排一轮：对真实 agent 跑一条「uptime → df -h」两步链并核对台账/审计/run 快照（W2）
-  证据：本机实例（:20010）+ agent `workflows-acc-a1` 真机执行；run success、两步快照
-  均含输出、Job 台账 2 条 actor=workflow、审计 workflow_run resource_id=run id；
-  证据文件 run-W2/final-W2/jobs-W2/audit-workflow.json（`.acceptance/workflows/evidence/`）
-- [x] 扇出步：`targets` 多目标顺序逐台执行 → run success、逐台快照独立 jobId、台账按台独立（W10，M2b）
-  证据：W10 双台 [a1,a2] `echo FAN-OK && uptime` → 逐台 success、jobId 独立成行、
-  台账 2 条；Web 步骤编辑器多选目标 + run 时间线「N 台」聚合展开逐台明细（vitest 22 用例）
-- [x] 扇出失败停：首台失败 run failed、次台 pending 无 Job（F3 同 W5 停推进口径）（W10b）
-  证据：W10b [a1,a2] `exit 3` → 逐台 [failed/failed, pending]、步级 StopReason=failed、
-  台账 1 条（次台从未派发）
-- [x] 扇出 ghost 混入：任一目标离线 503 不建 run（F8 逐台校验，延伸 W7）（W10c）
-  证据：W10c [a1,ghost] → 503 `agent offline for steps[0]`、run 台账 0 条（不落幽灵 run）
+- [x] Asynchronous creation: `POST /api/jobs` immediately returns 201 pending, the ledger poll sees the terminal state; the "Cancel" entry on a pending row is visible and clickable (W1/W9)
+  Evidence: W1 `uptime` → 201 status=pending (the W1 contract, deterministic after the 0d065a1 race fix) → the ledger poll
+  success/exit 0/output marker/params round-trip/start and end landed; the pending-row cancel in web is in place `Jobs/index.tsx:159`
+  (the pending row's "Cancel" button → `cancelJob`), cancelling a running one is rejected with 409 `only pending` (W9)
+  (M2c rework: cancelling a running one changed to RPC kill 200 + `cancelled` — W9 has been reworked and re-verified
+  passing 200+kill cancelled+cancel-after-terminal 409)
+- [x] Success chain: a two-step Workflow run has every step success, and each step's jobId in the run ledger can be opened to see the output/exit code (W2)
+  Evidence: W2 two-step chain (uptime → df -h) run success; the step snapshot success lands in run.steps;
+  the Job ledger has 2 entries with actor=workflow, `/api/jobs?workflow_run_id=` hits them; the web run detail
+  jobId "View" button reuses the ledger Job view (`Workflows/index.tsx:538` openJob)
+- [x] Failure stops: a mid-chain step failure (non-zero exit) → run failed, the third step does not execute, the break point is readable in the snapshot (W3)
+  Evidence: W3 three-step chain with `exit 3` on step 2 → run failed; the snapshot [success/failed/pending] break point is readable;
+  the Job ledger has exactly 2 entries (the third step has no Job, it was never dispatched)
+- [x] Retry: the first attempt fails and the retry succeeds (retry=1) → step attempts=2, each attempt enters the ledger as an independent Job row (W4)
+  Evidence: W4 the marker file's first `cat` attempt fails (exit 1), retry=1 succeeds on the retry → steps[0].attempts=2,
+  attempt 2 success contains the output marker, attempt 1 failed exit=1 becomes its own row; the two Jobs are measured at an interval ∈[4s,10s]
+  (the workflowRetryInterval=5s semantics)
+- [x] Cancelling a run: after the in-flight step ends the run is cancelled, subsequent steps do not advance; cancelling again gives 409 (W5)
+  Evidence: W5 sleep 12 in flight → cancel 200 → run cancelled+finishedAt; 12s later step 2 still has no
+  Job (no advancement), the ledger has 1 entry; cancelling again gives 409 `run is not running`; the web cancel button is visible
+  only for running (`Workflows/index.tsx:496`)
+  (M2c rework: the in-flight step changed to really being killed by `job.cancel` landing `cancelled`+stopReason=`run
+  cancelled`, no longer running out naturally — W5 has been reworked and awaits re-verification)
+- [x] Re-entrance and freezing: running the same definition again gives 409; updating/deleting the definition during an active run gives 409 (W6)
+  Evidence: W6 a second run inside the active-run window (during the 8s/12s sleep) gives 409, PUT definition gives 409,
+  DELETE definition gives 409 (the three 409 freeze surfaces); after cancel sets the terminal state DELETE gives 200 and can clear (W7 tail segment)
+- [x] Offline target: a step targeting an offline agent → 503, no run created (the same criterion as a single Job) (W7)
+  Evidence: W7 target `workflows-acc-ghost` (never registered, the same registry.Get branch as "was online then dropped")
+  → 503 containing `agent offline`, the run ledger has 0 entries (no ghost); the same criterion for a single Job is in J5
+- [x] Permissions and audit: without `workflows:write` the run/create entries are not visible; `workflow_create/workflow_run/workflow_cancel` leave audit traces (W8)
+  Evidence: W8 viewer (workflows:read) list 200/run detail 200, create/trigger/cancel all 403; a custom role with only
+  `dns:read` is 403 across the board (rbac `{"/api/workflows","workflows",""}` at the route layer);
+  audit records all three actions with resource=workflow; the web entry PermGuard
+  `workflows:write` (`Workflows/index.tsx:307,315,334`) + menu `workflows:read`
+  (`App.tsx:222`)
+- [x] One round of real-machine orchestration: run a two-step chain of "uptime → df -h" against a real agent and cross-check the ledger/audit/run snapshot (W2)
+  Evidence: the local instance (:20010) + agent `workflows-acc-a1` executing for real; run success, both step snapshots
+  contain output, the Job ledger has 2 entries with actor=workflow, the audit workflow_run resource_id=run id;
+  evidence files run-W2/final-W2/jobs-W2/audit-workflow.json (`.acceptance/workflows/evidence/`)
+- [x] Fan-out step: `targets` with multiple machines executes them in order → run success, each machine's snapshot has an independent jobId, the ledger has one entry per machine (W10, M2b)
+  Evidence: W10 two machines [a1,a2] `echo FAN-OK && uptime` → success on each, independent jobId rows,
+  the ledger has 2 entries; the web step editor has multi-select targets and the run timeline aggregates "N machines" with expandable per-machine detail (vitest 22 cases)
+- [x] Fan-out stops on failure: the first machine fails so the run is failed, the next machine stays pending with no Job (the F3 stop-advancement criterion, same as W5) (W10b)
+  Evidence: W10b [a1,a2] `exit 3` → [failed/failed, pending] per machine, step-level StopReason=failed,
+  the ledger has 1 entry (the second machine was never dispatched)
+- [x] A ghost mixed into fan-out: any offline target gives 503 and no run is created (F8 per-machine validation, extending W7) (W10c)
+  Evidence: W10c [a1,ghost] → 503 `agent offline for steps[0]`, the run ledger has 0 entries (no ghost run)
 
 
-## 移动端（Flutter，iOS + Android）
+## Mobile (Flutter, iOS + Android)
 
-设计：[mobile-design](./mobile-design.md)。前置：Android 真机（或模拟器）安装 debug APK（CI `Mobile` workflow artifact 或本地 `flutter build apk --debug`）；server 可达（公网或同网段）。iOS 编译验证已闭环到 CI macOS runner（`Mobile` workflow build-ios job，无签名 debug 构建，见 D8）；iOS 真机安装与上架签名仍需自有 Mac/账号，下述清单 iOS 侧暂以 Android 真机为准。
+Design: [mobile-design](/guide/mobile-design). Prerequisite: a real Android machine (or emulator) with the debug APK installed (CI `Mobile` workflow artifact or a local `flutter build apk --debug`); the server reachable (public or on the same subnet). iOS build verification is already closed out on the CI macOS runner (`Mobile` workflow build-ios job, unsigned debug build, see D8); iOS real-device install and store signing still need your own Mac/account, so the checklist below uses the Android real machine as the baseline for the iOS side.
 
-- [ ] 首启引导：输入 server 地址 → `/health` 通过 → 落盘进入登录页；错误地址的失败呈现可读
-- [ ] 登录：用户名密码 → 开启 TOTP 的账号进入验证码二步 → 成功后底部四 tab 可用
-- [ ] 仪表盘：主机在线/离线计数、未读/错误告警数与 web 面板一致
-- [ ] 主机列表：在线徽标、`ip · region · zone` 标签与后端一致；下拉刷新
-- [ ] 容器操作：docker 主机进容器列表，restart 真实生效（状态翻转）、失败 SnackBar 呈现、操作在 web 审计留痕
-- [ ] 告警：列表与 server 一致、未读加粗带点、「全部已读」后 web 侧同步已读
-- [ ] 审计：分页首屏加载、数据不足一屏自动预取、失败行红标
-- [ ] 会话恢复：杀进程重开直接进入主界面（本地 token）；调短 JWT expiration 后 token 过期自动续期无感；refresh 失效回登录页
-- [ ] 安全：未开自签开关时自签 server 连接被拒；开启后可用（红字风险提示存在）
-- [ ] 推送：server 配 ntfy 渠道，触发一条告警，ntfy 官方 app 手机送达（D3 路径）
-- [ ] 深色模式跟随系统切换正常
-- [ ] 资源页：域名/证书临期徽标（正常/临期/已过期）与 web 资源面板一致；证书剩余天数呈现
-- [ ] 备份：任务列表 last_status/下次运行时间与 web 一致；「立即运行」真实触发且 SnackBar 反馈
-- [ ] Cron：带 cron 能力的主机入口可见，任务列表（schedule/命令/启停）与 server crontab 一致；外部条目原文可读
-- [ ] 文件：目录导航进出流畅、点文件弹详情（路径/权限/大小）；自签 server 下文件列表可加载
-- [ ] 终端：主机动作单「SSH 终端」连接成功、键盘输入与回显即时、命令执行真实生效（如 touch 后文件页可见）、断线出现错误横幅与重连按钮
-- [ ] 生物识别锁：设置页开关仅在支持设备可开；开启后杀进程重开要求指纹/面容验证；验证失败停留蒙层可重试；关闭开关后重开直接进主页
+- [ ] First-launch onboarding: enter the server address → `/health` passes → persisted, entering the login page; the failure presentation for a wrong address is readable
+- [ ] Login: username and password → an account with TOTP enabled enters the code second step → on success the four bottom tabs are usable
+- [ ] Dashboard: host online/offline counts, unread/error alert counts consistent with the web panel
+- [ ] Host list: online badge, `ip · region · zone` tags consistent with the backend; pull-to-refresh
+- [ ] Container operations: a docker host enters the container list, restart really takes effect (the state flips), failures present a SnackBar, and the operation leaves a trace in the web audit
+- [ ] Alerts: the list is consistent with the server, unread entries bold with a dot, and after "Mark All Read" the web side is synced as read
+- [ ] Audit: paginated first-screen loading, auto-prefetch when the data does not fill a screen, failed rows marked red
+- [ ] Session restore: killing the process and reopening goes straight to the main screen (local token); after shortening the JWT expiration the token auto-renews seamlessly on expiry; a failed refresh returns to the login page
+- [ ] Security: with the self-signed toggle off a self-signed server connection is refused; with it on it works (the red-ink risk warning is present)
+- [ ] Push: the server configured with an ntfy channel, trigger one alert, and the official ntfy app receives it on the phone (the D3 path)
+- [ ] Dark mode follows the system switch correctly
+- [ ] Resources page: domain/certificate approaching-expiry badges (normal / approaching expiry / expired) consistent with the web resources panel; certificate remaining days presented
+- [ ] Backup: task list last_status / next run time consistent with the web; "Run Now" really triggers with SnackBar feedback
+- [ ] Cron: on a host with cron capability the entry is visible, and the task list (schedule/command/start-stop) is consistent with the server crontab; external entries readable verbatim
+- [ ] Files: directory navigation in and out is smooth, tapping a file pops up the detail (path/permissions/size); the file list loads under a self-signed server
+- [ ] Terminal: the single "SSH Terminal" action on a host connects successfully, keyboard input and echo are immediate, command execution really takes effect (e.g. the file is visible on the Files page after touch), and a dropped connection shows an error banner with a reconnect button
+- [ ] Biometric lock: the toggle on the settings page can only be turned on on supported devices; once on, killing the process and reopening demands fingerprint/face verification; a failed verification keeps the overlay up with a retry; turning the toggle off means reopening goes straight to the home page
 
-## 验收后回填约定
+## Post-Acceptance Backfill Convention
 
-- 每通过一项：勾选本清单 + 在 `todo.md` 对应条目的「剩余」中移除该项，要点补进完成记录
-- 验收发现的缺陷：按既有纪律单独立项修复（一笔一提交，不夹带）
-- 全域通过后在本文件顶部标注「已完成（日期）」并归档到 `docs/archive/`（如适用）
+- Every time an item passes: check it off in this list + remove it from the "Remaining" part of the matching `todo.md` entry, folding the key points into the completion record
+- Defects found during acceptance: file and fix them as separate items per existing discipline (one commit per fix, nothing bundled)
+- Once the whole domain passes, annotate "Completed (date)" at the top of this file and archive it to `docs/archive/` (where applicable)

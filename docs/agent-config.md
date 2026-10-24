@@ -1,21 +1,20 @@
-# Agent 配置参考
+# Agent Configuration Reference
 
-> 语言：**中文** ｜ [English](./agent-config.en.md)
 
-## 启动参数
+## Startup Flags
 
-| 参数 | 说明 | 默认值 |
+| Flag | Description | Default |
 |------|------|--------|
-| `-server` | Server WebSocket 地址（必需） | — |
-| `-id` | Agent ID（可选，自动从 machine-id 生成） | `agent-{hostname}-{machineId[:8]}` |
-| `-secret` | Agent 认证密钥 | — |
-| `-region` | 地域 | — |
-| `-zone` | 可用区 | — |
-| `-labels` | 标签，格式 `key1=v1,key2=v2` | — |
-| `-bias` | 同机器多 Agent 偏移量 | `0` |
-| `-ssh-keys` | SSH 私钥目录 | `~/.ssh/` |
+| `-server` | Server WebSocket address (required) | — |
+| `-id` | Agent ID (optional, auto-generated from machine-id) | `agent-{hostname}-{machineId[:8]}` |
+| `-secret` | Agent authentication secret | — |
+| `-region` | Region | — |
+| `-zone` | Availability zone | — |
+| `-labels` | Labels, format `key1=v1,key2=v2` | — |
+| `-bias` | Offset for multiple Agents on the same machine | `0` |
+| `-ssh-keys` | SSH private key directory | `~/.ssh/` |
 
-示例：
+Example:
 
 ```bash
 cockpit-agent start \
@@ -25,91 +24,91 @@ cockpit-agent start \
   -ssh-keys /home/user/.ssh
 ```
 
-## 环境变量
+## Environment Variables
 
-通过 `/etc/default/cockpit-agent`（systemd）或 Docker `-e` 设置。
+Set via `/etc/default/cockpit-agent` (systemd) or Docker `-e`.
 
-| 变量 | 说明 | 默认值 |
+| Variable | Description | Default |
 |------|------|--------|
-| `COCKPIT_SSH_KEYS` | SSH 私钥目录（覆盖 `-ssh-keys` 和自动检测） | 自动检测 |
-| `SERVER_URL` | Server 地址（systemd wrapper 用；必填，无代码默认） | — |
-| `REGION` / `ZONE` | 地域 / 可用区（systemd unit 透传用；二进制直读 `COCKPIT_REGION` / `COCKPIT_ZONE`） | — |
+| `COCKPIT_SSH_KEYS` | SSH private key directory (overrides `-ssh-keys` and auto-detection) | auto-detected |
+| `SERVER_URL` | Server address (used by the systemd wrapper; required, no code default) | — |
+| `REGION` / `ZONE` | Region / availability zone (passed through by the systemd unit; the binary reads `COCKPIT_REGION` / `COCKPIT_ZONE` directly) | — |
 | `AGENT_ID` | Agent ID | — |
-| `SECRET` | 认证密钥 | — |
-| `LABELS` | 标签 | — |
+| `SECRET` | Authentication secret | — |
+| `LABELS` | Labels | — |
 
-## SSH 密钥路径
+## SSH Key Paths
 
-Agent 建立远程 SSH 连接时，按以下顺序查找私钥：
+When the Agent establishes a remote SSH connection, it searches for private keys in this order:
 
 ```
-1. 前端显式传入的密钥（通过 Web 终端的认证表单）
-2. COCKPIT_SSH_KEYS 环境变量指定的目录
-3. SUDO_USER 的 ~/.ssh/（systemd/sudo 场景，如 /home/cui/.ssh/）
-4. 当前用户的 ~/.ssh/（兜底，如 /root/.ssh/）
+1. Key passed explicitly from the front end (via the Web terminal authentication form)
+2. Directory given by the COCKPIT_SSH_KEYS environment variable
+3. SUDO_USER's ~/.ssh/ (systemd/sudo case, e.g. /home/cui/.ssh/)
+4. Current user's ~/.ssh/ (fallback, e.g. /root/.ssh/)
 ```
 
-在每个目录中，按优先级扫描：
+Within each directory, scan in priority order:
 
-| 文件 | 算法 |
+| File | Algorithm |
 |------|------|
-| `id_ed25519` | Ed25519（推荐） |
+| `id_ed25519` | Ed25519 (recommended) |
 | `id_rsa` | RSA |
 | `id_ecdsa` | ECDSA |
-| `id_dsa` | DSA（不推荐） |
+| `id_dsa` | DSA (not recommended) |
 
-### systemd 部署
+### systemd deployment
 
-Agent 以 `cockpit` 系统用户运行（`ProtectHome=true`，`/home/*` 不可达），用户密钥经 `COCKPIT_SSH_KEYS` 指定目录：
+The Agent runs as the `cockpit` system user (`ProtectHome=true`, `/home/*` unreachable); user keys are supplied via the directory given in `COCKPIT_SSH_KEYS`:
 
 ```bash
-# 在 /etc/default/cockpit-agent 中指定
+# Specify it in /etc/default/cockpit-agent
 COCKPIT_SSH_KEYS=/home/cui/.ssh
 ```
 
-### Docker 部署
+### Docker deployment
 
 ```bash
-# 方式 1：挂载宿主机密钥（只读）
+# Option 1: mount host keys (read-only)
 docker run -v /home/user/.ssh:/root/.ssh:ro cockpit-agent
 
-# 方式 2：指定自定义路径
+# Option 2: specify a custom path
 docker run \
   -e COCKPIT_SSH_KEYS=/app/keys \
   -v /path/to/keys:/app/keys:ro \
   cockpit-agent
 
-# 方式 3：不指定，默认读容器内 /root/.ssh/
+# Option 3: do not specify; reads /root/.ssh/ inside the container by default
 docker run cockpit-agent
 ```
 
-### 生成密钥
+### Generating keys
 
 ```bash
-# 生成 Ed25519 密钥（推荐）
+# Generate an Ed25519 key (recommended)
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "cockpit-agent@$(hostname)"
 
-# 将公钥添加到目标机器
+# Add the public key to the target machine
 ssh-copy-id -i ~/.ssh/id_ed25519.pub user@target-host
 ```
 
-## systemd 服务管理
+## systemd Service Management
 
 ```bash
-# 查看状态
+# Check status
 sudo systemctl status cockpit-agent
 
-# 查看日志
+# View logs
 sudo journalctl -u cockpit-agent -f
 
-# 重启
+# Restart
 sudo systemctl restart cockpit-agent
 
-# 配置文件
+# Configuration file
 sudo vim /etc/default/cockpit-agent
 ```
 
-配置文件 `/etc/default/cockpit-agent` 格式：
+Configuration file `/etc/default/cockpit-agent` format:
 
 ```bash
 SERVER_URL=wss://cockpit.cuihairu.site/ws

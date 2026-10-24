@@ -1,81 +1,69 @@
 ---
-title: 虚拟化平台能力——hypervisor provider 层（PVE/vSphere/本机 QEMU-KVM 统一虚机生命周期）
+title: Hypervisor platform capabilities — hypervisor provider layer (unified VM lifecycle across PVE/vSphere/local QEMU-KVM)
 ---
 
-# 虚拟化平台能力设计
+# Hypervisor Platform Capability Design
 
-> 语言：**中文** ｜ [English](./hypervisor-capabilities.en.md)
 
-## 状态
+## Status
 
-- 状态: **Active（用户令 2026-10-10 设计补单2：与 BMC 层同构进插件机制）**。
-- 定位：hypervisor provider 层——把 PVE / vSphere / 本机 QEMU-KVM 统一成**同一组虚机生命周期
-  接口**，与 [BMC 带外管理](bmc-capabilities.md) 共用同一套 provider 机制（capability 探测 +
-  RPC 转发 + 凭据下发 + 审计红线），差异只在平台客户端适配。
-- 与 BMC 层的关系：**带内 vs 带外互补**——BMC 管硬件/电源（主机关机也能管），本层管虚机生命周期
-  （平台在线时）；面板上分区呈现，语义不重叠（同服务检测 agent 的「服务是否可达」也不重叠）。
-- 本批零代码，实施批次见 §5。
+- Status: **Active (user directive 2026-10-10 design follow-up 2: isomorphic with the BMC layer, entering the plugin mechanism)**.
+- Positioning: hypervisor provider layer — unifying PVE / vSphere / local QEMU-KVM into **one set of VM lifecycle interfaces**, sharing the same provider mechanism as [BMC out-of-band management](/design/bmc-capabilities) (capability probing + RPC forwarding + credential delivery + audit red lines), with differences only in platform client adaptation.
+- Relationship with the BMC layer: **in-band vs out-of-band complementarity** — BMC manages hardware/power (controllable even with the host powered off); this layer manages VM lifecycle (when the platform is online); the panel presents them in separate sections, with no overlapping semantics (likewise non-overlapping with the service-detect agent's "is the service reachable").
+- Zero code in this batch; implementation batches in §5.
 
-## 1. 平台与选型（调研定案 2026-10-10：直接引用成熟库，不自研）
+## 1. Platforms and selection (research settled 2026-10-10: reference mature libraries directly, no in-house development)
 
-| 平台 | 选型 | 说明 |
+| Platform | Selection | Notes |
 | --- | --- | --- |
-| PVE | **`github.com/bpg/proxmox-api`**（MPL-2.0，活跃） | bpg/terraform-provider-proxmox 2.3k★ 家族抽的独立客户端，REST+SSH；备选 Telmate/proxmox-api-go（老牌，wiki 官列） |
-| vSphere | **`github.com/vmware/govmomi`**（Apache-2，~2.6k★ 官方级） | 带 govc CLI + **vcsim 模拟器——CI 用 vcsim 免真机** |
-| 本机 QEMU/KVM | **预留 libvirt Go bindings 位** | 不选型定案，只留位（agent 与 hypervisor 同机时 in-band 直连） |
+| PVE | **`github.com/bpg/proxmox-api`** (MPL-2.0, active) | A standalone client extracted from the bpg/terraform-provider-proxmox 2.3k★ family; REST+SSH; alternative Telmate/proxmox-api-go (veteran, listed officially in the wiki) |
+| vSphere | **`github.com/vmware/govmomi`** (Apache-2, ~2.6k★ official-grade) | Ships the govc CLI + **vcsim simulator — CI uses vcsim, no real machine needed** |
+| Local QEMU/KVM | **Reserved slot for libvirt Go bindings** | No selection settled; only a slot is reserved (in-band direct connection when the agent and hypervisor share the host) |
 
-## 2. 统一虚机生命周期接口（平台无关）
+## 2. Unified VM lifecycle interface (platform-agnostic)
 
-| 能力 | 接口键 | 破坏性 |
+| Capability | Interface key | Destructive |
 | --- | --- | --- |
-| 列表 | `vm.list` | 否 |
-| 详情 | `vm.get` | 否 |
-| 创建 | `vm.create` | 否（占资源，审计） |
-| 启停 | `vm.start` / `vm.stop` / `vm.reboot` | stop/reboot 破坏性（审计） |
-| 克隆 | `vm.clone` | 破坏性（审计） |
-| 删除 | `vm.delete` | **高危（双确认+审计）** |
-| 控制台入口 | `vm.console` | 否（链接/代理面，本批留位） |
-| 资源用量 | `vm.metrics` | 否（接现有 metrics 面） |
-| 平台/节点 | `node.list` / `platform.info` | 否 |
+| List | `vm.list` | No |
+| Detail | `vm.get` | No |
+| Create | `vm.create` | No (consumes resources; audited) |
+| Start/stop | `vm.start` / `vm.stop` / `vm.reboot` | stop/reboot are destructive (audited) |
+| Clone | `vm.clone` | Destructive (audited) |
+| Delete | `vm.delete` | **High risk (double confirmation + audit)** |
+| Console entry | `vm.console` | No (link/proxy surface; slot reserved in this batch) |
+| Resource usage | `vm.metrics` | No (connects to the existing metrics surface) |
+| Platform/node | `node.list` / `platform.info` | No |
 
-## 3. 落位（与 BMC 同构的 provider 机制）
+## 3. Placement (provider mechanism isomorphic with BMC)
 
-- **agent 侧 provider**（同 nginx/traefik/stacks/BMC 先例）：capability `virt-pve`/`virt-vsphere`/
-  `virt-libvirt` 进注册 metadata；server RPC 方法 `virt.*` 转发，REST `/api/agents/{id}/virt/*`
-  纯转发不落库（agent 侧为事实源，同 proxy 先例）。
-- 平台客户端封在 core（如 `core/virt`，纯客户端零业务）；provider 编排进 `internal/agent`
-  （插件位）；三平台同一 provider 接口，平台差异在客户端适配层。
-- 凭据：PVE 推荐 **API token**（PVEVMUser 角色最小权限，优于口令）；vSphere service account；
-  经加密 WS 下发即用即弃（同 BMC §5 红线）。
-- CI 策略：vSphere=vcsim 免真机；PVE=接口桩（bpg/proxmox-api 无模拟器）；真机验收另批。
+- **agent-side provider** (following the nginx/traefik/stacks/BMC precedent): capabilities `virt-pve`/`virt-vsphere`/`virt-libvirt` enter the registration metadata; server RPC methods `virt.*` are forwarded, and REST `/api/agents/{id}/virt/*` is pure forwarding with no persistence (the agent side is the source of truth, same as the proxy precedent).
+- Platform clients are encapsulated in core (e.g. `core/virt`, pure clients with zero business logic); provider orchestration goes into `internal/agent` (plugin slot); the three platforms share one provider interface, with platform differences in the client adaptation layer.
+- Credentials: PVE recommends **API tokens** (the PVEVMUser role with least privilege is better than a password); vSphere uses a service account; delivered over the encrypted WS for use-then-discard (same as the BMC §5 red line).
+- CI strategy: vSphere via vcsim with no real machine; PVE via an interface stub (bpg/proxmox-api has no simulator); real-machine acceptance in a separate batch.
 
-## 4. 安全红线（与 BMC 同款）
+## 4. Security red lines (same as BMC)
 
-1. **凭据不落明文**：存 server 凭据库（remote credential vault 同款 AES-GCM 模型，扩 `virt` 类型）；
-   每次操作经加密 WS 下发，不落 agent 盘、不进日志/审计明文。
-2. **TLS 默认校验**：证书校验默认开；PVE 自签常见，per-target 显式 `skip_verify` 仅限内网自签
-   （web 红字警示）。
-3. **破坏性操作双确认+审计**：`vm.delete`/`vm.stop`(强制)/`vm.clone`——web 二次确认（输入目标名
-   confirm，同 stack 删除先例）+ 审计事件 `virt.vm.{delete,stop,clone,create}`（记 agent/平台/目标/
-   动作/操作者，不含凭据）+ execlog 留痕（依赖 P5 execlog 挂起项——MVP 先落既有审计面）。
-4. **最小权限分权**：PVE API token 用 PVEVMUser 角色；vSphere 只读角色与虚机管理角色分开。
+1. **Credentials never in plaintext**: stored in the server credential vault (same AES-GCM model as the remote credential vault, with a `virt` type added); delivered over the encrypted WS for each operation, never written to the agent's disk and never in plaintext in logs/audit.
+2. **TLS verified by default**: certificate validation is on by default; PVE self-signed certificates are common, so a per-target explicit `skip_verify` is limited to intranet self-signed cases (red-text warning in web).
+3. **Destructive operations: double confirmation + audit**: `vm.delete`/`vm.stop` (forced)/`vm.clone` — second web confirmation (type the target name to confirm, same as the stack deletion precedent) + audit events `virt.vm.{delete,stop,clone,create}` (recording agent/platform/target/action/operator, no credentials) + execlog trail (depends on the P5 execlog pending item — MVP falls back on the existing audit surface first).
+4. **Least-privilege separation of duties**: PVE API tokens use the PVEVMUser role; vSphere separates read-only roles from VM-management roles.
 
-## 5. 批次计划（小步：实现+测试绿+英文 commit）
+## 5. Batch plan (small steps: implementation + tests green + English commits)
 
-| 批 | 内容 | 门禁 |
+| Batch | Content | Gate |
 | --- | --- | --- |
-| H-B1 | 本简档 | docs |
-| H-B2 | PVE provider（list/get/start-stop + 接口桩测试） | Go 门禁 |
-| H-B3 | vSphere provider（vcsim CI 全链） | Go 门禁 |
-| H-B4 | 创建/克隆/删除 + 双确认 + 审计 + 凭据库下发 | Go 门禁 + web 二次确认 |
-| H-B5 | vm.metrics 接现有资源面板 | web 全量门禁 TZ=UTC |
-| H-B6 | vm.console 控制台入口 | Go 门禁 + 手工验收 |
-| H-B7 | libvirt 预留位接线 | Go 门禁 |
+| H-B1 | This brief | docs |
+| H-B2 | PVE provider (list/get/start-stop + interface-stub tests) | Go gate |
+| H-B3 | vSphere provider (full chain in CI via vcsim) | Go gate |
+| H-B4 | Create/clone/delete + double confirmation + audit + credential-vault delivery | Go gate + web second confirmation |
+| H-B5 | vm.metrics connected to the existing resource panel | Full web gate TZ=UTC |
+| H-B6 | vm.console console entry | Go gate + manual acceptance |
+| H-B7 | libvirt reserved slot wired in | Go gate |
 
-## 6. 边界（诚实清单）
+## 6. Boundaries (honest list)
 
-- 不做存储/网络编排（PVE SDN、vSphere DVS）——虚机生命周期为界。
-- 快照管理、迁移（HA/DRS）留位；固件/硬件面归 BMC 层。
-- KVM 直连形态仅 libvirt 位预留，不选型不定案。
-- 与 stack-deploy（docker compose 容器栈）不重叠：那管容器，本层管虚机。
-- 真机验收（PVE 集群/vCenter）另批；CI 以 vcsim + 接口桩为准。
+- No storage/network orchestration (PVE SDN, vSphere DVS) — bounded at VM lifecycle.
+- Snapshot management and migration (HA/DRS) slots reserved; firmware/hardware surface belongs to the BMC layer.
+- KVM direct-connection form only reserves a libvirt slot; no selection, nothing settled.
+- No overlap with stack-deploy (docker compose container stacks): that manages containers, this layer manages VMs.
+- Real-machine acceptance (PVE cluster/vCenter) in a separate batch; CI is based on vcsim + interface stubs.

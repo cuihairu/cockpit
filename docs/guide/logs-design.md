@@ -1,232 +1,242 @@
-# P2 方案设计：日志查看（远程 journalctl / docker logs 查询器）
+# P2 Design: Log Viewing (Remote journalctl / docker logs Query)
 
-> 语言：**中文** ｜ [English](./logs-design.en.md)
 
-> 2026-09-15。P2「日志聚合查看」首期设计。todo.md 原文：「Agent 推送容器/系统
-> 日志，WebUI 统一检索（可接 Loki/轻量自行开发）」。本文只做设计决策与接口定义。
+> 2026-09-15. First-phase design for P2 "Log Aggregation and Viewing". Original text in todo.md: "Agent pushes container/system
+> logs, WebUI unified search (can integrate Loki or lightweight in-house development)". This document covers design decisions and interface definitions only.
 
-## 现状与痛点
+## Current State and Pain Points
 
-| 痛点 | 现状 | 后果 |
+| Pain point | Current state | Consequence |
 |------|------|------|
-| 「服务为什么挂了」要 SSH 逐台查 | journalctl / docker logs 是命令输出，不是文件，文件管理器覆盖不了 | 排障路径长，多机场景逐台登录 |
-| systemd 服务日志无入口 | Workbench 只有终端/桌面/文件 | 不知道服务何时开始异常、报了什么 |
-| 容器 stdout 日志无入口 | Docker 页面只有容器列表与生命周期操作 | 容器崩溃只能进终端 docker logs |
-| cron 执行失败无处可查 | cron-design.md D10 明确执行历史属日志范畴 | 定时任务静默失败（journal 里有 cron.log） |
+| "Why did the service die" requires SSH-ing machine by machine | journalctl / docker logs are command output, not files; the file manager can't cover them | Long troubleshooting path; in multi-machine scenarios you log into each host one by one |
+| No entry point for systemd service logs | Workbench only has terminal/desktop/files | You don't know when a service started misbehaving or what it reported |
+| No entry point for container stdout logs | The Docker page only has the container list and lifecycle operations | On container crash you must enter a terminal and run docker logs |
+| cron execution failures are unfindable | cron-design.md D10 explicitly places execution history in the logs domain | Scheduled tasks fail silently (journal has cron.log) |
 
-## 架构总览
+## Architecture Overview
 
-与反向代理/定时任务同一通道模型：**同步 RPC + server 纯转发 + 不落库**。
-M1 是查询式查看器（pull 型）：每次查询由 agent 实时执行 journalctl / docker logs，
-无采集、无存储、无推送——聚合采集管道（Loki 式）留 M2。
+Same channel model as reverse proxy/scheduled tasks: **synchronous RPC + server pure forwarding + no database**.
+M1 is a query-style viewer (pull type): each query runs journalctl / docker logs live on the agent,
+no collection, no storage, no push — the aggregation collection pipeline (Loki-style) is deferred to M2.
 
 ```
-┌─ server ────────────────────┐        ┌─ agent（日志所在主机）────────────┐
-│ REST /api/agents/{id}/logs  │ ─RPC─▶ │ logs provider（新）                │
-│ 纯转发，不落库              │ ◀─RPC─ │ journalctl / docker logs 实时查询  │
-│ 浏览类操作不记审计          │        │ 白名单校验 + 字节上限 + 超时       │
-└─────────────────────────────┘        └───────────────────────────────────┘
+┌─ server ───────────────────────────┐        ┌─ agent (host where logs live) ────────────┐
+│ REST /api/agents/{id}/logs         │ ─RPC─▶ │ logs provider (new)                       │
+│ pure forwarding, no database       │ ◀─RPC─ │ journalctl / docker logs live query       │
+│ browse-type operations not audited │        │ whitelist validation + byte cap + timeout │
+└────────────────────────────────────┘        └───────────────────────────────────────────┘
 ```
 
-## 关键决策
+## Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D1 | M1 边界 | 查询式查看器（pull）：agent 不采集不存储，查询时实时执行命令 | 个人场景日志查询频率低，实时执行毫秒级返回即可闭环；采集管道 + 跨机检索是独立量级，M2 立项 |
-| D2 | 日志源范围 | systemd 服务（journalctl）+ docker 容器（docker logs）两类；文件日志走既有文件管理器不重复 | 覆盖系统级与容器级两大入口；journal 顺带覆盖 cron/ssh 等系统日志 |
-| D3 | capability | `logs`：journalctl 或 docker 至少一个可用（LookPath）才注册；status 返回两者可用性 | 与 cron D7 同款纪律，不出现假能力；单源主机照样可用 |
-| D4 | 查询参数 | `{type, source, tail, since_minutes, grep}`：tail 默认 200 上限 2000 行；since_minutes 最近 N 分钟（0=不限）；grep 关键词 agent 侧内存过滤 | tail+since+grep 覆盖九成排障查询；grep 用统一内存 contains 过滤而非 journalctl -g（PCRE 语义）/docker logs 无内建——**双端行为一致且可测** |
-| D5 | 安全边界 | source 名白名单正则 `^[a-zA-Z0-9][a-zA-Z0-9_.@+-]{0,127}$`；输出上限 1MB（超限截断 + truncated 标记）；命令超时 30s；argv 直传不经 shell | 纵深防御：即便正则放行也不会注入（不经 shell）；1MB/2000 行防大日志拖垮 WS；读日志与终端权限同级，沿用既有 agent 权限模型，不另设 RBAC |
-| D6 | 输出形态 | 整段文本（string，short-iso/`--timestamps` 统一带时间戳）+ truncated 标志 | 行数组 JSON 体积大、前端反而要 join；整段文本 pre 渲染 + 前端 grep 高亮即可 |
-| D7 | RPC 方法 | `logs.status` / `logs.sources` / `logs.query` 三方法 | 最小闭环：可用性、源枚举、查询 |
-| D8 | REST 挂载 | `/api/agents/{id}/logs/*`，复用 serveAPI `/agents/` 分发模式 | 按 agent 作用域；纯转发不落库（与 cron D9 同理） |
-| D9 | 审计 | 查询类操作不记审计（浏览性质，与文件浏览同纪律） | M1 无变更类操作；若未来加「日志下载/导出」再补 |
-| D10 | 源枚举实现 | systemd：`systemctl list-units --type=service --no-legend --plain` 取 unit 名；docker：<span v-pre>`docker ps --format '{{.Names}}'`</span>（行内代码无 v-pre，Go template 花括号须手动包裹防 Vue 插值解析） | 只列**运行中**对象（查询的是活日志）；`--all` 扩展按需后补 |
+| D1 | M1 boundary | Query-style viewer (pull): the agent neither collects nor stores; queries execute commands live | In the personal scenario log queries are infrequent; live execution returning in milliseconds closes the loop; a collection pipeline + cross-machine search is a different order of magnitude, M2 project |
+| D2 | Log source scope | Two classes: systemd services (journalctl) + docker containers (docker logs); file logs go through the existing file manager, no duplication | Covers the two major entry points, system-level and container-level; journal incidentally covers system logs such as cron/ssh |
+| D3 | capability | `logs`: registered only if at least one of journalctl or docker is available (LookPath); status returns the availability of both | Same discipline as cron D7, no false capability; single-source hosts still work |
+| D4 | Query parameters | `{type, source, tail, since_minutes, grep}`: tail defaults to 200, capped at 2000 lines; since_minutes = last N minutes (0=unlimited); grep keyword filtered in memory on the agent side | tail+since+grep covers ninety percent of troubleshooting queries; grep uses uniform in-memory contains filtering instead of journalctl -g (PCRE semantics) / docker logs which has none built in — **consistent and testable behavior on both ends** |
+| D5 | Security boundary | source name whitelist regex `^[a-zA-Z0-9][a-zA-Z0-9_.@+-]{0,127}$`; output cap 1MB (truncated on overflow + truncated flag); command timeout 30s; argv passed directly, not through a shell | Defense in depth: even if the regex lets something through, injection is impossible (no shell); 1MB/2000 lines prevent a huge log from dragging down the WS; reading logs is at the same permission level as the terminal, reusing the existing agent permission model, no separate RBAC |
+| D6 | Output shape | Whole-block text (string, short-iso/`--timestamps` uniformly timestamped) + truncated flag | A JSON array of lines is bulky and the frontend would just join it anyway; whole-block text rendered in pre + frontend grep highlighting suffices |
+| D7 | RPC methods | Three methods: `logs.status` / `logs.sources` / `logs.query` | Minimal closed loop: availability, source enumeration, query |
+| D8 | REST mounting | `/api/agents/{id}/logs/*`, reusing the serveAPI `/agents/` dispatch pattern | Scoped per agent; pure forwarding, no database (same reasoning as cron D9) |
+| D9 | Audit | Query operations are not audited (browsing in nature, same discipline as file browsing) | M1 has no mutating operations; if "log download/export" is added later, revisit |
+| D10 | Source enumeration implementation | systemd: `systemctl list-units --type=service --no-legend --plain` for unit names; docker: <span v-pre>`docker ps --format '{{.Names}}'`</span> (inline code has no v-pre; Go template curly braces must be wrapped manually to prevent Vue interpolation parsing) | Only lists **running** objects (we query live logs); `--all` extension added later as needed |
 
-## Agent 侧设计
+## Agent-Side Design
 
-### 探测与注册
+### Detection and Registration
 
-- `DetectLogs() (journalctl, docker bool)`：`exec.LookPath` 双探测；
-  两者皆缺 → 不追加 `logs` capability、不注册 provider；
-- provider 复用 nginx/cron 的 `Commander` 抽象，测试可注入。
+- `DetectLogs() (journalctl, docker bool)`: dual detection via `exec.LookPath`;
+  if both are missing → do not append the `logs` capability, do not register the provider;
+- The provider reuses the nginx/cron `Commander` abstraction, injectable in tests.
 
-### RPC 方法
+### RPC Methods
 
-| 方法 | 参数 | 返回 | 说明 |
+| Method | Parameters | Returns | Description |
 |------|------|------|------|
-| `logs.status` | `{}` | `{journalctl, docker}` | 两类源可用性 |
-| `logs.sources` | `{}` | `{systemd: [unit...], docker: [name...]}` | 运行中对象枚举（任一类不可用返回空数组） |
-| `logs.query` | `{query}` | `{lines, truncated}` | 见下 |
+| `logs.status` | `{}` | `{journalctl, docker}` | Availability of the two source classes |
+| `logs.sources` | `{}` | `{systemd: [unit...], docker: [name...]}` | Enumeration of running objects (unavailable classes return empty arrays) |
+| `logs.query` | `{query}` | `{lines, truncated}` | See below |
 
-### query 参数与校验（server 双端同规则）
+### query Parameters and Validation (same rules on the server, both ends)
 
-| 字段 | 规则 |
+| Field | Rule |
 |------|------|
 | `type` | `systemd` / `docker` |
-| `source` | 白名单正则（D5），systemd 侧允许 `.service` 等后缀 |
-| `tail` | 1-2000，默认 200 |
-| `since_minutes` | 0-1440（0 = 不限，默认 0） |
-| `grep` | 可选，≤256 字符，不含换行（逐行 contains） |
+| `source` | Whitelist regex (D5); the systemd side allows suffixes like `.service` |
+| `tail` | 1-2000, default 200 |
+| `since_minutes` | 0-1440 (0 = unlimited, default 0) |
+| `grep` | Optional, ≤256 characters, no newlines (line-by-line contains) |
 
-### 命令构造
+### Command Construction
 
 ```
 systemd：journalctl -u {source} -n {tail} --no-pager -q -o short-iso [--since=-{N}min]
 docker ：docker logs --tail {tail} --timestamps [{--since Nm}] {name}
 ```
 
-- 输出处理：读 stdout → 按 grep 过滤 → 超 1MB 截断到最后一行边界 → `truncated=true`；
-- grep 过滤后为空属正常结果（`lines: ""`），非错误。
+- Output processing: read stdout → filter by grep → truncate past 1MB to the last line boundary → `truncated=true`;
+- An empty result after grep filtering is a normal outcome (`lines: ""`), not an error.
 
-## Server 侧设计
+## Server-Side Design
 
-### REST API（server/api_logs.go，挂 serveAPI `/agents/` 分支，JWT）
+### REST API (server/api_logs.go, mounted on the serveAPI `/agents/` branch, JWT)
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |------|------|------|
-| GET  | `/api/agents/{id}/logs/status`  | 转发 logs.status |
-| GET  | `/api/agents/{id}/logs/sources` | 转发 logs.sources |
-| POST | `/api/agents/{id}/logs/query`   | body 为查询参数 → 双端校验 → 转发 logs.query |
+| GET  | `/api/agents/{id}/logs/status`  | Forward logs.status |
+| GET  | `/api/agents/{id}/logs/sources` | Forward logs.sources |
+| POST | `/api/agents/{id}/logs/query`   | body is query parameters → validated on both ends → forward logs.query |
 
-- 参数校验双端同规则（D5）；agent 错误原样透传（502）；离线 503。
+- Parameter validation uses the same rules on both ends (D5); agent errors pass through as-is (502); offline → 503.
 
-## Web UI 设计
+## Web UI Design
 
-- Workbench 新增「日志」Tab（无连接语义，与「文件」同款内嵌面板）：
-  - **源选择**：类型 Segmented（systemd 服务 / docker 容器）→ 具体源 Select
-    （来自 sources，随类型联动）；无可用源时给出 capability 提示；
-  - **过滤栏**：最近时长 Select（不限/5 分钟/1 小时/24 小时）、行数 InputNumber
-    （≤2000）、关键词输入（回车即查）、查询按钮 + 刷新按钮；
-  - **日志视图**：等宽 pre、深色底、自动滚动到底部；grep 命中高亮；
-    ERROR/FATAL 行红、WARN 行橙（前端正则着色，不改 agent 输出）；
-  - **状态行**：返回行数 / 截断提示（`已截断，仅显示最后 N KB`）/ 查询耗时。
+- Workbench gains a "Logs" Tab (no connection semantics, an embedded panel like "Files"):
+  - **Source selection**: type Segmented (systemd services / docker containers) → specific source Select
+    (from sources, linked to the type); a capability hint is shown when no sources are available;
+  - **Filter bar**: recent-duration Select (unlimited/5 minutes/1 hour/24 hours), line-count InputNumber
+    (≤2000), keyword input (Enter to query), query button + refresh button;
+  - **Log view**: monospace pre, dark background, auto-scroll to bottom; grep hits highlighted;
+    ERROR/FATAL lines red, WARN lines orange (frontend regex coloring, agent output untouched);
+  - **Status line**: returned line count / truncation notice (`Truncated, showing only the last N KB`) / query duration.
 
-## M2：实时尾随（2026-09-18）
+## M2: Live Tail (2026-09-18)
 
-tail -f 式流式查看：agent 侧跟随进程持续推 chunk，server 经 HTTP 流式响应转发浏览器，断开即停。数据面复用 ProxyData 通道（与 terminal 同构），控制面走常规 RPC——**协议零新增**。
+tail -f style streaming view: the agent-side follower process continuously pushes chunks, the server forwards them to the browser via an HTTP streaming response, stopping on disconnect. The data plane reuses the ProxyData channel (structurally identical to terminal), the control plane goes over regular RPC — **zero new protocol**.
 
-| D | 决策 | 理由 |
+| D | Decision | Rationale |
 |---|------|------|
-| F1 | 通道拆分 | **控制面** RPC：`logs.follow.start`（`{followId, type, source, tail, grep}`，返回成功即开始）/ `logs.follow.stop`（`{followId}`）；**数据面** 复用 `proxy_data`/`proxy_close` 消息，`proxyId = "logs:<followId>"`——与 terminal 前缀模式同构，协议不加新类型 | RPC 校验/错误/测试走既有惯例；数据单向高频，ProxyData 已是二进制高效路径 |
-| F2 | agent 跟随进程 | systemd：`journalctl -f -n $TAIL -o short-iso -u $UNIT`；docker：`docker logs -f --tail $TAIL --timestamps $NAME`；bufio 按行扫描（行上限 1MB 同 query），grep 内存 contains 同款过滤 | 命令拼装复用 query 同款参数语义，行为一致；argv 直传不经 shell |
-| F3 | agent 会话上限 | 单会话累计输出 4MB 即停（发 close reason=limit）；会话超时 10 分钟自动停；follows map 上限 16 个；followId 重复 start 覆盖旧会话（先杀旧进程） | 防打爆 WS 与浏览器内存；上限内个人场景富余 |
-| F4 | server 流式端点 | `POST /api/agents/{id}/logs/follow`（body 同 query 参数），响应 NDJSON 流：`{"data":"..."}` 数据帧 / `{"eof":true,"reason":"..."}` 终止帧；认证走既有 JWT 中间件（fetch POST 可带头，不用 EventSource） | fetch streaming（ReadableStream）现代浏览器全支持；abort() 即断开，客户端关闭 → server 检测 ctx.Done → 发 follow.stop |
-| F5 | server 生命周期 | `logsFollowers` 注册表（followId → chan + agentID）；ProxyData `logs:` 前缀分派写入；ProxyClose 同前缀 → 流发 eof 帧收尾；全局 follow 上限 8 / 每 agent 上限 2；CallAgent 失败即 4xx/5xx 不占表 | 与 terminalSessions 同款注册表模式；上限防滥用 |
-| F6 | 语义细节 | start 后 agent 先推回填 tail 行再持续跟随（journalctl -f 自带、docker logs -f --tail 自带）；docker 容器停止 → 进程退出 → ProxyClose reason=exited；server 校验与 query 完全同规则（source 白名单/tail 上限/grep 无换行） | tail -f 心智：回填 + 跟随一体 |
-| F7 | web | LogsPanel「实时尾随」开关：开启清空当前视图 → fetch POST 流式读（AbortController），逐行追加渲染（复用 GrepLine 着色与 grep 高亮）；尾随中锁定源/参数输入；关闭/切源/组件卸载 abort | 单向流 + abort 足够，不引入 WS 复杂度 |
-| F8 | 审计 | 尾随不记审计（同查询浏览纪律，D9） | 无变更操作 |
+| F1 | Channel split | **Control plane** RPC: `logs.follow.start` (`{followId, type, source, tail, grep}`, success return means started) / `logs.follow.stop` (`{followId}`); **data plane** reuses `proxy_data`/`proxy_close` messages, `proxyId = "logs:<followId>"` — structurally identical to the terminal prefix pattern, no new protocol types | RPC validation/errors/testing follow existing conventions; data is one-way and high-frequency, ProxyData is already the efficient binary path |
+| F2 | agent follower process | systemd: `journalctl -f -n $TAIL -o short-iso -u $UNIT`; docker: `docker logs -f --tail $TAIL --timestamps $NAME`; bufio line-by-line scanning (line cap 1MB same as query), grep in-memory contains filtering of the same kind | Command assembly reuses the same parameter semantics as query, consistent behavior; argv passed directly, not through a shell |
+| F3 | agent session limits | A single session stops at 4MB cumulative output (sends close reason=limit); sessions auto-stop after a 10-minute timeout; the follows map caps at 16; a duplicate followId start overwrites the old session (killing the old process first) | Prevents blowing up the WS and browser memory; the limits leave ample headroom for the personal scenario |
+| F4 | server streaming endpoint | `POST /api/agents/{id}/logs/follow` (body same as query parameters), response is an NDJSON stream: `{"data":"..."}` data frames / `{"eof":true,"reason":"..."}` termination frame; authentication via the existing JWT middleware (fetch POST can carry headers, no EventSource needed) | fetch streaming (ReadableStream) is supported by all modern browsers; abort() disconnects; client closing → server detects ctx.Done → sends follow.stop |
+| F5 | server lifecycle | `logsFollowers` registry (followId → chan + agentID); ProxyData `logs:` prefix dispatch writes; ProxyClose same prefix → stream sends an eof frame to finish; global follow cap 8 / per-agent cap 2; a failed CallAgent yields 4xx/5xx and takes no table slot | Same registry pattern as terminalSessions; caps prevent abuse |
+| F6 | Semantic details | After start, the agent first pushes backfilled tail lines then keeps following (journalctl -f has this built in, docker logs -f --tail too); docker container stopping → process exits → ProxyClose reason=exited; server validation uses exactly the same rules as query (source whitelist/tail cap/grep no newlines) | tail -f mental model: backfill + follow as one |
+| F7 | web | LogsPanel "Live tail" toggle: turning it on clears the current view → fetch POST streaming read (AbortController), rendering line by line (reusing GrepLine coloring and grep highlighting); while tailing, source/parameter inputs are locked; close/switch source/component unmount aborts | One-way stream + abort suffices, no WS complexity introduced |
+| F8 | Audit | Tailing is not audited (same browsing discipline as queries, D9) | No mutating operations |
 
-**测试**：agent follow 会话（mock Commander 输出逐行推、grep 过滤、4MB 上限停、stop 杀进程、followId 覆盖）；server 端点（校验 400、上限 429、NDJSON 帧序列、客户端断开触发 stop RPC、ProxyClose 收尾）；web build。
+**Tests**: agent follow sessions (mock Commander output pushed line by line, grep filtering, 4MB cap stop, stop kills the process, followId overwrite); server endpoint (validation 400, cap 429, NDJSON frame sequence, client disconnect triggers stop RPC, ProxyClose finalization); web build.
 
-## M3：跨机联邦检索（设计，2026-09-19）
+## M3: Cross-Machine Federated Search (designed 2026-09-19)
 
-todo 原文「推送式采集与跨机检索、结构化解析」。设计期先回答路线问题——「跨机检索」
-不必依赖「推送式采集先行」：
+The todo's original text: "push-based collection with cross-machine search, structured parsing". The design phase first answers the routing question — "cross-machine search"
+does not have to depend on "push-based collection first":
 
-| 路线 | 形态 | 量级 | 结论 |
+| Route | Shape | Magnitude | Conclusion |
 |------|------|------|------|
-| (a) 联邦扇出检索 | server 并行向在线 agent 转发**既有** `logs.query`，按主机分组返回 | 小：1 个 server 端点 + 1 个 web 页，agent 零改动、零存储 | 选为 M3 本体 |
-| (b) 推送式采集 + 服务端索引 | agent 常驻 tail → 推送 → server SQLite 落库 → 全文检索 | 独立量级：采集会话、断线补采、背压丢弃、保留清理、查询分页 | 维持不做，触发条件见「不做」清单 |
+| (a) Federated fan-out search | The server forwards the **existing** `logs.query` in parallel to online agents, returning results grouped by host | Small: 1 server endpoint + 1 web page, zero agent changes, zero storage | Chosen as M3 proper |
+| (b) Push-based collection + server-side indexing | agent resident tail → push → server SQLite persistence → full-text search | A separate magnitude: collection sessions, offline backfill, backpressure drops, retention cleanup, query pagination | Remains not done; trigger conditions in the "not doing" list |
 
-选 (a) 的理由：
+Reasons for choosing (a):
 
-- D1「查询频率低，实时执行即可闭环」在跨机维度同样成立——排障的高频动作是
-  「同时在所有机器上 grep 同一条错误」，不是「对全量历史建索引」；
-- 原判断「跨机统一检索：依赖采集管道先行」被联邦路线打破：零采集零存储同样
-  闭环，且完整保持 D1/D8 纯转发哲学（server 依旧不落盘）；
-- 离线机器的日志本来就无法访问（agent 是唯一通道），采集管道在个人云场景
-  买不回「离线机器历史可查」这个能力；
-- server 虽有 SQLite 先例（probe_results/alert），但 3-10 台机器的日志量撑不起
-  索引收益，运维负担（容量/清理/迁移）先行到来。
+- D1's "query frequency is low, live execution closes the loop" holds equally in the cross-machine
+  dimension — the high-frequency troubleshooting action is
+  "grep the same error on all machines at once", not "build an index over the full history";
+- The earlier judgment "unified cross-machine search: depends on the collection pipeline coming first" is
+  broken by the federated route: zero collection and zero storage still close the loop, fully preserving
+  the D1/D8 pure-forwarding philosophy (the server still doesn't persist);
+- Logs on offline machines are inherently inaccessible (the agent is the only channel); a collection
+  pipeline cannot buy back the "offline machine history is searchable" capability in the personal-cloud
+  scenario;
+- The server does have SQLite precedents (probe_results/alert), but the log volume of 3-10 machines
+  cannot justify index gains, while the ops burden (capacity/cleanup/migration) arrives first.
 
-结构化解析（journalctl -o json 字段提取）维持不做：docker 源无对应语义，做了要
-双轨解析，文本形态 + grep + 前端着色（M1）已够用。
+Structured parsing (journalctl -o json field extraction) remains not done: docker sources have no
+corresponding semantics, doing it would require dual-track parsing, and the text shape + grep +
+frontend coloring (M1) already suffices.
 
-| D | 决策 | 理由 |
+| D | Decision | Rationale |
 |---|------|------|
-| D11 | 全局端点 `POST /api/logs/search`（不挂在 `/api/agents/{id}` 下）：对每个目标 agent 转发既有 `logs.query`，每机单源单查询；tail 收窄 ≤500/机 | 复用 M1 全部积木与安全边界（源白名单/1MB 截断/30s 超时/argv 直传）；扇出是放大器，10 机 × 500 行渲染与传输均可控 |
-| D12 | 目标 = 在线且带 `logs` capability 的 agent；body.agents 指定子集时取交集；被排除目标回 `skipped` 并归因（offline / no-logs / not-found）；server 扇出并发上限 4，端点全局同时 ≤2 个在途请求，超出 429 | `Registry.List` + capability 过滤现成；双重闸门防扇出放大；个人场景 2 个并发检索富余 |
-| D13 | 单 agent 失败/超时不整体失败：该机结果 `ok=false` + error 文本；全部目标不可用 → 200 空结果 + skipped 说明（不 5xx）；单目标超时 35s（agent 30s + 余量） | 与 NAS 单数据源降级（D8）、logs 多源降级（D2）同纪律；检索是浏览性质，部分成功仍是有效结果 |
-| D14 | 结果按 agent 分组返回，**不做跨机时间归并**；每机 `{agentId, hostname, ok, truncated, output}`，output 与 `logs.query` 同形态 | 各机时钟不可信，跨机归并是伪精度；分组卡片内单机时间线自然有序 |
-| D15 | 参数校验 server 侧镜像 M1 同规则：type 枚举、source 必填过白名单转发校验、grep ≤256 无换行、since_minutes 1-1440、tail 1-500（收窄于单机的 2000）；浏览性质不记审计（D9 同纪律） | 双端防御一致；扇出无写路径，审计只会刷屏 |
-| D16 | web 独立「日志检索」页（新路由 + 菜单项）：表单（type / source 手填 AutoComplete / tail / since / grep / agent 多选默认全选）→ 按主机分组卡片 + grep 命中高亮；Workbench 单机「日志」Tab 保留（深查 + 实时尾随动线） | 跨机检索与单机深查是两条动线；source 跨机下拉需 N 次 sources 枚举（又一个扇出放大器），手填 AutoComplete 回避；着色与高亮复用 LogsPanel 既有实现 |
+| D11 | Global endpoint `POST /api/logs/search` (not mounted under `/api/agents/{id}`): forwards the existing `logs.query` to each target agent, one source one query per machine; tail narrowed to ≤500/machine | Reuses all of M1's building blocks and security boundaries (source whitelist/1MB truncation/30s timeout/argv direct pass); fan-out is an amplifier, 10 machines × 500 lines keeps rendering and transfer controlled |
+| D12 | Targets = agents that are online with the `logs` capability; when body.agents specifies a subset, take the intersection; excluded targets return `skipped` with attribution (offline / no-logs / not-found); server fan-out concurrency cap 4, endpoint globally at most 2 in-flight requests concurrently, beyond → 429 | `Registry.List` + capability filtering are off the shelf; the double gate prevents fan-out amplification; 2 concurrent searches are ample for the personal scenario |
+| D13 | A single agent failure/timeout does not fail the whole request: that machine's result `ok=false` + error text; all targets unavailable → 200 empty result + skipped explanation (not 5xx); per-target timeout 35s (agent 30s + margin) | Same discipline as NAS single-datasource degradation (D8) and logs multi-source degradation (D2); search is browsing in nature, partial success is still a valid result |
+| D14 | Results returned grouped by agent, **no cross-machine time merging**; per machine `{agentId, hostname, ok, truncated, output}`, output in the same shape as `logs.query` | Machine clocks cannot be trusted; cross-machine merging is false precision; within a grouped card the single machine's timeline is naturally ordered |
+| D15 | Parameter validation mirrors M1's same rules on the server side: type enum, source required and whitelist-validated before forwarding, grep ≤256 no newlines, since_minutes 1-1440, tail 1-500 (narrowed from the single-machine 2000); browsing in nature, not audited (same discipline as D9) | Consistent defense on both ends; fan-out has no write path, auditing would only spam |
+| D16 | web standalone "Log Search" page (new route + menu item): form (type / source typed into AutoComplete / tail / since / grep / agent multi-select defaulting to all) → host-grouped cards + grep hit highlighting; the Workbench single-machine "Logs" Tab stays (deep-dive + live tail flow) | Cross-machine search and single-machine deep dive are two separate flows; a cross-machine source dropdown would need N sources enumerations (yet another fan-out amplifier), typed AutoComplete avoids it; coloring and highlighting reuse LogsPanel's existing implementation |
 
-API 形态：
+API shape:
 
 ```
 POST /api/logs/search
 {"type": "systemd", "source": "nginx.service", "grep": "ERROR",
- "since_minutes": 60, "tail": 200, "agents": ["a1", "a2"]}   // agents 缺省 = 全部
+ "since_minutes": 60, "tail": 200, "agents": ["a1", "a2"]}   // agents omitted = all
 
 200 →
 {"results": [
    {"agentId": "a1", "hostname": "web-1", "ok": true,
-    "truncated": false, "output": "...同 logs.query 形态..."},
+    "truncated": false, "output": "...same shape as logs.query..."},
    {"agentId": "a2", "hostname": "db-1", "ok": false, "error": "timeout"}],
  "skipped": [{"agentId": "a3", "reason": "offline"}]}
 ```
 
-### Server 侧
+### Server Side
 
-- 新文件 `api_logs_search.go`：目标筛选（capability 过滤 / agents 交集 / skipped
-  归因）→ 信号量并发 4 扇出 `CallAgent("logs.query", …)` → 单机结果透传 +
-  hostname 标注；serveAPI 挂独立 `/api/logs/search` 分支（非 `/agents/` 前缀）；
-- 端点级在途计数（atomic）≤2，超出 429；每目标 `context.WithTimeout(35s)`，
-  单目标失败不传染。
+- New file `api_logs_search.go`: target filtering (capability filtering / agents intersection / skipped
+  attribution) → semaphore-concurrency-4 fan-out of `CallAgent("logs.query", …)` → per-machine result
+  pass-through + hostname annotation; serveAPI mounts the standalone `/api/logs/search` branch (not the
+  `/agents/` prefix);
+- Endpoint-level in-flight counter (atomic) ≤2, beyond → 429; per-target `context.WithTimeout(35s)`,
+  a single target's failure does not spread.
 
-### Web 侧
+### Web Side
 
-- 新路由 + 菜单「日志检索」页：`api.ts` 加 `searchLogs(payload)`；表单提交后
-  按 `results` 顺序渲染主机卡片（ok=false 红色 error 态、skipped 灰色折叠行），
-  卡片内复用 LogsPanel 的日志行着色与 grep 命中高亮；
-- 表单校验与 D15 同规则前置（source 必填、grep 长度、tail/since 范围）。
+- New route + menu "Log Search" page: `api.ts` adds `searchLogs(payload)`; after form submission,
+  render host cards in `results` order (ok=false red error state, skipped gray collapsed rows),
+  reusing LogsPanel's log-line coloring and grep hit highlighting inside cards;
+- Form validation mirrors D15's rules up front (source required, grep length, tail/since ranges).
 
-**测试**：server `api_logs_search_test.go`——参数校验表驱动（type 非法 / source 空 /
-grep 超长 / tail 越界 / agents 形态）、目标筛选与 skipped 归因（离线 / 无 capability /
-不存在 id）、扇出成功（注册 2 个假 agent 各返结果）、单 agent 失败降级（整体仍 200）、
-在途上限 429；web `npx tsc --noEmit` 零错误 + `pnpm build` + 表单交互手验。
+**Tests**: server `api_logs_search_test.go` — parameter validation table-driven (invalid type / empty
+source / over-long grep / out-of-range tail / agents shape), target filtering and skipped attribution
+(offline / no capability / nonexistent id), fan-out success (register 2 fake agents each returning
+results), single-agent failure degradation (whole still 200), in-flight cap 429; web `npx tsc
+--noEmit` zero errors + `pnpm build` + manual form-interaction verification.
 
-### M3 清单
+### M3 Checklist
 
-- [x] server：`api_logs_search.go`（筛选 / 扇出 / 降级 / 并发闸）+ serveAPI 接入
-- [x] web：跨机检索页（表单 / 分组卡片 / 高亮）
-- [x] 测试 + 文档收尾（本清单勾选）+ todo.md 同步
+- [x] server: `api_logs_search.go` (filtering / fan-out / degradation / concurrency gate) + serveAPI integration
+- [x] web: cross-machine search page (form / grouped cards / highlighting)
+- [x] Tests + documentation wrap-up (checking off this list) + todo.md synced
 
-M3 完成（2026-09-19）：server 6 测试（校验 10 形态 + 405 / 扇出聚合与排序 /
-no-logs 跳过双形态 / 单机失败降级 / 全目标不可用 200 / 在途闸门 429）全绿；
-web tsc 零新增错误 + build 过。实现注记：单目标超时即 CallAgent 既有 30s 上限
-（未另设 35s）；agent 断开即从注册表注销，offline 与 not-found 归因合并为
-offline；结果按 agentId 排序保证输出稳定（registry.List 基于 map 遍历无序）。
+M3 complete (2026-09-19): server 6 tests (validation 10 forms + 405 / fan-out aggregation and ordering /
+no-logs skip dual forms / single-machine failure degradation / all targets unavailable 200 / in-flight
+gate 429) all green; web tsc zero new errors + build passed. Implementation notes: the per-target
+timeout is CallAgent's existing 30s cap (no separate 35s); an agent disconnecting deregisters from the
+registry, so offline and not-found attribution merge into offline; results sorted by agentId to
+guarantee stable output (registry.List iterates a map, unordered).
 
-## 不做（后续项）
+## Not Doing (Future Items)
 
-- 推送式采集与服务端存储聚合（agent 常驻采集 → server 落库索引，或 Loki 对接）：
-  独立量级；M3 联邦检索已闭环跨机排障，仅当出现历史趋势检索 / 合规留存类需求
-  时再立项；
-- 日志级别结构化解析（journalctl -o json 的字段提取）：当前文本形态已够用，且
-  docker 源无对应语义（M3 设计复确认）；
-- `--all` 历史对象枚举、多 unit 联合查询、PCRE 过滤：按需后补。
+- Push-based collection and server-side storage aggregation (agent resident collection → server
+  persistence and indexing, or Loki integration):
+  a separate magnitude; M3's federated search already closes the loop on cross-machine troubleshooting;
+  only start a project when historical trend search / compliance-retention needs emerge;
+- Structured parsing at the log level (field extraction from journalctl -o json): the current text
+  shape suffices, and docker sources lack the corresponding semantics (reconfirmed in the M3 design);
+- `--all` historical object enumeration, multi-unit joint queries, PCRE filtering: added later as
+  needed.
 
-## M1 清单
+## M1 Checklist
 
-- [x] agent：`internal/agent/rpc/logs_provider.go`（探测/源枚举/查询/过滤/截断）
-      + `logs` capability 追加 + 按能力注册
-- [x] server：`api_logs.go`（3 端点 + 双端参数校验）+ serveAPI 接入
-- [x] web：Workbench「日志」Tab（源选择/过滤栏/着色视图/状态行）
-- [x] 测试：源枚举解析、query 各形态（tail/since/grep/truncated）、白名单校验、
-      server 转发与错误透传
-- [x] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] agent: `internal/agent/rpc/logs_provider.go` (detection/source enumeration/query/filtering/truncation)
+      + `logs` capability appended + registration by capability
+- [x] server: `api_logs.go` (3 endpoints + parameter validation on both ends) + serveAPI integration
+- [x] web: Workbench "Logs" Tab (source selection/filter bar/colored view/status line)
+- [x] tests: source enumeration parsing, query in all forms (tail/since/grep/truncated), whitelist
+      validation, server forwarding and error pass-through
+- [x] Documentation wrap-up (checking off this list) + todo.md synced
 
-M1 完成（2026-09-15）：agent 7 测试 + server 4 测试全绿；grep 命中词前端高亮与
-agent contains 过滤同语义（大小写敏感）；Workbench「日志」Tab 与「文件」Tab 同模式内嵌，
-无 logs capability 主机呈现类型禁用 + 提示条。
+M1 complete (2026-09-15): agent 7 tests + server 4 tests all green; the frontend highlighting of grep
+hits has the same semantics as the agent's contains filtering (case-sensitive); the Workbench "Logs"
+Tab embeds in the same pattern as the "Files" Tab; hosts without the logs capability show a disabled
+type + hint bar.
 
-## 参考
+## References
 
-- 内部：[cron-design.md](./cron-design.md)（Commander + server 转发模式同构）、
-  [file-manager-design.md](./file-manager-design.md)（Workbench Tab 与文件日志边界）、
-  `todo.md` P2 日志聚合查看条目
-- 外部：[journalctl(1)](https://www.freedesktop.org/software/systemd/man/journalctl.html)
-  （-o short-iso / --since 语义）、[docker logs](https://docs.docker.com/engine/reference/commandline/logs/)
-  （--tail/--timestamps/--since）
+- Internal: [cron-design.md](/guide/cron-design) (Commander + server forwarding pattern, structurally
+  identical),
+  [file-manager-design.md](/guide/file-manager-design) (Workbench Tab and file-log boundary),
+  `todo.md` P2 log aggregation viewing item
+- External: [journalctl(1)](https://www.freedesktop.org/software/systemd/man/journalctl.html)
+  (-o short-iso / --since semantics), [docker logs](https://docs.docker.com/engine/reference/commandline/logs/)
+  (--tail/--timestamps/--since)

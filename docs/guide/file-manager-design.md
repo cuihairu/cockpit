@@ -1,285 +1,313 @@
-# P1 方案设计：文件管理器（Agent 远程文件浏览 / 编辑 / 上传 / 下载）
+# P1 Design: File Manager (Agent Remote File Browse / Edit / Upload / Download)
 
-> 语言：**中文** ｜ [English](./file-manager-design.en.md)
 
-> 2026-09-15。P1「文件管理器」首期设计。todo.md 原文：「通过 Agent 远程文件浏览/
-> 上传/下载（Workbench 目前只有终端和桌面），支撑配置编辑与日志文件查看」。
-> 本文只做设计决策与接口定义。
+> 2026-09-15. First-phase design of the P1 "File Manager". Original todo.md text: "Remote file browsing/
+> upload/download via Agent (Workbench currently has only terminal and desktop), supporting config
+> editing and log file viewing".
+> This document covers only design decisions and interface definitions.
 
-## 现状与痛点
+## Current State and Pain Points
 
-| 痛点 | 现状 | 后果 |
+| Pain point | Current state | Consequence |
 |------|------|------|
-| 改一个配置文件要开 SSH | Workbench 只有终端/桌面，改 nginx.conf 要 `vi` | 高频动作摩擦大，移动端基本不可用 |
-| 看日志要敲命令 | `tail -f` / `less` 手工翻 | 没有搜索、没有高亮、没有下载 |
-| 传文件要 scp | 本机 ↔ 服务器来回敲命令 | 忘记路径、权限问题的经典翻车点 |
-| 危险操作无审计 | rm/mv 只留在 shell history | 出事无从追溯 |
+| Editing a config file requires SSH | Workbench has only terminal/desktop; editing nginx.conf means `vi` | High-friction for a frequent action; essentially unusable on mobile |
+| Viewing logs means typing commands | Manual scrolling with `tail -f` / `less` | No search, no highlighting, no download |
+| Transferring files needs scp | Typing commands back and forth between local machine ↔ server | The classic blunder spot: forgotten paths, permission problems |
+| Dangerous operations unaudited | rm/mv live only in shell history | No traceability when things go wrong |
 
-## 架构总览
+## Architecture Overview
 
-沿用备份 M1.5 验证过的通道：**分块 RPC base64 经出站 WebSocket，server 纯转发不落盘**
-（文件管理器没有大文件中转需求，编辑/上传都是 KB–MB 级，下载走流式分块拉取）。
+Reuse the channel proven by backup M1.5: **chunked RPC base64 over the outbound WebSocket, with the
+server purely forwarding and never touching disk**
+(the file manager has no large-file relay need — editing/uploading are KB–MB scale,
+and downloads use streamed chunked pulls).
 
 ```
-┌─ server ─────────────────────┐         ┌─ agent ─────────────────────┐
-│ REST /api/agents/{id}/files  │ ─RPC─▶  │ file provider（新）          │
-│ 参数校验 + 审计（变更类操作） │ ◀─RPC─  │ list/read/write/mkdir/      │
-│ download 流式转发（不落盘）   │         │ delete/rename               │
-└──────────────────────────────┘         └─────────────────────────────┘
+┌─ server ───────────────────────────────────────┐        ┌─ agent ────────────────┐
+│ REST /api/agents/{id}/files                    │ ─RPC─▶ │ file provider (new)    │
+│ param validation + audit (mutating ops)        │ ◀─RPC─ │ list/read/write/mkdir/ │
+│ download streamed through (never touches disk) │        │ delete/rename          │
+└────────────────────────────────────────────────┘        └────────────────────────┘
 ```
 
-## 关键决策
+## Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D1 | 可见范围 | Agent 全文件系统自由导航，不设根目录白名单 | Agent 本有终端（等价 root 能力），白名单制造虚假安全感还挡住合法场景 |
-| D2 | M1 能力边界 | 浏览 / 读 / 编辑保存 / 删除 / 重命名 / 新建目录 / 上传（≤10MB）/ 下载（不限大小）；不做 chmod/chown、搜索、目录大小统计 | 高频运维动作优先；权限修改风险大场景少，后补容易（chmod/chown 已由 M4 补齐，搜索已由 M2 补齐） |
-| D3 | 传输通道 | `file.read` / `file.write` 分块 base64 RPC，复用出站 WebSocket | 与 `backup.read` 同构，协议零扩展，server 不落盘 |
-| D4 | 读通道分工 | 浏览器**编辑器**走 `read`（≤1MB 文本，超出拒绝）；**下载**走 server 循环 read 256KB 流转发（无总大小限制，断开即停） | 编辑大文本卡 UI 无意义；下载流式天然支持 GB 级日志 |
-| D5 | 写/上传 | `file.write {path, data, truncate}`：truncate=true 覆盖（编辑保存/新建），false 追加（上传分块续传）；单块 ≤1MB，客户端整文件 ≤10MB | M1 不做断点续传，10MB 覆盖配置/证书/小日志场景 |
-| D6 | 删除 | `file.delete` 支持递归删目录；UI：文件 Popconfirm，**目录要求输入目录名确认**（GitHub 模式）；一律审计 | rm -rf 必须有摩擦 |
-| D7 | 符号链接 | 列表标注 `isSymlink`+`target`；read/write/delete 拒绝直接作用于 symlink 路径；不跟随 | 与备份「不跟随」原则一致；symlink 穿越是最经典攻击面 |
-| D8 | capability | 新增 `file` capability，**全平台注册**（Go 标准库，openwrt/busybox 通用） | 文件操作无平台差异；backup 是 Linux-only，file 不是 |
-| D9 | 审计 | 写/删/重命名/新建目录/上传 记审计（ResourceFile）；浏览/读/下载不记 | 读操作量大无审计价值，变更必须可追溯 |
-| D10 | 搜索语义 | `file.search {dir, query, caseSensitive?, maxResults?}`，query 纯文本 contains（非正则），默认大小写不敏感 | 与 logs grep 同纪律（防 ReDoS、双端行为一致可测）；运维搜配置常大小写混用，默认不敏感更实用 |
-| D11 | 扫描边界 | 递归深度 ≤8；跳过 symlink（不跟随，D7 延伸）与非普通文件；二进制跳过（首 512B 含 NUL）；单文件 >1MB 跳过（与编辑器 read 上限一致）；文件总数 ≤5000；命中 ≤200 条即停；总超时 15s 返回已扫部分；排除 `.git`/`node_modules` 目录，其余隐藏目录照搜（`.ssh`/`.config` 可能正是目标） | 大目录树/大日志不拖垮 agent；每个上限都有 truncated/skipped 计数可解释 |
-| D12 | server 端点 | `POST /api/agents/{id}/files/search` 纯转发，双端同规则校验（dir 路径 + query 非空 ≤256），不审计（浏览性质，D9 延伸） | 与既有文件端点同模式 |
-| D13 | web 交互 | 工具栏「搜索」按钮 → Modal（当前目录为根 + 关键词 + 大小写开关）→ 结果列表（相对路径 + 行号 + 命中行高亮，行截断 200 字符）→ 点路径跳转所在目录 | 搜索天然以当前浏览位置为起点 |
-| D14 | 图片预览 | 纯 web 实现，复用 `files/read` 分块端点（零 Go 改动）；扩展名白名单 jpg/jpeg/png/gif/webp/bmp/svg/ico/avif；>20MB 拒绝预览引导下载；一律 `<img>` 渲染（含 SVG） | 预览是浏览性质，走既有 read 端点无新攻击面；`<img>` 上下文的 SVG 处于 secure static 模式脚本不执行，天然隔离；MIME 按扩展名映射、不依赖内容嗅探；20MB 上限外的图片属罕见场景，下载本地看体验更好 |
+| D1 | Visible scope | Free navigation across the agent's full filesystem; no root-directory whitelist | The agent already has a terminal (equivalent to root power); a whitelist creates a false sense of security and blocks legitimate scenarios |
+| D2 | M1 capability boundary | Browse / read / edit+save / delete / rename / mkdir / upload (≤10MB) / download (no size limit); no chmod/chown, search, or directory size stats | High-frequency ops actions first; permission changes are risky with few scenarios and easy to add later (chmod/chown were added by M4, search by M2) |
+| D3 | Transport channel | `file.read` / `file.write` chunked base64 RPC, reusing the outbound WebSocket | Isomorphic to `backup.read`; zero protocol extension; the server never touches disk |
+| D4 | Read channel split | The browser **editor** uses `read` (≤1MB text, rejected beyond); **download** uses the server looping read in 256KB chunks for stream forwarding (no total size limit, stops on disconnect) | Editing large text would needlessly freeze the UI; streamed downloads naturally support GB-scale logs |
+| D5 | Write/upload | `file.write {path, data, truncate}`: truncate=true overwrites (edit-save/new file), false appends (upload chunk resume); single chunk ≤1MB, client-side whole file ≤10MB | M1 has no resume support; 10MB covers config/certificate/small-log scenarios |
+| D6 | Delete | `file.delete` supports recursive directory deletion; UI: Popconfirm for files, **directories require typing the directory name to confirm** (GitHub mode); always audited | rm -rf must have friction |
+| D7 | Symlinks | List entries marked `isSymlink`+`target`; read/write/delete refuse to act directly on symlink paths; no following | Consistent with backup's "no following" principle; symlink traversal is the most classic attack surface |
+| D8 | capability | New `file` capability, **registered on all platforms** (Go standard library, works on openwrt/busybox) | File operations have no platform differences; backup is Linux-only, file is not |
+| D9 | Audit | Write/delete/rename/mkdir/upload are audited (ResourceFile); browse/read/download are not | Reads are high-volume with no audit value; changes must be traceable |
+| D10 | Search semantics | `file.search {dir, query, caseSensitive?, maxResults?}`; query is plain-text contains (not regex), case-insensitive by default | Same discipline as logs grep (ReDoS-proof, consistent and testable behavior on both ends); ops config searches mix cases often, so insensitive-by-default is more practical |
+| D11 | Scan bounds | Recursion depth ≤8; skip symlinks (no following, extends D7) and non-regular files; skip binaries (NUL in first 512B); skip files >1MB (same cap as the editor read); total files ≤5000; stop at 200 hits; total timeout 15s returning the scanned portion; exclude `.git`/`node_modules` directories, search other hidden directories as usual (`.ssh`/`.config` may be exactly the target) | Large directory trees/large logs must not drag down the agent; every limit has a truncated/skipped count for explainability |
+| D12 | Server endpoint | `POST /api/agents/{id}/files/search` pure forwarding, both ends validate the same rules (dir path + query non-empty ≤256), not audited (browsing in nature, extends D9) | Same pattern as the existing file endpoints |
+| D13 | Web interaction | Toolbar "Search" button → Modal (current directory as root + keyword + case toggle) → result list (relative path + line number + hit-line highlight, lines truncated to 200 chars) → click a path to jump to its directory | Search naturally starts from the current browsing location |
+| D14 | Image preview | Pure web implementation reusing the `files/read` chunk endpoint (zero Go changes); extension whitelist jpg/jpeg/png/gif/webp/bmp/svg/ico/avif; >20MB refuses preview and directs to download; always rendered via `<img>` (including SVG) | Preview is browsing in nature; going through the existing read endpoint adds no new attack surface; SVG in an `<img>` context is in secure static mode where scripts don't execute — natural isolation; MIME is mapped by extension, not content sniffing; images beyond the 20MB cap are rare, and downloading to view locally is a better experience |
 
-## Agent 侧设计
+## Agent-Side Design
 
-### capability 与注册
+### Capability and Registration
 
-- `agent.go` detectCapabilities 无条件追加 `file` capability（metadata 带 M1 支持的
-  maxReadChunk=1MB / maxWriteChunk=1MB 提示值；上传上限 10MB 由 web 端校验）；
-- `providers.go` 无条件 `RegisterProvider(rpc.NewFileProvider(rpc.FileConfig{}))`
-  （无平台判断，与 backup 的 GOOS==linux 形成对照）。
+- `agent.go` detectCapabilities unconditionally appends the `file` capability (metadata carries the
+  M1-supported hint values maxReadChunk=1MB / maxWriteChunk=1MB; the 10MB upload cap is enforced
+  on the web side);
+- `providers.go` unconditionally calls `RegisterProvider(rpc.NewFileProvider(rpc.FileConfig{}))`
+  (no platform check, in contrast to backup's GOOS==linux).
 
-### RPC 方法
+### RPC Methods
 
-| 方法 | 参数 | 返回 | 同步/异步 |
+| Method | Params | Returns | Sync/Async |
 |------|------|------|-----------|
-| `file.list` | `{dir}` | `{entries: [{name, size, mode, mtime, isDir, isSymlink, target}]}` | 同步 |
-| `file.read` | `{path, offset, length}` | `{data(base64), size, eof}` | 同步分块 |
-| `file.write` | `{path, data(base64), truncate, mode?}`（mode 可选，白名单 0600/0644，缺省 0644） | `{size}`（写入后文件总大小） | 同步 |
-| `file.mkdir` | `{path}` | `{}` | 同步 |
-| `file.delete` | `{path}` | `{}` | 同步 |
-| `file.rename` | `{path, name}` | `{}`（同目录内改名） | 同步 |
+| `file.list` | `{dir}` | `{entries: [{name, size, mode, mtime, isDir, isSymlink, target}]}` | Sync |
+| `file.read` | `{path, offset, length}` | `{data(base64), size, eof}` | Sync chunked |
+| `file.write` | `{path, data(base64), truncate, mode?}` (mode optional, whitelist 0600/0644, default 0644) | `{size}` (total file size after write) | Sync |
+| `file.mkdir` | `{path}` | `{}` | Sync |
+| `file.delete` | `{path}` | `{}` | Sync |
+| `file.rename` | `{path, name}` | `{}` (rename within the same directory) | Sync |
 
-- `file.list` 只返回目录直属条目（不递归），按目录优先 + 名称排序；`mode` 展示为
-  八进制（如 0644）；symlink 条目用 Lstat 标注，`target` 为链接目标（只读展示）；
-- `file.read` 单块上限 `fileReadChunkLimit = 1MB`，offset≥size 返回 eof=true 空数据
-  （与 backup.read 完全同构）；只允许读**普通文件**（Lstat 后 Mode().IsRegular()）；
-- `file.write`：truncate=true 时 O_CREATE|O_TRUNC；truncate=false 时 O_APPEND（且文件
-  必须已存在）；目录不存在自动 MkdirAll 父目录（0700）；返回写入后文件总大小；
-- `file.mkdir`：已存在报错（防误把已有目录当新建）；MkdirAll 支持一次建多级；
-- `file.delete`：文件直接删；目录递归删（RemoveAll）；symlink 只删链接本身
-  （Remove 不跟随）；path Clean 后为 `/` 拒绝；
-- `file.rename`：`name` 只允许文件名（`^[^/\x00]{1,255}$`，不含路径分隔符），
-  目标已存在拒绝（不静默覆盖）。
+- `file.list` returns only the directory's direct entries (no recursion), sorted directories-first
+  + by name; `mode` is shown in octal (e.g. 0644); symlink entries are marked via Lstat, with
+  `target` being the link destination (read-only display);
+- `file.read` single-chunk cap `fileReadChunkLimit = 1MB`; offset≥size returns empty data with
+  eof=true (fully isomorphic to backup.read); only **regular files** can be read
+  (Mode().IsRegular() after Lstat);
+- `file.write`: O_CREATE|O_TRUNC when truncate=true; O_APPEND when truncate=false (and the file
+  must already exist); missing parent directories are auto-created via MkdirAll (0700); returns
+  the total file size after the write;
+- `file.mkdir`: errors if it already exists (to avoid mistaking an existing directory for a new
+  one); MkdirAll supports creating multiple levels at once;
+- `file.delete`: files are deleted directly; directories are deleted recursively (RemoveAll);
+  a symlink deletes only the link itself (Remove doesn't follow); a path that Cleans to `/`
+  is rejected;
+- `file.rename`: `name` allows only a filename (`^[^/\x00]{1,255}$`, no path separators),
+  an existing target is rejected (no silent overwrite).
 
-### 路径安全（双端防御，server 同规则）
+### Path Safety (defense on both ends, same rules on the server)
 
-- 所有 path：`filepath.Clean` 后必须 `filepath.IsAbs`，拒绝相对路径与 `..` 形态
-  （Clean 已消解 `a/../b`，残留 `..` 开头即非绝对）；
-- write/mkdir/delete 的 path 不得为 `/`（根目录本身不可写不可删）；
-- rename 的 `name` 不含分隔符，目标路径 Join 后仍在原父目录内（结构性保证）；
-- read/write 目标若是 symlink 直接拒绝（D7），杜绝经链接写穿到任意位置。
+- All paths: after `filepath.Clean` they must satisfy `filepath.IsAbs`; relative paths and `..`
+  forms are rejected (Clean already resolves `a/../b`; a residual leading `..` means it's not absolute);
+- write/mkdir/delete paths must not be `/` (the root directory itself is neither writable nor deletable);
+- rename's `name` contains no separator, so the joined target path stays inside the original
+  parent directory (structural guarantee);
+- read/write targets that are symlinks are rejected outright (D7), eliminating writes punched
+  through links to arbitrary locations.
 
-## Server 侧设计
+## Server-Side Design
 
-### REST API（server/api_files.go，registerFilesAPI，JWT 保护）
+### REST API (server/api_files.go, registerFilesAPI, JWT protected)
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Notes |
 |------|------|------|
-| POST | `/api/agents/{id}/files/list` | `{dir}` → 转发 file.list |
-| POST | `/api/agents/{id}/files/read` | `{path, offset, length}` → 转发 file.read（编辑器专用） |
-| POST | `/api/agents/{id}/files/write` | `{path, data, truncate}` → file.write + 审计 file_write |
-| POST | `/api/agents/{id}/files/mkdir` | `{path}` + 审计 file_mkdir |
-| POST | `/api/agents/{id}/files/delete` | `{path}` + 审计 file_delete |
-| POST | `/api/agents/{id}/files/rename` | `{path, name}` + 审计 file_rename |
-| GET  | `/api/agents/{id}/files/download?path=` | 循环 file.read（256KB 块）流式转发，attachment，断开即停，15 分钟总超时 |
+| POST | `/api/agents/{id}/files/list` | `{dir}` → forwards to file.list |
+| POST | `/api/agents/{id}/files/read` | `{path, offset, length}` → forwards to file.read (editor-only) |
+| POST | `/api/agents/{id}/files/write` | `{path, data, truncate}` → file.write + audit file_write |
+| POST | `/api/agents/{id}/files/mkdir` | `{path}` + audit file_mkdir |
+| POST | `/api/agents/{id}/files/delete` | `{path}` + audit file_delete |
+| POST | `/api/agents/{id}/files/rename` | `{path, name}` + audit file_rename |
+| GET  | `/api/agents/{id}/files/download?path=` | Loops file.read (256KB chunks) for stream forwarding, attachment, stops on disconnect, 15-minute total timeout |
 
-- 所有路径参数 server 侧执行与 agent 相同的 Clean/IsAbs/根目录校验（双端防御）；
-- 下载复用备份下载的流转发骨架（Content-Length 由首块 size 透传、nosniff、
-  中途失败截断由 Content-Length 不匹配暴露）；
-- 上传不经 server 暂存：浏览器 base64 后 POST write，server 原样转发（内存里
-  一过即弃）；
-- 审计：`ResourceFile = "file"`，动作 file_write / file_mkdir / file_delete /
-  file_rename；detail 记 path（路径属操作信息可记，**文件内容从不入审计**）。
+- All path parameters go through the same Clean/IsAbs/root checks on the server as on the agent
+  (defense on both ends);
+- Download reuses the backup download's stream-forwarding skeleton (Content-Length passed through
+  from the first chunk's size, nosniff,
+  mid-stream failures exposed as a Content-Length mismatch);
+- Uploads are not staged on the server: the browser base64s and POSTs write; the server forwards
+  as-is (passes through memory and is discarded);
+- Audit: `ResourceFile = "file"`, actions file_write / file_mkdir / file_delete /
+  file_rename; detail records the path (a path is operational information and may be recorded,
+  **file contents never enter the audit log**).
 
-## Web UI 设计
+## Web UI Design
 
-- Workbench `WorkbenchTab` 增加 `'files'`，Tab「文件」（FolderOutlined），
-  与 SSH/RDP/VNC 并列——文件管理天然按 agent 作用域，复用左侧 Agent 树；
-- 新组件 `web/src/components/FileBrowser/index.tsx`：
-  - **工具栏**：面包屑路径（可点击逐级回退 + 手输路径跳转）、刷新、新建目录、上传；
-  - **列表** Table：名称（目录/文件图标 + symlink 标注）/ 大小 / 权限 / 修改时间 /
-    操作（编辑[仅普通文件 ≤1MB]、下载、重命名、删除）；
-  - **编辑 Modal**：read 全文 → TextArea（等宽字体）→ 保存（truncate write）；
-  - **上传**：antd Upload 手动模式，beforeUpload 读 File → base64 →
-    write（truncate=true），>10MB 前端拒绝；
-  - **下载**：GET download → axios blob → createObjectURL（备份同款）；
-  - **删除**：文件 Popconfirm；目录 Modal 输入目录名确认（D6）。
+- Workbench's `WorkbenchTab` gains `'files'`, a "Files" tab (FolderOutlined),
+  alongside SSH/RDP/VNC — file management is naturally agent-scoped and reuses the left
+  Agent tree;
+- New component `web/src/components/FileBrowser/index.tsx`:
+  - **Toolbar**: breadcrumb path (clickable level-by-level back + manual path entry to jump), refresh, new directory, upload;
+  - **List** Table: name (directory/file icon + symlink marker) / size / permissions / modified time /
+    actions (edit [regular files ≤1MB only], download, rename, delete);
+  - **Edit Modal**: read the whole file → TextArea (monospace) → save (truncate write);
+  - **Upload**: antd Upload in manual mode, beforeUpload reads the File → base64 →
+    write (truncate=true); >10MB rejected on the frontend;
+  - **Download**: GET download → axios blob → createObjectURL (same as backup);
+  - **Delete**: Popconfirm for files; for directories, a Modal asking to type the directory name to confirm (D6).
 
-## M2：文本搜索（2026-09-18）
+## M2: Text Search (2026-09-18)
 
-目录内递归文本搜索（D10-D13），排障场景定位「配置项写在哪个文件」。
+Recursive in-directory text search (D10-D13), locating "which file a config entry lives in" for troubleshooting scenarios.
 
-### Agent 侧
+### Agent Side
 
-- RPC `file.search`：`{dir, query, caseSensitive, maxResults}` → 
-  `{matches: [{path, line, text}], truncated, scanned, skipped}`；
-  - `filepath.WalkDir` 递归；相对路径相对 `dir` 呈现；行号从 1 起；
-  - 匹配：`strings.Contains`（不敏感时 ToLower 双侧），命中行 `text` 截断 200 字符；
-  - 每个 `matches` 命中即使停（D11），`truncated=true`；目录深于 8 / 文件数超 5000 /
-    总超时 15s 同样置 truncated 提前收尾；skipped 计大文件与二进制；
-- 路径校验与 list 同款（Clean/IsAbs/非根）；`query` 为空或 >256 字符拒绝。
+- RPC `file.search`: `{dir, query, caseSensitive, maxResults}` →
+  `{matches: [{path, line, text}], truncated, scanned, skipped}`;
+  - Recursion via `filepath.WalkDir`; relative paths are presented relative to `dir`; line numbers start at 1;
+  - Matching: `strings.Contains` (ToLower on both sides when insensitive); the hit line's `text` is truncated to 200 chars;
+  - Stops once `matches` reaches the cap (D11) with `truncated=true`; depth beyond 8 / more than
+    5000 files / 15s total timeout likewise set truncated and wrap up early; skipped counts
+    large files and binaries;
+- Path validation same as list (Clean/IsAbs/not root); an empty `query` or >256 chars is rejected.
 
-### Server 侧
+### Server Side
 
-- `POST /api/agents/{id}/files/search`（api_files.go 分发）：双端同规则校验后转发
-  `file.search`；agent 错误 502 透传；不审计。
+- `POST /api/agents/{id}/files/search` (dispatched in api_files.go): validates the same rules on both ends,
+  then forwards `file.search`; agent errors pass through as 502; not audited.
 
-### Web 侧
+### Web Side
 
-- FileBrowser 工具栏加「搜索」：Modal 内输入关键词（当前目录为根）+ 大小写开关；
-- 结果列表：命中路径（点击跳转所在目录并关闭 Modal）+ 行号 + 命中行（关键词高亮）；
-- 底部状态行：`N 处命中 · 已扫描 M 文件`，truncated/skipped>0 给提示 Tag。
+- FileBrowser toolbar gains "Search": a Modal with keyword input (current directory as root) + a case toggle;
+- Result list: hit path (click to jump to its directory and close the Modal) + line number + hit line (keyword highlighted);
+- Bottom status line: `N hits · M files scanned`, a hint Tag when truncated/skipped>0.
 
-**测试**：agent 临时目录树（命中与大小写开关 / 深度上限 / 二进制与大文件跳过 /
-200 条截断 / 路径校验拒绝 / 空结果非错误）；server 转发与校验 400；web build。
+**Tests**: agent temp directory tree (hits and case toggle / depth cap / binary and large-file skipping /
+truncation at 200 / path validation rejections / empty result is not an error); server forwarding and 400
+validation; web build.
 
-## M2：图片预览（2026-09-18）
+## M2: Image Preview (2026-09-18)
 
-文件列表内直接预览图片（D14），免下载看截图/图标/证书二维码等场景。
+Preview images directly in the file list (D14), for screenshot/icon/certificate-QR-code viewing without downloading.
 
-### Web 侧（纯前端，零 Go 改动）
+### Web Side (pure frontend, zero Go changes)
 
-- **触发**：操作列「预览」按钮（EyeOutlined），仅对扩展名命中白名单
-  （jpg/jpeg/png/gif/webp/bmp/svg/ico/avif，大小写不敏感）且非目录非 symlink
-  的文件显示；
-- **拉取**：`readFileChunk` 1MB 分块循环拼装，offset 按**已读字节数**推进
-  （返回值 `size` 是文件总大小，不能当游标）；首块返回的 `size` >20MB 直接拒绝
-  （提示走下载）；Modal 关闭置 cancelled 标志，循环立即中止不再发后续请求；
-- **渲染**：按扩展名映射 MIME（image/jpeg 等，白名单内完备）→ `Blob` →
-  `createObjectURL` → `<img>`；关闭与重新打开都 revoke 旧 URL；
-- **安全**：SVG 一律走 `<img>`（浏览器 secure static 模式，脚本不执行），
-  绝不 innerHTML；MIME 不信任 agent 内容嗅探（read 端点本就不返回 content-type）；
-- **Modal**：标题为文件名；加载中 Spin；失败 Alert 兜底 + 引导下载；
-  图片 `max-width:100% / max-height:60vh`、透明底纹深色底（透明 PNG 可见）；
-  页脚显示自然分辨率（onLoad 读 naturalWidth×Height）与文件大小。
+- **Trigger**: a "Preview" button in the actions column (EyeOutlined), shown only for files whose
+  extension hits the whitelist
+  (jpg/jpeg/png/gif/webp/bmp/svg/ico/avif, case-insensitive) and that are neither directories nor
+  symlinks;
+- **Fetch**: `readFileChunk` loops in 1MB chunks to assemble; offset advances by **bytes already read**
+  (the returned `size` is the file's total size and cannot be used as a cursor); if the first chunk's
+  `size` is >20MB, refuse immediately (hint to download instead); closing the Modal sets a
+  cancelled flag, the loop aborts at once and no further requests are sent;
+- **Render**: map MIME by extension (image/jpeg etc., complete within the whitelist) → `Blob` →
+  `createObjectURL` → `<img>`; both closing and reopening revoke the old URL;
+- **Security**: SVG always goes through `<img>` (browser secure static mode, scripts don't execute),
+  never innerHTML; MIME doesn't trust agent content sniffing (the read endpoint doesn't return
+  content-type anyway);
+- **Modal**: title is the filename; Spin while loading; failure Alert as fallback + guidance to download;
+  image `max-width:100% / max-height:60vh` with a dark background and translucent texture (so
+  transparent PNGs are visible);
+  the footer shows the natural resolution (naturalWidth×Height read on onLoad) and file size.
 
-**测试**：纯 web 改动——`pnpm build`（tsc 零错误）+ 既有 Go 测试零回归。
+**Tests**: pure web change — `pnpm build` (zero tsc errors) + zero regression in existing Go tests.
 
-## M3：分块上传 / 断点续传（2026-09-18）
+## M3: Chunked Upload / Resume (2026-09-18)
 
-上传从「≤10MB 单次 write」升级为「任意 ≤2GB 分块流式」：`file.write` 的
-append 通道（M1 D5 预留）正式启用，agent 零改动。
+Uploads upgrade from "≤10MB single write" to "any ≤2GB chunked streaming": the append channel of
+`file.write` (reserved in M1 D5) is officially enabled, with zero agent changes.
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / Notes |
 |---|------|------|------------|
-| D15 | 分块协议 | web 循环调既有 `files/write`（server 端点零改动，单块预检 1MB 原样）：单块 1MB（agent `fileWriteChunkLimit` 满额）；首块 `truncate=true` 建文件/清空旧内容，后续块 `truncate=false`（O_APPEND——agent 已有「append 目标必须存在」防碎片）；每块成功后校验返回 `size === 已传字节数`（agent 返回写入后总大小），不一致即终止（防交错/错位产出损坏文件） | 首块建文件的协议是 agent 既有设计（append 目标必须存在）；size 校验是顺序写入的自证 |
-| D16 | 断点续传（会话内） | 块写入失败自动重试 ≤3 次：重试前 `files/list` 探测目标文件当前 size——等于已传字节数 → 从断点 append 续传；为 0/不存在 → 从头（首块重建）；其他值（并发写入）→ 终止报错。跨浏览器刷新不续传（v1，上传多为一次性动作） | 服务器文件 size 即续传游标，无需服务端会话状态；并发写检测保护用户不覆盖他人改动 |
-| D17 | 大小分流 | ≤10MB 保持单块快速路径（一次 write，体验不变）；>10MB 走分块，上限 2GB（更大引导 scp/终端——base64 经 WebSocket RPC 的合理边界） | 小文件零开销，大文件解锁；上限值与下载「不限」对称（拉流便宜推流贵） |
-| D18 | 审计分流 | server write 审计只记 `truncate=true`（新写入会话：编辑保存/分块首块/覆盖上传各一条）；`truncate=false`（分块续块）不记——否则 500MB 上传产生 500 条 file_write 刷屏，且续块无独立语义 | 会话级审计由首块代表；append 通道目前仅分块上传使用；终端等价 root 能力本就在审计面之外（D1 语义） |
-| D19 | Web 交互 | 工具栏上传入口不变；>10MB 文件上传中在工具栏显示进度（`Progress` + 已传/总量）与「取消」；取消 = 中止后续块 + 删除半成品（`files/delete`，失败静默）+ 提示；上传完成刷新列表 | 进度就地可见；半成品不留垃圾；取消后重新上传首块 truncate 清空，语义自洽 |
+| D15 | Chunk protocol | The web loops the existing `files/write` (zero changes to the server endpoint; the 1MB single-chunk precheck stays as-is): 1MB per chunk (the agent's full `fileWriteChunkLimit`); the first chunk uses `truncate=true` to create the file/clear old content, subsequent chunks `truncate=false` (O_APPEND — the agent already requires "the append target must exist", guarding against fragments); after each chunk, verify the returned `size === bytes sent` (the agent returns the total size after write); on mismatch, abort (preventing interleaving/misalignment from producing a corrupt file) | The first-chunk-creates-file protocol is the agent's existing design (the append target must exist); the size check is sequential writing proving itself |
+| D16 | Resume (within a session) | Failed chunk writes auto-retry ≤3 times: before retrying, `files/list` probes the target file's current size — equal to bytes sent → resume appending from the breakpoint; 0/nonexistent → start over (first chunk rebuilds); any other value (concurrent write) → abort with an error. No resume across browser refreshes (v1; uploads are mostly one-shot actions) | The server-side file size is the resume cursor, so no server session state is needed; concurrent-write detection protects users from overwriting others' changes |
+| D17 | Size-based routing | ≤10MB keeps the single-chunk fast path (one write, unchanged experience); >10MB goes chunked with a 2GB cap (larger is directed to scp/terminal — the sensible boundary for base64 over WebSocket RPC) | Zero overhead for small files, unlocks large ones; the cap mirrors download's "no limit" (pulling a stream is cheap, pushing is expensive) |
+| D18 | Audit routing | The server write audit records only `truncate=true` (new write sessions: one row each for edit-save/chunked first chunk/overwrite upload); `truncate=false` (chunked continuation) is not recorded — otherwise a 500MB upload would spam 500 file_write rows, and continuation chunks have no standalone meaning | Session-level audit is represented by the first chunk; the append channel is currently used only by chunked upload; terminal-equivalent root power is already outside the audit surface (D1 semantics) |
+| D19 | Web interaction | The toolbar upload entry stays; while a >10MB file uploads, the toolbar shows progress (`Progress` + sent/total) and "Cancel"; cancel = abort remaining chunks + delete the partial file (`files/delete`, silent on failure) + notify; on completion, refresh the list | Progress visible in place; no partial-file garbage left; re-uploading after cancel starts with a truncate-clearing first chunk, semantically self-consistent |
 
-### Server 侧
+### Server Side
 
-- `forwardFileRPC` write 分支：审计条件加 `truncate`（仅首块/覆盖写记
-  `file_write`），其余逻辑不动。
+- `forwardFileRPC` write branch: the audit condition gains `truncate` (only first chunks/overwrites record
+  `file_write`), the rest of the logic is untouched.
 
-### Web 侧
+### Web Side
 
-- `UPLOAD_MAX_BYTES` 语义改为单块路径阈值；新增分块上限 2GB；
-- `uploadFiles` 分块循环（`File.slice` → base64 → write），进度/取消用
-  token 递增（与图片预览同款）+ 半成品清理；失败探测续传（D16）。
+- `UPLOAD_MAX_BYTES` semantics change to the single-chunk path threshold; a new 2GB chunked cap;
+- `uploadFiles` chunk loop (`File.slice` → base64 → write); progress/cancel via
+  an incrementing token (same as image preview) + partial-file cleanup; resume on failure by
+  probing (D16).
 
-**测试**：server——truncate=true 审计、truncate=false 不审计；web——tsc +
-build；agent 零改动零回归。
+**Tests**: server — truncate=true audited, truncate=false not; web — tsc +
+build; agent zero changes, zero regression.
 
-## M4：chmod / chown 权限编辑（2026-09-19）
+## M4: chmod / chown Permission Editing (2026-09-19)
 
-D2 划出 M1 的「chmod/chown 后补」项正式补齐。纯权限位与归属修改，
-不碰内容——复用既有通道（分块 RPC 同构、路径校验、审计模式）。
+The "chmod/chown later" item scoped out of M1 in D2 is now formally filled in. Pure permission bits
+and ownership changes, without touching content — reusing the existing channels (isomorphic chunked RPC,
+path validation, audit patterns).
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / Notes |
 |---|------|------|------------|
-| D20 | agent RPC | `file.chmod {path, mode}` / `file.chown {path, uid, gid}`：path 走既有 `cleanAbsPath`；**symlink 拒绝**（D7 延伸——对链接 chmod/chown 会作用到目标，给「不跟随」纪律开例外）；`mode` 数字 0–0o777（只管 perm 位，不碰 setuid/sticky）；`uid`/`gid` 数字 0–4294967295，**不做用户名解析**（跨机用户名空间不可靠，`nobody` 在两台机器不是同一个人）；不做平台门禁——Windows 上 Chmod 只有效只读位、Chown 报错，诚实透出 | 权限修改是低频动作，参数面小；错误信息原样回 UI（EPERM 等）即运维所需 |
-| D21 | list 增补归属 | list 条目加 `uid`/`gid`（int）；取自 `syscall.Stat_t`（unix 专属）→ 按 GOOS 拆文件 `file_stat_unix.go` / `file_stat_windows.go`（恒 -1，UI 显示「—」） | 改之前必须看到现状；CI 交叉编译 darwin/windows，类型断言目标必须存在 |
-| D22 | server + web | `POST /api/agents/{id}/files/chmod {path, mode}`、`/files/chown {path, uid, gid}`：双端同规则校验（绝对路径 + 数值范围）；**审计** `file_chmod`/`file_chown`（detail 记 mode/uid/gid）——chown 改归属直接影响访问控制，必须可追溯；web 行操作加「权限」→ Modal：当前 mode/uid/gid 只读展示 + rwx 九宫格（属主/组/其他）+ uid/gid 数字输入；应用时按变化分流——mode 变调 chmod、uid/gid 变调 chown、都没变提示无变更 | 单 Modal 收口两个动作；九宫格比裸填八进制直观防错，同时显示合成八进制供核对 |
+| D20 | agent RPC | `file.chmod {path, mode}` / `file.chown {path, uid, gid}`: path goes through the existing `cleanAbsPath`; **symlinks rejected** (extends D7 — chmod/chown on a link would act on the target, carving an exception into the "no following" discipline); `mode` numeric 0–0o777 (perm bits only, no setuid/sticky); `uid`/`gid` numeric 0–4294967295, **no username resolution** (username namespaces are unreliable across machines — `nobody` on two machines is not the same person); no platform gating — on Windows Chmod affects only the read-only bit and Chown errors, honestly surfaced | Permission changes are low-frequency with a small parameter surface; passing error messages back to the UI verbatim (EPERM etc.) is exactly what ops needs |
+| D21 | list gains ownership | list entries gain `uid`/`gid` (int); taken from `syscall.Stat_t` (unix-specific) → files split by GOOS: `file_stat_unix.go` / `file_stat_windows.go` (always -1, UI shows "—") | You must see the current state before changing it; CI cross-compiles darwin/windows, so the type-assertion target must exist |
+| D22 | server + web | `POST /api/agents/{id}/files/chmod {path, mode}` and `/files/chown {path, uid, gid}`: same-rule validation on both ends (absolute path + numeric ranges); **audited** as `file_chmod`/`file_chown` (detail records mode/uid/gid) — chown changes ownership and directly affects access control, so it must be traceable; the web row actions gain "Permissions" → Modal: current mode/uid/gid shown read-only + an rwx nine-cell grid (owner/group/other) + numeric uid/gid inputs; on apply, route by what changed — mode changed calls chmod, uid/gid changed calls chown, nothing changed reports no change | One Modal captures both actions; the nine-cell grid is more intuitive and error-proof than raw octal entry, while also showing the composed octal for verification |
 
-### Agent 侧
+### Agent Side
 
-- `file_provider.go` 加 `Chmod`/`Chown`（lstat → symlink 拒绝 → 数值校验 →
-  `os.Chmod`/`os.Chown`）+ Call 分发；`file_stat_*.go` 提供
-  `fileStatOwner(path) (uid, gid int)`（Lstat 语义，不跟随）。
+- `file_provider.go` gains `Chmod`/`Chown` (lstat → symlink rejection → numeric validation →
+  `os.Chmod`/`os.Chown`) + Call dispatch; `file_stat_*.go` provides
+  `fileStatOwner(path) (uid, gid int)` (Lstat semantics, no following).
 
-### Server 侧
+### Server Side
 
-- `api_files.go`：action 白名单加 chmod/chown；`fileRPRequest` 加
-  `Mode/UID/GID *float64`（JSON number）；校验后转发 + 审计。
+- `api_files.go`: the action whitelist gains chmod/chown; `fileRPRequest` gains
+  `Mode/UID/GID *float64` (JSON number); validate, then forward + audit.
 
-### Web 侧
+### Web Side
 
-- `api.chmodFile/chownFile`；`FileEntry` 加 `uid?/gid?`；FileBrowser 行操作
-  加「权限」按钮（symlink 禁用）→ PermissionModal（九宫格 + 归属输入）。
+- `api.chmodFile/chownFile`; `FileEntry` gains `uid?/gid?`; FileBrowser row actions
+  gain a "Permissions" button (disabled for symlinks) → PermissionModal (nine-cell grid + ownership inputs).
 
-**测试**：agent——chmod roundtrip（0600→0644 回读）、symlink 拒绝、mode/uid/gid
-越界拒绝、不存在路径报错、list 含 uid/gid；server——转发参数、双端校验
-（路径/mode 范围/uid 范围）、审计落库、agent 失败不记审计；web——tsc + build。
+**Tests**: agent — chmod roundtrip (0600→0644 read back), symlink rejection, out-of-range
+mode/uid/gid rejection, missing-path errors, list includes uid/gid; server — forwarded params,
+both-end validation (path/mode range/uid range), audit persisted, agent failure not audited;
+web — tsc + build.
 
-## M5：跨刷新断点续传（2026-09-19）
+## M5: Resume Across Refreshes (2026-09-19)
 
-M3 D16 预留的「后续项」。关键观察：续传游标（目标文件实际 size）agent 侧
-早已有探测机制（D16 失败续传同源），刷新真正丢的只有**上传坐标的记忆**
-——本地 File 对象与「传到哪了」的关联。这恰是 localStorage 的适用场景
-（单浏览器单用户语义），**不需要服务端上传会话状态**——推翻「不做」条目
-括号里的原设想，机制降维后改动面收敛为纯 web。
+The "follow-up item" reserved in M3 D16. Key observation: the resume cursor (the target file's
+actual size) already has a probing mechanism agent-side (same source as D16's failure resume);
+what a refresh really loses is only **the memory of the upload coordinates**
+— the association between the local File object and "how far it got". This is precisely
+localStorage's sweet spot (single-browser, single-user semantics), **no server-side upload
+session state needed** — overturning the original assumption in the "not doing" item's
+parentheses; once the mechanism was simplified, the change surface collapsed to pure web.
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / Notes |
 |---|------|------|------------|
-| D23 | 挂起登记 | 分块上传每块成功后 upsert `{agentId, dir, name, size, lastModified, uploaded, ts}` 进 localStorage `cockpit-pending-uploads`（数组，容量 10 FIFO，载入时清 7 天前过期项）；上传成功/取消移除；**重试耗尽的最终失败保留**——网络断了关页面正是要续传的场景；≤10MB 单块路径不登记（重传成本低） | localStorage 是 per-viewer 便利存储的既定用法（SettingsContext 先例）；读写全 try/catch，隐私窗口/禁用存储时功能静默缺席，主上传流程零影响 |
-| D24 | 续传交互 | FileBrowser 挂载时按 agentId 读挂起条目，列表上方 Alert 呈现（文件名/目录/进度/继续/放弃，上传进行中隐藏）。「继续」→ 用户重选本地文件（File 句柄浏览器不可恢复，必须人工重选）→ 校验矩阵：size 不一致报错保留记录；mtime 不一致 Modal 确认（混合内容风险）；随后探测远端——null/0 从头；1MB 整块对齐且 < size 从该偏移续传；=== size 视为已传完（清记录刷新）；非对齐或 > size Modal 确认覆盖重传 | 校验矩阵逐级放权：机器能判的自动判（size/对齐），语义模糊的交用户（mtime/覆盖）；对齐校验复用分块协议不变量（除末块外恒 1MB） |
-| D25 | 边界 | 纯 web 零 Go 改动；续传复用 uploadChunked（参数化起始偏移），size-mismatch 与并发写保护原样生效；「放弃」只清本地记录**不删远端半成品**（刷新后远端状态可能已变，自动删除有误伤面，Tooltip 引导手动清理或重新上传覆盖） | 远端文件 size 即游标的 D16 哲学不变；服务端零新状态、零新端点、零审计变化 |
+| D23 | Pending registry | After each successful chunk, upsert `{agentId, dir, name, size, lastModified, uploaded, ts}` into localStorage `cockpit-pending-uploads` (array, capacity 10 FIFO, entries older than 7 days purged on load); removed on upload success/cancel; **final failures with retries exhausted are kept** — network drop plus closing the page is exactly the scenario resume is for; the ≤10MB single-chunk path doesn't register (cheap to re-upload) | localStorage is established usage for per-viewer convenience storage (SettingsContext precedent); all reads/writes are wrapped in try/catch, so in private windows/with storage disabled the feature is silently absent with zero impact on the main upload flow |
+| D24 | Resume interaction | On mount, FileBrowser reads pending entries by agentId and shows them in an Alert above the list (filename/directory/progress/continue/abandon; hidden while an upload is in progress). "Continue" → the user re-selects the local file (File handles can't be restored by the browser; manual re-selection is mandatory) → validation matrix: size mismatch errors and keeps the record; mtime mismatch asks for Modal confirmation (mixed-content risk); then probe the remote — null/0 start from scratch; 1MB whole-chunk aligned and < size resumes from that offset; === size counts as fully uploaded (clear record and refresh); misaligned or > size asks for Modal confirmation to overwrite and re-upload | The validation matrix delegates step by step: what machines can judge is judged automatically (size/alignment), semantically ambiguous calls go to the user (mtime/overwrite); the alignment check reuses the chunk protocol invariant (always 1MB except the last chunk) |
+| D25 | Boundaries | Pure web, zero Go changes; resume reuses uploadChunked (parameterized start offset), with size-mismatch and concurrent-write protection intact; "Abandon" only clears the local record and **does not delete the remote partial file** (remote state may have changed after refresh; auto-deletion has friendly-fire risk, so a Tooltip guides manual cleanup or overwrite by re-upload) | The D16 philosophy — the remote file size is the cursor — is unchanged; zero new server state, zero new endpoints, zero audit changes |
 
-### Web 侧
+### Web Side
 
 - `readPendingUploads` / `persistPendingUpload` / `removePendingUpload`
-  （localStorage try/catch + TTL + FIFO）；
-- `uploadChunked(raw, path, token, resume?)` 加可选起始偏移，每块成功落
-  登记进度；
-- 工具栏下挂起上传 Alert（每行 Upload 重选文件 + 放弃 Popconfirm），
-  `confirmAsync` 封装 Modal.confirm 为 Promise。
+  (localStorage try/catch + TTL + FIFO);
+- `uploadChunked(raw, path, token, resume?)` gains an optional start offset; each successful chunk
+  records progress;
+- Pending-uploads Alert below the toolbar (each row an Upload to re-select the file + an
+  Abandon Popconfirm), `confirmAsync` wraps Modal.confirm into a Promise.
 
-**测试**：web——tsc 零新增（9 存量）+ build；server/agent 零改动零回归。
+**Tests**: web — zero new tsc errors (9 pre-existing) + build; server/agent zero changes, zero regression.
 
-## 不做（后续项）
+## Not Doing (follow-up items)
 
-- 目录大小统计/回收站；
-- 递归 chmod/chown（目录树批量改权限——误伤面大，等真实需求）；
-- 二进制 hex 预览：编辑器/图片预览先覆盖文本与图片主场景。
+- Directory size stats / recycle bin;
+- Recursive chmod/chown (batch permission changes across a directory tree — large blast radius,
+  wait for a real need);
+- Binary hex preview: the editor/image preview first cover the main text and image scenarios.
 
-## M1 清单
+## M1 Checklist
 
-- [x] agent：`internal/agent/rpc/file_provider.go`（list/read/write/mkdir/delete/rename
-      + 路径安全 + symlink 拒绝）+ 无条件注册 + file capability（全平台）
-- [x] server：`api_files.go`（7 个端点 + 双端路径校验 + 审计）+ serveAPI `/agents/` 分支
-      接入 + audit 常量（ResourceFile + file_write/mkdir/delete/rename）
-- [x] web：Workbench「文件」Tab + FileBrowser（面包屑/手输跳转/列表/编辑 ≤1MB/
-      上传 ≤10MB/下载不限/重命名/删除——目录输入名字确认）
-- [x] 测试：provider 单测（list 排序与 symlink 标注 / read 分块拼接 / write 覆盖与追加 /
-      追加缺失文件拒绝（测试抓出实现偏差） / 穿越/symlink/根目录拒绝 / rename 校验 /
-      symlink 删除只删链接本身）、server API 转发与校验、下载流转发逐字节比对、
-      agent 离线 503
-- [x] 文档收尾 + todo.md 同步
+- [x] agent: `internal/agent/rpc/file_provider.go` (list/read/write/mkdir/delete/rename
+      + path safety + symlink rejection) + unconditional registration + file capability (all platforms)
+- [x] server: `api_files.go` (7 endpoints + both-end path validation + audit) + serveAPI `/agents/`
+      branch wiring + audit constants (ResourceFile + file_write/mkdir/delete/rename)
+- [x] web: Workbench "Files" tab + FileBrowser (breadcrumb/manual path jump/list/edit ≤1MB/
+      upload ≤10MB/download unlimited/rename/delete — directories confirmed by typing the name)
+- [x] tests: provider unit tests (list sorting and symlink marking / read chunk reassembly /
+      write overwrite and append / appending to a missing file rejected (the test caught an
+      implementation deviation) / traversal/symlink/root rejection / rename validation /
+      symlink deletion removes only the link itself), server API forwarding and validation,
+      byte-for-byte comparison of download stream forwarding, agent offline 503
+- [x] docs wrap-up + todo.md sync
 
-## 参考
+## References
 
-- 内部：[backup-design.md](./backup-design.md) M1.5（file.read 分块与下载流转发骨架来源）、
-  [stack-deploy-design.md](./stack-deploy-design.md)（Provider 注册模式）、
-  [probe-enhance-design.md](./probe-enhance-design.md)（审计与通知模式）、`todo.md` P1 文件管理器条目
-- 外部：[Filebrowser](https://github.com/filebrowser/filebrowser)（浏览交互范式）、
-  OWASP Path Traversal（双端校验与 symlink 策略）
+- Internal: [backup-design.md](/guide/backup-design) M1.5 (source of the file.read chunking and download
+  stream-forwarding skeleton), [stack-deploy-design.md](/guide/stack-deploy-design) (provider
+  registration pattern), [probe-enhance-design.md](/guide/probe-enhance-design) (audit and notification
+  patterns), `todo.md` P1 file manager item
+- External: [Filebrowser](https://github.com/filebrowser/filebrowser) (browsing interaction paradigm),
+  OWASP Path Traversal (both-end validation and symlink policy)

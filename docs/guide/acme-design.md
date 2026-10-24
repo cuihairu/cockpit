@@ -1,87 +1,86 @@
-# ACME 证书自动签发设计
-
-> 语言：**中文** ｜ [English](./acme-design.en.md)
-
-## 背景
-
-Cockpit 已具备三个可复用基础，证书「签发 + 存储 + 续期」是它们合流的自然落点：
-
-- **DNS 写路径**（`docs/guide/dns-design.md`）：server 直连 Cloudflare API，token 管理（config.yaml `dns.cloudflare.api_token` / env `CLOUDFLARE_API_TOKEN`）现成——DNS-01 challenge 的全部前提；
-- **巡检循环模式**（drift → smart → ddns 三轮验证）：ticker + Setting 动态间隔 + 真去重告警；
-- **证书观测**（`internal/cert` + `Certificate` 表）：probe 定期 TLS 探测回写到期/签发者，但**没有任何签发能力**，`Certificate` 是纯观测表。
-
-反向代理功能（proxy-design.md）的「证书签发联动」被明确标注等待本能力；DDNS 场景（家庭宽带域名）签好解析后，下一步就是 HTTPS 证书。
-
-## 决策
-
-- **D1 库选型 lego v4**（`github.com/go-acme/lego/v4`，MIT，v4.35.2 活跃维护）：纯库嵌入（`lego.NewClient` + `Certificate.Obtain`），DNS-01 全流程封装（TXT 下发、传播等待、授权轮询、取证书链），100+ DNS provider 开箱即用，账户注册/EAB 支持。否决备选：`x/crypto/acme/autocert`——绑定 `http.Server` 的 TLS 配置场景，DNS-01 需自行编排（等于半个自行开发）；`certmagic`——定位是托管 web server 的 TLS 全生命周期（缓存/OCSP/SNI 路由），对「签发+存储+展示」的控制台场景过重；`acmez`——太底层，lego 正是建在这类原语上的封装。
-
-- **D2 只做 DNS-01 challenge**：HTTP-01 / TLS-ALPN-01 要求 80/443 从公网可达——家庭宽带入站端口常被封（本项目的核心场景），且只有 DNS-01 支持泛域名（`*.example.com`）。DNS-01 只需 Zone.DNS Edit 权限，与 DNS 管理/DDNS **同一份 token** 即可，无需额外授权。
-
-- **D3 架构：server 侧直连**：与 DNS 管理/probe/DDNS 同款出站路径，agent 不参与。签发与续期都是 server 动作——证书要存 server 的 SQLite（见 D5），且 Cloudflare token 只在 server（dns-design D2/D7）。
-
-- **D4 DNS provider 与 CA 目录**：M1 用 lego 自带 `providers/dns/cloudflare`（`NewDNSProviderConfig` 直接吃 APIToken，复用 `s.dns` 同源 token；未配置 token 时创建/签发统一 503 + 引导文案，同 DNS 页模式）。CA 目录两档：`production`（Let's Encrypt 生产）与 `staging`（假证书，测试不触限频），per-证书可选，默认 staging（防误触生产限频，用户确认后切 production）。M2 扩展 DNSPod/阿里云时在 server 侧加 provider 工厂，lego 接口是现成扩展点。
-
-- **D5 数据模型（SQLite 两表）**：
-  - `AcmeAccount`（单行，ID=1）：`Email / PrivateKeyPEM（ECDSA P-256）/ RegistrationURI / CADirectory / CreatedAt`。首次签发时惰性注册（lego `Registration.Register`），账户 key 持久化——跨重启复用同一 ACME 账户（重复注册会触发账户数限频）。
-  - `AcmeCert`：`Domains（JSON 数组，首个为 primary）/ PrimaryDomain（索引）/ CADirectory / Status（pending|issued|failed）/ CertificatePEM / IssuerPEM / PrivateKeyPEM / ExpiresAt / RenewBeforeDays（默认 30）/ AutoRenew / LastRenewAt / LastStatus（ok|failed|never）/ LastError / CheckedAt`（观测字段复刻 DDNS 风格）。
-  - 证书与私钥存 SQLite：与面板数据同生命周期，server-backup（VACUUM INTO）自动覆盖；文件落盘留给 M2 部署联动按需导出。
-- **D6 签发流程**：`POST /acme/certs/{id}/issue` 同步执行——校验 token/账户 → lego `Obtain{Domains, Bundle:false}`（证书链与 issuer 分开存）→ 回写 `Status=issued / ExpiresAt（解析叶子证书 NotAfter）/ LastStatus / LastRenewAt` → **联动观测表**：upsert `Certificate`（`DomainName=primary`，`Issuer`，`ExpiresAt`，`Status=valid`，`Labels["source"]="acme"`），probe 的 TLS 探测对该域名继续独立观测，两层互补。同步等待 DNS 传播通常几秒~几十秒，M1 可接受（前端按钮 loading）；异步任务化（stack 模式）留给签发+部署联动的 M2。
-
-- **D7 续期巡检**：`acmeScanLoop` 复刻 drift/smart/ddns 模式；Setting `acme.scan_interval_seconds`，默认 3600，min 300，max 86400，`0 = 关闭`。扫描范围 `AutoRenew` 且 `Status ∈ {issued, failed}`：issued 判断 `ExpiresAt - now < RenewBeforeDays * 24h` 临期重签（重新 Obtain，全新证书覆盖旧 PEM）；failed 按 D8 节流后重试（否则一次失败证书就永远卡死）；pending 需用户手动首签（创建 ≠ 立即签发的语义预期）。失败置 `Status=failed + LastError` + `alert.CheckACME` 真去重 warning（title 按主域名，同 CheckDDNS 构）。
-
-- **D8 限频保护**：Let's Encrypt 生产限频（每注册域名每周 50 张、失败验证 5 次/小时/账户/主机名、重复证书 5 张/周）。M1 三道闸：a) 默认 staging（D4）；b) 签发失败节流——`LastRenewAt` 距今 < 1h 的证书巡检跳过重试（手动 issue 不节流，用户明确意图优先）；c) 传播 pre-check 由 lego 顺序 DNS 策略承担（查 authoritative NS，避免盲等固定时长）。
-
-- **D9 安全与审计边界**：账户 key、证书私钥**永不进** API 响应/日志/审计；列表与详情只回元数据；PEM 内容仅经下载端点出去：`GET /acme/certs/{id}/download?part=cert|issuer|key`——`key` 强制记审计（`acme_download_key`），`cert/issuer` 不记。审计：`acme_create / acme_update / acme_delete / acme_issue / acme_download_key`；巡检自动续期不记审计（同 ddns D9 则，`LastRenewAt` 已记录轨迹）。删除配置仅删本地记录，**不向 CA 吊销**（吊销需要账户 key 且语义上证书可能已部署他处）。
-
-- **D10 REST**（全部 `/api/acme` 前缀）：
-  - `GET /api/acme/certs` 列表；`POST /api/acme/certs` 创建（`domains[]` 逐个过 `dns.ValidateInput` 同规则、`ca` ∈ {staging, production}、`autoRenew`、`renewBeforeDays` 7~90）；`PUT /api/acme/certs/{id}` 更新；`DELETE /api/acme/certs/{id}` 删除
-  - `POST /api/acme/certs/{id}/issue` 立即签发/重签（同步，返回结果摘要）
-  - `GET /api/acme/certs/{id}/download?part=cert|issuer|key`（`text/plain` 附件）
-  - `GET/PUT /api/acme/account`（email 设置；PUT 时若账户已注册且 email 变更则更新注册）
-  - `GET/PUT /api/acme/config` 全局巡检间隔（与 `/api/drift/config` 等同构；0 = 关闭）
-
-- **D11 前端**：新页面 `/acme`「证书签发」（导航挂「资源」分组，紧跟「证书」观测项），页面结构照 DDNS Tab 模式：设置行（自动续期巡检开关 + 间隔分钟 + 新建按钮）+ 配置表（主域名+泛域名标记/CA 徽标（staging 橙色）/状态徽标（失败 Tooltip 错误）/到期时间+剩余天数/最后签发时间/操作（立即签发、下载下拉、编辑、删除））+ 新建/编辑 Modal（domains Tag 列表编辑、CA Select 默认 staging 带「测试用假证书」说明、自动续期 Switch、提前续期天数）+ email 账户设置（首次创建时内嵌在引导里）。未配置 token 时引导卡片（同 DNS 页文案，指出 ACME 与 DNS 管理共用 token）。
-
-- **D13 DNS provider 扩展：DNSPod / 阿里云（M2）**：lego provider 开箱即用（v4.35.2 源码核实：`dnspod.Config.LoginToken`（"ID,Token" 合并格式）、`alidns.Config.APIKey/SecretKey`），server 侧只差 provider 工厂与配置面。
-  - **配置**：`dns.provider` ∈ {空（=cloudflare，向后兼容）, dnspod, alidns}；凭据各走同源双通道——`dns.dnspod.login_token`（env `DNSPOD_LOGIN_TOKEN` 优先）、`dns.alidns.access_key` + `dns.alidns.secret_key`（env `ALIYUN_ACCESS_KEY` / `ALIYUN_ACCESS_KEY_SECRET` 优先，secret 不落 yaml 惯例同 cloudflare）。
-  - **issuer**：`NewLegoIssuer` 的单 token 闭包改为 `func() AcmeDNSConfig` 配置快照闭包（provider + 全部凭据）；`Issue()` 按快照构造对应 lego provider，未知 provider / 凭据缺失各报各的键名（替换 Cloudflare 专属的 errAcmeNoToken 文案）。
-  - **凭据就绪判定语义分叉**：DNS 管理页与 DDNS 仍 Cloudflare 专属（`dns.status.configured` 原样不动）；ACME 视角独立——`GET /api/acme/config` 响应新增 `dns: {provider, configured}`，issue 503 预检与巡检续期按 ACME provider 判定，错误文案报缺哪个键。
-  - **web**：引导卡片改读 acme config 的 `dns` 字段，未配置时按三种 provider 列配置方法。
-  - **测试**：provider 工厂表驱动（三家就绪/缺凭据/未知）；config defaults 的 env 覆盖；503 预检按 provider 分派。
-- **D12 校验面**：`domains[]` 非空、每个元素过与 DNS 记录名同规则的域名校验（允许 `*.` 前缀的泛域名，剥离后校验）；`renewBeforeDays` ∈ [7, 90]；`ca` 白名单；primary domain = domains[0]。token 未配置时 create/issue 返回 503（同 DNS 页 503 文案约定）。
-
-- **D14 签发后部署推送到 agent（M2，proxy 站点联动）**：proxy-design.md D7 的 https 站点 `tlsCert/tlsKey` 是 agent 本机绝对路径，M1 靠「工作台-文件上传」手动搬证书；证书存 server SQLite，续期后 agent 侧文件不会自更新——联动闭环 = 签发成功后把 PEM 推到 agent，nginx reload 即生效。
-  - **绑定模型（一对一，多目标已落地见下）**：`AcmeCert` 加 `DeployAgentID / DeployCertPath / DeployKeyPath`（空 = 未绑定）+ `LastDeployAt`（Unix 秒，0=从未）+ `LastDeployError`（空 = 最近一次成功）。绑定/解绑走既有 `PUT /api/acme/certs/{id}`（`acmeCertInput` 加三个可选字段，路径必须绝对路径，双端同规则）。
-  - **通道**：复用 `file.write`（base64 单块 + `truncate` 覆盖写；1MB 块上限对 PEM 富余）。私钥落盘权限：`file.write` 加可选 `mode` 参数，白名单 `{0600, 0644}`（缺省 0644 行为不变，向后兼容）——证书 0644、私钥 0600。唯一 agent 侧改动。
-  - **路径约定**：不强制，web 提供一键填充 `/etc/cockpit/certs/<primary>.crt.pem` / `.key.pem`；`/proxy` 页 https 表单提示该约定，nginx 站点路径直接引用。
-  - **触发**：① `runACMEIssue` 成功路径统一触发（手动 issue 与巡检续期共用）；② 手动立即部署 `POST /api/acme/certs/{id}/deploy`（审计 `acme_deploy`；未绑定 400、agent 离线 503）。推送失败不回滚签发成功状态，记 `LastDeployError`（web 红标 Tooltip），不产告警——巡检场景避免告警风暴，未部署状态页面可见。
-  - **server**：`deployAcmeCert(cert)` = 校验绑定 → agent 在线 → 两次 `CallAgent file.write`（cert 0644 / key 0600，`truncate=true`）→ 回写 `LastDeployAt/LastDeployError` → 审计 `acme_deploy`（details 含 agentID 与路径，不含 PEM）。
-  - **web**：配置 Modal 加「自动部署」区（在线 agent Select + 两路径输入 + 默认路径一键填充）；操作列「部署」按钮（绑定后可用）；部署状态红标 + Tooltip（时间/错误）。
-  - **测试**：agent `file.write` mode 白名单（0600/0644 过、其他拒、缺省不变）；deploy 端点（未绑定 400 / 离线 503 / 成功两次 RPC 往返 + 审计）；`runACMEIssue` 成功后自动推送；PUT 绑定更新。
-  - **多目标部署扩展（2026-10-12 已实现，决策 D-2026-10-12-3）**：绑定模型升级为一对多——新表 `AcmeDeployTarget`（`(cert_id, agent_id)` 唯一索引，`CertPath/KeyPath/LastDeployAt/LastDeployError`），上表一对一五列（`DeployAgentID/DeployCertPath/DeployKeyPath/LastDeployAt/LastDeployError`）弃用（列保留只为回滚安全，json 不再输出），migrate 时一次性幂等 backfill（有绑定的证书生成同内容 target 行并清空旧列）。API 入参改 `deployTargets[]`（≤8 个、agentId 必填、绝对路径、同 agent 去重），视图携带 `deployTargets[]`；手动部署端点语义：无目标 400、无任何在线目标 agent 503、**仅全部目标失败才 502**（部分成功 = 200，逐目标结果看 target 行 `LastDeployError`）；`deployAcmeCert` 逐目标 `file.write`（cert 0644 / key 0600、truncate）并逐目标回写状态；审计 `acme_deploy` details 为逐目标 `{agentId, certPath, keyPath, ok, error}`（不含 PEM）。续期成功后自动部署遍历全部目标。
+# ACME Automatic Certificate Issuance Design
 
 
-## 测试策略
+## Background
 
-lego 完整 ACME 流程需真实 CA（官方测试用 Pebble 外部进程），M1 单测不跑真流程——把「签发」抽成 `AcmeIssuer` 接口（`Issue(cert *storage.AcmeCert) (issued *IssuedResult{CertificatePEM, IssuerPEM, PrivateKeyPEM, ExpiresAt}, err error)`），server 依赖接口、生产实现包 lego、测试注入 fake（与 fakeDNSProvider 同构）：
+Cockpit already has three reusable foundations, and certificate "issuance + storage + renewal" is the natural convergence point of the three:
 
-- storage：两表 CRUD 往返；
-- API：校验（domains 空/坏域名/CA 白名单/renewBeforeDays 越界拒绝）、创建/更新/删除审计、download key 记审计且响应体为 PEM、issue 调用 issuer 并回写状态、token 未配置 503；
-- 巡检：临期续期 / 未临期跳过 / failed 后 1h 节流 / 失败告警真去重；
-- lego 集成（真签发）留给真实环境验收（staging 目录跑通一次）。
+- **DNS write path** (`docs/guide/dns-design.md`): the server calls the Cloudflare API directly; token management (config.yaml `dns.cloudflare.api_token` / env `CLOUDFLARE_API_TOKEN`) is ready — all the prerequisites for a DNS-01 challenge;
+- **Inspection loop pattern** (validated over three rounds: drift → smart → ddns): ticker + Setting-based dynamic interval + genuinely deduplicated alerts;
+- **Certificate observation** (`internal/cert` + `Certificate` table): probe periodically TLS-probes and writes back expiry/issuer, but there is **no issuance capability at all**; `Certificate` is a pure observation table.
 
-## 实现切分（M1，本任务）
+The reverse proxy feature (proxy-design.md)'s "certificate issuance linkage" was explicitly marked as waiting for this capability; in the DDNS scenario (home broadband domains), once resolution is set up, the next step is an HTTPS certificate.
 
-1. **docs**：本文档；
-2. **storage**：`acme.go`（AcmeAccount + AcmeCert CRUD）+ AutoMigrate + 测试；
-3. **server**：`acme_issuer.go`（lego 封装：账户惰性注册、cloudflare provider 构造、Obtain）+ `api_acme.go`（REST + 审计）+ `acme_scan.go`（巡检）+ `alert.CheckACME` + api.go 分发 + 测试（fake issuer）；
-4. **web**：/acme 页 + 路由/导航 + 类型 + api 方法 + build 通过。
+## Decisions
 
-## 验收清单（真实环境）
+- **D1 Library choice: lego v4** (`github.com/go-acme/lego/v4`, MIT, actively maintained at v4.35.2): pure library embedding (`lego.NewClient` + `Certificate.Obtain`), the whole DNS-01 flow encapsulated (TXT publication, propagation waiting, authorization polling, certificate chain retrieval), 100+ DNS providers out of the box, account registration/EAB support. Rejected alternatives: `x/crypto/acme/autocert` — bound to `http.Server` TLS configuration scenarios, DNS-01 must be orchestrated yourself (amounting to half a custom development); `certmagic` — positioned for full TLS lifecycle of a managed web server (caching/OCSP/SNI routing), too heavy for a console "issue + store + display" scenario; `acmez` — too low-level, lego is precisely an encapsulation built on such primitives.
 
-- [ ] staging 目录签发单域名证书成功，`/resources/certificates` 出现 `source=acme` 记录
-- [ ] 下载 cert/key 的 PEM 内容与签发一致，key 下载产生审计
-- [ ] 切 production 签发一张真证书，浏览器信任链验证通过
-- [ ] 把 `renewBeforeDays` 调到 90，等巡检轮触发自动续期，ExpiresAt 更新
-- [ ] 撤走 token 触发一次失败，告警只出现一条（真去重）
+- **D2 DNS-01 challenge only**: HTTP-01 / TLS-ALPN-01 require 80/443 reachable from the public internet — home broadband inbound ports are often blocked (this project's core scenario), and only DNS-01 supports wildcards (`*.example.com`). DNS-01 needs only the Zone.DNS Edit permission, and works with the **same token** as DNS management/DDNS, no extra authorization needed.
+
+- **D3 Architecture: server-side direct connection**: the same outbound path as DNS management/probe/DDNS; agents are not involved. Both issuance and renewal are server actions — certificates must be stored in the server's SQLite (see D5), and the Cloudflare token exists only on the server (dns-design D2/D7).
+
+- **D4 DNS provider and CA directory**: M1 uses lego's built-in `providers/dns/cloudflare` (`NewDNSProviderConfig` takes the APIToken directly, reusing the same-source token from `s.dns`; when no token is configured, creation/issuance uniformly return 503 + guidance text, same as the DNS page pattern). CA directory in two tiers: `production` (Let's Encrypt production) and `staging` (fake certificates, testing without hitting rate limits), per-certificate optional, default staging (to prevent accidentally hitting production rate limits; switch to production after user confirmation). M2 extends DNSPod/Alibaba Cloud by adding a provider factory on the server side; the lego interface is a ready-made extension point.
+
+- **D5 Data model (two SQLite tables)**:
+  - `AcmeAccount` (single row, ID=1): `Email / PrivateKeyPEM (ECDSA P-256) / RegistrationURI / CADirectory / CreatedAt`. Lazily registered at first issuance (lego `Registration.Register`), with the account key persisted — so the same ACME account is reused across restarts (repeated registration would trip the account-count rate limit).
+  - `AcmeCert`: `Domains (JSON array, the first is primary) / PrimaryDomain (indexed) / CADirectory / Status (pending|issued|failed) / CertificatePEM / IssuerPEM / PrivateKeyPEM / ExpiresAt / RenewBeforeDays (default 30) / AutoRenew / LastRenewAt / LastStatus (ok|failed|never) / LastError / CheckedAt` (observation fields replicate the DDNS style).
+  - Certificates and private keys stored in SQLite: same lifetime as the panel data, covered automatically by server-backup (VACUUM INTO); file export is left to M2's deployment linkage on demand.
+- **D6 Issuance flow**: `POST /acme/certs/{id}/issue` runs synchronously — validate token/account → lego `Obtain{Domains, Bundle:false}` (the certificate chain and issuer are stored separately) → write back `Status=issued / ExpiresAt (parse the leaf certificate's NotAfter) / LastStatus / LastRenewAt` → **link the observation table**: upsert `Certificate` (`DomainName=primary`, `Issuer`, `ExpiresAt`, `Status=valid`, `Labels["source"]="acme"`); probe's TLS probing continues to observe that domain independently, and the two layers complement each other. Synchronously waiting for DNS propagation is usually a few to a few tens of seconds, acceptable in M1 (frontend button loading); turning it into an async task (stack pattern) is left to M2's issuance + deployment linkage.
+
+- **D7 Renewal inspection**: `acmeScanLoop` replicates the drift/smart/ddns pattern; Setting `acme.scan_interval_seconds`, default 3600, min 300, max 86400, `0 = disabled`. Scan scope is `AutoRenew` with `Status ∈ {issued, failed}`: for issued, judge `ExpiresAt - now < RenewBeforeDays * 24h` to renew early (a fresh Obtain, the new certificate overwriting the old PEM); for failed, retry after the D8 throttle (otherwise one failed certificate would be stuck forever); pending requires a manual first issuance by the user (the semantic expectation that creating ≠ issuing immediately). On failure, set `Status=failed + LastError` and raise a genuinely deduplicated warning via `alert.CheckACME` (title by primary domain, same structure as CheckDDNS).
+
+- **D8 Rate-limit protection**: Let's Encrypt production limits (50 certificates per registered domain per week, 5 failed validations per hour per account/host name, 5 duplicate certificates per week). Three gates in M1: a) default staging (D4); b) issuance-failure throttling — certificates whose `LastRenewAt` is within 1h of now are skipped on inspection retry (manual issue is not throttled; an explicit user intent takes priority); c) the propagation pre-check is handled by lego's sequential DNS policy (querying authoritative NS, avoiding a blind fixed wait).
+
+- **D9 Security and audit boundary**: the account key and certificate private keys **never enter** API responses/logs/audit; lists and details return metadata only; PEM content leaves only via the download endpoint: `GET /acme/certs/{id}/download?part=cert|issuer|key` — `key` is always audited (`acme_download_key`), `cert/issuer` are not. Audit: `acme_create / acme_update / acme_delete / acme_issue / acme_download_key`; inspection-driven automatic renewal is not audited (same rule as ddns D9, `LastRenewAt` already records the trail). Deleting a config only removes the local record and **does not revoke with the CA** (revocation requires the account key and semantically the certificate may already be deployed elsewhere).
+
+- **D10 REST** (all under the `/api/acme` prefix):
+  - `GET /api/acme/certs` list; `POST /api/acme/certs` create (`domains[]` each validated by `dns.ValidateInput` under the same rules, `ca` ∈ {staging, production}, `autoRenew`, `renewBeforeDays` 7~90); `PUT /api/acme/certs/{id}` update; `DELETE /api/acme/certs/{id}` delete
+  - `POST /api/acme/certs/{id}/issue` issue/renew immediately (synchronous, returns a result summary)
+  - `GET /api/acme/certs/{id}/download?part=cert|issuer|key` (text/plain attachment)
+  - `GET/PUT /api/acme/account` (email settings; on PUT, if the account is already registered and the email changed, update the registration)
+  - `GET/PUT /api/acme/config` global inspection interval (isomorphic with `/api/drift/config` etc.; 0 = disabled)
+
+- **D11 Frontend**: new page `/acme` "certificate issuance" (navigation attached to the "resources" group, right after the "certificates" observation item), page structure following the DDNS tab pattern: a settings row (auto-renewal inspection switch + interval in minutes + a new button) + a config table (primary domain + wildcard marker / CA badge (staging in orange) / status badge (error tooltip on failure) / expiry time + days remaining / last issued time / actions (issue now, download dropdown, edit, delete)) + a new/edit Modal (domains Tag list editing, CA Select defaulting to staging with a "fake certificate for testing" note, auto-renewal Switch, renewal lead time in days) + email account settings (embedded in the onboarding flow at first creation). When no token is configured, a guidance card (same text as the DNS page, noting that ACME shares its token with DNS management).
+
+- **D13 DNS provider extension: DNSPod / Alibaba Cloud (M2)**: lego providers are ready out of the box (verified in the v4.35.2 source: `dnspod.Config.LoginToken` (merged "ID,Token" format), `alidns.Config.APIKey/SecretKey`); only the provider factory and the config surface are missing on the server side.
+  - **Configuration**: `dns.provider` ∈ {empty (=cloudflare, backwards compatible), dnspod, alidns}; credentials each go through the same dual channel — `dns.dnspod.login_token` (env `DNSPOD_LOGIN_TOKEN` takes priority), `dns.alidns.access_key` + `dns.alidns.secret_key` (env `ALIYUN_ACCESS_KEY` / `ALIYUN_ACCESS_KEY_SECRET` take priority, and the secret is not written to yaml by convention, same as cloudflare).
+  - **issuer**: change `NewLegoIssuer`'s single-token closure to a `func() AcmeDNSConfig` config-snapshot closure (provider + all credentials); `Issue()` builds the corresponding lego provider from the snapshot, and an unknown provider / missing credentials each report their own key name (replacing Cloudflare's dedicated errAcmeNoToken message).
+  - **Branching credentials-readiness semantics**: the DNS management page and DDNS remain Cloudflare-specific (`dns.status.configured` left as-is); the ACME perspective is independent — the `GET /api/acme/config` response gains `dns: {provider, configured}`, and the issue 503 pre-check plus inspection renewal judge by the ACME provider, with error text naming which key is missing.
+  - **web**: the guidance card reads the acme config's `dns` field, and when unconfigured lists the configuration method for each of the three providers.
+  - **Tests**: provider factory table-driven (all three ready / missing credentials / unknown); env overrides in config defaults; 503 pre-check dispatch by provider.
+- **D12 Validation surface**: `domains[]` non-empty, each element passing the same domain validation as DNS record names (wildcards with a `*.` prefix allowed, validated after stripping it); `renewBeforeDays` ∈ [7, 90]; `ca` allowlist; primary domain = domains[0]. When no token is configured, create/issue return 503 (same 503 message convention as the DNS page).
+
+- **D14 Post-issuance deployment push to the agent (M2, proxy site linkage)**: in proxy-design.md D7, an https site's `tlsCert/tlsKey` are absolute local paths on the agent, and M1 relies on "workbench - file upload" to move certificates by hand; certificates live in the server's SQLite, so after renewal the agent-side files do not self-update — the closed loop is to push the PEM to the agent after successful issuance, after which an nginx reload takes effect.
+  - **Binding model (one-to-one; multi-target is now landed, see below)**: add `DeployAgentID / DeployCertPath / DeployKeyPath` to `AcmeCert` (empty = unbound) + `LastDeployAt` (Unix seconds, 0=never) + `LastDeployError` (empty = the most recent succeeded). Binding/unbinding goes through the existing `PUT /api/acme/certs/{id}` (`acmeCertInput` gains three optional fields; paths must be absolute, with the same rules on both sides).
+  - **Channel**: reuse `file.write` (base64 single block + `truncate` overwrite; the 1MB block cap is generous for PEM). Private key on-disk permissions: add an optional `mode` parameter to `file.write`, allowlisted to `{0600, 0644}` (default 0644 behavior unchanged, backwards compatible) — certificate 0644, private key 0600. The only agent-side change.
+  - **Path convention**: not enforced; web provides one-click fill-in of `/etc/cockpit/certs/<primary>.crt.pem` / `.key.pem`; the https form on the `/proxy` page hints at the convention, and nginx site paths reference it directly.
+  - **Triggers**: (1) the success path of `runACMEIssue` triggers uniformly (shared by manual issue and inspection renewal); (2) manual immediate deployment `POST /api/acme/certs/{id}/deploy` (audit `acme_deploy`; 400 when unbound, 503 when the agent is offline). A push failure does not roll back the successful issuance state; `LastDeployError` is recorded (web red badge with tooltip), and no alert is raised — inspection scenarios avoid alert storms, and the undeployed state is visible on the page.
+  - **server**: `deployAcmeCert(cert)` = validate binding → agent online → two `CallAgent file.write` calls (cert 0644 / key 0600, `truncate=true`) → write back `LastDeployAt/LastDeployError` → audit `acme_deploy` (details include the agentID and paths, no PEM).
+  - **web**: add an "auto-deploy" section to the config Modal (online agent Select + two path inputs + one-click fill of the default paths); a "deploy" button in the actions column (available once bound); deployment status as a red badge + tooltip (time/error).
+  - **Tests**: agent `file.write` mode allowlist (0600/0644 pass, others rejected, default unchanged); the deploy endpoint (400 unbound / 503 offline / success with two RPC round trips + audit); automatic push after `runACMEIssue` succeeds; PUT binding update.
+  - **Multi-target deployment extension (implemented 2026-10-12, decision D-2026-10-12-3)**: the binding model is upgraded to one-to-many — new table `AcmeDeployTarget` (unique index on `(cert_id, agent_id)`, with `CertPath/KeyPath/LastDeployAt/LastDeployError`), and the five one-to-one columns above (`DeployAgentID/DeployCertPath/DeployKeyPath/LastDeployAt/LastDeployError`) are deprecated (columns retained only for rollback safety, no longer emitted in json), with a one-time idempotent backfill at migrate time (certificates with bindings get a target row of the same content and the old columns are cleared). The API input changes to `deployTargets[]` (≤8, agentId required, absolute paths, deduplicated per agent), and the view carries `deployTargets[]`; manual deployment endpoint semantics: 400 with no targets, 503 with no online target agent, **502 only when all targets fail** (partial success = 200, per-target results are in the target row's `LastDeployError`); `deployAcmeCert` does `file.write` per target (cert 0644 / key 0600, truncate) and writes back status per target; the audit `acme_deploy` details are per-target `{agentId, certPath, keyPath, ok, error}` (no PEM). Automatic deployment after a successful renewal walks all targets.
+
+
+## Testing strategy
+
+lego's full ACME flow requires a real CA (the official test setup uses the external Pebble process), so M1 unit tests do not run the real flow — extract "issuance" into an `AcmeIssuer` interface (`Issue(cert *storage.AcmeCert) (issued *IssuedResult{CertificatePEM, IssuerPEM, PrivateKeyPEM, ExpiresAt}, err error)`); the server depends on the interface, the production implementation wraps lego, and tests inject a fake (isomorphic with fakeDNSProvider):
+
+- storage: CRUD round trips for the two tables;
+- API: validation (empty domains / bad domain / CA allowlist / out-of-range renewBeforeDays rejected), create/update/delete audit, download key audited with a PEM response body, issue calls the issuer and writes back status, 503 when no token is configured;
+- Inspection: early renewal / skipping when not near expiry / 1h throttle after failed / genuinely deduplicated failure alerts;
+- The lego integration (real issuance) is left to real-environment acceptance (one run against the staging directory).
+
+## Implementation split (M1, this task)
+
+1. **docs**: this document;
+2. **storage**: `acme.go` (AcmeAccount + AcmeCert CRUD) + AutoMigrate + tests;
+3. **server**: `acme_issuer.go` (lego wrapper: lazy account registration, cloudflare provider construction, Obtain) + `api_acme.go` (REST + audit) + `acme_scan.go` (inspection) + `alert.CheckACME` + api.go dispatch + tests (fake issuer);
+4. **web**: /acme page + route/navigation + types + api method + build passing.
+
+## Acceptance checklist (real environment)
+
+- [ ] Issuing a single-domain certificate against the staging directory succeeds, and a `source=acme` record appears in `/resources/certificates`
+- [ ] Downloaded cert/key PEM content matches what was issued, and downloading the key produces an audit record
+- [ ] Switch to production and issue a real certificate; the browser trust chain verifies
+- [ ] Set `renewBeforeDays` to 90, wait for the inspection round to trigger automatic renewal, ExpiresAt updates
+- [ ] Remove the token to trigger a failure; only one alert appears (genuine deduplication)

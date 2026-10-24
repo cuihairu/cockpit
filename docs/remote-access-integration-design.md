@@ -1,202 +1,201 @@
-# 远控三协议第三方集成设计：VNC / SSH / RDP 统一 Guacamole 栈
+# Remote Access Three-Protocol Third-Party Integration Design: A Unified VNC / SSH / RDP Guacamole Stack
 
-> 语言：**中文** ｜ [English](./remote-access-integration-design.en.md)
 
-> 2026-09-25 立项。方向对齐另一仓库：VNC / SSH / RDP 三协议的远控统一集成
-> 第三方方案，不再各自维护自行开发协议链路。RDP / VNC 已在
-> [remote-desktop-guacamole-design](./remote-desktop-guacamole-design.md)
-> 落地（Guacamole 路线）；本文补齐 **SSH 接入同一栈**，并给出三协议的
-> 选型总览。旧设计「不做：SSH/telnet 走 Guacamole」一条自本文起**废止**
-> （见 D7），其余决策不受影响。
+> Initiated 2026-09-25. Direction aligned with the other repository: the remote access integration
+> of the three protocols VNC / SSH / RDP is unified on third-party solutions, no longer
+> maintaining separate self-developed protocol chains. RDP / VNC already landed in
+> [remote-desktop-guacamole-design](/remote-desktop-guacamole-design)
+> (the Guacamole route); this document completes **SSH joining the same stack** and provides a
+> selection overview for the three protocols. The old design's "not doing: SSH/telnet via
+> Guacamole" item is **repealed** as of this document
+> (see D7); the remaining decisions are unaffected.
 >
-> 2026-10-07 更新：旧自研桌面链路（grdp / noVNC 直连）已从代码库整体删除
->（D-2026-10-07-1），本文涉及旧链路的对比描述仅作历史背景。
+> 2026-10-07 update: the old self-developed desktop chains (grdp / noVNC direct connections) have
+> been deleted from the codebase entirely
+> (D-2026-10-07-1); the comparison descriptions of the old chains in this document serve only as historical background.
 
-## 现状（2026-09-25 复核）
+## Current state (reviewed 2026-09-25)
 
-| 协议 | 前端入口 | 通道 | 协议终结方（第三方库） | 状态 |
+| Protocol | Frontend entry | Channel | Protocol terminator (third-party library) | Status |
 | --- | --- | --- | --- | --- |
-| RDP | GuacamoleModal | `/api/remote/guacamole` → guacd | guacd（FreeRDP）+ guacamole-common-js | 已集成 |
-| VNC | GuacamoleModal | 同上（protocol=vnc） | guacd（libvncclient）+ guacamole-common-js | 已集成 |
-| SSH | TerminalModal（xterm.js） | `/api/remote/terminal` → agent | agent 内 `x/crypto/ssh`（Go 库，非远控专用栈） | 自行开发链路 |
-| Telnet | TerminalModal | 同上 | agent raw TCP | 维持 |
-| （兜底） | VNCModal（noVNC）/ DesktopModal（grdp） | agent 通道 | noVNC / grdp | 2026-09-24 拍板保留并存期；**组件已于 D-2026-10-07-1 删除**（现状表为历史快照） |
+| RDP | GuacamoleModal | `/api/remote/guacamole` → guacd | guacd (FreeRDP) + guacamole-common-js | Integrated |
+| VNC | GuacamoleModal | Same as above (protocol=vnc) | guacd (libvncclient) + guacamole-common-js | Integrated |
+| SSH | TerminalModal (xterm.js) | `/api/remote/terminal` → agent | `x/crypto/ssh` inside agent (a Go library, not a remote-access-specific stack) | Self-developed chain |
+| Telnet | TerminalModal | Same as above | agent raw TCP | Unchanged |
+| (fallback) | VNCModal (noVNC) / DesktopModal (grdp) | agent channel | noVNC / grdp | Kept for a coexistence period per the 2026-09-24 decision; **the components were deleted by D-2026-10-07-1** (this table is a historical snapshot) |
 
-缺口只有一项：**SSH 未走第三方远控栈**。VNC/RDP 的痛点论述（自行开发协议
-链路的维护成本、渲染/输入/剪贴板自担）见旧设计文档「痛点」章节，SSH
-同理——且 SSH 是三协议中唯一还留在自行开发链路上的。
+There is only one gap: **SSH does not ride the third-party remote-access stack**. For the
+pain-point discussion of VNC/RDP (the maintenance cost of self-developed protocol chains,
+carrying rendering/input/clipboard ourselves), see the "pain points" chapter of the old design
+document; the same applies to SSH — and SSH is the only one of the three protocols still
+sitting on a self-developed chain.
 
-## 选型
+## Selection
 
-### 三协议客户端选型表
+### Client selection table for the three protocols
 
-| 协议 | 选型 | 底层引擎 | 接入点 |
+| Protocol | Selection | Underlying engine | Entry point |
 | --- | --- | --- | --- |
-| RDP | guacd 的 rdp 插件 | FreeRDP | `/api/remote/guacamole`（protocol=rdp） |
-| VNC | guacd 的 vnc 插件 | libvncclient | `/api/remote/guacamole`（protocol=vnc） |
-| SSH | guacd 的 ssh 插件 | libssh2 | `/api/remote/guacamole`（protocol=ssh，新增） |
-| 浏览器渲染/输入 | guacamole-common-js | canvas / keyboard / clipboard | GuacamoleModal（三协议复用同一组件） |
+| RDP | guacd's rdp plugin | FreeRDP | `/api/remote/guacamole` (protocol=rdp) |
+| VNC | guacd's vnc plugin | libvncclient | `/api/remote/guacamole` (protocol=vnc) |
+| SSH | guacd's ssh plugin | libssh2 | `/api/remote/guacamole` (protocol=ssh, new) |
+| Browser rendering/input | guacamole-common-js | canvas / keyboard / clipboard | GuacamoleModal (all three protocols reuse the same component) |
 
-**一句话理由**：guacd 一个守护进程覆盖三协议（外加 telnet 可选），浏览器
-侧 common-js 一个客户端全包；会话/票据/审计/出口策略仍在 Go 后端
-（旧设计 D4 的边界不变），guacd 无状态、无用户概念。
+**One-sentence rationale**: one guacd daemon covers all three protocols (plus optional
+telnet), and on the browser side common-js is the single client that covers everything;
+session/ticket/audit/egress policy stays in the Go backend (the boundary from old design
+D4 is unchanged), and guacd is stateless with no concept of users.
 
-### 备选方案为什么不用
+### Why the alternatives are not used
 
-| 方案 | 覆盖 | 不用理由 |
+| Option | Coverage | Reason for rejection |
 | --- | --- | --- |
-| **noVNC**（现 VNCModal） | 仅 VNC（RFB） | 只覆盖 VNC，RDP/SSH 无着落；与 RDP 栈无法共享渲染/输入/录制代码。保留为兜底，不再扩展。 |
-| **x/crypto/ssh + xterm.js**（现状 agent 通道） | 仅 SSH | 这是「Go 库 + 终端模拟器」的自组链路而非远控方案：host key（TOFU）、保活、录制、协议演进全部自担。作为 agent 侧兜底保留，不作为主入口。 |
-| **WebSSH / sshwifty / ttyd** 等独立终端网关 | 仅 SSH | 多部署一个服务、多一套账号体系；票据/审计/出口策略要二次打通。guacd 已在部署内。 |
-| **server 直连 crypto/ssh 自行开发网关** | 仅 SSH | 等于把 agent 通道平移到 server，仍要自行开发录制与协议维护；与「集成第三方方案」方向相反。 |
-| **Teleport** | SSH/K8s/DB | 企业级全家桶（自带用户库/证书体系/Proxy），个人 homelab 场景过重。 |
-| **Apache Guacamole 完整版**（含 Java web 层） | RDP/VNC/SSH/Telnet | 旧设计 D1 已否决：Java 层与 Cockpit 的 Go 后端职责重叠（认证/会话/审计都在 Go 侧）。只取 guacd + common-js。 |
-| **Myrtille / SparkView** | RDP 为主 | 商业许可或活跃度不足，协议覆盖不全。 |
+| **noVNC** (today's VNCModal) | VNC only (RFB) | Covers only VNC, leaving RDP/SSH unresolved; cannot share rendering/input/recording code with the RDP stack. Kept as a fallback, not extended further. |
+| **x/crypto/ssh + xterm.js** (today's agent channel) | SSH only | This is a self-assembled "Go library + terminal emulator" chain, not a remote-access solution: host key (TOFU), keepalive, recording, and protocol evolution are all on us. Kept as the agent-side fallback, not the main entry. |
+| Standalone terminal gateways such as **WebSSH / sshwifty / ttyd** | SSH only | One more service to deploy and one more account system; tickets/audit/egress policy would need a second integration pass. guacd is already in the deployment. |
+| **server dialing crypto/ssh directly as a self-developed gateway** | SSH only | Equivalent to shifting the agent channel onto the server; recording and protocol maintenance would still be self-developed — the opposite of the "integrate third-party solutions" direction. |
+| **Teleport** | SSH/K8s/DB | An enterprise-grade bundle (ships its own user store/certificate system/Proxy), too heavy for a personal homelab. |
+| **Full Apache Guacamole** (including the Java web layer) | RDP/VNC/SSH/Telnet | Already rejected by old design D1: the Java layer overlaps in responsibility with Cockpit's Go backend (auth/session/audit all live on the Go side). We take only guacd + common-js. |
+| **Myrtille / SparkView** | Mostly RDP | Commercial licensing or insufficient activity, incomplete protocol coverage. |
 
-## 协议与数据流（SSH 新增段）
+## Protocol and data flow (new SSH segment)
 
 ```
-浏览器                    Go 网关                         guacd                  目标
+Browser                    Go gateway                      guacd                  Target
    │  WSS /api/remote/guacamole?ticket=…                     │                    │
-   │  (Sec-WebSocket-Protocol 兜底)                          │                    │
+   │  (Sec-WebSocket-Protocol fallback)                      │                    │
    │ ────────────────────────────────────────────────────────>│  TCP select "ssh"  │
-   │                          参数名列表响应 <──────────────── │                    │
-   │                          size 1280x800 + connect ──────> │ ── libssh2 ──────> │ :22
-   │                          (username/password/private-key) │    认证 + PTY      │
-   │ <────────────── 指令流（终端图块/剪贴板/sync）─────────── │ <───────────────── │
-   │ ─────────────── 键盘/鼠标/剪贴板指令（key/mouse/clip）──> │ ────────────────> │
+   │                     parameter name list response <────── │                    │
+   │                     size 1280x800 + connect ───────────> │ ── libssh2 ──────> │ :22
+   │                     (username/password/private-key)     │    auth + PTY      │
+   │ <───────────── instruction stream (terminal tiles/clipboard/sync) ───────── │ <───────────────── │
+   │ ────────────── keyboard/mouse/clipboard instructions (key/mouse/clip) ───> │ ────────────────> │
 ```
 
-- **浏览器 ↔ server 段**：WebSocket 文本帧承载 Guacamole 指令流，与
-  RDP/VNC 完全同一管道；网关不解析指令内容（握手指令构造除外）。
-- **server ↔ guacd 段**：`select ssh` → 参数列表 → `size` + `connect`。
-  `size` 的像素宽高由 guacd 的 ssh 插件按默认字体度量换算成终端列/行
-  （connect 参数不传 width/height——官方 ssh 参数集无此项）。
-- **guacd ↔ 目标段**：libssh2 拨 `hostname:port`，认证用 connect 指令
-  携带的凭据；终端输出编码为 Guacamole 指令流（图块）推回。
+- **Browser ↔ server segment**: WebSocket text frames carry the Guacamole instruction stream over exactly the same pipe as RDP/VNC; the gateway does not parse instruction content (except for constructing the handshake instructions).
+- **server ↔ guacd segment**: `select ssh` → parameter list → `size` + `connect`. The pixel width/height of `size` is converted by guacd's ssh plugin into terminal columns/rows based on the default font metrics (the connect parameters carry no width/height — the official ssh parameter set has no such item).
+- **guacd ↔ target segment**: libssh2 dials `hostname:port` and authenticates with the credentials carried in the connect instruction; terminal output is encoded as a Guacamole instruction stream (tiles) and pushed back.
 
-### connect 参数映射（D2）
+### connect parameter mapping (D2)
 
-| ticket 参数 | guacd connect 参数 | 说明 |
+| ticket parameter | guacd connect parameter | Description |
 | --- | --- | --- |
-| `username` | `username` | 直传（上游已统一处理） |
-| `password` | `password` | 直传；口令认证 |
-| `private_key` | `private-key` | **PEM 原文直传**（不 base64）；私钥认证，优先于口令 |
-| `domain` | 不传 | SSH 无域概念（RDP 专用） |
-| `width`/`height` | 不传 | 字符终端；尺寸经隧道层 `size` 指令（guacd 自行换算列/行） |
+| `username` | `username` | Passed through directly (upstream already handles it uniformly) |
+| `password` | `password` | Passed through directly; password authentication |
+| `private_key` | `private-key` | **PEM passed through as-is** (not base64); private key authentication, takes precedence over password |
+| `domain` | Not sent | SSH has no concept of a domain (RDP-specific) |
+| `width`/`height` | Not sent | Character terminal; size travels via the tunnel-layer `size` instruction (guacd converts to columns/rows itself) |
 
-## 与现有远控链路衔接
+## Integration with the existing remote-access chain
 
-全部复用，零新增基础设施：
+Everything is reused, zero new infrastructure:
 
-1. **票据**：`POST /api/remote/tickets` 的 `private_key` 字段早已存在
-   （agent 通道 SSH 私钥用），Guacamole 路线直接复用；票据仍为 5 分钟
-   一次性、内存态，凭据不进 URL/日志/审计。
-2. **出口策略**：`matchRemoteEgress`（allow-list / CIDR / per-agent），
-   agent_id 作为策略锚点与审计归属——与 RDP/VNC 语义一致。guacd 只拨本机回环中继
-   （`internal/server/guac_relay.go`），真实目标由 agent 从自己网络位拨出，
-   agent 在数据路径上（2026-10-02 落地，修正旧设计 D4「guacd 直拨」的假设）。
-3. **审计**：`auditRemoteStart/End` 全协议同款；SSH 经 guacd 的会话同样
-   记 `Protocol: ssh`，凭据（口令/私钥）绝进审计详情。
-4. **录制**：guacd 的 ssh 插件同样支持 `recording-path/recording-name`
-   → `.guac` 收集链路（`collectGuacRecording`，Format=guac）原样生效，
-   SSH 会话录制与 RDP/VNC 同一 `/recordings` 页回放。
-5. **权限**：`terminal:write`（RBAC `terminal` 资源域，`/api/remote/*` 统一归并，见 `internal/server/rbac.go`），入口按钮的
-   PermGuard 不因通道切换而变。
+1. **Tickets**: the `private_key` field of `POST /api/remote/tickets` has long existed
+   (used for agent-channel SSH private keys) and the Guacamole route reuses it directly; tickets remain one-shot, in-memory, valid for 5 minutes,
+   and credentials never enter URLs/logs/audit.
+2. **Egress policy**: `matchRemoteEgress` (allow-list / CIDR / per-agent), with agent_id as the policy anchor and audit attribution — semantically identical to RDP/VNC. guacd dials only the local loopback relay
+   (`internal/server/guac_relay.go`); the real target is dialed by the agent from its own network position, so the agent sits on the data path (landed 2026-10-02, correcting old design D4's "guacd dials directly" assumption).
+3. **Audit**: `auditRemoteStart/End` is the same across protocols; SSH sessions via guacd likewise record `Protocol: ssh`, and credentials (password/private key) never enter audit details.
+4. **Recording**: guacd's ssh plugin likewise supports `recording-path/recording-name` → the `.guac` collection chain (`collectGuacRecording`, Format=guac) works as-is, and SSH session recordings play back on the same `/recordings` page as RDP/VNC.
+5. **Permissions**: `terminal:write` (the RBAC `terminal` resource domain, `/api/remote/*` is merged into it uniformly, see `internal/server/rbac.go`); the entry button's
+   PermGuard does not change when the channel switches.
 
-## 决策
+## Decisions
 
-- **D1 协议白名单扩 `ssh`**：`handleGuacamoleWebSocket` 放行 rdp/vnc/ssh；
-  **telnet 不进**（方向只提三协议；telnet 无加密，维持 agent 通道现状）。
-- **D2 connect 参数映射**：见上表；私钥 PEM 原文直传（真机验收修正
-  2026-09-30：settings.h 注释 "encoded as base64" 与实现矛盾——
-  guac_user_parse_args_string → key_alloc 零解码，base64 文本进 libssh2
-  PEM_read 必失败；A/B 实测原文两格式认证全过、base64 全败）。
-- **D3 前端入口切换**：web 默认 SSH 入口从 TerminalModal 切到
-  GuacamoleModal（Workbench SSH Tab 与 Agents 页统一分流），与 RDP/VNC
-  一致；SSH Tab 保留「内置终端（经 Agent）」次入口作兜底。
-- **D4 agent 通道降级为兜底、不删**：与 grdp 路线同一「并存期」纪律——
-  TerminalModal 保留（telnet 仍走它；guacd 不可达时 SSH 有退路；移动端
-  继续用它）。
-- **D5 录制/审计/出口策略复用**：见上节，零新增配置键。
-- **D6 移动端不动**：mobile 的 SSH 终端走 `/api/remote/terminal` +
-  xterm.dart 独立链路，本次不改（Flutter 端无 guacamole 客户端，后续
-  单独评估）。
-- **D7 旧决策废止**：remote-desktop-guacamole-design.md「不做：SSH/telnet
-  走 Guacamole」一条废止（telnet 维持不做，SSH 接入）；其余「不做」
-  （音频 UI、文件传输、SFTP 等）不变。
+- **D1 protocol whitelist extended with `ssh`**: `handleGuacamoleWebSocket` admits rdp/vnc/ssh; **telnet is not admitted** (the direction names only the three protocols; telnet has no encryption, so the agent channel stays as-is).
+- **D2 connect parameter mapping**: see the table above; the private key PEM is passed through as-is (corrected during real-machine acceptance on
+  2026-09-30: the settings.h comment "encoded as base64" contradicts the implementation —
+  guac_user_parse_args_string → key_alloc does zero decoding, so base64 text fed into libssh2
+  PEM_read always fails; A/B live tests showed raw text passing authentication in both formats while base64 failed across the board).
+- **D3 frontend entry switch**: the web's default SSH entry switches from TerminalModal to
+  GuacamoleModal (the Workbench SSH Tab and the Agents page route uniformly), consistent with
+  RDP/VNC; the SSH Tab keeps the "built-in terminal (via Agent)" secondary entry as a fallback.
+- **D4 agent channel downgraded to fallback, not deleted**: the same "coexistence period" discipline as the grdp route —
+  TerminalModal is retained (telnet still goes through it; SSH has a way out when guacd is unreachable;
+  mobile keeps using it).
+- **D5 recording/audit/egress policy reuse**: see the previous section; zero new configuration keys.
+- **D6 mobile untouched**: mobile's SSH terminal rides the independent `/api/remote/terminal` +
+  xterm.dart chain and is not changed this time (the Flutter side has no guacamole client; to be
+  evaluated separately later).
+- **D7 old decision repealed**: the "not doing: SSH/telnet
+  via Guacamole" item of remote-desktop-guacamole-design.md is repealed (telnet remains not done, SSH joins); the remaining "not doing"
+  items (audio UI, file transfer, SFTP, etc.) are unchanged.
 
-### 体验差异（如实记录）
+### Experience differences (recorded as-is)
 
-guacd 的 ssh 终端是**服务端渲染的图块流**（guacamole 指令编码的位图），
-不是 xterm.js 的字符网格：带宽占用更高、字体渲染由 guacd 决定。统一栈
-（同一组件、同一录制、同一部署）的收益大于该差异；对终端渲染要求高
-的场景用「内置终端（经 Agent）」兜底入口。此差异是 D3/D4 并存的
-根本原因，不是过渡态。
+guacd's ssh terminal is a **server-rendered tile stream** (bitmaps encoded as guacamole
+instructions), not xterm.js's character grid: higher bandwidth usage, and font rendering is
+decided by guacd. The gains of the unified stack (same component, same recording, same
+deployment) outweigh this difference; for scenarios that demand high-fidelity terminal
+rendering, use the "built-in terminal (via Agent)" fallback entry. This difference is the
+root reason D3/D4 coexist — it is not a transitional state.
 
-### D8：SSH 尺寸跟窗口走、剪贴板只对终端开反向
+### D8: SSH size follows the window; reverse clipboard enabled for the terminal only
 
-「接入同一栈」不等于「三协议行为一致」——两处按协议分岔，都是语义决定的
-结果而非实现偷懒：
+"Joining the same stack" does not mean "the three protocols behave identically" — two spots
+diverge per protocol, both dictated by semantics rather than implementation laziness:
 
-| | RDP / VNC（桌面） | SSH（终端） |
+| | RDP / VNC (desktop) | SSH (terminal) |
 | --- | --- | --- |
-| `size` 指令语义 | 「切远端桌面分辨率」 | 「终端占多大像素 → guacd 换算列/行」 |
-| 谁来发 | 工具栏分辨率下拉（用户显式选） | `ResizeObserver` 监听 display 容器 + 150ms 去抖，自动跟窗口/全屏变形 |
-| 工具栏分辨率下拉 | 显示 | **隐藏**（尺寸跟窗口走，固定档位会与之打架） |
-| 剪贴板反向（浏览器 → 远端） | 不接（维持既有的仅正向，桌面路径零行为变更） | 接：终端区域 Ctrl+V（`paste` 事件，自带数据不需 Clipboard 授权）+ 工具栏「粘贴到远程」按钮（`navigator.clipboard.readText()`，读失败提示走 Ctrl+V） |
+| `size` instruction semantics | "switch the remote desktop resolution" | "how many pixels the terminal occupies → guacd converts to columns/rows" |
+| Who sends it | Toolbar resolution dropdown (explicit user choice) | `ResizeObserver` watching the display container + 150ms debounce, automatically following window/fullscreen resizing |
+| Toolbar resolution dropdown | Shown | **Hidden** (size follows the window; fixed presets would fight it) |
+| Reverse clipboard (browser → remote) | Not wired (keeps the existing forward-only behavior; zero behavior change on the desktop path) | Wired: Ctrl+V in the terminal area (`paste` event, carries its own data, no Clipboard permission needed) + the toolbar "Paste to remote" button (`navigator.clipboard.readText()`; on read failure the prompt says to use Ctrl+V) |
 
-桌面侧不自动发 `size` 的理由：那会让「窗口多大桌面就多大」，全屏时把
-用户精心选定的分辨率改掉——与既有行为不符。终端侧必须自动发的理由：
-`vim` / `top` 这类全屏程序按列/行重绘，不跟随就会停在建连时的旧列行数、
-右侧留黑边。
+Why the desktop side does not send `size` automatically: that would make "the desktop as big
+as the window" and, on fullscreen, override the resolution the user carefully chose —
+inconsistent with existing behavior. Why the terminal side must send it automatically:
+full-screen programs like `vim` / `top` redraw by columns/rows; without following they would
+stay at the column/row count from connection time and leave a black band on the right.
 
-反向剪贴板用 `Client.createClipboardStream('text/plain')` +
-`Guacamole.StringWriter`（common-js 官方写法）；Go 网关是字节管道，
-`clipboard` 指令原样透传到 guacd，**后端零改动**。纯文本单层
-（富格式见「不做」）。
+The reverse clipboard uses `Client.createClipboardStream('text/plain')` +
+`Guacamole.StringWriter` (the official common-js approach); the Go gateway is a byte pipe,
+the `clipboard` instruction is passed through to guacd as-is, **zero backend changes**.
+Plain text, single layer (rich formats: see "not doing").
 
-### 实现补记
+### Implementation notes
 
-- `GuacamoleModal` 里 `useConnectionTimeout` 的 `clear` 曾解构成
-  `clearTimeout`，**遮蔽了全局 `clearTimeout`**——尺寸同步去抖第一版就
-  被它坑了（连续两次 resize 发了两条 `size`）。已改名 `clearConnTimeout`。
-  组件内还有真实定时器，别再把 hook 的 clear 叫 `clearTimeout`。
-- `RemoteToolbar` 的「粘贴到远程」按钮补了 `aria-label`（此前 icon-only
-  无可访问名，测试也只能靠按钮序号定位）。
+- In `GuacamoleModal`, the `clear` of `useConnectionTimeout` was once destructured as
+  `clearTimeout`, **shadowing the global `clearTimeout`** — the first version of the
+  size-sync debounce was bitten by it (two consecutive resizes sent two `size`
+  instructions). Renamed to `clearConnTimeout`.
+  There are also real timers inside the component; never name the hook's clear `clearTimeout` again.
+- The "Paste to remote" button of `RemoteToolbar` got an `aria-label` (it was icon-only
+  with no accessible name, and tests could only locate it by button index).
 
-## 测试与验收
+## Testing and acceptance
 
-**单测（本次落地）**：
+**Unit tests (landed in this change)**:
 
-- Go：`guacConnectArgs` ssh 分支（username/password/private-key PEM 原文
-  直传、无 width/height/domain；私钥 base64 曾为缺陷，真机验收修正
-  2026-09-30）；WS 白名单 ssh 放行、telnet 拒绝；
-  全链路（covGuacdServer）ssh 握手指令断言。
-- web：GuacamoleModal ssh 表单（用户名必填、口令/私钥可选、无私钥时
-  不传 private_key）；Workbench SSH 分流到 GuacamoleModal、内置终端
-  次入口仍开 TerminalModal。
-- web（D8 补齐）：ssh 尺寸同步（容器 resize 去抖后发 `sendSize` 末次
-  尺寸、0 尺寸跳过、RDP 不挂 ResizeObserver、卸载时 effect cleanup）；
-  剪贴板反向（终端 paste / 工具栏按钮、readText 失败兜底）；SSH 隐藏
-  分辨率下拉而 RDP 保留；Agents 页 ssh 分流断言随 D3 更新。
-- `web/src/test/setup.ts` 加 ResizeObserver 可观测桩（jsdom 无实现），
-  触发器 `window.__triggerResize(w, h)`。
+- Go: the ssh branch of `guacConnectArgs` (username/password/private-key PEM passed through raw,
+  no width/height/domain; private-key base64 was once a defect, corrected during real-machine acceptance
+  on 2026-09-30); WS whitelist admits ssh and rejects telnet;
+  full-chain (covGuacdServer) assertions on the ssh handshake instructions.
+- web: the GuacamoleModal ssh form (username required, password/private key optional, no
+  private_key sent when there is no private key); Workbench SSH routes to GuacamoleModal, and the built-in-terminal
+  secondary entry still opens TerminalModal.
+- web (completed under D8): ssh size sync (send `sendSize` with the last size after the
+  container-resize debounce, skip on size 0, no ResizeObserver attached for RDP, effect cleanup
+  on unmount);
+  reverse clipboard (terminal paste / toolbar button, readText failure fallback); SSH hides
+  the resolution dropdown while RDP keeps it; Agents page ssh routing assertions updated with D3.
+- `web/src/test/setup.ts` adds an observable ResizeObserver stub (jsdom has no implementation),
+  with trigger `window.__triggerResize(w, h)`.
 
-**真机验收（已于 2026-09-30 通过，见 `docs/guide/acceptance-checklist.md`「远控三协议」节）**：
+**Real-machine acceptance (passed on 2026-09-30; see the "remote access three protocols" section of `docs/guide/acceptance-checklist.md`)**:
 
-- 真 guacd + 真 sshd：口令认证 / 私钥认证各一次；
-- 终端渲染（vim/top 全屏程序）、`size` 变更换算列/行；
-- SSH 会话 `.guac` 录制收集与 `/recordings` 回放；
-- 剪贴板双向（浏览器 ↔ sshd）。
+- Real guacd + real sshd: one pass each of password authentication / private key authentication;
+- Terminal rendering (vim/top full-screen programs), `size` changes converting to columns/rows;
+- SSH session `.guac` recording collection and `/recordings` playback;
+- Bidirectional clipboard (browser ↔ sshd).
 
-## 不做（后续版本）
+## Not doing (future versions)
 
-- **telnet 经 guacd**：方向只提三协议；telnet 维持 agent 通道。
-- **SFTP / Guacamole Filesystem drive**：与 file-manager 路线重叠，
-  维持旧设计「不做」。
-- **删除 agent SSH 通道 / TerminalModal / VNCModal / DesktopModal**：
-  并存期纪律，等 Guacamole 方案真机验收后统一定夺。
-- **移动端 SSH 切 guacamole**：见 D6。
-- **guacd ssh 专属参数**（font-name/color-scheme/timezone/backspace 等）：
-  最小参数集起步，有需求再加（参数是 connect 指令追加项，零迁移）。
+- **telnet via guacd**: the direction names only the three protocols; telnet stays on the agent channel.
+- **SFTP / Guacamole Filesystem drive**: overlaps with the file-manager route;
+  keeps the old design's "not doing".
+- **Deleting the agent SSH channel / TerminalModal / VNCModal / DesktopModal**:
+  coexistence-period discipline; to be decided together after the Guacamole approach passes real-machine acceptance.
+- **Switching mobile SSH to guacamole**: see D6.
+- **guacd ssh-specific parameters** (font-name/color-scheme/timezone/backspace, etc.):
+  start with the minimal parameter set and add on demand (parameters are append items of the connect instruction, zero migration).

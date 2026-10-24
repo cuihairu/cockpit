@@ -1,84 +1,83 @@
-# Agent 出口与 SD-WAN 能力边界
+# Agent Egress and SD-WAN Capability Boundaries
 
-> 语言：**中文** ｜ [English](./agent-egress-sdwan.en.md)
 
-本文记录 Cockpit 当前 Agent 作为内网访问出口的实际能力，以及与完整 SD-WAN 的差距。结论以当前代码实现为准。
+This document records the actual capabilities of Cockpit's Agent as an intranet access egress, and the gap to full SD-WAN. Conclusions are based on the current code implementation.
 
-## 结论
+## Conclusion
 
-当前 Agent 已具备“通过某个在线 Agent 访问其网络可达目标”的基础能力，但还不是 SD-WAN。它更接近应用层远控、端口代理和堡垒机通道。
+The current Agent already has the base capability of "accessing targets reachable in a certain online Agent's network through that Agent", but it is not SD-WAN. It is closer to application-layer remote control, port proxying, and a bastion-channel.
 
-如果目标是“选一个 Agent 作为出点，访问内网某台机器的 SSH/RDP/VNC”，现有架构可以支撑一部分。如果目标是“一个网段都通过某个 Agent 透明路由，像 SD-WAN 一样接入”，当前还不具备。
+If the goal is "pick an Agent as an egress point to access SSH/RDP/VNC on some intranet machine", the existing architecture can support part of it. If the goal is "an entire subnet routed transparently through a certain Agent, joining like SD-WAN", it is not yet available.
 
-## 已具备能力
+## Capabilities Already Present
 
-### Agent 连接内网 TCP 目标
+### Agent Connecting to Intranet TCP Targets
 
-Server 可以向 Agent 发送 `proxy_new` 消息，Agent 收到后连接目标 `host:port`，并通过 `proxy_data` 双向转发数据。只要 Agent 所在网络能访问目标地址，Server 就可以经由该 Agent 建立应用层通道。
+The Server can send a `proxy_new` message to an Agent; on receipt, the Agent connects to the target `host:port` and forwards data bidirectionally via `proxy_data`. As long as the network the Agent sits in can reach the target address, the Server can establish an application-layer channel through that Agent.
 
-关键实现：
+Key implementation:
 
-- `internal/proxy/handler.go`：Agent 端通过 `net.DialTimeout("tcp", target, ...)` 连接目标。
-- `internal/proxy/mgr/manager.go`：Server 端可监听本地端口，将客户端连接转发到指定 Agent。
-- `internal/server/api_remote.go`：远程终端入口通过 ticket 创建到 Agent 的代理连接。
+- `internal/proxy/handler.go`: the Agent side connects to the target via `net.DialTimeout("tcp", target, ...)`.
+- `internal/proxy/mgr/manager.go`: the Server side can listen on a local port and forward client connections to a specified Agent.
+- `internal/server/api_remote.go`: the remote terminal entry point creates the proxy connection to the Agent via a ticket.
 
-### 桌面远控（RDP/VNC/SSH，Guacamole）
+### Desktop Remote Control (RDP/VNC/SSH, Guacamole)
 
-RDP/VNC/SSH 桌面统一走 Guacamole 隧道：浏览器 `GuacamoleModal` 连 `/api/remote/guacamole`，Server 把 guacamole-common-js 指令转成 `guac:` 前缀的 `proxy_new/proxy_data` 发给 Agent，Agent 只做到 guacd 的 TCP 中继，协议由 guacd 终结（RDP 走 FreeRDP、VNC 走 libvncclient）。无特殊构建标签要求；自研 grdp 与 noVNC 直连路径已删除（D-2026-10-07-1）。
+RDP/VNC/SSH desktops all go through the Guacamole tunnel: the browser's `GuacamoleModal` connects to `/api/remote/guacamole`, the Server converts guacamole-common-js commands into `proxy_new/proxy_data` with the `guac:` prefix for the Agent, the Agent only performs TCP relay to guacd, and the protocol is terminated by guacd (RDP via FreeRDP, VNC via libvncclient). No special build tags required; the in-house grdp and noVNC direct-connect paths have been removed (D-2026-10-07-1).
 
-关键实现：
+Key implementation:
 
-- `internal/server/api_guacamole.go`：ticket 校验、`guac:` 指令编解码与字节中继。
-- `web/src/components/GuacamoleModal/index.tsx`：guacamole-common-js 渲染与输入。
+- `internal/server/api_guacamole.go`: ticket validation, `guac:` command encode/decode, and byte relay.
+- `web/src/components/GuacamoleModal/index.tsx`: guacamole-common-js rendering and input.
 
-### 固定端口代理
+### Fixed-Port Proxy
 
-ProxyManager 支持在 Server 侧监听端口，并通过某个 Agent 转发到目标服务。当前实际监听地址固定为 `127.0.0.1:<remotePort>`，这是安全默认，避免无意公网暴露。
+ProxyManager supports listening on a port on the Server side and forwarding to a target service through a certain Agent. The current actual listen address is fixed to `127.0.0.1:<remotePort>`, which is a safe default avoiding accidental public exposure.
 
-这适合本机工具或前置反向代理接入，不等于自动对公网发布内网服务。
+This suits local tooling or a fronting reverse proxy joining in; it does not mean automatically publishing intranet services to the public internet.
 
-## 当前缺口
+## Current Gaps
 
-### 不是完整 SD-WAN
+### Not Full SD-WAN
 
-当前没有实现以下能力：
+The following capabilities are not currently implemented:
 
-- TUN/TAP 虚拟网卡
-- L3 路由转发
-- 子网路由表下发
-- NAT、iptables 或 nftables 管理
-- CIDR 级访问控制
-- UDP 代理真实转发
-- 多 Agent 路径选择、链路质量探测和故障切换
+- TUN/TAP virtual network interfaces
+- L3 routing/forwarding
+- Subnet routing table distribution
+- NAT, iptables, or nftables management
+- CIDR-level access control
+- Real UDP proxy forwarding
+- Multi-Agent path selection, link quality probing, and failover
 
-仓库中有 WireGuard / ZeroTier / Tailscale 能力检测（`internal/agent/detector/overlay.go`，任一可用即报 `overlay` capability），但这些只是能力检测，不是隧道建立或路由管理；Cloudflare Tunnel 与路由信息探测未实现。
+The repository has WireGuard / ZeroTier / Tailscale capability detection (`internal/agent/detector/overlay.go`, reporting the `overlay` capability if any is available), but these are only capability detection, not tunnel establishment or routing management; Cloudflare Tunnel and routing-information probing are not implemented.
 
-### 不支持完整的“网段以 Agent 为出口”策略模型
+### No Full "Subnet Egress via Agent" Policy Model
 
-远控白名单现在已经支持主机名、IP 和 CIDR，并且 `remote_control.egress` 已支持按 `agent_id + allowed_targets + allowed_ports` 做最小出口限制。但它仍不会从 inventory 自动派生 allow-list，也不具备多 Agent 路由选择、优先级、故障切换和动态路径探测。
+The remote-control whitelist now supports hostnames, IPs, and CIDRs, and `remote_control.egress` already supports minimal egress restriction by `agent_id + allowed_targets + allowed_ports`. But it still does not derive allow-lists automatically from inventory, nor does it have multi-Agent routing selection, priority, failover, or dynamic path probing.
 
-关键实现：
+Key implementation:
 
 - `internal/server/remote_audit.go`
-- `config/cockpit.yaml` 的 `remote_control.allowed_targets`
+- `remote_control.allowed_targets` in `config/cockpit.yaml`
 
-### Web SSH 已是完整 SSH 客户端
+### Web SSH Is Already a Complete SSH Client
 
-TerminalModal（浏览器 xterm WebSocket）的 SSH 链路：Agent 端 `internal/proxy/ssh_session.go` 实现完整 SSH client（握手、认证、加密、PTY 分配、Shell），由 `internal/proxy/handler.go` 在建连时调用；Server 只编排 ticket、审计与 WebSocket 中转，不碰协议栈。
+The SSH path of the TerminalModal (browser xterm WebSocket): the Agent-side `internal/proxy/ssh_session.go` implements a complete SSH client (handshake, authentication, encryption, PTY allocation, shell), called by `internal/proxy/handler.go` at connection time; the Server only orchestrates tickets, auditing, and WebSocket relay, not touching the protocol stack.
 
-因此当前 Web SSH 已具备完整协议能力，不再是缺口；剩余工作在 ACL、错误反馈与审计在两条路径上的统一。
+Therefore the current Web SSH already has full protocol capability and is no longer a gap; the remaining work is unifying ACL, error feedback, and auditing across the two paths.
 
-### UDP 代理未真正落地
+### UDP Proxy Not Actually Landed
 
-**已拒收（D-2026-10-08-2）**：API 显式拒绝 `proxyType=udp`（返回 400），仅接受 `tcp`。存储层仍保留字段但写入固定为 `tcp`。UDP 代理需单独实现连接建模、会话超时、包边界与返回路径，未纳入当前规划。
+**Rejected (D-2026-10-08-2)**: the API explicitly refuses `proxyType=udp` (returns 400), accepting only `tcp`. The storage layer still keeps the field but writes are fixed to `tcp`. A UDP proxy requires separate connection modeling, session timeouts, packet boundaries, and return paths; it is not in the current plan.
 
-## 建议路线
+## Suggested Roadmap
 
-### 第一阶段：Agent Egress Gateway
+### Phase 1: Agent Egress Gateway
 
-优先实现“某个 Agent 可作为某些主机或网段的远控出口”，不要一开始自行开发完整 SD-WAN。
+Prioritize implementing "a certain Agent can serve as the remote-control egress for certain hosts or subnets"; do not start by developing a full SD-WAN in-house.
 
-建议配置模型：
+Suggested configuration model:
 
 ```yaml
 remote_control:
@@ -92,67 +91,67 @@ remote_control:
         - 5900
 ```
 
-当前已落地：
+Already landed:
 
-- `remote_control.allowed_targets` 支持 CIDR。
-- `remote_control.egress` 支持按 Agent 约束目标和端口。
-- ticket 创建时会校验 `agent_id + host + port` 是否匹配策略。
-- 审计日志记录命中的出口 Agent、目标 IP、端口和协议（`RemoteSessionDetails.Egress`）。
-- **多策略命中规则已明确（D-2026-10-12-2）**：同一 Agent 配置多条 `egress[]` 时，按「任一策略同时放行目标与端口即放行」合并判定，与配置顺序无关；不跨策略拼凑（A 策略放行的目标 × B 策略放行的端口不构成放行）。Agent 未出现在任何策略中时，拒绝文案指向 `remote_control.egress`（补 Agent 级策略）；目标出现在某策略但 (目标, 端口) 组合不被任何策略覆盖时，拒绝文案指向 `allowed_ports`。
+- `remote_control.allowed_targets` supports CIDR.
+- `remote_control.egress` supports constraining targets and ports per Agent.
+- Ticket creation validates whether `agent_id + host + port` matches the policy.
+- Audit logs record the matched egress Agent, target IP, port, and protocol (`RemoteSessionDetails.Egress`).
+- **Multi-policy matching rules are now defined (D-2026-10-12-2)**: when one Agent has multiple `egress[]` entries, matching is combined as "released if any single policy releases both target and port at the same time", independent of configuration order; no cross-policy assembly (a target released by policy A × a port released by policy B does not constitute a release). When an Agent does not appear in any policy, the refusal text points to `remote_control.egress` (add an Agent-level policy); when the target appears in a policy but the (target, port) combination is not covered by any policy, the refusal text points to `allowed_ports`.
 
-后续建议：
+Suggested follow-up:
 
-- 如果需要透明组网，再引入专用数据平面。
+- If transparent networking is needed, introduce a dedicated data plane.
 
-该阶段能满足大部分“通过 Agent 访问内网 SSH/RDP/VNC”的需求，同时保持实现简单。
+This phase satisfies most of the "access intranet SSH/RDP/VNC through an Agent" requirement while keeping the implementation simple.
 
-### 第二阶段：补齐协议级远控
+### Phase 2: Completing Protocol-Level Remote Control
 
-协议级远控已由 Guacamole 栈统一落地：RDP/VNC/SSH 桌面经 guacd 终结，浏览器不自行实现协议栈；Agent 不做协议终结、只做 TCP 中继，构建产物无特殊标签要求。
+Protocol-level remote control has already been unified via the Guacamole stack: RDP/VNC/SSH desktops are terminated by guacd, the browser does not implement a protocol stack itself; the Agent does not terminate protocols, only TCP relay, with no special tag requirements on build artifacts.
 
-SSH 另有内置终端兜底路径：Agent 端用 `x/crypto/ssh`（`internal/proxy/ssh_session.go`，`ssh_provider.go` 仅提供默认密钥）完成握手、认证和 PTY 转发，Server 只负责编排、审计和 WebSocket 中转。
+SSH has an additional built-in terminal fallback path: the Agent side uses `x/crypto/ssh` (`internal/proxy/ssh_session.go`, `ssh_provider.go` only supplies the default key) to complete handshake, authentication, and PTY forwarding; the Server is only responsible for orchestration, auditing, and WebSocket relay.
 
-剩余工作是 ACL、错误反馈和审计在两条路径上的统一，而不是再造协议客户端。
+The remaining work is unifying ACL, error feedback, and auditing across the two paths, not building another protocol client.
 
-### 第三阶段：端口发布
+### Phase 3: Port Publishing
 
-如果需要本地工具直接访问，例如 `ssh user@server -p 2222` 进入 Agent 后面的机器，应在 ProxyManager 中显式建模监听地址和暴露策略。
+If local tools need direct access, for example `ssh user@server -p 2222` to reach a machine behind an Agent, the ProxyManager should explicitly model the listen address and exposure policy.
 
-建议新增字段：
+Suggested new fields:
 
-- `bindAddress`：默认 `127.0.0.1`。
-- `allowedSources`：来源 IP/CIDR allow-list。
-- `publicBind`：只有管理员显式允许时才可监听 `0.0.0.0`。
+- `bindAddress`: defaults to `127.0.0.1`.
+- `allowedSources`: an IP/CIDR allow-list of sources.
+- `publicBind`: only listen on `0.0.0.0` when an admin explicitly permits it.
 
-不要把当前固定 `127.0.0.1` 直接改成 `0.0.0.0`，否则会扩大暴露面。
+Do not simply change the current fixed `127.0.0.1` to `0.0.0.0`, which would widen the exposure surface.
 
-### 第四阶段：真 SD-WAN 集成
+### Phase 4: True SD-WAN Integration
 
-如果目标是真正透明三层组网，建议集成成熟方案，而不是在 Cockpit 内自行开发完整数据平面。
+If the goal is genuinely transparent L3 networking, it is recommended to integrate a mature solution rather than develop a full data plane inside Cockpit.
 
-可选方向：
+Possible directions:
 
-- WireGuard：Cockpit 负责配置分发、节点注册、状态监控和审计。
-- Headscale/Tailscale：Cockpit 作为控制台集成节点、ACL 和服务入口。
-- Cloudflare Tunnel：适合应用层服务发布，不适合完整三层网段互通。
+- WireGuard: Cockpit handles configuration distribution, node registration, state monitoring, and auditing.
+- Headscale/Tailscale: Cockpit acts as a console integrating nodes, ACLs, and service entries.
+- Cloudflare Tunnel: suited for application-layer service publishing, not for full L3 subnet interconnect.
 
-Cockpit 更适合作为控制面和运维入口，数据平面交给成熟隧道或 VPN 实现。
+Cockpit is better suited as a control plane and ops entry point, with the data plane delegated to a mature tunnel or VPN implementation.
 
-## 能力矩阵
+## Capability Matrix
 
-| 目标 | 当前状态 | 说明 |
+| Goal | Current state | Notes |
 | --- | --- | --- |
-| Agent 访问其网络可达的单个 TCP 目标 | 基础具备 | 通过 `proxy_new` 和 `proxy_data` 转发 |
-| VNC 浏览器直连 | 基本具备 | 经 Guacamole（guacd 终结 VNC），Agent 仅 `guac:` TCP 中继 |
-| RDP 浏览器直连 | 基本具备 | 经 Guacamole（guacd 终结 RDP），无特殊构建标签 |
-| 浏览器真正 SSH 登录 | 基本具备 | Guacamole SSH 桌面；Agent 内置 `x/crypto/ssh` 终端兜底 |
-| 本地 SSH 客户端经 Server 端口转发 | 架构可支持 | 需要补监听策略和产品化入口 |
-| 一个网段以某个 Agent 为出口 | 部分支持 | 已支持 CIDR allow-list 和 per-agent egress policy，但仍不是透明路由 |
-| 真 SD-WAN / 透明三层组网 | 当前不支持 | 建议集成 WireGuard 或 Headscale/Tailscale |
+| Agent accessing a single TCP target reachable in its network | Basically available | Forwarded via `proxy_new` and `proxy_data` |
+| VNC browser direct connect | Basically available | Via Guacamole (guacd terminates VNC), Agent only `guac:` TCP relay |
+| RDP browser direct connect | Basically available | Via Guacamole (guacd terminates RDP), no special build tags |
+| True browser SSH login | Basically available | Guacamole SSH desktop; Agent built-in `x/crypto/ssh` terminal fallback |
+| Local SSH client via Server port forwarding | Architecturally supportable | Needs listen policy and a productized entry point |
+| A subnet egressing via a certain Agent | Partially supported | CIDR allow-list and per-agent egress policy already supported, but still not transparent routing |
+| True SD-WAN / transparent L3 networking | Not supported currently | Integrate WireGuard or Headscale/Tailscale |
 
-## 设计原则
+## Design Principles
 
-- KISS：先做 Agent Egress Gateway，解决远控和运维访问，不直接自行开发 L3 数据平面。
-- YAGNI：只有明确需要透明组网时，再引入 WireGuard/Headscale 等数据平面。
-- DRY：远控、VNC、端口代理应共享同一套目标校验和审计逻辑。
-- SOLID：Server 负责策略、ticket、审计和编排；Agent 负责连接目标和协议执行；不要让 Agent 直接承担全局策略判断。
+- KISS: do the Agent Egress Gateway first, solving remote control and ops access, rather than developing an L3 data plane in-house.
+- YAGNI: only introduce WireGuard/Headscale or similar data planes when transparent networking is clearly needed.
+- DRY: remote control, VNC, and port proxying should share the same target validation and auditing logic.
+- SOLID: the Server handles policy, tickets, auditing, and orchestration; the Agent handles connecting to targets and protocol execution; do not make the Agent bear global policy decisions directly.

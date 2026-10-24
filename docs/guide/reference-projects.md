@@ -1,195 +1,194 @@
-# 参考项目对比与借鉴
+# Reference Project Comparison and Takeaways
 
-> 语言：**中文** ｜ [English](./reference-projects.en.md)
 
-本文记录 Cockpit 与同类开源项目的对比分析，用于功能规划和设计决策。基于 2026-09 的公开资料整理，链接见文末来源。
+This document records comparative analyses of Cockpit against similar open-source projects, used for feature planning and design decisions. Compiled from public sources as of 2026-09; links in the sources section at the end.
 
-Cockpit 的定位是**个人混合基础设施控制台**，四条主线：
+Cockpit is positioned as a **personal hybrid infrastructure console**, with four main lines:
 
-1. Git-first CMDB（inventory YAML → SQLite）
-2. Agent 主动出站 WebSocket（NAT 友好）
-3. 运行态监控 + 告警 + 健康探测
-4. Web 控制台（终端/桌面/VNC 远控 + Docker 管理）
+1. Git-first CMDB (inventory YAML → SQLite)
+2. Agent-initiated outbound WebSocket (NAT friendly)
+3. Runtime monitoring + alerts + health probing
+4. Web console (terminal/desktop/VNC remote control + Docker management)
 
-按能力域选取 7 个对标项目。每个项目给出优缺点，并区分**可参考**（直接照做的具体做法）与**可借鉴**（吸收的设计理念）。
+Seven benchmark projects were selected by capability domain. For each project we give pros and cons, distinguishing **directly adoptable** (concrete practices to copy) from **worth borrowing** (design ideas to absorb).
 
-2026-10 的延伸调研（监控面板六家 + 探活采集路线裁决，含真机截图）见 运维开源方案调研。
+For the extended 2026-10 research (six monitoring dashboards + the liveness-collection route verdict, with live screenshots) see [Ops Open-Source Solutions Survey](/research/ops-oss-survey).
 
-## 监控域：Beszel
+## Monitoring Domain: Beszel
 
-[henrygd/beszel](https://github.com/henrygd/beszel) — MIT 协议，Go 编写，hub + agent 架构，与 Cockpit 的 Server + Agent 同构。2026 年已是 homelab / 小型 VPS 集群监控的主流选择。
+[henrygd/beszel](https://github.com/henrygd/beszel) — MIT licensed, written in Go, hub + agent architecture, structurally identical to Cockpit's Server + Agent. As of 2026 it is the mainstream choice for homelab / small VPS cluster monitoring.
 
-**优点**
+**Pros**
 
-- 极轻量：每个被监控服务器上 agent 仅约 23MB RAM
-- 单二进制部署，分钟级跑起来
-- Docker 容器级 stats、历史数据、告警、通知推送齐全
-- PocketBase 底座，运维简单
+- Extremely lightweight: the agent takes only ~23MB RAM on each monitored server
+- Single-binary deployment, up and running in minutes
+- Docker container-level stats, historical data, alerts, and notification push all complete
+- PocketBase foundation, simple to operate
 
-**缺点**
+**Cons**
 
-- 只做监控：无 CMDB、无远控、无管理动作、无资源视图
-- 数据模型固定，扩展性有限
+- Monitoring only: no CMDB, no remote control, no management actions, no resource views
+- Fixed data model, limited extensibility
 
-**可借鉴**
+**Worth borrowing**
 
-- Agent 资源占用是硬指标：Cockpit Agent 应建立内存/CPU 基线测量，避免膨胀
-- 历史指标的紧凑存储方案（Cockpit 用 SQLite，可研究其降采样策略）
-- "开箱即用"的部署体验：一条命令跑起来，默认配置即可用
+- Agent resource usage is a hard metric: the Cockpit Agent should establish memory/CPU baseline measurements to avoid bloat
+- Compact storage for historical metrics (Cockpit uses SQLite; its downsampling strategy is worth studying)
+- The "works out of the box" deployment experience: one command to run, usable with default configuration
 
-## 多机容器管理：Komodo
+## Multi-Machine Container Management: Komodo
 
-[Komodo (komo.do)](https://komo.do/docs/intro) — Core + Periphery 架构，与 Cockpit 的 Server + Agent 完全同构，是最值得研究的多机管理参照。
+[Komodo (komo.do)](https://komo.do/docs/intro) — Core + Periphery architecture, fully identical in shape to Cockpit's Server + Agent, the most worthwhile multi-machine management reference to study.
 
-**优点**
+**Pros**
 
-- **Git-to-deploy 工作流**：compose.yml 存 Git 仓库，变更自动部署到目标服务器
-- Build 管道：镜像构建与部署一体化
-- "自动化程序"（Procedures）：把常用运维动作编排成可复用过程
-- 单 Core 管理多 Docker 主机
+- **Git-to-deploy workflow**: compose.yml lives in a Git repository; changes deploy automatically to target servers
+- Build pipeline: image build and deployment integrated
+- "Procedures": orchestrating common ops actions into reusable processes
+- A single Core manages multiple Docker hosts
 
-**缺点**
+**Cons**
 
-- 依赖 MongoDB，对个人单机场景偏重
-- 只管容器：不做 CMDB、远控、桌面接入
+- Depends on MongoDB, heavy for a personal single-machine scenario
+- Containers only: no CMDB, remote control, or desktop access
 
-**可借鉴**
+**Worth borrowing**
 
-- 直接对标路线图 P1"应用部署"：Compose 栈从 Git 拉取 + 触发 up/down 的模式
-- "自动化程序"概念：Cockpit 已有 RPC 链路 + probe，把"重启栈 + 清理镜像 + 健康探测"编排成可复用过程成本低
+- A direct benchmark for roadmap P1 "app deployment": the pattern of pulling a Compose stack from Git + triggering up/down
+- The "Procedures" concept: Cockpit already has the RPC path + probes, so orchestrating "restart stack + clean up images + health probe" into a reusable process is cheap
 
-## 容器面板：Portainer / Dockge
+## Container Panels: Portainer / Dockge
 
-[Portainer vs Dockge 对比](https://talos.tools/compare/portainer-vs-dockge)、[OneUptime 2026 对比](https://oneuptime.com/blog/post/2026-03-20-portainer-vs-dockge/view)
+[Portainer vs Dockge comparison](https://talos.tools/compare/portainer-vs-dockge), [OneUptime 2026 comparison](https://oneuptime.com/blog/post/2026-03-20-portainer-vs-dockge/view)
 
 | | Portainer | Dockge |
 | --- | --- | --- |
-| 优点 | 多主机/Swarm/K8s、企业治理、生态成熟（约 50MB 内存） | compose-file-first 哲学、文件即真相、单机简单直观 |
-| 缺点 | 商业化趋重、部分闭源 | 单机局限、多机能力弱 |
+| Pros | Multi-host/Swarm/K8s, enterprise governance, mature ecosystem (~50MB memory) | compose-file-first philosophy, file as the source of truth, simple and intuitive for a single machine |
+| Cons | Growing commercial heft, partially closed source | Single-machine limitation, weak multi-machine capability |
 
-**可参考**
+**Directly adoptable**
 
-- Compose Stack 的 UI 交互蓝本：编辑器 + 状态总览 + up/down 按钮 + 日志入口一屏完成。Cockpit 做 P1 应用部署页时可直接参照此布局
-- Dockge 的 compose-file-first：YAML 文件本身是配置源头，UI 是视图——与 Cockpit 的 Git-first 理念一致
+- The UI interaction blueprint of the Compose Stack: editor + status overview + up/down buttons + log entry completed on one screen. When Cockpit builds the P1 app deployment page it can follow this layout directly
+- Dockge's compose-file-first: the YAML file itself is the configuration source, the UI is a view — consistent with Cockpit's Git-first philosophy
 
-## 远控网关：Apache Guacamole
+## Remote Access Gateway: Apache Guacamole
 
-[Apache Guacamole](https://guacamole.apache.org/) — clientless 远程桌面网关标杆，浏览器直接开 VNC/RDP/SSH。
+[Apache Guacamole](https://guacamole.apache.org/) — the clientless remote desktop gateway benchmark; the browser opens VNC/RDP/SSH directly.
 
-**优点**
+**Pros**
 
-- guacd 协议翻译层把协议处理与 Web 层解耦，架构清晰
-- 会话录制、剪贴板/文件传输通道
-- 连接管理、双因素认证成熟
+- The guacd protocol translation layer decouples protocol handling from the web layer, a clean architecture
+- Session recording, clipboard/file transfer channels
+- Mature connection management and two-factor authentication
 
-**缺点**
+**Cons**
 
-- Java 技术栈重，需要单独维护 guacd 进程
-- 连接是静态配置的，与 Cockpit 的动态 inventory 理念相反
+- Heavy Java stack, requires maintaining a separate guacd process
+- Connections are statically configured, contrary to Cockpit's dynamic inventory philosophy
 
-**可借鉴**
+**Worth borrowing**
 
-- **会话录制**：Cockpit 审计目前记录会话开始/结束，可增加终端输出录制作为审计补强
-- 文件传输通道：路线图 P1"文件管理器"之外，远控侧的文件进出能力补充
+- **Session recording**: Cockpit audits currently record session start/end; terminal output recording could be added as an audit reinforcement
+- File transfer channel: beyond roadmap P1's "file manager", a supplement for file ingress/egress on the remote-control side
 
-## 访问安全：Teleport
+## Access Security: Teleport
 
-Teleport（[与 Guacamole 的社区对比](https://www.reddit.com/r/selfhosted/comments/1im5ioy/how_to_connect_to_sshrdp_web_based_with_teleport/)）— 身份为中心的访问平台。
+Teleport ([community comparison with Guacamole](https://www.reddit.com/r/selfhosted/comments/1im5ioy/how_to_connect_to_sshrdp_web_based_with_teleport/)) — an identity-centric access platform.
 
-**优点**
+**Pros**
 
-- 证书短时效访问、RBAC、完整会话录制
-- Access request 审批流：高危操作需审批放行
-- 会话粒度审计明细
+- Short-lived certificate access, RBAC, complete session recording
+- Access request approval flow: high-risk operations require approval to proceed
+- Session-granularity audit detail
 
-**缺点**
+**Cons**
 
-- 企业级复杂度与资源占用，个人场景过重
+- Enterprise-grade complexity and resource usage, too heavy for personal scenarios
 
-**可参考**
+**Directly adoptable**
 
-- Cockpit 的短时效 ticket + `Sec-WebSocket-Protocol` 认证链路与其思路一致，**设计已验证正确**
+- Cockpit's short-lived ticket + `Sec-WebSocket-Protocol` authentication chain follows the same thinking; **the design is validated as correct**
 
-**可借鉴**
+**Worth borrowing**
 
-- 按会话粒度的审计明细（命令级记录是远期方向）
-- `allow_arbitrary_target` 这类高危开关可升级为"单次审批放行"模式
+- Session-granularity audit detail (command-level recording is a long-term direction)
+- High-risk switches like `allow_arbitrary_target` could be upgraded to a "one-time approval" mode
 
-## CMDB：NetBox
+## CMDB: NetBox
 
-[NetBox Labs：source of truth 理念](https://netboxlabs.com/blog/the-long-war-against-configuration-chaos/)、[NetBox GitOps 集成](https://netodata.io/netbox-integration-connecting-dcim-ipam-with-enterprise-infrastructure/) — DCIM/IPAM 领域最成熟的 declarative source of truth。
+[NetBox Labs: the source of truth philosophy](https://netboxlabs.com/blog/the-long-war-against-configuration-chaos/), [NetBox GitOps integration](https://netodata.io/netbox-integration-connecting-dcim-ipam-with-enterprise-infrastructure/) — the most mature declarative source of truth in the DCIM/IPAM space.
 
-**优点**
+**Pros**
 
-- "声明式真相源"范式最成熟：API-first、期望态（desired）与实际态（actual）分离
-- Terraform / Ansible 的 GitOps 集成生态完整
-- 资源建模精细：标签、自定义字段、资源关系
+- The most mature "declarative source of truth" paradigm: API-first, separation of desired and actual state
+- Complete GitOps integration ecosystem with Terraform / Ansible
+- Fine-grained resource modeling: tags, custom fields, resource relations
 
-**缺点**
+**Cons**
 
-- Python/Django 技术栈，DCIM/IPAM 领域模型重，不适合个人单机轻量场景
+- Python/Django stack, heavy DCIM/IPAM domain model, unsuitable for lightweight personal single-machine scenarios
 
-**可借鉴**
+**Worth borrowing**
 
-- inventory schema 字段建模可对照其 resource 模型补齐（标签、资源关系、自定义字段）
-- **desired state vs actual state 分离 + drift（漂移）视图**：Cockpit 的 Syncer 已是此模式，可在 API/UI 暴露"inventory 声明与 Agent 实报不一致"的高亮视图——这是 Git-first CMDB 的差异化卖点
+- The inventory schema field modeling can be filled in against its resource model (tags, resource relations, custom fields)
+- **Desired state vs actual state separation + drift views**: Cockpit's Syncer already follows this pattern; an API/UI could expose a highlighted view of "inventory declarations inconsistent with agent-reported reality" — this is the differentiating selling point of a Git-first CMDB
 
-## 拨测：Uptime Kuma
+## Probing: Uptime Kuma
 
-[Uptime Kuma](https://github.com/louislam/uptime-kuma) — 自托管拨测监控标杆（GitHub 为唯一官方来源；uptimekuma.co 为非官方粉丝站，不作引用）。
+[Uptime Kuma](https://github.com/louislam/uptime-kuma) — the self-hosted probing/monitoring benchmark (GitHub is the only official source; uptimekuma.co is an unofficial fan site, not cited).
 
-**优点**
+**Pros**
 
-- 20 秒级探测间隔，多协议（HTTP(s)/TCP/ping/DNS/关键字/Docker 容器）
-- 90+ 通知渠道（ntfy/Telegram/Discord/Slack/邮件等）
-- 公开状态页、心跳条式历史 UI
+- 20-second probing intervals, multi-protocol (HTTP(s)/TCP/ping/DNS/keyword/Docker containers)
+- 90+ notification channels (ntfy/Telegram/Discord/Slack/email, etc.)
+- Public status pages, heartbeat-bar style history UI
 
-**缺点**
+**Cons**
 
-- Node.js 常驻资源偏高
-- 只能从自身位置拨测，**无 agent 分布式探测**
-- 无 CMDB 联动，监控目标需手工录入
+- Node.js resident resource usage is on the high side
+- Can only probe from its own location, **no distributed agent probing**
+- No CMDB linkage; monitoring targets must be entered by hand
 
-**可借鉴**（对照 Cockpit 的 `internal/probe`；下列「已落地」条目为当初借鉴来源）
+**Worth borrowing** (against Cockpit's `internal/probe`; "landed" items below were the original borrowing sources)
 
-- ~~探测间隔可配置~~ 已落地：UI `probe.interval_seconds` Setting / yaml `probe.interval` /
-  `PUT /api/probe/config`（越界自动夹到 [30s, 1h]）
-- ~~通知渠道集成：补 ntfy/webhook/Telegram 输出~~ 已落地：notification 渠道 herald/ntfy/webhook/telegram，
-  见 `config/cockpit.yaml` notification 节
-- 心跳条式状态历史 UI、公开状态页（仍未做）
-- **Cockpit 的差异化优势**：probe 结果天然联动 inventory 资源、且可经 Agent 所在网络分布式探测——这是 Uptime Kuma 架构做不到的，应重点强化而非回避
+- ~~Configurable probing intervals~~ Landed: UI `probe.interval_seconds` setting / yaml `probe.interval` /
+  `PUT /api/probe/config` (auto-clamped to [30s, 1h])
+- ~~Notification channel integration: add ntfy/webhook/Telegram outputs~~ Landed: notification channels
+  herald/ntfy/webhook/telegram, see the notification section of `config/cockpit.yaml`
+- Heartbeat-bar status history UI, public status pages (still not built)
+- **Cockpit's differentiating advantage**: probe results naturally link to inventory resources and can probe distributedly via the network the Agent sits in — something Uptime Kuma's architecture cannot do, and it should be strengthened head-on rather than avoided
 
-## 汇总矩阵
+## Summary Matrix
 
-| 项目 | 重叠域 | 可参考（抄做法） | 可借鉴（吸收理念） | 不值得学 |
+| Project | Overlap domain | Directly adoptable (copy the practice) | Worth borrowing (absorb the idea) | Not worth learning |
 | --- | --- | --- | --- | --- |
-| Beszel | 监控/agent | 历史数据紧凑存储 | agent 轻量性硬指标、部署体验 | —— |
-| Komodo | 容器/agent | —— | Git-to-deploy、自动化程序编排 | MongoDB 依赖 |
-| Portainer/Dockge | Docker UI | Compose 栈页面交互 | compose-file-first | 企业治理层 |
-| Guacamole | 远控 | —— | 会话录制、文件传输 | Java 栈、静态连接配置 |
-| Teleport | 远控安全 | ticket 短时效（已验证） | 审批流、会话粒度审计 | 企业级复杂度 |
-| NetBox | CMDB | —— | 期望态/实际态分离、drift 视图 | 领域模型重量 |
-| Uptime Kuma | 拨测 | 心跳条 UI | 通知渠道、状态页 | 单点探测模式 |
+| Beszel | Monitoring/agent | Compact historical-data storage | Agent lightness as a hard metric, deployment experience | —— |
+| Komodo | Containers/agent | —— | Git-to-deploy, procedure orchestration | MongoDB dependency |
+| Portainer/Dockge | Docker UI | Compose stack page interactions | compose-file-first | Enterprise governance layer |
+| Guacamole | Remote control | —— | Session recording, file transfer | Java stack, static connection configuration |
+| Teleport | Remote-control security | Short-lived tickets (validated) | Approval flows, session-granularity auditing | Enterprise-grade complexity |
+| NetBox | CMDB | —— | Desired/actual state separation, drift views | Domain model weight |
+| Uptime Kuma | Probing | Heartbeat-bar UI | Notification channels, status pages | Single-point probing model |
 
-## 对功能规划的结论
+## Conclusions for Feature Planning
 
-1. **P1"应用部署（Compose Stack）"首选启动**：同时借鉴 Komodo 的 Git-to-deploy 与 Dockge 的 compose-file-first；Cockpit 已有 `docker_provider` RPC 链路，投入产出比最高。
-2. **probe 增强**：间隔可配置 + 通知渠道，成本低，让已落地的健康探测立刻产生实际价值。
-3. **会话录制**（远期）：借鉴 Guacamole/Teleport，补强远控审计。
-4. **drift 视图**（远期）：借鉴 NetBox，强化 Git-first CMDB 差异化。
+1. **P1 "App Deployment (Compose Stack)" starts first**: borrowing both Komodo's Git-to-deploy and Dockge's compose-file-first; Cockpit already has the `docker_provider` RPC path, the highest input-output ratio.
+2. **Probe enhancements**: configurable intervals + notification channels, low cost, letting the landed health probing immediately produce real value.
+3. **Session recording** (long-term): borrow from Guacamole/Teleport to reinforce remote-control auditing.
+4. **Drift view** (long-term): borrow from NetBox to strengthen the Git-first CMDB differentiation.
 
-## 来源
+## Sources
 
-- [Beszel 官网](https://www.beszel.dev/) / [henrygd/beszel](https://github.com/henrygd/beszel)
-- [7 款自托管监控工具实测（2026）](https://dev.to/vikasprogrammer/i-tested-7-self-hosted-monitoring-tools-on-a-3-vps-in-2026-heres-the-one-i-kept-aoa)
-- [RamNode Beszel 指南](https://www.ramnode.com/guides/series/monitoring/beszel)
-- [Komodo 文档](https://komo.do/docs/intro)
-- [Komodo vs Portainer：Git-to-deploy](https://medium.com/@mariomarco08/komodo-vs-portainer-which-fits-a-git-to-deploy-workflow-715e8ef49bd3)
-- [Bitdoze：五个 Docker 管理 UI 实测](https://www.bitdoze.com/portainer-alternatives/)
-- [Portainer vs Dockge（OneUptime，2026）](https://oneuptime.com/blog/post/2026-03-20-portainer-vs-dockge/view)
-- [Portainer vs Dockge（Talos.tools）](https://talos.tools/compare/portainer-vs-dockge)
-- [Apache Guacamole 官网](https://guacamole.apache.org/)
-- [Teleport/Guacamole 社区对比](https://www.reddit.com/r/selfhosted/comments/1im5ioy/how_to_connect_to_sshrdp_web_based_with_teleport/)
-- [NetBox Labs：The Long War Against Configuration Chaos](https://netboxlabs.com/blog/the-long-war-against-configuration-chaos/)
-- [NetBox GitOps 集成](https://netodata.io/netbox-integration-connecting-dcim-ipam-with-enterprise-infrastructure/)
-- [louislam/uptime-kuma](https://github.com/louislam/uptime-kuma)（GitHub 官方仓库）
+- [Beszel official site](https://www.beszel.dev/) / [henrygd/beszel](https://github.com/henrygd/beszel)
+- [I tested 7 self-hosted monitoring tools (2026)](https://dev.to/vikasprogrammer/i-tested-7-self-hosted-monitoring-tools-on-a-3-vps-in-2026-heres-the-one-i-kept-aoa)
+- [RamNode Beszel guide](https://www.ramnode.com/guides/series/monitoring/beszel)
+- [Komodo docs](https://komo.do/docs/intro)
+- [Komodo vs Portainer: Git-to-deploy](https://medium.com/@mariomarco08/komodo-vs-portainer-which-fits-a-git-to-deploy-workflow-715e8ef49bd3)
+- [Bitdoze: five Docker management UIs tested](https://www.bitdoze.com/portainer-alternatives/)
+- [Portainer vs Dockge (OneUptime, 2026)](https://oneuptime.com/blog/post/2026-03-20-portainer-vs-dockge/view)
+- [Portainer vs Dockge (Talos.tools)](https://talos.tools/compare/portainer-vs-dockge)
+- [Apache Guacamole official site](https://guacamole.apache.org/)
+- [Teleport/Guacamole community comparison](https://www.reddit.com/r/selfhosted/comments/1im5ioy/how_to_connect_to_sshrdp_web_based_with_teleport/)
+- [NetBox Labs: The Long War Against Configuration Chaos](https://netboxlabs.com/blog/the-long-war-against-configuration-chaos/)
+- [NetBox GitOps integration](https://netodata.io/netbox-integration-connecting-dcim-ipam-with-enterprise-infrastructure/)
+- [louislam/uptime-kuma](https://github.com/louislam/uptime-kuma) (official GitHub repository)

@@ -1,255 +1,261 @@
-# 防漂移检测（Drift Detection）设计
-
-> 语言：**中文** ｜ [English](./drift-design.en.md)
+# Drift Detection Design
 
 
-> 状态：M1 方案定稿（2026-09-15）｜ 参考：todo.md「drift 漂移视图」条目
-> （NetBox 期望态/实际态分离），主体实现为**配置漂移**：面板写路径产生
-> 基线，与磁盘当前内容比对。
+> Status: the M1 approach is finalised (2026-09-15) ｜ Reference: the "drift view" item in todo.md
+> (NetBox's desired/actual separation); the main implementation is **configuration drift**: baselines are
+> produced by the panel's write paths and compared against the current on-disk content.
 
-## 痛点与定位
+## Pain points and positioning
 
-自建云服务器上「面板改的配置被手改/误删」是高频翻车源：手改 nginx 片段后
-下次面板保存静默覆盖；cockpit 名下 cron 任务被人为删掉无人知晓；stack 的
-compose.yml 被直接编辑导致下次 up 行为与页面所见不符。
+On a self-hosted cloud server, "config the panel wrote gets hand-edited or accidentally deleted" is a high-frequency
+failure source: after hand-editing an nginx snippet, the next panel save silently overwrites it; a cron job under
+cockpit's name gets deleted by someone and nobody knows; a stack's compose.yml gets edited directly so the next
+`up` behaves differently from what the page shows.
 
-Cockpit 已有三大配置写路径（nginx 站点片段 / cron cockpit 段 / stack
-compose 文件），**写入现场天然产生期望态**——基线在写成功那一刻记录，无
-需用户额外声明。检测则是纯 pull：用户主动检查，实时读盘比对。
+Cockpit already has three major config write paths (nginx site snippets / the cron cockpit section / stack
+compose files), and **writing naturally produces a desired state** — the baseline is recorded the moment a write
+succeeds, with no extra declaration from the user. Detection is then pure pull: the user actively checks,
+reading disk in real time and comparing.
 
 ```
-写路径（面板保存）                    检查（按需）
+write paths (panel save)                   check (on demand)
 nginx ApplySite ──Record──┐          GET /drift/check
-cron ApplyJob/DeleteJob ──┤ baseline │  当前内容 sha256
-stack SaveCompose ────────┘  (JSON)  ←逐项对比→  vs 基线 sha256
+cron ApplyJob/DeleteJob ──┤ baseline │  current content sha256
+stack SaveCompose ────────┘  (JSON)  ←item-by-item compare→  vs baseline sha256
                                      → ok / drifted / missing / no_baseline
 ```
 
-## 决策
+## Decisions
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / notes |
 |---|------|------|------------|
-| D1 | M1 边界 | 按需检查（pull），基线只读不改 | 定时巡检 + 告警通知、手动登记基线、inventory 字段一致性（hostname/IP）留 M2 |
-| D2 | 检测对象 | 仅 cockpit 名下对象：nginx `cockpit-site-*.conf` 片段 / traefik `cockpit-site-*.yml` 动态片段 / cron cockpit 任务段 / stack `compose.yml` + `.env` | 与 nginx「用户已有配置零接触」纪律一致；外部条目不检测 |
-| D3 | 基线存储 | agent 本地 JSON `/var/lib/cockpit/drift-baseline.json`（`COCKPIT_DRIFT_BASELINE` 覆盖），mutex + tmp+rename 原子写，0600 | 基线跟着 agent 走；server 不落库（转发纪律）；写路径与基线同进程无网络往返，无不一致窗口 |
-| D4 | 条目 key | `nginx/<name>`、`traefik/<name>`、`cron/cockpit`、`stack/<name>/compose.yml`、`stack/<name>/.env`；每条目 `{sha256, updated_at}` | 文件粒度，问题定位直接 |
-| D5 | 状态 | `ok`（hash 一致）/ `drifted`（基线在、当前在、内容变）/ `missing`（基线在、文件没了）/ `no_baseline`（文件在、无基线——面板外存量对象）；实现补充：`error`（读取失败，不影响其他类）、`none`（cron 空段且无基线，不产生噪音条目） | `no_baseline` 提示通过面板保存一次即自动登记；删除对象走 Forget 不产生 missing |
-| D6 | check 算法 | 实时读当前内容算 sha256 与基线比对；nginx **对文件原始字节** hash（meta 注释被改坏同样算漂移）；cron 对 `splitCockpit` 解析出的任务列表 marshal hash（meta 行损坏会掉出任务列表 → hash 变 → 漂移）；stack 逐文件 | 不解析语义，字节级比对最诚实 |
-| D7 | 挂钩注入 | `BaselineRecorder` 接口（`Record(kind, name, content)` / `Forget(kind, name)`）注入三个 provider，字段零值 nil 不记录 | provider 相互独立注册，接口注入改动最小；测试可注入 fake |
-| D8 | 挂钩时机 | **写成功后** Record（nginx 在 reload 成功后；reload 失败回滚不记）；删除成功后 Forget（nginx DeleteSite / stack 删除目录 / cron DeleteJob） | 基线 = 线上实际生效的内容 |
-| D9 | capability | `drift`：nginx-proxy / traefik-proxy / cron / docker-api（stack）**任一存在**即注册 | 四者全无则 check 无从谈起 |
-| D10 | RPC | `drift.check` 单方法（POST），无用户输入参数（M3/M4 追加 `drift.diff`/`drift.record`） | 校验面为零；结果一次性全量返回 |
-| D11 | server | `POST /api/agents/{id}/drift/check` 纯转发，不落库；浏览类不记审计 | 与 cron/logs 转发纪律一致 |
-| D12 | Web | `/drift` 页面：agent 选择 + 「检查」按钮 + 汇总（漂移 N 项）+ 四态清单（类型 Tag / 名称 / 状态 Tag / 基线与当前 hash 短码） | 参照 /cron 页面结构 |
+| D1 | M1 boundary | on-demand checking (pull), the baseline is read-only and never modified | scheduled inspection + alert notification, manual baseline registration, inventory field consistency (hostname/IP) are left to M2 |
+| D2 | Detection targets | only objects under cockpit's name: nginx `cockpit-site-*.conf` snippets / traefik `cockpit-site-*.yml` dynamic snippets / the cron cockpit job section / stack `compose.yml` + `.env` | Consistent with nginx's "zero contact with existing user config" discipline; external entries are not detected |
+| D3 | Baseline storage | an agent-local JSON at `/var/lib/cockpit/drift-baseline.json` (`COCKPIT_DRIFT_BASELINE` overrides), mutex + tmp+rename atomic write, 0600 | The baseline follows the agent; the server doesn't persist (forwarding discipline); the write path and the baseline share a process with no network round-trip, so there's no inconsistency window |
+| D4 | Entry key | `nginx/<name>`, `traefik/<name>`, `cron/cockpit`, `stack/<name>/compose.yml`, `stack/<name>/.env`; each entry `{sha256, updated_at}` | File granularity, so problems localise directly |
+| D5 | Status | `ok` (hash matches) / `drifted` (baseline present, current present, content changed) / `missing` (baseline present, file gone) / `no_baseline` (file present, no baseline — pre-existing objects from outside the panel); implementation additions: `error` (read failure, doesn't affect other kinds), `none` (cron empty section with no baseline, produces no noisy entry) | `no_baseline` hints that saving once through the panel auto-registers it; deleting an object goes through Forget and produces no `missing` |
+| D6 | check algorithm | read the current content in real time and sha256 it against the baseline; nginx **hashes the raw file bytes** (a mangled meta comment also counts as drift); cron hashes the marshal of the job list parsed out of `splitCockpit` (a corrupt meta line drops out of the job list → hash changes → drift); stack per file | No semantic parsing; byte-level comparison is the most honest |
+| D7 | Hook injection | a `BaselineRecorder` interface (`Record(kind, name, content)` / `Forget(kind, name)`) injected into the three providers, a nil zero value meaning no recording | Providers register independently, so interface injection is the smallest change; tests can inject a fake |
+| D8 | Hook timing | Record **after a successful write** (nginx after a successful reload; a failed reload that rolls back records nothing); Forget after a successful delete (nginx DeleteSite / stack directory removal / cron DeleteJob) | The baseline = the content actually in effect in production |
+| D9 | capability | `drift`: registered if **any** of nginx-proxy / traefik-proxy / cron / docker-api (stack) exists | With none of the four, check is meaningless |
+| D10 | RPC | a single `drift.check` method (POST), with no user-input parameters (M3/M4 add `drift.diff`/`drift.record`) | Zero validation surface; the result is returned in full at once |
+| D11 | server | `POST /api/agents/{id}/drift/check` purely forwards, doesn't persist; browsing-class requests aren't audited | Consistent with the cron/logs forwarding discipline |
+| D12 | Web | a `/drift` page: agent selection + a "Check" button + a summary (N drifted) + a four-state list (kind Tag / name / status Tag / short baseline and current hashes) | Modelled on the /cron page structure |
 
 ## RPC
 
-| 方法 | 参数 | 返回 |
+| Method | Parameters | Returns |
 |------|------|------|
 | `drift.check` | `{}` | `{items: [{kind, name, status, baseline_sha, current_sha}], checked_at}` |
-| `drift.diff` | `{kind, name}` | `{expected, current}`（两侧全文；cron 侧为 MarshalIndent 美化后的 cockpit 段） |
-| `drift.record` | `{kind, name}` | `{recorded: true, sha256}`（以当前内容登记基线，M4） |
+| `drift.diff` | `{kind, name}` | `{expected, current}` (both sides in full; on the cron side it's the MarshalIndent-prettified cockpit section) |
+| `drift.record` | `{kind, name}` | `{recorded: true, sha256}` (register the baseline from the current content, M4) |
 
-status 语义见 D5；`baseline_sha` / `current_sha` 空串表示对应侧不存在。
+Status semantics per D5; an empty `baseline_sha` / `current_sha` string means that side doesn't exist.
 
-## M2：定时巡检 + 漂移告警（2026-09-15）
+## M2: scheduled inspection + drift alerts (2026-09-15)
 
-把 M1 的「按需检查」升级为「自动发现」：server 侧定时对在线且带 drift
-capability 的 agent 执行 drift.check，发现漂移即产生告警（复用 M2 拨测
-的告警去重与通知管道），agent 侧零变更。
+Upgrades M1's "on-demand check" to "automatic discovery": the server periodically runs drift.check against
+online agents carrying the drift capability, and any drift produces an alert (reusing M2 probe's alert
+deduplication and notification channel), with zero agent-side change.
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / notes |
 |---|------|------|------------|
-| D13 | 巡检循环 | server 侧 `driftScanLoop`（ctx+ticker 同 alert_loop 模式），每分钟醒来对比「距上次扫描 ≥ 间隔」再扫；间隔可动态改，故用固定 1min ticker + 时间戳对比 | probe runner 的 maybePrune/lastPrune 同款；lastScan 仅循环 goroutine 访问无锁 |
-| D14 | 巡检目标 | `registry.ListByCapability("drift")` 全部在线 agent，逐个 `CallAgent(drift.check)`；失败记日志跳过下轮再试 | 单 agent 失败不影响其他；离线由既有 offline 告警覆盖 |
-| D15 | 告警条件 | items 含 `drifted` 或 `missing` → 每 agent 一条汇总告警；`error` 只记日志（可能是权限问题，告警会噪音）；`no_baseline` 不告警（存量对象）；全 ok 无动作 | 汇总到 agent 级控制告警风暴；title 固定 → 同主机未读存在期间只报一次（D15 去重语义：用户标已读后再次漂移会重新告警） |
-| D16 | 告警形态 | alert 包公开 `CheckDriftScan(agentID, hostname, driftedNames)`：非空则 `createAlertIfNotExists("warning", "配置漂移：主机 X", 明细列表, agentID, "agent")`；明细最多 10 行 + 截断提示 | 复用拨测 M2 的真去重（HasUnreadAlert）与非阻塞多渠道通知 |
-| D17 | 配置 | Setting 键 `drift.scan_interval_seconds`，[0, 86400]，0=关闭巡检，默认 1800（30 分钟）；REST `GET/PUT /api/agents/.../drift/config`？——不，配置是全局非 per-agent：`GET/PUT /api/drift/config` | 与 probe interval 同一 Setting 模式；每次醒来读 Setting 免缓存（loadThresholds 同款） |
-| D18 | Web | `/drift` 页面顶部加「自动巡检」设置行（开关 + 间隔分钟数，保存 PUT /api/drift/config）；巡检开启时页面提示自动发现可用 | 配置入口放使用场景里，不进全局 Settings |
+| D13 | Inspection loop | server-side `driftScanLoop` (ctx+ticker, same as alert_loop), waking every minute and scanning only when "≥ interval since the last scan"; since the interval can change dynamically, a fixed 1min ticker plus timestamp comparison is used | same as probe runner's maybePrune/lastPrune; lastScan is only accessed by the loop goroutine so no lock is needed |
+| D14 | Inspection targets | all online agents from `registry.ListByCapability("drift")`, one `CallAgent(drift.check)` each; failures log and skip to retry next round | A single agent failing doesn't affect others; offline is already covered by the existing offline alert |
+| D15 | Alert condition | items containing `drifted` or `missing` → one summary alert per agent; `error` only logs (it may be a permissions issue and alerting would be noisy); `no_baseline` doesn't alert (pre-existing objects); all ok → no action | Aggregating to agent level controls alert storms; the fixed title means only one report per host while an unread one exists (D15 dedupe semantics: after the user marks it read, drift again alerts again) |
+| D16 | Alert shape | the alert package exposes `CheckDriftScan(agentID, hostname, driftedNames)`: if non-empty then `createAlertIfNotExists("warning", "configuration drift: host X", detail list, agentID, "agent")`; at most 10 detail lines + a truncation notice | Reuses probe M2's real deduplication (HasUnreadAlert) and non-blocking multi-channel notification |
+| D17 | Configuration | Setting key `drift.scan_interval_seconds`, [0, 86400], 0 = inspection off, default 1800 (30 minutes); REST `GET/PUT /api/agents/.../drift/config`? — no, the config is global, not per-agent: `GET/PUT /api/drift/config` | Same Setting pattern as the probe interval; read the Setting on each wake to avoid caching (same as loadThresholds) |
+| D18 | Web | an "automatic inspection" settings row at the top of the `/drift` page (toggle + interval in minutes, saving PUT /api/drift/config); when inspection is on, the page notes that automatic discovery is available | The config entry lives with the use case, not in global Settings |
 
-不落库：巡检结果不存储（告警即记录），/drift 页面保持实时手动检查语义。
+No persistence: inspection results aren't stored (the alert is the record), and the /drift page keeps its
+real-time manual-check semantics.
 
-## M3：漂移 diff 视图（2026-09-18）
+## M3: drift diff view (2026-09-18)
 
-drifted 条目从「变没变 + hash 短码」升级为「哪里变了」：基线补存原文 +
-`drift.diff` 取两侧全文 + web 行级 diff 渲染。
+Drifted entries upgrade from "did it change + a short hash" to "where did it change": the baseline additionally
+stores the original text, `drift.diff` returns both sides in full, and the web renders a line-level diff.
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / notes |
 |---|------|------|------------|
-| D19 | 基线存原文 | `BaselineEntry` 加 `Content string`（omitempty；`Record` 时随 hash 一并写入，单条 >256KB 只存 hash 不存原文）；旧基线无原文时 `drift.diff` 明确报「基线无原文（旧版本记录），到对应管理页重新保存一次即可」 | Record 本来就拿到 content，零额外读；写路径下次保存自动补原文，零迁移；基线文件仍 0600 本地；.env 等内容经 diff 返回与文件管理器 read 同权限面（JWT + agent 在线），无新增泄露 |
-| D20 | `drift.diff` | `{kind, name}`：kind 白名单 {nginx, traefik, cron, stack}；expected=基线原文，current=实时读（nginx/traefik 片段文件 / stack compose.yml 与 .env / cron 读 crontab 后 splitCockpit 取 jobs）；任一侧缺失或 >256KB 拒绝并报原因；**cron 两侧返回前 MarshalIndent 美化**（hash/基线层保持 compact `json.Marshal` 不动——否则升级后旧基线 hash 失配全量误报 drifted；美化只在 diff 展示层） | current 的取法与 check/Record 完全同源（同 marshal），保证 diff 与 hash 判定一致；JSON 美化让 cron 段可按行 diff |
-| D21 | server 端点 | `POST /api/agents/{id}/drift/diff`，body `{kind, name}`：kind 白名单 + name 非空 ≤128 双端同规则校验后转发 `drift.diff`；不审计（浏览性质，与 check 一致） | forwardDriftRPC 复用 |
-| D22 | Web diff 渲染 | drifted 行加「差异」按钮 → Modal：自写 LCS 行级 diff（双方先按行截断 1000 行并标注「内容过长，仅对比前 1000 行」）；统一 diff 着色（del 红=基线有当前无，add 绿=当前新增，same 灰）；页脚提示「核对后到对应管理页重新保存可消除漂移」 | 自写 LCS（整数键 + DP 全表 + 回溯，1000 行 O(n²)≤10⁶ 可接受）避免引入依赖；不做双栏对照（行级统一 diff 更适合配置段落场景；后被 M5/D26 推翻） |
+| D19 | Baseline stores original text | `BaselineEntry` gains `Content string` (omitempty; written alongside the hash on `Record`, and for entries >256KB only the hash is stored without the text); when an old baseline has no text, `drift.diff` clearly reports "the baseline has no original text (recorded by an older version) — save once again on the corresponding management page" | Record already receives the content, so zero extra reads; the next save through the write path backfills the text automatically, zero migration; the baseline file is still local 0600; .env and similar content returned via diff has the same permission surface as a file-manager read (JWT + agent online), no new exposure |
+| D20 | `drift.diff` | `{kind, name}`: kind whitelist {nginx, traefik, cron, stack}; expected = baseline original text, current = read in real time (nginx/traefik snippet file / stack compose.yml and .env / cron reading crontab then splitCockpit for jobs); either side missing or >256KB is rejected with a reason; **both cron sides are MarshalIndent-prettified before returning** (the hash/baseline layer keeps compact `json.Marshal` untouched — otherwise old baseline hashes would all mismatch after an upgrade and falsely report drifted; prettifying only happens on the diff display layer) | Reading current uses exactly the same source as check/Record (same marshal), guaranteeing the diff agrees with the hash judgement; JSON prettifying makes the cron section diffable by line |
+| D21 | Server endpoint | `POST /api/agents/{id}/drift/diff`, body `{kind, name}`: after the kind whitelist + non-empty name ≤128 are validated by the same rules on both ends, forward `drift.diff`; no audit (browsing in nature, consistent with check) | reuses forwardDriftRPC |
+| D22 | Web diff rendering | a "Diff" button on drifted rows → Modal: a hand-written LCS line-level diff (both sides first truncated to 1000 lines with a "content too long, comparing only the first 1000 lines" notice); unified diff colouring (del red = in baseline not current, add green = new in current, same grey); a footer hint "after verifying, save again on the corresponding management page to clear the drift" | Hand-written LCS (integer keys + full DP table + backtracking, 1000 lines O(n²) ≤10⁶ is acceptable) avoids a new dependency; no side-by-side view (a line-level unified diff suits config-section scenarios better; later overturned by M5/D26) |
 
-### Agent 侧
+### Agent side
 
-- `drift.diff`：kind/name 校验 → 基线取条目（无 → 报错「无基线」；有但 Content
-  空 → 报错「基线无原文」）→ 按 kind 读 current（读法与 check 同源）→ 两侧
-  >256KB 报错 → cron 两侧 MarshalIndent → 返回；
-- `Record` 存原文：`update()` 条目带 Content（截断逻辑在 Record 内，不动
-  Forget/hash 语义）。
+- `drift.diff`: validate kind/name → fetch the baseline entry (absent → report "no baseline"; present but Content
+  empty → report "the baseline has no original text") → read current by kind (same source as check) → both sides
+  >256KB → error → MarshalIndent both cron sides → return;
+- `Record` stores the original text: the entry in `update()` carries Content (the truncation logic lives inside Record, leaving Forget/hash semantics untouched).
 
-### Server 侧
+### Server side
 
-- `handleAgentDriftAPI` 加 `sub == "diff"`：POST + body 解码 + kind 白名单
-  {nginx,traefik,cron,stack} + name 非空 ≤128 → `forwardDriftRPC(..., "drift.diff", params)`。
+- `handleAgentDriftAPI` gains `sub == "diff"`: POST + body decoding + the kind whitelist
+  {nginx,traefik,cron,stack} + non-empty name ≤128 → `forwardDriftRPC(..., "drift.diff", params)`.
 
-### Web 侧
+### Web side
 
-- `types` 加 `DriftDiffResult {expected, current}`；`api.driftDiff(agentId, kind, name)`；
-- `web/src/utils/lineDiff.ts`：LCS 行级 diff（入参两侧字符串，先 split('\n') 截断
-  1000 行 + truncated 标记，输出 `{type: 'same'|'del'|'add', text}[]`）；
-- Drift 页：drifted 行「差异」按钮 → Modal（加载中 Spin / 失败 Alert 透出 agent
-  原因 / diff 行渲染等宽 + 行号 + 着色 + 截断提示 + 页脚操作指引）。
+- `types` gains `DriftDiffResult {expected, current}`; `api.driftDiff(agentId, kind, name)`;
+- `web/src/utils/lineDiff.ts`: LCS line-level diff (inputs are both strings, split on '\n' truncated to
+  1000 lines with a truncated flag, output `{type: 'same'|'del'|'add', text}[]`);
+- The Drift page: a "Diff" button on drifted rows → Modal (loading Spin / a failure Alert surfacing the agent's
+  reason / diff rows in monospace + line numbers + colouring + truncation notice + footer action guidance).
 
-**测试**：agent——Record 存原文与截断、diff 全流程（nginx 手改 / cron 美化与
-同源 / stack 两文件）、旧基线无原文报错、kind/name 校验、两侧过大拒绝；
-server——转发与 400 校验；web——tsc + build。
+**Tests**: agent — Record storing original text and truncation, the full diff flow (hand-edited nginx /
+  cron prettifying with the same source / two stack files), an error for an old baseline without original text,
+  kind/name validation, rejection when either side is too large; server — forwarding and 400 validation;
+  web — tsc + build.
 
-## M4：手动登记基线「以当前为准」（2026-09-18）
+## M4: manual baseline registration "take current as authoritative" (2026-09-18)
 
-把「基线只来自面板写路径」补全为「也可来自用户确认」：面板外存量对象
-（no_baseline）一键纳入检测；手改后的 drifted 对象确认无误后一键以当前
-内容为新标准。agent 侧复用 M3 的 currentContent + Record，零新存储。
+Completes "the baseline only comes from the panel's write paths" into "it can also come from user confirmation":
+pre-existing objects outside the panel (`no_baseline`) enter detection with one click; a drifted object that
+was hand-edited and confirmed correct becomes the new standard with one click. The agent side reuses M3's
+currentContent + Record, with zero new storage.
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / notes |
 |---|------|------|------------|
-| D23 | `drift.record` | `{kind, name}`：kind/name 复用 M3 校验 → 实时读当前内容（与 check/diff 同源 `currentContent`，cron 为 splitCockpit→compact marshal）→ `baseline.Record` 登记原文；适用 no_baseline（纳入检测）与 drifted（确认手改为新标准）；missing/error 场景读不到当前内容直接报错（无需客户端状态白名单）；>256KB 照 Record 语义只存 hash | 全部复用 M3 积木（validDriftTarget + currentContent + Record）；「以当前为准」与面板重新保存互补——前者以磁盘为准（不重写文件），后者以面板为准（重写文件） |
-| D24 | server 端点 + 审计 | `POST /api/agents/{id}/drift/record`：与 diff 同规则校验（kind 白名单 + name 非空 ≤128）后转发；**记审计** `drift_record` / `drift_baseline`，resourceID=`kind/name`，detail 记 agent | check/diff 是浏览不审计，record 是用户主动变更漂移判定标准——之后该对象「漂不漂」以此为准，必须可追溯（与文件变更审计同档） |
-| D25 | Web 交互 | drifted 行「以当前为准」+ no_baseline 行「登记」按钮（Popconfirm：「之后的漂移检测将以当前磁盘内容为标准」）；成功后自动重查刷新清单；missing/error 行不出按钮 | 操作入口放结果行内就地闭环；两个文案同一 RPC，按行状态选择语义更准的动词 |
+| D23 | `drift.record` | `{kind, name}`: kind/name reuse M3 validation → read current content in real time (the same `currentContent` as check/diff, compact marshal for cron) → register the original text via `baseline.Record`; applies to no_baseline (bring it into detection) and drifted (confirm the hand edit as the new standard); missing/error scenarios error out directly when current content can't be read (no client-side status whitelist needed); >256KB keeps Record's semantics of storing only the hash | Everything reuses M3's building blocks (validDriftTarget + currentContent + Record); "take current as authoritative" and saving again on the panel are complementary — the former takes disk as authoritative (no file rewrite), the latter takes the panel as authoritative (rewrite the file) |
+| D24 | Server endpoint + audit | `POST /api/agents/{id}/drift/record`: validated by the same rules as diff (kind whitelist + non-empty name ≤128) then forwarded; **audited** as `drift_record` / `drift_baseline`, resourceID=`kind/name`, detail records the agent | check/diff are browsing and aren't audited, but record is a user actively changing the drift judgement standard — from then on whether that object "drifts" is judged by this, so it must be traceable (same tier as file-change auditing) |
+| D25 | Web interaction | an "Take current as authoritative" button on drifted rows + a "Register" button on no_baseline rows (Popconfirm: "future drift detection will use the current on-disk content as the standard"); automatically re-check to refresh the list on success; missing/error rows show no buttons | The action entry lives inline in the result row for an in-place closed loop; the two wordings call the same RPC, and picking the more accurate verb per row status is better |
 
-### Agent 侧
+### Agent side
 
-- `drift.record`：`validDriftTarget` → `currentContent`（读失败透传原因）→
-  `baseline.Record` → 返回 `{recorded: true, sha256}`（登记后 hash，供前端提示）。
+- `drift.record`: `validDriftTarget` → `currentContent` (read failures pass the reason through) →
+  `baseline.Record` → return `{recorded: true, sha256}` (the hash after registration, for the frontend hint).
 
-### Server 侧
+### Server side
 
-- `handleAgentDriftAPI` 加 `sub == "record"`：与 diff 共用 body 校验 →
-  `forwardDriftRPC(..., "drift.record", params)` → 成功后 `auditDriftRecord`
-  （username/IP/UA 同 auditFile 模式，detail 记 agent）。
+- `handleAgentDriftAPI` gains `sub == "record"`: sharing diff's body validation →
+  `forwardDriftRPC(..., "drift.record", params)` → on success `auditDriftRecord`
+  (username/IP/UA following the auditFile pattern, detail records the agent).
 
-### Web 侧
+### Web side
 
-- `api.driftRecord(agentId, kind, name)`；操作列按状态出「差异」（drifted）/
-  「以当前为准」（drifted）/「登记」（no_baseline）；Popconfirm 确认 → 调用 →
-  message 成功 → 自动重跑 check 刷新清单（失败 Alert 透出 agent 原因）。
+- `api.driftRecord(agentId, kind, name)`; the action column shows "Diff" (drifted) /
+  "Take current as authoritative" (drifted) / "Register" (no_baseline) by status; Popconfirm confirm → call →
+  success message → automatically re-run check to refresh the list (a failure Alert surfaces the agent's reason).
 
-**测试**：agent——no_baseline 登记→check 变 ok（nginx/cron/stack）、drifted
-以当前为准→ok 且基线原文更新、读失败报错、校验拒绝；server——转发参数、
-400 校验不达 agent、审计落库；web——tsc + build。
+**Tests**: agent — no_baseline registration → check becomes ok (nginx/cron/stack), drifted
+take-current-authoritative → ok and the baseline original text updated, errors on read failure, validation
+rejection; server — forwarding parameters, 400 validation never reaching the agent, audit persisted;
+web — tsc + build.
 
-## M5：双栏对照 diff 与配置着色（2026-09-19）
+## M5: side-by-side diff and config syntax highlighting (2026-09-19)
 
-推翻 D22「不做双栏对照」的范围决策（行级统一 diff 在增删交错时对照不
-直观）。纯 web 升级，零 Go 改动。
+Overturns D22's scope decision "no side-by-side view" (a line-level unified diff is unintuitive when additions
+and deletions interleave). A pure web upgrade with zero Go changes.
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / notes |
 |---|------|------|------------|
-| D26 | 双栏对照视图 | DiffModal 加 Segmented「对照 / 统一」切换（默认对照）；`pairDiffLines` 把统一 diff 转行对：same 直通双栏，连续 del/add 块内按序一一配对，多出的一侧独占行；缺位半边画底纹 | 配对在渲染层完成，lineDiff 的 LCS 输出不动；统一视图保留（窄窗口与整段复制场景） |
-| D27 | 配置轻量着色 | `configHighlight.ts` 单行无状态词法：注释行 / 行首键（yaml `key:`、env `KEY=`、json `"key":` 带引号整体）/ nginx 首词指令（仅 `word …;` 与 `word … {` 形态才认）/ 引号串 / 独立数字（两侧不贴词字符或点）/ `{};` 标点；不做跨行解析状态、不猜行内 `#` 注释 | 宁缺毋错：覆盖 cockpit 下发四类内容（nginx conf、Traefik/compose YAML、cron JSON、.env）足矣；不引语法高亮依赖 |
+| D26 | Side-by-side view | the DiffModal gains a Segmented "Side-by-side / Unified" toggle (side-by-side by default); `pairDiffLines` turns the unified diff into row pairs: same passes through to both columns, consecutive del/add blocks are paired in order one-to-one, the extra side occupies a row alone; the missing half gets a shaded background | Pairing happens in the render layer, so lineDiff's LCS output is untouched; the unified view is retained (narrow windows and whole-section copy scenarios) |
+| D27 | Lightweight config highlighting | `configHighlight.ts` is a single-line stateless lexer: comment lines / leading keys (yaml `key:`, env `KEY=`, json `"key":` with quotes included) / nginx leading-word directives (only the `word …;` and `word … {` shapes are recognised) / quoted strings / standalone numbers (not adjacent to word characters or dots on either side) / `{};` punctuation; no cross-line parse state, no guessing at inline `#` comments | Better to under-recognise than to be wrong: covering the four kinds of content cockpit delivers (nginx conf, Traefik/compose YAML, cron JSON, .env) is enough; no syntax highlighting dependency |
 
-### Web 侧
+### Web side
 
-- `lineDiff.ts` 加 `pairDiffLines`（统一 diff → 双栏行对）；新增
-  `configHighlight.ts`（着色词法，返回 span 序列）；
-- DiffModal：Segmented 视图切换（默认对照）+ 两种视图共用着色与截断
-  提示；Modal 宽度 960→1080（双栏需要更宽）。
+- `lineDiff.ts` gains `pairDiffLines` (unified diff → side-by-side row pairs); a new
+  `configHighlight.ts` (highlighting lexer returning a span sequence);
+- DiffModal: a Segmented view toggle (side-by-side by default) + both views share colouring and truncation
+  notices; Modal width 960→1080 (side-by-side needs more width).
 
-**测试**：web——tsc + build + tsx 运行时校验（注释行 / yaml 键 / nginx 指令
-与端口数字 / env 键值 / JSON 键与串值 / `hunter2` 值不误染 / 行内 `#` 不猜
-注释；双栏配对 del/add 对齐、多出一侧独占行）。
+**Tests**: web — tsc + build + tsx runtime verification (comment lines / yaml keys / nginx directives
+  with port numbers / env keys and values / JSON keys and string values / the `hunter2` value not being
+  mis-coloured / no inline `#` comment guessing; side-by-side pairing aligning del/add, an extra side
+  occupying a row alone).
 
-## M6：CMDB 一致性——inventory 声明 vs agent 实报（2026-09-19）
+## M6: CMDB consistency — inventory declaration vs agent report (2026-09-19)
 
-「不做」清单的末项正式立项，也是 drift 主线（配置漂移）到 CMDB 主线
-（期望态 vs 实际态）的收口：配置漂移管「面板下发的文件有没有被改」，
-CMDB 一致性管「Git 里声明的机器还是不是那台机器」。数据事实决定形态——
-声明态只活在 inventory YAML（watcher 热加载的内存副本），实况 hostname/IP
-由注册覆写同一 DB 行（`persistRegisteredAgent` → `UpsertAgent`），声明值
-并无持久化副本。因此**不建新表、不起巡检循环**，按需读模型比对。
+The last item of the "not doing" list is formally proposed, and it is also the closing of the drift main line
+(configuration drift) into the CMDB main line (desired vs actual): configuration drift manages "were the files
+the panel delivered changed", CMDB consistency manages "is the machine declared in Git still that machine".
+The data facts decide the shape — the declared state only lives in the inventory YAML (an in-memory copy
+hot-reloaded by the watcher), and the actual hostname/IP overwrite the same DB row (via `persistRegisteredAgent`
+→ `UpsertAgent`), so the declared values have no persisted copy. Therefore **no new table and no inspection
+loop**: compare an on-demand read model.
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / notes |
 |---|------|------|------------|
-| D28 | 按需读模型 | `GET /api/inventory/consistency`：`watcher.GetInventory()`（声明）× `db.ListAgents()`（实报）即时比对，零新持久化、零巡检循环、不进告警框架 | 一致性是 CMDB 卫生项不是事故，「UI 高亮」即诉求（P2 原文）；inventory watcher 已保证声明态新鲜度；起循环只会产出待读状态的滞后副本 |
-| D29 | 比对语义 | 仅声明非空才比对；hostname **大小写不敏感**（DNS 语义）+ TrimSpace，IP 精确串匹配（不做 CIDR/多 IP 语义——inventory v1 就是单串）；四态：`ok` / `mismatch`（含 field 级明细）/ `unregistered`（声明了但库里没有——未上线或声明先于装机）/ `undeclared`（库里有但 YAML 没声明——CMDB 完整性缺口） | 大小写归一是唯一豁免：主机名在解析层本就不分大小写，报出来是噪声；其余宁可严格，误报比漏报有用于 CMDB |
-| D30 | API + UI | server 侧 `handleInventoryConsistency`（JWT，浏览类不审计，同 drift check 口径；`inventorySync == nil` 时 503 指名引导 `inventory.path`）；比对纯函数落 `internal/inventory`（输入 `*Inventory` + `[]*storage.Agent`，产出报告，无 IO 可全表测）；web 漂移页加 Tabs「配置漂移 / CMDB 一致性」，一致性 Tab 出汇总条 + 四态表（mismatch 行展开声明 vs 实报对照） | 纯函数与端点解耦，watcher 无关即可测；UI 挂漂移页——两者同属「期望 vs 实际」主题，不为单一报表新建页面 |
+| D28 | On-demand read model | `GET /api/inventory/consistency`: `watcher.GetInventory()` (declared) × `db.ListAgents()` (reported) compared immediately, zero new persistence, zero inspection loop, not entering the alert framework | Consistency is CMDB hygiene, not an incident — "UI highlighting" is the whole ask (P2 wording); the inventory watcher already guarantees the declared state is fresh; starting a loop would only produce a lagging copy in unread state |
+| D29 | Comparison semantics | only compare when the declaration is non-empty; hostname is **case-insensitive** (DNS semantics) + TrimSpace, IP is an exact string match (no CIDR/multi-IP semantics — inventory v1 is a single string); four states: `ok` / `mismatch` (with field-level detail) / `unregistered` (declared but absent from the DB — not yet online, or declared before provisioning) / `undeclared` (in the DB but not declared in YAML — a CMDB completeness gap) | Case normalisation is the only exemption: hostnames are case-insensitive at resolution anyway, so reporting it is noise; everything else is better strict, since false positives are more useful than misses in a CMDB |
+| D30 | API + UI | server side `handleInventoryConsistency` (JWT, browsing-class so unaudited, same as drift check; when `inventorySync == nil` a 503 names `inventory.path` as guidance); the comparison is a pure function in `internal/inventory` (inputs `*Inventory` + `[]*storage.Agent`, outputs a report, no IO so the whole table is testable); the web drift page gains Tabs "Configuration drift / CMDB consistency", with the consistency tab showing a summary bar + a four-state table (mismatch rows expand declared vs reported) | The pure function is decoupled from the endpoint so it's testable without the watcher; the UI hangs off the drift page — both belong to the "expected vs actual" theme, and a single report doesn't deserve its own page |
 
-### Server 侧
+### Server side
 
-- `internal/inventory/consistency.go`：`AgentConsistency` 纯比对 +
-  `CompareAgents(inv, agents)` 报告（summary 四态计数 + 按 id 排序明细）；
-- `internal/sync` Manager 加 `Consistency(db)` 薄封装（GetInventory + 比对）；
-- `api_inventory.go`：路由 `/inventory/consistency`。
+- `internal/inventory/consistency.go`: `AgentConsistency` pure comparison +
+  `CompareAgents(inv, agents)` report (four-state summary counts + details sorted by id);
+- the `internal/sync` Manager gains a thin `Consistency(db)` wrapper (GetInventory + comparison);
+- `api_inventory.go`: the route `/inventory/consistency`.
 
-### Web 侧
+### Web side
 
-- `api.getInventoryConsistency()`；漂移页 Tabs 化：原内容为「配置漂移」，
-  新「CMDB 一致性」Tab（useQuery 30s staleTime，四态 Tag + mismatch 明细
-  Tooltip 对照声明/实报）。
+- `api.getInventoryConsistency()`; the drift page becomes Tabs: the original content as "Configuration drift",
+  a new "CMDB consistency" tab (useQuery with 30s staleTime, four-state Tags + a mismatch detail
+  Tooltip comparing declared/reported).
 
-**测试**：inventory——比对纯函数表驱动（ok/hostname 大小写/IP 不符/
-多字段同报/unregistered/undeclared/声明空跳过）；server——端点 wiring
-（200 形态、nil manager 503、JWT 外校验不涉及）；web——tsc 零新增 + build。
+**Tests**: inventory — table-driven tests of the pure comparison function (ok/hostname case/IP mismatch/
+  multiple fields reported together/unregistered/undeclared/empty declaration skipped); server — endpoint wiring
+  (200 shape, nil manager 503, JWT and outer validation not involved); web — zero new tsc errors + build.
 
-## M6 清单
+## M6 checklist
 
-- [x] inventory：`consistency.go` 比对纯函数（四态 + field 级 mismatch +
-      summary 计数 + id 稳定排序）+ 表驱动单测
-- [x] sync：`Manager.Consistency()`（GetInventory × ListAgents 即时比对）
-- [x] server：`GET /api/inventory/consistency`（JWT，浏览类不审计；
-      `inventorySync == nil` 503 指名引导 `inventory.path`）+ 端点测试
-- [x] web：types + `api.getInventoryConsistency()` + 漂移页 Tabs 化 +
-      `ConsistencyTab`（汇总条 + 四态表 + mismatch 行展开对照）
-- [x] 测试：inventory 3 测试 + server 2 测试全绿（-race 全包过）；
-      web tsc 零新增（基线 9 不变）+ build 过
-- [x] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] inventory: the `consistency.go` pure comparison function (four states + field-level mismatch +
+      summary counts + stable id sort) + table-driven unit tests
+- [x] sync: `Manager.Consistency()` (GetInventory × ListAgents immediate comparison)
+- [x] server: `GET /api/inventory/consistency` (JWT, browsing-class unaudited;
+      `inventorySync == nil` → 503 naming `inventory.path` as guidance) + endpoint tests
+- [x] web: types + `api.getInventoryConsistency()` + drift page Tabs +
+      `ConsistencyTab` (summary bar + four-state table + mismatch rows expanded)
+- [x] tests: 3 inventory tests + 2 server tests all green (the whole package passes under -race);
+      web tsc with zero new errors (the baseline 9 unchanged) + build passing
+- [x] documentation wrap-up (this checklist ticked) + todo.md synced
 
-M6 完成（2026-09-19）。落地差异补记：① `Consistency()` 为无参方法
-（db 由 `NewManager` 构造时持有），非设计行文的 `Consistency(db)`；②
-mismatch 对照落地以**行展开**（字段级子表：字段/声明值/实报值）为准，
-「Web 侧」行文的 Tooltip 只承载四态状态语义，不做 Tooltip 塞对照；③
-Tabs 化随附卡片标题「漂移检测」→「漂移与一致性」（两 Tab 同属期望 vs
-实际主题）；④ 未启用 inventory 的 503 文案在 web 侧以引导 Alert 透出
-（含 `inventory.path` 指引），与 server 端点文案同口径。
+M6 done (2026-09-19). Landing delta notes: ① `Consistency()` is a no-argument method
+(the db is held from `NewManager` construction), not the `Consistency(db)` in the design wording; ②
+the mismatch comparison landed as **row expansion** (a field-level sub-table: field/declared value/reported value),
+with the Tooltip in the "Web side" wording only carrying the four-state status semantics rather than stuffing the comparison into a Tooltip; ③
+Tabs-isation came with the card title changing from "Drift Detection" to "Drift and Consistency" (both tabs belong to the expected vs
+actual theme); ④ the 503 wording when inventory isn't enabled is surfaced on the web side as a guiding Alert
+(including the `inventory.path` pointer), consistent with the server endpoint wording.
 
-## 不做（后续版本）
+## Not doing (later versions)
 
-- nginx 非 cockpit 片段、外部 crontab 条目、docker 卷内容检测。
+- Detection of non-cockpit nginx snippets, external crontab entries, docker volume contents.
 
-## M1 清单
+## M1 checklist
 
-- [x] agent：`drift_provider.go`（baseline 存储读写 + check）+ nginx/cron/stack
-      三 provider 挂钩 + `drift` capability + providers.go 接线
-- [x] server：`api_drift.go`（check 转发）+ serveAPI 接入
-- [x] web：`/drift` 页面 + 路由与菜单
-- [x] 测试：baseline 原子读写、四态判定（nginx/cron/stack）、挂钩注入、
-      server 转发与离线 503
-- [x] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] agent: `drift_provider.go` (baseline storage read/write + check) + hooks into the nginx/cron/stack
+      three providers + the `drift` capability + providers.go wiring
+- [x] server: `api_drift.go` (check forwarding) + serveAPI integration
+- [x] web: the `/drift` page + routing and menu
+- [x] tests: baseline atomic read/write, four-state judgement (nginx/cron/stack), hook injection,
+      server forwarding and offline 503
+- [x] documentation wrap-up (this checklist ticked) + todo.md synced
 
-M1 完成（2026-09-15）：agent 8 测试 + server 3 测试全绿；基线挂钩验证覆盖
-「面板写入成功 → 基线登记」「校验失败 → 不登记」「外部条目变更 → 不算漂移」；
-cron 基线只对 cockpit 任务段 hash（外部 crontab 条目零接触）。
+M1 done (2026-09-15): 8 agent tests + 3 server tests all green; baseline hook verification covers
+"panel write succeeds → baseline registered", "validation fails → not registered", "external entry changed → not counted as drift";
+the cron baseline hashes only the cockpit job section (zero contact with external crontab entries).
 
-## M2 清单
+## M2 checklist
 
-- [x] alert：`CheckDriftScan`（汇总告警 + 真去重复用）+ 单测
-- [x] server：`drift_scan.go`（循环 + Setting 键 + interval 校验）+ config
-      GET/PUT 端点 + server.go 启动
-- [x] web：/drift 页面「自动巡检」设置行 + api/types
-- [x] 测试：告警创建/去重/全 ok 无动作、config 校验、扫描失败跳过
-- [x] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] alert: `CheckDriftScan` (summary alert + reusing real dedupe) + unit tests
+- [x] server: `drift_scan.go` (loop + Setting key + interval validation) + config
+      GET/PUT endpoints + server.go startup
+- [x] web: the "automatic inspection" settings row on the /drift page + api/types
+- [x] tests: alert creation/dedupe/all-ok no action, config validation, scan failure skipping
+- [x] documentation wrap-up (this checklist ticked) + todo.md synced
 
-M2 完成（2026-09-15）：alert 2 测试（创建/字段校验、未读去重、已读后重新
-告警、空列表 no-op、13 项截断 10 行 + 总数提示）+ server 5 测试（config 默认/
-合法含 0 写入/越界 400、扫描产告警 + 二轮去重、全 ok 与 error 态不告警、agent
-报错跳过不 panic、标题定位到主机名）全绿；巡检循环为固定 1min ticker +
-lastScan 对比（间隔动态改生效），启动等 90s 让 agent 先上线。
+M2 done (2026-09-15): 2 alert tests (creation/field validation, unread dedupe, re-alert after being read,
+empty list no-op, 13 items truncated to 10 lines + a total notice) + 5 server tests (config default/
+legal including 0 written/out-of-range 400, scan producing an alert + second-round dedupe, all-ok and error
+states not alerting, an agent error skipping without panic, the title locating the hostname) all green; the
+inspection loop is a fixed 1min ticker + lastScan comparison (a dynamic interval change takes effect), and
+startup waits 90s to let agents come online first.
 
-## 参考
+## References
 
-- 内部：[cron-design.md](./cron-design.md)（splitCockpit 与 server 转发模式）、
-  [proxy-design.md](./proxy-design.md)（片段目录与零接触纪律）、
-  [stack-deploy-design.md](./stack-deploy-design.md)（stacks 目录布局）
-- 外部：NetBox desired/actual 模型、driftctl / Terraform drift detection 的
-  状态比对呈现
+- Internal: [cron-design.md](/guide/cron-design) (splitCockpit and the server forwarding pattern),
+  [proxy-design.md](/guide/proxy-design) (snippet directories and the zero-contact discipline),
+  [stack-deploy-design.md](/guide/stack-deploy-design) (stacks directory layout)
+- External: NetBox's desired/actual model, driftctl / Terraform drift detection's
+  state comparison presentation

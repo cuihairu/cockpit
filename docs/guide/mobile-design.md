@@ -1,133 +1,80 @@
-# 移动端方案：Flutter（iOS + Android）
+# Mobile Plan: Flutter (iOS + Android)
 
-> 语言：**中文** ｜ [English](./mobile-design.en.md)
 
-> 2026-09-22。用户指定技术栈 Flutter，双端覆盖。本文档定义选型依据、与既有
-> server 的边界、M1 最小可用范围与后续里程碑。
+> 2026-09-22. The user specified Flutter as the tech stack, covering both platforms. This document defines the rationale for the choice, the boundary with the existing server, the M1 minimum viable scope, and subsequent milestones.
 
-## 背景
+## Background
 
-Cockpit web UI 是桌面优先（antd 数据密集表格、多栏工作台），手机浏览器体验差。
-而个人基础设施控制台最典型的移动场景恰是：
+The Cockpit web UI is desktop-first (antd data-dense tables, multi-column workbench), and the mobile browser experience is poor. Yet the most typical mobile scenarios for a personal infrastructure console are exactly:
 
-- **在外面看状态**：agent 在线吗、告警了吗、证书/域名快到期了吗；
-- **收告警**：磁盘 SMART 异常、agent 掉线、备份失败要能推到手机；
-- **少量关键操作**：重启一个容器/服务、确认一条告警，而不是完整运维。
+- **Checking status while away**: is the agent online, are there alerts, are certificates/domains about to expire;
+- **Receiving alerts**: disk SMART anomalies, agent offline, backup failures must be pushable to the phone;
+- **A few critical operations**: restarting a container/service, acknowledging an alert — not full ops work.
 
-移动端功能面天然是 web 的窄子集，方案设计围绕「薄客户端 + 复用一切既有设施」。
+The mobile feature surface is naturally a narrow subset of the web; the design revolves around "thin client + reuse all existing infrastructure".
 
-## 决策
+## Decisions
 
-- **D1 技术选型 Flutter**（用户指定）。备选对比：PWA/响应式改造 web 成本最低，
-  但 antd 表格小屏体验差、无推送通道、无原生手感，作为移动方案不达标；React
-  Native 与 web 共享 TS 生态，但个人项目维护第二前端的成本同样存在，且终端模拟
-  （xterm.dart）等原生组件 Flutter 侧更成熟。Flutter 代价是引入第三语言栈
-  （Go / TS / Dart），以 M1 功能面窄（只读为主 + 少量操作）换取长期维护面可控。
+- **D1 Tech choice: Flutter** (user-specified). Alternatives compared: PWA/responsive retrofit of web has the lowest cost, but antd tables perform poorly on small screens, there is no push channel, and no native feel — not up to standard as a mobile solution; React Native shares the TS ecosystem with web, but the cost of maintaining a second frontend for a personal project remains, and native components like the terminal emulator (xterm.dart) are more mature on the Flutter side. The price of Flutter is introducing a third language stack (Go / TS / Dart), traded against the narrow M1 feature surface (mostly read-only + a few operations) for a controllable long-term maintenance surface.
 
-- **D2 不建独立 BFF，直连既有 `/api/*`**：web 端 `services/api.ts` 已收敛 196 个
-  端点调用，认证（JWT + TOTP 双步）、agent、告警、Docker、审计全部现成。移动端
-  只做薄客户端；server 侧仅在确有聚合需求时补端点（M1 预计零新增）。API 对齐
-  纪律同 web：**字段以 Go model json tag 为准**，不从记忆或互相抄。
+- **D2 No separate BFF, direct connection to existing `/api/*`**: the web's `services/api.ts` has already converged 196 endpoint calls; authentication (JWT + TOTP two-step), agents, alerts, Docker, and audit are all ready-made. The mobile side is just a thin client; the server side only adds endpoints when there is a genuine aggregation need (M1 expects zero additions). API alignment discipline is the same as web: **fields are authoritative per the Go model json tags**, not from memory or copying each other.
 
-- **D3 告警推送复用 ntfy 渠道，不接 FCM/APNs**：server 通知已有
-  herald / ntfy / webhook / telegram 四渠道（config.go），其中 ntfy 官方
-  Android/iOS app 就是现成的推送终端——server 配一条 ntfy 渠道即得手机推送，
-  省掉 FCM/APNs 的账号、签名与后端管道。App 内另做告警列表轮询兜底。
-  自托管 ntfy 的 iOS 即时送达有限制（后台轮询间隔），文档记录、不阻塞。
+- **D3 Alert push reuses the ntfy channel, no FCM/APNs**: server notifications already have four channels — herald / ntfy / webhook / telegram (config.go) — and the official ntfy Android/iOS app is a ready-made push endpoint: the server configures one ntfy channel and gets phone push, saving the accounts, signing, and backend pipeline of FCM/APNs. Inside the app, alert-list polling serves as a fallback. Self-hosted ntfy has limitations on instant iOS delivery (background polling interval); documented, not a blocker.
 
-- **D4 认证完全复用**：`POST /api/auth/login` → `requires_totp=true` 时以
-  `tmp_token` 走 `/api/auth/totp/verify` 换正式 JWT（web `LoginResponse` 同款
-  双步流程）；token 存 `flutter_secure_storage`（iOS Keychain / Android
-  Keystore），绝不落 SharedPreferences；`/api/auth/refresh` 续期由 dio 拦截器
-  自动完成（401 → refresh → 重放，失败登出回登录页）。
+- **D4 Authentication fully reused**: `POST /api/auth/login` → when `requires_totp=true`, use `tmp_token` with `/api/auth/totp/verify` to exchange for the formal JWT (the same two-step flow as the web's `LoginResponse`); tokens are stored in `flutter_secure_storage` (iOS Keychain / Android Keystore), never in SharedPreferences; `/api/auth/refresh` renewal is done automatically by a dio interceptor (401 → refresh → replay, on failure log out back to the login page).
 
-- **D5 自签 HTTPS 显式开关**：server 常部署在内网或自签证书后。默认严格校验；
-  设置页提供「允许自签证书」开关（`badCertificateCallback` 放行），开启时红字
-  提示中间人风险。不做证书导入（个人场景过度设计）。
+- **D5 Self-signed HTTPS explicit switch**: the server is often deployed on an intranet or behind a self-signed certificate. Strict validation by default; the settings page provides an "allow self-signed certificates" switch (`badCertificateCallback` lets it through), with a red-text warning about man-in-the-middle risk when enabled. No certificate import (over-engineering for a personal scenario).
 
-- **D6 状态管理 Riverpod + 网络 dio**：Riverpod 编译期安全、社区主流；dio 的
-  拦截器机制直接承载 D4 的刷新重放与 D5 的证书开关。数据轮询为主（M1 不接
-  WebSocket 指标流），仪表盘场景轮询省电且实现简单。
+- **D6 State management Riverpod + networking dio**: Riverpod is compile-time safe and mainstream in the community; dio's interceptor mechanism directly carries D4's refresh-replay and D5's certificate switch. Data polling is the mainstay (M1 does not connect the WebSocket metrics stream); polling is battery-friendly and simple to implement for dashboard scenarios.
 
-- **D7 终端 / 桌面后置**：终端 M2 用 xterm.dart + 既有 remote ticket WebSocket；
-  VNC/桌面观看在 Flutter 侧生态弱（无 noVNC 等价物），列为探索项不承诺
-  （2026-10-07 收口为不做，评估依据见 M3 节）。
+- **D7 Terminal / desktop deferred**: terminal in M2 with xterm.dart + the existing remote ticket WebSocket; VNC/desktop viewing has a weak ecosystem on the Flutter side (no noVNC equivalent), listed as an exploration item without commitment (closed as "won't do" on 2026-10-07; evaluation basis in the M3 section).
 
-- **D8 CI 独立 `mobile.yml`**：`paths: mobile/**` 触发，`flutter analyze` +
-  `flutter test` + APK 构建（`subosito/flutter-action`）。iOS 构建不进 CI
-  （需 macOS runner + 签名账号），本地/真机阶段再议。（2026-10-07 更新：
-  按第三版口径补 `build-ios` job——macOS runner `flutter build ios
-  --no-codesign --debug` 无签名账号验证「编译过」；签名与真机安装仍不在
-  CI 范围。）
+- **D8 CI as a standalone `mobile.yml`**: triggered by `paths: mobile/**`, with `flutter analyze` + `flutter test` + APK build (`subosito/flutter-action`). iOS builds do not enter CI (requires a macOS runner + signing account); to be revisited at the local/real-device stage. (2026-10-07 update: per the third-edition policy, add a `build-ios` job — the macOS runner runs `flutter build ios --no-codesign --debug` to verify "it compiles" without a signing account; signing and real-device installation remain outside CI scope.)
 
-## 里程碑
+## Milestones
 
-**M1 最小可用**（手机场景核心闭环）：
+**M1 minimum viable** (core loop for phone scenarios):
 
-| 页面 | 复用端点（对照 `web/src/services/api.ts`） |
+| Page | Reused endpoints (cf. `web/src/services/api.ts`) |
 | --- | --- |
-| 引导：server URL 配置 + 连接测试 | `GET /health` |
-| 登录（含 TOTP 双步） | `/api/auth/login`、`/api/auth/totp/verify` |
-| 仪表盘：agent 在线/离线、未读告警、证书域名临期 | `/api/agents`、`/api/alerts`、资源列表 |
-| Agent 列表 + 详情指标 | `/api/agents`、metrics 端点 |
-| Docker 容器列表 + start/stop/restart | Docker 容器端点 |
-| 告警列表 + 全部已读 | `/api/alerts`、`PUT /api/alerts/read-all` |
-| 审计列表 | `/api/admin/audit/logs` |
-| 设置：server URL、自签开关、退出 | — |
+| Onboarding: server URL config + connection test | `GET /health` |
+| Login (incl. TOTP two-step) | `/api/auth/login`, `/api/auth/totp/verify` |
+| Dashboard: agent online/offline, unread alerts, certificate/domain expiry | `/api/agents`, `/api/alerts`, resource lists |
+| Agent list + detail metrics | `/api/agents`, metrics endpoints |
+| Docker container list + start/stop/restart | Docker container endpoints |
+| Alert list + mark all read | `/api/alerts`, `PUT /api/alerts/read-all` |
+| Audit list | `/api/admin/audit/logs` |
+| Settings: server URL, self-signed switch, logout | — |
 
-深色主题跟随系统；手机竖屏单栏布局。
+Dark theme follows the system; portrait single-column layout on phones.
 
-**M2**（2026-09-22 完成）：资源页三 tab（域名/证书临期、备份任务状态与手动触发）、
-Cron 只读视图（外部条目原文展示，写操作留桌面端）、文件浏览（只读：目录导航 +
-条目详情）、SSH 终端（tickets 票据 + WS 子协议 + xterm.dart）、生物识别锁
-（local_auth 启动门）。
+**M2** (completed 2026-09-22): resources page with three tabs (domain/certificate expiry, backup task status and manual trigger), Cron read-only view (external entries shown verbatim, write operations left to desktop), file browsing (read-only: directory navigation + entry details), SSH terminal (tickets + WS subprotocol + xterm.dart), biometric lock (local_auth startup gate).
 
-与原计划的偏差：反代（nginx/traefik）视图原顺延 M3 评估，后经 todo M4
-（只读三态，2026-09-23）与 M5（新建/编辑/删除写操作，a9c095f4）两批收口；
-备份视图落位为资源页第三 tab 而非独立页；Cron 与文件在移动端明确**只读**——
-增删改类操作留桌面端，与「手机看、桌面改」的定位一致。
+Deviations from the original plan: the reverse proxy (nginx/traefik) view, originally deferred to M3 evaluation, was closed in two batches via todo M4 (read-only three states, 2026-09-23) and M5 (create/edit/delete write operations, a9c095f4); the backup view landed as the third tab of the resources page rather than a standalone page; Cron and files are explicitly **read-only** on mobile — add/delete/edit operations stay on desktop, consistent with the "view on phone, change on desktop" positioning.
 
-**M3**（2026-10-07 收口）：Stacks 部署操作已落地（2026-09-29，todo M8）——
-stack 列表 + up/down/restart/pull 异步操作（taskId 2s 轮询）+ compose/.env
-只读预览；偏差：compose 编辑、stack 删除与部署历史留桌面端。
-SMART/NAS/组网观测只读三页已落地（2026-10-01，b5d15a6，20 个 widget 测试
-收口）——per-agent 动作单入口（不进底部 tab，与反代/Stacks 同款），
-`smart_page`（健康三态与异常盘置顶口径对齐 web Disk 页）、`nas_page`
-（池/挂载/共享三段 + 超阈值高亮）、`overlay_page`（四工具运行态快照），
-巡检配置与写操作留桌面端。
-**VNC/桌面观看探索项收口（2026-10-07，决策=不做）**：D7 立项时即标注
-「Flutter 侧生态弱、不承诺」，收口评估——① 路线 a「webview 嵌 noVNC」
-需裸 VNC 端口暴露，与 cockpit「VNC 统一经 guacd + /api/remote/guacamole
-隧道」的既有架构冲突；② 路线 b「Dart 实现 Guacamole 协议客户端」
-（指令解析 + CustomPainter 渲染 + 键鼠事件编码）等于重造 guacamole-js，
-违反「不重造底层」边界纪律；③ 定位判断：应急操作已被 M2 SSH 终端覆盖，
-手机小屏看桌面 + 触控映射价值低。触发条件（满足任一再立项）：出现明确
-移动看桌面需求，或 Flutter 侧出现维护活跃的 noVNC 等价物。桌面观看
-由 web 端 Guacamole 三协议（RDP/VNC/SSH）承担，移动端不重复建设。
+**M3** (closed 2026-10-07): Stacks deployment operations have landed (2026-09-29, todo M8) — stack list + up/down/restart/pull async operations (taskId polled every 2s) + compose/.env read-only preview; deviation: compose editing, stack deletion, and deployment history stay on desktop. The SMART/NAS/networking observation read-only pages have landed (2026-10-01, b5d15a6, closed with 20 widget tests) — per-agent action single entry (not in the bottom tab, same as reverse proxy/Stacks), `smart_page` (health three states and anomalous-disk-pinned ordering aligned with the web Disk page), `nas_page` (pool/mount/share three sections + over-threshold highlighting), `overlay_page` (runtime-state snapshots of the four tools); inspection config and write operations stay on desktop.
+**VNC/desktop viewing exploration item closed (2026-10-07, decision = won't do)**: when D7 was initiated it was already noted that "the Flutter-side ecosystem is weak, no commitment"; closing evaluation — (1) route a "webview embedding noVNC" requires exposing a bare VNC port, conflicting with cockpit's existing architecture of "VNC uniformly via guacd + /api/remote/guacamole tunnel"; (2) route b "Dart implementation of a Guacamole protocol client" (instruction parsing + CustomPainter rendering + keyboard/mouse event encoding) amounts to rebuilding guacamole-js, violating the "don't rebuild the underlying layer" boundary discipline; (3) positioning judgment: emergency operations are already covered by the M2 SSH terminal, and watching a desktop on a small phone screen + touch mapping is low value. Trigger conditions (re-initiate if either is met): a clear mobile desktop-viewing need emerges, or a actively-maintained noVNC equivalent appears on the Flutter side. Desktop viewing is handled by the web-side Guacamole three protocols (RDP/VNC/SSH); the mobile side does not duplicate it.
 
-## 目录结构
+## Directory structure
 
 ```
-mobile/                  # Flutter 工程，与 web/ 平行
+mobile/                  # Flutter project, parallel to web/
   lib/
     main.dart
-    api/                 # dio client、拦截器、端点封装
-    models/              # 手写与 Go json tag 对齐的模型
-    state/               # Riverpod providers（auth、agents、alerts…）
-    pages/               # 每页一目录，与 web pages 命名对齐
+    api/                 # dio client, interceptors, endpoint wrappers
+    models/              # hand-written models aligned with Go json tags
+    state/               # Riverpod providers (auth, agents, alerts…)
+    pages/               # one directory per page, named in alignment with web pages
     widgets/
-  test/                  # 单测：models 对齐、拦截器、页面 widget test
+  test/                  # unit tests: model alignment, interceptors, page widget tests
 ```
 
-## 落地前提与验收
+## Prerequisites and acceptance
 
-- 本机需安装 Flutter SDK（stable）。本机为 Linux：**Android APK 可本地构建；
-  iOS 无法本地构建**（需 macOS + Xcode）——iOS 编译验证已闭环到 CI macOS
-  runner（2026-10-07，`mobile.yml` build-ios 无签名 debug 构建）；iOS 真机
-  安装与上架签名仍需自有 Mac/账号，真机验收项挂起。
-- 自动化验收：`flutter analyze` 0 问题、`flutter test` 全绿、`mobile.yml` CI 绿。
-- 真机验收（补入 `docs/guide/acceptance-checklist.md` 移动端一节）：
-  - Android 真机安装 APK：登录 → TOTP → 仪表盘数据与 server 一致；
-  - 断网/错误 server URL 的错误呈现；token 过期自动续期无感；
-  - ntfy 渠道推送送达手机（server 侧触发告警）；
-  - 自签开关关闭时自签 server 连接被拒、开启后可用。
+- The Flutter SDK (stable) must be installed locally. This machine is Linux: **Android APK can be built locally; iOS cannot be built locally** (requires macOS + Xcode) — iOS compile verification is closed out to the CI macOS runner (2026-10-07, `mobile.yml` build-ios unsigned debug build); iOS real-device installation and App Store signing still require your own Mac/account, so the real-device acceptance item is on hold.
+- Automated acceptance: `flutter analyze` with 0 issues, `flutter test` all green, `mobile.yml` CI green.
+- Real-device acceptance (to be added to the mobile section of `docs/guide/acceptance-checklist.md`):
+  - Install the APK on a real Android device: login → TOTP → dashboard data consistent with the server;
+  - Error presentation for offline/wrong server URL; token expiry auto-renewal without user awareness;
+  - ntfy channel push delivered to the phone (trigger an alert on the server side);
+  - With the self-signed switch off, a self-signed server connection is rejected; on, it works.

@@ -1,39 +1,34 @@
 ---
-title: 服务检测 agent——healthprobe 独立探测面（目标格式+状态机+故障窗口）
+title: Service-detect agent — healthprobe standalone probing surface (target format + state machine + failure window)
 ---
 
-# 服务检测 agent 简档
+# Service-detect Agent Brief
 
-> 语言：**中文** ｜ [English](./service-detect-agent.en.md)
 
-## 状态
+## Status
 
-- 状态: **Active——B1-B6 全部落地（2026-10-10，B6 web 面板块见 Services 页 ProbePanel）**。
-  用户令 2026-10-09 立项：基于 core/healthprobe 做正式探测 agent，先简档后写码。
-- 定位：独立小 agent（探测专用产物）——同一份 core 零件 + 平台层 + 探测业务插件，三层架构纪律同
-  [agent-core](agent-core-architecture.md)。standalone（无 server）只做本地状态；配置 server 后经
-  register/heartbeat/report 全链上行。
-- 与 P6 挂起项的关系：P6（rpc service_health 引擎切 Liveness/Readiness/Heartbeat 三语义）**维持挂起
-  待拍板**；本 agent 的故障窗口是 croupier「system 角色探针」口径在**独立探测面**的落地，不改动既有
-  service_health 引擎，两者不互斥也不互相阻塞。
+- Status: **Active — B1-B6 all landed (2026-10-10, the B6 web surface landed as the ProbePanel on the Services page)**.
+  User directive 2026-10-09: build a formal probe agent on top of core/healthprobe, brief first, then code.
+- Positioning: a small standalone (probe-dedicated) agent — the same core parts + platform layer + probe business plugin, following the same three-layer discipline as [agent-core](/design/agent-core-architecture). In standalone mode (no server) it keeps state locally; once a server is configured it uplinks the full chain via register/heartbeat/report.
+- Relationship with the suspended P6 item: P6 (switching the rpc service_health engine to Liveness/Readiness/Heartbeat semantics) **stays suspended pending a decision**; this agent's failure window is the croupier "system-role probe" framing landing on a **standalone probing surface**. It does not modify the existing service_health engine — the two neither exclude nor block each other.
 
-## 1. 目标格式（YAML，yaml.v3 已在依赖）
+## 1. Target format (YAML, yaml.v3 is already a dependency)
 
 ```yaml
-# /etc/cockpit-agent/probe.yaml（默认路径 = platform Paths().ConfigDir/probe.yaml，
-# -config 覆盖；这是 platform Paths 契约的第一个消费方）
-server: ws://127.0.0.1:9000/ws   # 可选；缺省纯本地模式
-secret: ""                        # Server 已配置 enrollment_secret 时必须填写同值；仅 serverless/dev 匿名场景可留空
-interval: 30s                     # 全局默认间隔
-timeout: 5s                       # 全局默认超时
-threshold: 3                      # 全局默认连续失败判故障（防抖）
-recovery: 2                       # 全局默认连续成功判恢复
+# /etc/cockpit-agent/probe.yaml (default path = platform Paths().ConfigDir/probe.yaml,
+# overridable with -config; this is the first consumer of the platform Paths contract)
+server: ws://127.0.0.1:9000/ws   # optional; omit for pure local mode
+secret: ""                        # required when the Server has enrollment_secret; empty only for serverless/dev anonymous mode
+interval: 30s                     # global default interval
+timeout: 5s                       # global default timeout
+threshold: 3                      # global default consecutive failures before Faulty (debounce)
+recovery: 2                       # global default consecutive successes before recovery
 targets:
   - name: blog-http
     type: http
     url: http://127.0.0.1:8080/health
-    expect_status: 200            # http 专用，缺省 200
-    interval: 15s                 # 覆盖全局
+    expect_status: 200            # http only, default 200
+    interval: 15s                 # overrides the global default
   - name: pg-tcp
     type: tcp
     addr: 10.0.0.5:5432
@@ -41,86 +36,77 @@ targets:
     threshold: 2
 ```
 
-- name 必填且唯一（重复启动报错）；type 仅 http|tcp（core/healthprobe 既有 Checker 一对一映射）。
-- target 级 interval/timeout/threshold/recovery 覆盖全局默认；duration 字段用 time.ParseDuration。
+- `name` is required and unique (a duplicate fails at startup); `type` is only `http|tcp` (a one-to-one mapping onto core/healthprobe's existing Checkers).
+- Per-target `interval`/`timeout`/`threshold`/`recovery` override the global defaults; duration fields are parsed with `time.ParseDuration`.
 
-## 2. 状态机（防抖）
+## 2. State machine (debounce)
 
-每 target 一个独立状态机，三种状态：
+Each target gets its own independent state machine with three states:
 
 ```text
-Unknown ──连续成功≥recovery──▶ Healthy ──连续失败≥threshold──▶ Faulty
+Unknown ──consecutive successes ≥ recovery──▶ Healthy ──consecutive failures ≥ threshold──▶ Faulty
    │                               ▲                              │
-   └─────连续失败≥threshold────────┼──────────────────────────────┘
-                                   └────────连续成功≥recovery────────┘
+   └─────consecutive failures──────┼──────────────────────────────┘
+                                   └────────consecutive successes─┘
 ```
 
-- **Unknown 是启动冷区**：首轮结果不立即定性（threshold=1 时首轮失败即 Faulty）。
-- 连续计数：结果与当前倾向一致则累计、相异则清零重计（标准防抖）。
-- 状态迁移是唯一"事件"：Healthy→Faulty 开故障窗口，Faulty→Healthy 关窗口；窗口内单次探测失败
-  /成功只更新计数与 last_error，不产生事件。
+- **Unknown is the cold-start zone**: the first result does not immediately qualify (with threshold=1 a first-round failure is Faulty).
+- Consecutive counting: a result matching the current tendency accumulates, a differing result resets the counter (standard debounce).
+- A state transition is the only "event": Healthy→Faulty opens a failure window, Faulty→Healthy closes it; inside a window a single failed/successful probe only updates the counter and last_error and produces no event.
 
-## 3. 故障窗口数据结构（可回查）
+## 3. Failure window data structure (queryable)
 
 ```go
 // core/healthprobe/window.go
 type Window struct {
     Target    string    `json:"target"`
-    Semantics Semantics `json:"semantics,omitempty"` // 三语义（Liveness/Readiness/Heartbeat）
-    StartedAt time.Time `json:"startedAt"`            // Healthy→Faulty 时刻
-    EndedAt   time.Time `json:"endedAt,omitempty"`    // 零值 = 仍在故障中
+    Semantics Semantics `json:"semantics,omitempty"` // three semantics (Liveness/Readiness/Heartbeat)
+    StartedAt time.Time `json:"startedAt"`            // Healthy→Faulty moment
+    EndedAt   time.Time `json:"endedAt,omitempty"`    // zero value = still in failure
     LastError string    `json:"lastError"`
 }
 ```
 
-- 每 target 一个环形保留区：最多 1 个进行中 + 64 个已关闭窗口（容量常量，防长跑膨胀）。
-- 查询面：`Snapshot() → {target, state, since, lastChecked, lastError, open, recent []Window}`；
-  全量 `Snapshots()` 供上行与状态文件。
-- 「什么时间段服务不可用」= closed 窗口序列 [StartedAt, EndedAt]；「现在是否不可用」= open 窗口。
+- Each target has one ring retention area: at most 1 in-progress window plus 64 closed windows (a capacity constant, to bound long-running growth).
+- Query surface: `Snapshot() → {target, state, since, lastChecked, lastError, open, recent []Window}`; the full `Snapshots()` feeds uplink and the status file.
+- "Which period was the service unavailable" = the closed window sequence [StartedAt, EndedAt]; "is it unavailable now" = the open window.
 
-## 4. 输出面
+## 4. Output surface
 
-1. **本地**：内存 Snapshot（`-status-file` 落 JSON 后读文件；默认关，开启时建议放
-   Paths().DataDir）。
-2. **上行**：协议新消息 `probe_report`（MessageType 字符串枚举追加），payload =
-   `{targets:[{name,state,since,last_checked,last_error}], windows:[近期窗口]}`——状态迁移即发
-   + 每 10×interval 全量兜底；复用 core/report Enqueue 队列与 core/register/heartbeat 注册链。
-3. **server**：handler 收 probe_report 落库（快照表 + 窗口表），REST `GET /api/probe/targets`、
-   `GET /api/probe/windows?target=&agent_id=&limit=`（target/agent_id 均可选）供面板回查；挂现有鉴权中间件。
-4. **herald 告警出口（留位不实现）**：`Alerter interface { Alert(ev Transition) }` + noop 默认
-   实现——接口先行，推送通道等 herald 对接另批。
+1. **Local**: in-memory Snapshot (`-status-file` writes JSON and the file is read back; off by default, recommended to place under `Paths().DataDir` when enabled).
+2. **Uplink**: a new protocol message `probe_report` (MessageType string enum append), payload = `{targets:[{name,state,since,last_checked,last_error}], windows:[recent windows]}` — sent on each state transition + a full snapshot every 10×interval as a fallback; reuses the core/report Enqueue queue and the core/register/heartbeat registration chain.
+3. **Server**: the handler receives probe_report and persists it (snapshot table + window table); REST `GET /api/probe/targets` and `GET /api/probe/windows?target=&agent_id=&limit=` (both target and agent_id optional) feed the panel; hooked into the existing auth middleware.
+4. **herald alert egress (slot reserved, not implemented)**: `Alerter interface { Alert(ev Transition) }` plus a noop default implementation — interface first, the delivery channel waits for a separate herald integration batch.
 
-## 5. 三层落位
+## 5. Three-layer placement
 
 ```text
-core/healthprobe/            # ① 通用能力：既有 HTTP/TCP Checker + 新增 state.go（状态机）
-                             #    + window.go（窗口环）——零业务零平台，可独立复用
-internal/probeagent/         # ③ 业务插件：config.go（YAML 解析校验）、agent.go（调度器：
-                             #    每 target ticker + Checker + 状态机 + 事件分发）、report.go
-                             #    （上行+状态文件+Alerter 留位）
-cmd/cockpit-probe-agent/     # main 薄壳：-config/-status-file flags，standalone/server 双模式
-core/platform                # ② 平台适配：Paths 契约供默认配置/状态路径（首个消费方）；
-                             #    Signals 契约供优雅退出（startcmd 同款）
+core/healthprobe/            # ① Generic capability: existing HTTP/TCP Checker + new state.go (state machine)
+                             #    + window.go (window ring) — zero business logic, zero platform specifics, independently reusable
+internal/probeagent/         # ③ Business plugin: config.go (YAML parsing/validation), agent.go (scheduler:
+                             #    per-target ticker + Checker + state machine + event dispatch), report.go
+                             #    (uplink + status file + Alerter slot)
+cmd/cockpit-probe-agent/     # main thin shell: -config/-status-file flags, standalone/server dual mode
+core/platform                # ② Platform adaptation: the Paths contract for default config/status paths (first consumer);
+                             #    the Signals contract for graceful shutdown (same as startcmd)
 ```
 
-依赖方向同 agent-core：cmd → internal/probeagent → core/* → internal/protocol（白名单例外）。
+Dependency direction matches agent-core: cmd → internal/probeagent → core/* → internal/protocol (whitelisted exception).
 
-## 6. 批次计划（小步：实现+测试绿+英文 commit）
+## 6. Batch plan (small steps: implement + green tests + English commit)
 
-| 批 | 内容 | 门禁 |
+| Batch | Content | Gate |
 | --- | --- | --- |
-| B1 | 本简档 | docs |
-| B2 | core/healthprobe +state.go+window.go（状态机/窗口环/事件回调）+单测 | Go 门禁 |
-| B3 | internal/probeagent config+scheduler+snapshot+Alerter 留位 +单测 | Go 门禁 |
-| B4 | cmd/cockpit-probe-agent main（双模式+platform 接线）+ **本地样例实测** | 构建+实测 |
-| B5 | protocol probe_report + server handler/存储/REST | Go 门禁+server 测试 |
-| B6 | web 面板块（接现有 health/资源面板） | web 全量门禁 TZ=UTC |
+| B1 | This brief | docs |
+| B2 | core/healthprobe +state.go+window.go (state machine/window ring/event callback) + unit tests | Go gate |
+| B3 | internal/probeagent config+scheduler+snapshot+Alerter slot + unit tests | Go gate |
+| B4 | cmd/cockpit-probe-agent main (dual mode + platform wiring) + **local sample run** | build + real run |
+| B5 | protocol probe_report + server handler/storage/REST | Go gate + server tests |
+| B6 | Web surface (hooked into the existing health/resource panels) | web full gate with TZ=UTC |
 
-## 7. 边界（诚实清单）
+## 7. Boundaries (honest list)
 
-- 告警只留 Alerter 接口，不实现任何推送通道（herald 对接另批）。
-- server 存储用 sqlite（既有 AutoMigrate 面），不做独立时序库；窗口保留上限同本地环形容量，
-  更久回查属未来需求另批。
-- 探测从 agent 侧发起（黑盒探测），不做 server 侧分布式探测点位；多点位归属 croupier 口径另议。
-- rpc service_health 引擎（既有服务自愈面）不动；两套探测语义（服务自愈 vs 目标探活）并存，
-  面板上分区呈现。
+- Alerts only reserve the Alerter interface and implement no delivery channel (herald integration is a separate batch).
+- Server storage uses sqlite (the existing AutoMigrate surface), no dedicated time-series database; the window retention cap is the same ring capacity as locally, and longer-range queries are a future need for a separate batch.
+- Probing is initiated agent-side (black-box); there is no server-side distributed probe placement — multi-point placement follows the croupier framing and is discussed separately.
+- The rpc service_health engine (the existing service self-healing surface) is untouched; the two probe semantics (service self-healing vs target liveness) coexist and are presented in separate sections on the panel.

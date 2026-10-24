@@ -509,7 +509,7 @@ require (
     "vitest": "^5.0.1"
   }
 }
-English | 中文
+English
 
 <p align="center">
   <img src="web/public/logo.svg" alt="Cockpit Logo" width="64" height="64">
@@ -8531,7 +8531,7 @@ docs/guide/architecture.en.md:162:- Remote connection tickets are in-memory, 5-m
 docs/guide/decision-log.en.md:286:`Register(pending)` after ticket validation; once proxy_new has been delivered successfully it calls
 docs/guide/decision-log.en.md:315:point has to be added (currently `terminal:write` covers only ticket issuance); if growing guacd
 docs/guide/getting-started.en.md:219:export ALLOWED_ORIGINS="https://cockpit.cuihairu.site"
-docs/guide/concepts.en.md:198:The remote-connection Browser WebSocket uses short-lived ticket authentication. See [Protocols and API Boundary](/guide/protocol.en.md) for details.
+docs/guide/concepts.en.md:198:The remote-connection Browser WebSocket uses short-lived ticket authentication. See [Protocols and API Boundary](/guide/protocol.md) for details.
 docs/guide/concepts.en.md:208:| WebSocket Origin | Controlled by `ALLOWED_ORIGINS`; unset is fine for development but not for production |
 docs/guide/concepts.en.md:209:| Remote connections | 5-minute, single-use ticket |
 docs/index.en.md:28:    details: Admin bootstrap, JWT, TOTP, password reset, audit log and per-Agent secret
@@ -12142,7 +12142,7 @@ internal/server/acme_test.go:338:	f.issueErr = errors.New("rate limited")
     75	
     76	真实连接验证见设计文档「阶段 1 验收范围」（浏览器 RDP 连 Windows、
     77	VNC 连 Linux、iPad Safari 触控；Win11 Home 无 RDP server 走 VNC 兜底）。
-     1	English | 中文
+     1	English
      2	
      3	<p align="center">
      4	  <img src="web/public/logo.svg" alt="Cockpit Logo" width="64" height="64">

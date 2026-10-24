@@ -1,35 +1,34 @@
-# 介绍
+# Introduction
 
-> 语言：**中文** ｜ [English](./introduction.en.md)
 
-Cockpit 是一个面向个人混合基础设施的控制台。当前实现重点解决三件事：
+Cockpit is a console for personal hybrid infrastructure. The current implementation focuses on three things:
 
-- 用 Inventory YAML 和 SQLite 建立统一资源视图。
-- 通过 Agent 主动连接 Server，管理 NAT 后或跨地域节点。
-- 在 Web UI 中查看资源、监控、告警、审计，并发起远程终端、VNC、RDP 等连接。
+- Establishing a unified resource view with Inventory YAML and SQLite.
+- Managing NAT'd or geographically distributed nodes through Agents that connect outbound to the Server.
+- Viewing resources, monitoring, alerts, and audits in the Web UI, and initiating remote terminal, VNC, RDP, and other connections.
 
-## 当前能力
+## Current capabilities
 
-控制面底子是完整的：Server 有 Web UI、HTTP API、Agent WebSocket 接入、TOTP 两步验证、RBAC 用户与角色、审计日志，数据落 SQLite；Agent 主动连出注册，上报心跳、系统指标与能力标签，NAT 后的节点不开入站端口。`cockpit sync` 把 Inventory YAML 同步成运行时资源视图——计算实例、域名、证书、服务、网关、存储六类资源行都带拨测心跳条与到期告警。
+The control-plane foundation is complete: the Server has a Web UI, HTTP API, Agent WebSocket intake, TOTP two-step verification, RBAC users and roles, and audit logs, with data in SQLite; Agents connect out to register, reporting heartbeats, system metrics, and capability tags, so NAT'd nodes need no inbound ports. `cockpit sync` syncs Inventory YAML into the runtime resource view — all six resource rows (compute instances, domains, certificates, services, gateways, storage) carry probe heartbeat bars and expiry alerts.
 
-远程操作方面，终端 / VNC / 桌面走短期 ticket 转发，会话录制归档可回放；agent 上能浏览与传输文件；日志既能在单机 tail（journalctl / Docker），也能跨机联邦检索。应用与容器由 Docker 全量管理（容器、镜像、网络、卷），Stacks 按 compose 部署，带模板库与部署历史，restart/pull 就近操作。
+For remote operations, terminal / VNC / desktop go through short-lived ticket forwarding, with session recording archived and replayable; files can be browsed and transferred on agents; logs can be tailed on a single machine (journalctl / Docker) and searched federated across machines. Applications and containers are fully managed by Docker (containers, images, networks, volumes); Stacks deploy via compose with a template library and deployment history; restart/pull are operated locally. 
 
-备份做在两侧：agent 侧定时打包、保留策略、双阶段安全恢复，产物经 rclone 推异地并可补传；server 侧用 `VACUUM INTO` 定时备份面板数据库，同样支持异地推送。Web 侧管反向代理站点（nginx / Traefik 双后端，语法自检、失败回滚），证书走 ACME 签发与自动续期（Cloudflare / DNSPod / 阿里云 DNS-01），签发产物自动部署到 agent 指定路径；DNS 记录管理覆盖三家厂商的 A/AAAA/CNAME/MX/TXT/NS/SRV/CAA 八类记录，另有 DDNS 动态域名与域名/证书到期台账。
+Backups cover both sides: on the agent side, scheduled packing, retention policies, and two-stage safe recovery, with artifacts pushed off-site via rclone and re-pushable; on the server side, `VACUUM INTO` backs up the panel database on schedule, likewise with off-site push. The Web side manages reverse proxy sites (nginx / Traefik dual backends, syntax self-check, rollback on failure); certificates use ACME issuance with automatic renewal (Cloudflare / DNSPod / Alibaba Cloud DNS-01), and issued artifacts are automatically deployed to configured paths on agents; DNS record management covers eight record types (A/AAAA/CNAME/MX/TXT/NS/SRV/CAA) across three providers, plus DDNS dynamic domains and a domain/certificate expiry ledger.
 
-主机运维覆盖服务管理（systemd / Windows SCM / macOS launchd 三后端）、Cron 定时任务、SMART 磁盘巡检、NAS 观测（DSM / TrueNAS / OMV，本地 mdadm / ZFS），以及组网观测与管理（WireGuard / ZeroTier / Tailscale / frp 运行态、云端纳管、本机加入/离开网络与 daemon 服务启停）。配置漂移检测做面板下发与磁盘现状的比对，CMDB 一致性做声明与实报的对照；告警经 Herald / ntfy / webhook / Telegram 四个渠道发出。
+Host operations cover service management (systemd / Windows SCM / macOS launchd — three backends), Cron jobs, SMART disk inspection, NAS observation (DSM / TrueNAS / OMV, local mdadm / ZFS), and network observation and management (WireGuard / ZeroTier / Tailscale / frp runtime state, cloud enrollment, and joining/leaving networks and daemon service start/stop on this machine). Configuration drift detection compares what the panel dispatched against what is on disk; CMDB consistency compares declarations against actual reports; alerts go out through four channels: Herald / ntfy / webhook / Telegram.
 
-## 适用场景
+## Applicable scenarios
 
-Cockpit 适合个人或小规模环境：
+Cockpit suits personal or small-scale environments:
 
-- 家庭机房、本地机房和云 VPS 混合管理。
-- 多个节点处在 NAT 后，只能主动连出。
-- 希望用一份清单描述主机、服务、域名、证书和存储。
-- 希望在一个 Web UI 中查看资源状态、系统指标和远程连接入口。
+- Mixed management of a home rack, a local rack, and cloud VPSes.
+- Multiple nodes behind NAT that can only connect outbound.
+- Wanting to describe hosts, services, domains, certificates, and storage in a single inventory.
+- Wanting to see resource status, system metrics, and remote access entries in one Web UI.
 
-Cockpit 目前不是面向大规模多租户的 CMDB，也不是 Kubernetes 控制平面。它更像个人基础设施的轻量控制台。
+Cockpit is currently not a large-scale multi-tenant CMDB, nor a Kubernetes control plane. It is more of a lightweight console for personal infrastructure.
 
-## 架构概览
+## Architecture overview
 
 ```text
 Browser
@@ -49,29 +48,34 @@ Cockpit Agent
   |-- TCP proxy / terminal / VNC / desktop target access
 ```
 
-核心原则：
+Core principles:
 
-- Web UI 只访问 Server。
-- Agent 主动连接 Server。
-- Server 维护全局运行时视图。
-- Agent 负责节点侧探测和执行。
-- Inventory 是声明式输入，SQLite 是运行时查询面。
+- The Web UI only talks to the Server.
+- Agents connect outbound to the Server.
+- The Server maintains the global runtime view.
+- Agents handle node-side probing and execution.
+- Inventory is the declarative input; SQLite is the runtime query surface.
 
-完整边界见 架构与边界。
+See [architecture and boundaries](/guide/architecture) for the full boundary.
 
-## 与其他工具的关系
+## Relationship to other tools
 
-Cockpit 不要求替代已有控制台。当前代码中已经有 PVE、Docker、OpenWrt 客户端和 Agent 能力检测，长期可以把这些能力编排到统一工作台中。
+Cockpit does not require replacing existing consoles. The current code already has PVE, Docker, and OpenWrt clients and Agent capability detection; over the long term these capabilities can be orchestrated into a unified workbench.
 
-当前应按以下方式理解：
+For now, understand it as follows:
 
-| 工具/平台 | Cockpit 当前关系 |
+| Tool/platform | Cockpit's current relationship |
 | --- | --- |
-| PVE | 有 API 客户端和 Agent capability 检测；控制面集成仍需按具体功能确认 |
-| Docker | 有 API 客户端、能力检测和资源视图基础 |
-| OpenWrt | 有客户端和能力检测基础 |
-| 远程终端/VNC/RDP | 通过 Agent 代理访问内网目标 |
-| Git | Inventory YAML 可以由 Git 管理，但当前应用仍以 `cockpit sync` 写入 SQLite 为准 |
+| PVE | Has an API client and Agent capability detection; control-plane integration still needs confirmation per specific feature |
+| Docker | Has an API client, capability detection, and resource-view foundations |
+| OpenWrt | Has client and capability-detection foundations |
+| Remote terminal/VNC/RDP | Reaches intranet targets proxied through the Agent |
+| Git | Inventory YAML can be managed by Git, but the current application still treats `cockpit sync` writing into SQLite as authoritative |
 
-## 文档阅读路径
+## Documentation reading path
 
+1. [Getting started](/guide/getting-started)
+2. [Core concepts](/guide/concepts)
+3. [Architecture and boundaries](/guide/architecture)
+4. [Agent egress and SD-WAN capability boundaries](/guide/agent-egress-sdwan)
+5. [Protocol and API boundaries](/guide/protocol)

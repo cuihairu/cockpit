@@ -1,147 +1,136 @@
-# Docker 部署指南
+# Docker Deployment Guide
 
-> 语言：**中文** ｜ [English](./deploy-docker.en.md)
 
-用官方发布的镜像（`ghcr.io/cuihairu/cockpit`）在服务器上跑 Cockpit Server。
-面向「拿到一台服务器要把它跑起来」的部署者；改代码 locally 起服务见
-[快速开始](../guide/getting-started.md)。
+Run Cockpit Server on a server using the officially published image (`ghcr.io/cuihairu/cockpit`).
+Aimed at deployers who "have a server and want it running"; for running the service locally while changing code see
+[Quick start](/guide/getting-started).
 
-## 两种部署姿势先说清
+## Two deployment postures, clarified up front
 
-| | 用途 | 镜像来源 | compose 文件 |
+| | Purpose | Image source | compose file |
 | --- | --- | --- | --- |
-| 拉镜像部署（本文） | 生产/长期运行 | `ghcr.io/cuihairu/cockpit:<tag>` | `deployments/docker/docker-compose.yml` |
-| 本地构建 | 改代码自测 | 本机 `docker build` | 仓库根 `docker-compose.yml` |
+| Pull the image (this document) | production / long-running | `ghcr.io/cuihairu/cockpit:<tag>` | `deployments/docker/docker-compose.yml` |
+| Local build | self-testing code changes | local `docker build` | repo root `docker-compose.yml` |
 
-两份 compose 的服务定义同源（server + 可选 guacd），差别只在镜像来源；仓库根 `docker-compose.yml` 额外映射宿主端口 `9090:9000`（CF Tunnel 回源历史遗留）。
+Both compose files define their services from the same source (server + optional guacd); the only difference is the image source. The repo root `docker-compose.yml` additionally maps host port `9090:9000` (a leftover from the CF Tunnel origin era).
 
-## 前置要求
+## Prerequisites
 
-- Docker Engine 20.10+ 与 Compose V2（`docker compose version` 能跑）；
-- 1 核 1G 内存起（远控 guacd 另算，建议再留 512M）；
-- 对外 9000/tcp（或只绑回环、走反代）。
+- Docker Engine 20.10+ and Compose V2 (`docker compose version` must run);
+- 1 core and 1 GB of memory to start (guacd for remote access counts separately — allow another 512M);
+- Port 9000/tcp open to the outside (or bind to loopback only and go through a reverse proxy).
 
-## 快速开始
+## Quick start
 
 ```bash
-# 1. 准备变量文件
+# 1. Prepare the variable file
 cp deployments/docker/.env.example deployments/docker/.env
-vi deployments/docker/.env        # 至少改 ADMIN_PASSWORD / JWT_SECRET / TOTP_ENCRYPTION_KEY
+vi deployments/docker/.env        # at minimum change ADMIN_PASSWORD / JWT_SECRET / TOTP_ENCRYPTION_KEY
 
-# 2. 起服务（锁 tag 更稳；留空则跟 latest）
+# 2. Start the service (pinning the tag is safer; leaving it empty follows latest)
 cd deployments/docker
 COCKPIT_IMAGE_TAG=latest docker compose up -d
 
-# 3. 看状态
+# 3. Check status
 docker compose ps
 curl -fsS http://127.0.0.1:9000/health
 ```
 
-打开 `http://<服务器 IP>:9000`，用 `.env` 里的 `ADMIN_USERNAME` /
-`ADMIN_PASSWORD` 登录。
+Open `http://<server IP>:9000` and log in with `ADMIN_USERNAME` / `ADMIN_PASSWORD` from `.env`.
 
-生成随机值：
+Generate random values:
 
 ```bash
 openssl rand -base64 32
 ```
 
-## 镜像与 tag
+## Image and tags
 
-镜像由 `.github/workflows/docker.yml`
-在 GitHub-hosted runner 上用 buildx 构建并推到 GHCR。一次构建打多组 tag：
+The image is built by `.github/workflows/docker.yml` with buildx on a GitHub-hosted runner and pushed to GHCR. One build produces several tags:
 
-| tag | 含义 |
+| Tag | Meaning |
 | --- | --- |
-| `latest` | `main` 分支最新（每次合入 main 覆盖） |
-| `main` | 同上，显式引用分支名 |
-| `1.2.3` / `1.2` / `1` | 打 `v*` tag 时的语义化版本系列（`docker/metadata-action` 的 `pattern={{version}}` 会剥掉 `v` 前缀） |
-| `<短 sha>` | 每次构建的不可变快照，回滚用这个 |
-| `pr-123` | PR 构建（不推送 registry，仅验证能构建） |
+| `latest` | newest on the `main` branch (overwritten on every merge to main) |
+| `main` | the same, explicitly named after the branch |
+| `1.2.3` / `1.2` / `1` | the semantic-version series produced when a `v*` tag is pushed (`docker/metadata-action`'s `pattern={{version}}` strips the `v` prefix) |
+| `<short sha>` | an immutable snapshot of each build, used for rollbacks |
+| `pr-123` | PR builds (not pushed to the registry, only verify it builds) |
 
-**部署建议锁 sha 或语义化版本 tag**（`COCKPIT_IMAGE_TAG=<sha>`），别长期跟
-`latest`——`latest` 会随 main 前进，回滚时说不清回到哪一版。
+**For deployments, pin a sha or a semantic-version tag** (`COCKPIT_IMAGE_TAG=<sha>`) rather than following
+`latest` long-term — `latest` moves along with main, so a rollback can never say which version it went back to.
 
 ```bash
 docker compose pull && docker compose up -d
 ```
 
-镜像只出 `linux/amd64`：Server 走 CGO（SQLite 绑死在 cgo），多架构要交叉
-工具链链。需要 arm64 请用二进制发行包（`nightly.yml` / Releases）。
+The image is only published for `linux/amd64`: the Server uses CGO (SQLite is hard-bound to cgo), and multi-arch builds need a cross toolchain chain. For arm64 use the binary release packages (`nightly.yml` / Releases).
 
-查看镜像里内置的版本号：
+Check the version baked into the image:
 
 ```bash
 docker compose exec cockpit-server cockpit version
 ```
 
-## 环境变量
+## Environment variables
 
-完整清单见 `deployments/docker/.env.example`。
+The complete list is in `deployments/docker/.env.example`.
 
-**必改**（占位值会让容器拒绝启动，`entrypoint.sh` 硬校验）：
+**Must change** (placeholder values make the container refuse to start; `entrypoint.sh` hard-validates them):
 
-| 变量 | 说明 |
+| Variable | Description |
 | --- | --- |
-| `ADMIN_PASSWORD` | 管理员初始口令，≥8 字符，不能是示例值 |
-| `JWT_SECRET` | JWT 签名密钥，长随机串 |
-| `TOTP_ENCRYPTION_KEY` | `PRODUCTION=true` 时必填，≥32 字符。**启用 TOTP 后必须备份**，丢了已有密钥解不开 |
+| `ADMIN_PASSWORD` | initial admin password, ≥8 characters, not the example value |
+| `JWT_SECRET` | JWT signing key, a long random string |
+| `TOTP_ENCRYPTION_KEY` | required when `PRODUCTION=true`, ≥32 characters. **Must be backed up once TOTP is enabled** — without it existing secrets cannot be decrypted |
 
-**可选**：
+**Optional**:
 
-| 变量 | 说明 |
+| Variable | Description |
 | --- | --- |
-| `COCKPIT_IMAGE_TAG` | 镜像 tag，缺省 `latest` |
-| `COCKPIT_HTTP_PORT` | 宿主机端口，缺省 9000 |
-| `ADMIN_USERNAME` | 缺省 `admin` |
-| `AGENT_ENROLLMENT_SECRET` | 新 Agent 首次注册口令；建议 `openssl rand -hex 24` 生成，再在 Agent 启动命令加 `--secret`。留空时新 Agent 默认拒绝注册；不要提交 `.env` |
-| `PRODUCTION` | 缺省 `true`（放开 Host/Origin 校验等开发态便利） |
-| `BASE_URL` | 对外基址，邮件/通知里拼链接用 |
-| `ALLOWED_ORIGINS` | 对外域名，如 `https://cockpit.example.com`。未设置时 WS 接受所有 Origin（打 warning），**不会阻止启动但生产必设**；`.env.example` 自带 `http://localhost:9000` 可用默认值 |
-| `TZ` | 缺省 `Asia/Shanghai` |
-| `GUACD_ADDR` | guacd 地址（启用远控时设 `guacd:4822`） |
-| `GUACD_RECORDING_PATH` | guacd 录制目录，缺省 `/var/lib/guacamole` |
-| `AGENT_EXPIRE_MINUTES` | Agent 过期阈值（分钟），缺省 5：心跳超过该时长即判过期——服务端自动标离线并释放连接，列表默认隐藏（密钥/标签保留，物理清除走「清理离线 agent」钮）；负值关闭。**当前 Docker compose 未接线该变量**，在 `.env` 里设了不生效 |
-| `GUACD_LOG_LEVEL` | 缺省 `info`，**别开 `debug`**（会打印 connect 指令参数，含口令/私钥） |
+| `COCKPIT_IMAGE_TAG` | image tag, defaults to `latest` |
+| `COCKPIT_HTTP_PORT` | host port, defaults to 9000 |
+| `ADMIN_USERNAME` | defaults to `admin` |
+| `AGENT_ENROLLMENT_SECRET` | first-registration credential for new Agents; generate with `openssl rand -hex 24` and pass it via the Agent's `--secret` flag. New Agents are rejected by default when empty; never commit `.env` |
+| `PRODUCTION` | defaults to `true` (turning it off relaxes the Host/Origin checks and other dev conveniences) |
+| `BASE_URL` | external base URL, used to build links in emails/notifications |
+| `ALLOWED_ORIGINS` | external domain, e.g. `https://cockpit.example.com`. When unset the WS accepts all Origins (with a warning) — **this does not block startup but must be set in production**; `.env.example` ships with `http://localhost:9000` as a usable default |
+| `TZ` | defaults to `Asia/Shanghai` |
+| `GUACD_ADDR` | guacd address (`guacd:4822` when remote access is enabled) |
+| `GUACD_RECORDING_PATH` | guacd recording directory, defaults to `/var/lib/guacamole` |
+| `AGENT_EXPIRE_MINUTES` | agent expiry threshold (minutes), defaults to 5: a heartbeat older than that marks the agent expired — the server automatically marks it offline and releases the connection, and the list hides it by default (keys/tags are kept, physical removal goes through the "clean offline agents" button); a negative value disables it. **The current Docker compose does not wire this variable up**, so setting it in `.env` has no effect |
+| `GUACD_LOG_LEVEL` | defaults to `info`; **do not enable `debug`** (it prints connect instruction arguments, including passwords/keys) |
 
-## 远控栈（guacd，可选）
+## Remote access stack (guacd, optional)
 
-RDP / VNC / SSH 三个协议的远控入口需要同网络的 `guacd` 守护进程
-（浏览器侧 `guacamole-common-js` + Go 网关反代，详见
-[远控设计](../remote-desktop-guacamole-design.md) 与
-[三协议统一栈](../remote-access-integration-design.md)）。
+The remote access entry for the RDP / VNC / SSH protocols needs a `guacd` daemon on the same network
+(browser-side `guacamole-common-js` + a Go gateway reverse proxy; see
+[Remote desktop design](/remote-desktop-guacamole-design) and
+[Unified three-protocol stack](/remote-access-integration-design)).
 
 ```bash
-# .env 里加一行（同网络 DNS 名，不要写 127.0.0.1——那是 guacd 容器自己）
+# add one line to .env (a DNS name on the same network, do not write 127.0.0.1 — that is the guacd container itself)
 GUACD_ADDR=guacd:4822
 
 docker compose --profile guacd up -d
 ```
 
-要点：
+Key points:
 
-- **端口不对外暴露**。guacd 不是 HTTP 服务，浏览器只走 Cockpit 的
-  `/api/remote/guacamole` WebSocket，由 Go 网关同网络拨 guacd。
-- **录制卷必须同卷同路径**。compose 已把 `guacd-recordings` 同时挂给两个
-  容器（都在 `/var/lib/guacamole`）：guacd 按 `connect` 指令的
-  `recording-path` 写 `<session>.guac`，Go 网关在会话结束时把同一路径的
-  文件收走归档进 `/data/recordings`（`collectGuacRecording`）。两侧路径
-  对不上，录制就永远收不到，`/recordings` 页面看不到桌面/终端会话。
-  改了 `GUACD_RECORDING_PATH` 就要同步改两个容器的挂载点。
-- guacd 不可达时 SSH 仍有退路：Workbench 的 SSH Tab 保留「内置终端（经
-  Agent）」次入口（走 agent 通道 + xterm.js，不经 guacd）。
+- **The port is not exposed externally**. guacd is not an HTTP service; the browser only goes through Cockpit's `/api/remote/guacamole` WebSocket, and the Go gateway dials guacd over the same network.
+- **The recording volume must be the same volume at the same path**. compose already mounts `guacd-recordings` into both containers (both at `/var/lib/guacamole`): guacd writes `<session>.guac` at the `recording-path` from the `connect` instruction, and the Go gateway collects the file at the same path when the session ends and archives it into `/data/recordings` (`collectGuacRecording`). If the two paths disagree, recordings are never collected and the `/recordings` page shows no desktop/terminal sessions. Changing `GUACD_RECORDING_PATH` means changing the mount points of both containers.
+- When guacd is unreachable SSH still has a fallback: the SSH Tab in Workbench keeps the "built-in terminal (via Agent)" secondary entry (going through the agent channel + xterm.js, not guacd).
 
-## 反向代理
+## Reverse proxy
 
-反代必须放行两类 WebSocket 升级，否则 Agent 掉线、远控建不起来：
+A reverse proxy must allow two kinds of WebSocket upgrade, otherwise agents drop off and remote connections cannot be established:
 
-| 路径 | 用途 |
+| Path | Purpose |
 | --- | --- |
-| `/ws` | Agent 长连接 |
-| `/api/remote/guacamole` | Guacamole 隧道（RDP/VNC/SSH） |
-| `/api/remote/terminal` | 内置终端（经 Agent 的 SSH 兜底通道） |
+| `/ws` | agent long-lived connection |
+| `/api/remote/guacamole` | Guacamole tunnel (RDP/VNC/SSH) |
+| `/api/remote/terminal` | built-in terminal (the agent-mediated SSH fallback channel) |
 
-Nginx 片段：
+Nginx snippet:
 
 ```nginx
 location ~ ^/api/remote/(terminal|guacamole) {
@@ -149,63 +138,62 @@ location ~ ^/api/remote/(terminal|guacamole) {
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
-    proxy_read_timeout 86400;   # 远控会话长时间静默，超时别设太小
+    proxy_read_timeout 86400;   # remote sessions are silent for long stretches, don't set this too low
 }
 ```
 
-仓库里有一份站点配置模板：`deployments/nginx/cockpit.cuihairu.site.conf`（其 `location ~ ^/api/remote/(terminal|desktop|vnc|guacamole)` 仍含已删除的 desktop/vnc 端点，现网如需收敛为 terminal/guacamole 可自行调整，不影响已删除端点的兜底行为）。
+The repo ships a site config template: `deployments/nginx/cockpit.cuihairu.site.conf` (its `location ~ ^/api/remote/(terminal|desktop|vnc|guacamole)` still contains the deleted desktop/vnc endpoints; if you want to converge to terminal/guacamole in production you can adjust it yourself, it does not affect the fallback behaviour of the deleted endpoints).
 
-HTTPS 下浏览器会用 `wss://`，Go 网关同源反代，无需额外配置。
+Under HTTPS the browser uses `wss://` and the Go gateway reverse-proxies same-origin, so no extra configuration is needed.
 
-## 数据与备份
+## Data and backups
 
-数据全在 volume `cockpit-data` 挂载的 `/data`：
+All data lives in `/data`, mounted from volume `cockpit-data`:
 
-| 路径 | 内容 |
+| Path | Content |
 | --- | --- |
-| `/data/cockpit.db` | SQLite 主库（账号、配置、审计、会话记录…） |
-| `/data/inventory.yaml` | 采集清单 |
-| `/data/recordings/` | 会话录制归档（终端 `.cast`、桌面/远控 `.guac`） |
+| `/data/cockpit.db` | SQLite main database (accounts, config, audit, session records…) |
+| `/data/inventory.yaml` | inventory manifest |
+| `/data/recordings/` | session recording archives (terminal `.cast`, desktop/remote `.guac`) |
 
-备份与回滚：
+Backup and rollback:
 
 ```bash
 docker run --rm -v cockpit-data:/data -v "$PWD":/backup debian:bookworm-slim \
   tar czf /backup/cockpit-data-$(date +%F).tar.gz -C /data .
 ```
 
-升级前做一次。回滚 = 把 `COCKPIT_IMAGE_TAG` 改回旧 tag/sha 再
-`docker compose up -d`（数据库向前兼容，不自动降级迁移）。
+Do this once before upgrading. Rolling back = change `COCKPIT_IMAGE_TAG` back to the old tag/sha and run `docker compose up -d` again (the database is forward compatible; there is no automatic downgrade migration).
 
-## 从源码构建
+## Building from source
 
-要在部署机本地构建（离线、无 registry 访问时）：
+To build locally on the deploy host (offline, with no registry access):
 
 ```bash
-docker compose up -d --build          # 仓库根 compose，镜像名 cockpit:local
-# 或单独构建
+docker compose up -d --build          # repo root compose, image name cockpit:local
+# or build separately
 docker build -t cockpit:local --build-arg VERSION=$(git rev-parse --short HEAD) .
 ```
 
-`--build-arg VERSION` 会注入二进制的 `cockpit version`（`main.version`）。
-镜像内的 pnpm 版本已钉死（`pnpm@11.19.0`），与 lockfile 匹配。
+`--build-arg VERSION` is injected into the binary's `cockpit version` (`main.version`).
+The pnpm version inside the image is pinned (`pnpm@11.19.0`) to match the lockfile.
 
-## 排障
+## Troubleshooting
 
-| 现象 | 排查 |
+| Symptom | Investigation |
 | --- | --- |
-| 容器起不来，日志 `ADMIN_PASSWORD must be set...` | `.env` 里还是占位值；`entrypoint.sh` 故意拒绝弱口令启动 |
-| `/health` 不通 | `docker compose logs cockpit-server`；确认 9000 未被占；`ALLOWED_ORIGINS` 与实际访问域名不符时静态资源会被浏览器拦 |
-| 远控入口不显示 | `GUACD_ADDR` 没设或设错。留空 = 前端隐藏 RDP/VNC/SSH 入口（预期行为） |
-| 远控点了连不上，日志 `dial guacd ... failed` | guacd 容器没起（`--profile guacd` 漏了）或 `GUACD_ADDR` 写成了 `127.0.0.1`（那是 guacd 容器内的回环，Go 网关拨不到） |
-| `/recordings` 里没有远控会话录制 | guacd 录制卷没与 server 共挂（见「远控栈」一节） |
-| 反代后远控握手失败 | 漏了 `/api/remote/guacamole` 的 Upgrade 头（见「反向代理」） |
-| 终端/桌面会话中途断 | 反代 `proxy_read_timeout` 太小 |
+| The container won't start, log shows `ADMIN_PASSWORD must be set...` | `.env` still holds a placeholder value; `entrypoint.sh` deliberately refuses to start on a weak password |
+| `/health` unreachable | `docker compose logs cockpit-server`; confirm 9000 isn't taken; when `ALLOWED_ORIGINS` doesn't match the domain you actually access, static assets get blocked by the browser |
+| The remote access entry doesn't show | `GUACD_ADDR` is unset or wrong. Leaving it empty hides the RDP/VNC/SSH entries in the frontend (expected behaviour) |
+| Clicking remote access won't connect, log shows `dial guacd ... failed` | the guacd container isn't running (`--profile guacd` was missed), or `GUACD_ADDR` was written as `127.0.0.1` (that's the loopback inside the guacd container, unreachable from the Go gateway) |
+| No remote session recordings under `/recordings` | the guacd recording volume isn't co-mounted with the server (see "Remote access stack") |
+| Remote access handshake fails behind the reverse proxy | the Upgrade header for `/api/remote/guacamole` is missing (see "Reverse proxy") |
+| Terminal/desktop sessions drop mid-way | the reverse proxy's `proxy_read_timeout` is too small |
 
-## 相关文档
+## Related documents
 
-- [快速开始](../guide/getting-started.md) —— 二进制部署与本地起服务
-- 部署资产说明 `deployments/docker/README.md` —— 变量与脚本的逐项解释
-- [真机验收清单](../guide/acceptance-checklist.md) —— 上线后的功能验收
-- [远控设计](../remote-desktop-guacamole-design.md) /
-  [三协议统一栈](../remote-access-integration-design.md) —— guacd 接入细节
+- [Quick start](/guide/getting-started) —— binary deployment and running locally
+- Deployment asset notes `deployments/docker/README.md` —— an item-by-item explanation of the variables and scripts
+- [Real-machine acceptance checklist](/guide/acceptance-checklist) —— functional acceptance after going live
+- [Remote desktop design](/remote-desktop-guacamole-design) /
+  [Unified three-protocol stack](/remote-access-integration-design) —— guacd integration details

@@ -1,146 +1,155 @@
-# P1 方案设计：执行 Job 模型（最小闭环）
+# P1 Design: Execution Job Model (Minimal Closed Loop)
 
-> 语言：**中文** ｜ [English](./jobs-design.en.md)
 
-> 2026-10-04。P1「Job」首期落地设计。战略评审（见 reference-projects）把
-> Job/Action/Workflow/Event 列为控制面四个核心抽象，本文只做 Job 的最小
-> 闭环：一条持久化的执行记录 + 一个可执行的内置类型（agent.exec），
-> Action/Workflow/Event 留待后续在 Job 之上生长。
+> 2026-10-04. First-phase landing design for P1 "Job". The strategy review (see reference-projects) listed
+> Job/Action/Workflow/Event as the control plane's four core abstractions; this document only covers Job's
+> minimal closed loop: one persistent execution record + one executable built-in type (agent.exec);
+> Action/Workflow/Event are left to grow on top of Job later.
 
-## 实现状态（2026-10-04 对账）
+## Implementation Status (reconciled 2026-10-04)
 
-- **已实现**（22bd7fd → 4a0660f 六笔）：本文「最小闭环」范围全链落地——
-  `storage.Job` 模型 + AutoMigrate；Job 类型 `agent.exec` 走 agent 侧 `job.exec`
-  RPC provider（命令 ≤16KB、超时 ≤300s 缺省 60s、输出 64KB 截断、超时按
-  进程组 SIGKILL）；`GET|POST /api/jobs` + `GET /api/jobs/{id}`（创建后后台派发，
-  pending 即返回，终态异步回写）；终态单条审计 `job_run`（details 含 type/target/status/params）；
-  Jobs 页（全机台账 5s 轮询 + 创建即执行弹窗 + 终态详情）；权限点
-  `jobs:read`/`jobs:write`（PermGuard 控制创建入口）。
-- **未实现**（按本文「边界（明确不做）」节，立项时再设计，不写进当前能力）：
-  输出流式、Action/Event 抽象与 AI 接线（P5）。
-- **已由 P2 落地（2026-10-09，[workflow-design](./workflow-design.md) M1）**：
-  异步执行/取消（`cancelled` 终态、pending 可撤、台账过滤）与 Workflow 编排；
-  `POST /api/jobs` 语义随之改为「创建即 201 返回 pending，后台派发」（原同步
-  等待删除），timeout 仍按设计保持 `failed`（不设独立终态）。取消面再由 M2c
-  扩至 running：`POST /api/jobs/{id}/cancel` 经 `job.cancel` RPC 击杀在途进程
-  （2026-10-11）。Workflow/定时触发中，定时部分仍不做（workflow-design W11 约定）。
-- **真机验收**（2026-10-05，探针 `scripts/acceptance/jobs/` 五件套 9/9 PASS，
-  acceptance-checklist「统一 Job 执行」节七项全勾）：执行链路（82ms 成功回执 /
-  exit 3 输出带回 / 超时 1.078s 按时返回且 `pgrep` 无孤儿 / 截尾恰 64KB 尾部保留）、
-  离线 503 不落幽灵、校验面 400×7、终态审计恰一条、权限双角色 403 全部实证。
-  **验收逮到 D8 路由面缺口**：`/api/jobs` 未登记 `resourceRules`，RBAC
-  governed=false 整体放行（viewer 可执行），修为补规则 + 三角色矩阵 7 例。
+- **Implemented** (22bd7fd → 4a0660f, six commits): the whole "minimal closed loop" scope of this
+  document landed — the `storage.Job` model + AutoMigrate; Job type `agent.exec` going through the
+  agent-side `job.exec` RPC provider (command ≤16KB, timeout ≤300s default 60s, 64KB output truncation,
+  SIGKILL the process group on timeout); `GET|POST /api/jobs` + `GET /api/jobs/{id}` (background
+  dispatch after creation, immediate pending response, terminal state written back asynchronously);
+  a single terminal audit entry `job_run` (details containing
+  type/target/status/params); the Jobs page (all-machine ledger 5s polling + create-and-run modal +
+  terminal-state details); permission points `jobs:read`/`jobs:write` (PermGuard gates the create entry).
+- **Not implemented** (per this document's "Boundaries (explicitly not doing)" section, to be designed
+  when the project starts; not written into current capabilities): streaming output, the Action/Event
+  abstractions and AI wiring (P5).
+- **Landed by P2 (2026-10-09, [workflow-design](/guide/workflow-design) M1)**:
+  asynchronous execution/cancellation (`cancelled` terminal state, cancellable while pending, ledger
+  filtering) and Workflow orchestration; `POST /api/jobs` semantics changed accordingly to "create
+  returns 201 pending immediately, dispatched in the background" (the original synchronous wait
+  removed), and timeout still maps to `failed` per the design (no separate terminal state). The
+  cancellation surface was then extended by M2c to running: `POST /api/jobs/{id}/cancel` kills the
+  in-flight process via the `job.cancel` RPC (2026-10-11). For Workflow/scheduled triggering, the
+  scheduling part remains not done (per workflow-design W11).
+- **Live acceptance** (2026-10-05, probes `scripts/acceptance/jobs/` five-piece set 9/9 PASS,
+  acceptance-checklist "unified Job execution" section all seven items checked): the execution chain
+  (82ms success receipt / exit 3 output returned / timeout 1.078s returned on time with no orphans in
+  `pgrep` / tail truncation exactly 64KB with the tail retained), offline 503 leaving no ghost records,
+  400×7 across the validation surface, exactly one terminal audit entry, all 403s across the dual
+  permission roles empirically verified. **Acceptance caught a gap in D8's routing surface**:
+  `/api/jobs` was not registered in `resourceRules`, so RBAC governed=false let everything through
+  (viewer could execute); fixed by adding the rule + a 7-case three-role matrix.
 
-## 现状与痛点
+## Current State and Pain Points
 
-| 痛点 | 现状 | 后果 |
+| Pain point | Current state | Consequence |
 |------|------|------|
-| 「点一下执行」没有统一入口 | 备份跑一次、cron 手动触发、服务重启各是各的 API，互不复用 | 每加一种动作就要新增一条 RPC + 一个页面入口 |
-| 执行无台账 | 执行完即散，只能翻审计日志拼现场 | 想查「昨晚那台机器跑过什么、输出是什么」无从下手 |
-| 权限粒度粗 | 备份/代理/定时任务各有权限点，通用命令执行没有模型 | 无法回答「谁能在这台机器上跑命令」 |
-| AI/自动化没有可挂接的执行面 | 无统一 Job API，任何自动化都要绕业务接口 | 战略评审 P5「AI 接线」无处落地 |
+| "Click to execute" has no unified entry | Running a backup once, manually triggering cron, and restarting a service each have their own API, none reused | Every new kind of action means a new RPC + a new page entry |
+| No ledger for executions | Execution results scatter on completion; you can only piece the scene together from audit logs | You cannot even start to look up "what ran on that machine last night and what was the output" |
+| Coarse permission granularity | Backup/proxy/scheduled tasks each have permission points, but generic command execution has no model | Cannot answer "who can run commands on this machine" |
+| No executable surface for AI/automation to hook into | Without a unified Job API, any automation must route through business interfaces | The strategy review's P5 "AI wiring" has nowhere to land |
 
-## 架构总览
+## Architecture Overview
 
-与定时任务同一通道模型：**同步 RPC + server 落库**。区别于 cron 的
-「crontab 即状态、server 纯转发」，Job 的价值恰在台账——server 是事实源。
+The same channel model as scheduled tasks: **synchronous RPC + server persistence to DB**. Unlike cron's
+"crontab is the state, server purely forwards", the value of Job lies exactly in the ledger — the
+server is the source of truth.
 
 ```
-┌─ server ───────────────────────┐        ┌─ agent（目标主机）─────────────┐
-│ POST /api/jobs                 │ ─RPC─▶ │ job provider（新）              │
-│ 校验 → 建 Job(pending)         │        │ job.exec：sh -c / cmd /C        │
-│   → CallAgent(job.exec)        │ ◀─RPC─ │ 带超时执行，返回 exit_code/输出  │
-│   → 终态回写 + 审计 job_run    │        │ （输出截尾 64KB，业务字段不炸RPC）│
-│ GET /api/jobs[/{id}] 台账查询  │        └─────────────────────────────────┘
-└────────────────────────────────┘
+┌─ server ───────────────────────────────────┐        ┌─ agent (target host) ─────────────────────────────────────────┐
+│ POST /api/jobs                             │ ─RPC─▶ │ job provider (new)                                            │
+│ validate → create Job(pending)             │        │ job.exec: sh -c / cmd /C                                      │
+│   → CallAgent(job.exec)                    │ ◀─RPC─ │ run with timeout, return exit_code/output                     │
+│   → write back final state + audit job_run │        │ (output truncated at 64KB, business fields never blow up RPC) │
+│ GET /api/jobs[/{id}] ledger query          │        └───────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────┘
 ```
 
-## 关键决策
+## Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D1 | 状态机 | `pending → running → success \| failed`；cancelled/timeout 不设独立态——超时被杀即 failed（error=「timed out after Ns」，exit_code=-1），取消是后续异步化才有的能力（**P2 后更新**：`cancelled` 为真实终态——pending DB-only 取消（W3），running 经 RPC 击杀（M2c）；timeout 仍并入 failed 未变） | 同步 RPC 下 running 为瞬态，终态二分已覆盖当下全部路径；状态集合按需扩展 |
-| D2 | 首个类型 | `agent.exec`：目标 agent 本机执行一条 shell 命令（unix `sh -c` / windows `cmd /C`） | Control 域第一块；命令执行是其它一切动作的兜底语义 |
-| D3 | 通道 | 复用既有 RPC：server `CallAgent(target, "job.exec", params)`，agent 端 JobProvider 注册（平台无关，无条件注册） | 与 cron/备份同构，零新基建 |
-| D4 | 退出码语义 | 非零退出码是**业务字段**不是协议错误：RPC 层恒 success，`exit_code`/`output`/`error` 走 data；server 据此落 success/failed（输出仍带回） | 「命令失败」是 Job 的正常产物，不应混入传输层错误 |
-| D5 | 超时 | 双端同限：入参 `timeout_s` 1-300（缺省 60）；unix 侧进程组隔离（Setpgid）+ 超时杀整组，防止孙进程握住输出管道导致「假超时」 | 超时必须真的按时返回；`sh -c` 派生链是最常见悬挂源 |
-| D6 | 输出上限 | agent 截尾保留末 64KB（`jobExecMaxOutput`），server 落库同限（`storage.JobMaxOutput`）；命令长度上限 16KB | 错误信息通常在尾部；防长输出表膨胀 |
-| D7 | 离线拦截 | 创建前查 registry，目标不在线直接 503，**不建幽灵记录** | 与 cron 同口径；台账里不出现「从未执行」的记录 |
-| D8 | 权限 | 权限点 `jobs:read` / `jobs:write`（resourceActions + allPermissions 两处登记）；服务端校验与 cron 同口径（路由层 auth middleware） | 台账人人可看（read），执行是高危操作（write） |
-| D9 | 审计 | 终态一条 `job_run`（resource=job，id=Job ID），details 含 type/target/status/params | 命令入参进审计与 cron_apply 同口径，便于追溯「谁在哪台机器跑了什么」 |
-| D10 | 存储 | SQLite `jobs` 表（AutoMigrate），Parameters 存 JSON 串、API 层解析回对象返回 | 单机个人云规模够用；gorm 现有惯例 |
+| D1 | State machine | `pending → running → success \| failed`; cancelled/timeout get no separate states — a killed timeout is failed (error="timed out after Ns", exit_code=-1); cancellation is a capability that only exists with later async-ification (**updated after P2**: `cancelled` is a real terminal state — DB-only cancellation while pending (W3), kill via RPC while running (M2c); timeout still folds into failed, unchanged) | Under synchronous RPC, running is transient, and a two-way terminal state already covers all current paths; the state set extends on demand |
+| D2 | First type | `agent.exec`: run one shell command on the target agent's own machine (unix `sh -c` / windows `cmd /C`) | The first brick of the Control domain; command execution is the backstop semantics of every other action |
+| D3 | Channel | Reuses the existing RPC: server `CallAgent(target, "job.exec", params)`, the agent-side JobProvider registered (platform-agnostic, registered unconditionally) | Structurally identical to cron/backup, zero new infrastructure |
+| D4 | Exit-code semantics | A non-zero exit code is a **business field**, not a protocol error: the RPC layer is always success, `exit_code`/`output`/`error` go in data; the server lands success/failed accordingly (output still returned) | "Command failed" is a normal product of a Job, it should not be mixed into transport-layer errors |
+| D5 | Timeout | Same limits on both ends: input `timeout_s` 1-300 (default 60); unix-side process group isolation (Setpgid) + kill the whole group on timeout, preventing grandchild processes from holding the output pipe and causing a "false timeout" | Timeouts must actually return on time; the `sh -c` derivation chain is the most common hanging source |
+| D6 | Output cap | The agent truncates to the last 64KB (`jobExecMaxOutput`), the server persists at the same limit (`storage.JobMaxOutput`); command length capped at 16KB | Error messages are usually at the tail; prevents table bloat from long output |
+| D7 | Offline blocking | Check the registry before creating; if the target is offline, return 503 directly, **no ghost record created** | Same criterion as cron; the ledger never shows "never executed" records |
+| D8 | Permissions | Permission points `jobs:read` / `jobs:write` (registered in both resourceActions and allPermissions); server-side validation same criterion as cron (route-layer auth middleware) | The ledger is visible to everyone (read); execution is a high-risk operation (write) |
+| D9 | Audit | One `job_run` at the terminal state (resource=job, id=Job ID), details containing type/target/status/params | Command inputs entering the audit share the cron_apply criterion, easing the trace "who ran what on which machine" |
+| D10 | Storage | SQLite `jobs` table (AutoMigrate), Parameters stored as a JSON string and parsed back to an object at the API layer for return | Sufficient for single-machine personal-cloud scale; existing gorm conventions |
 
-## Server 侧设计
+## Server-Side Design
 
 ### REST API
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |------|------|------|
-| `POST /api/jobs` | `{type, target, parameters}` | 创建并执行，201 返回 pending 视图，后台派发终态 |
-| `POST /api/jobs/{id}/cancel` | — | 取消 pending/running Job（终态 409） |
-| `GET /api/jobs` | — | 最近 50 条台账（倒序） |
-| `GET /api/jobs/{id}` | — | 单条详情（含输出） |
+| `POST /api/jobs` | `{type, target, parameters}` | Create and execute, 201 returns the pending view, terminal state dispatched in the background |
+| `POST /api/jobs/{id}/cancel` | — | Cancel a pending/running Job (terminal states → 409) |
+| `GET /api/jobs` | — | The most recent 50 ledger entries (descending) |
+| `GET /api/jobs/{id}` | — | Single entry detail (including output) |
 
-校验（`validateJobPayload`）：type 必填且在白名单（当前仅 `agent.exec`）；
-target 非空；exec 需 `parameters.command` 非空且 ≤16KB；`timeout_s` 1-300。
+Validation (`validateJobPayload`): type required and on the whitelist (currently only `agent.exec`);
+target non-empty; exec requires a non-empty `parameters.command` ≤16KB; `timeout_s` 1-300.
 
-### Job 视图
+### Job View
 
 ```json
 {
   "id": "…", "type": "agent.exec", "target": "agent-id", "actor": "username",
   "status": "success", "parameters": {"command": "uptime"},
-  "output": "…尾部 64KB…", "exitCode": 0, "error": "",
+  "output": "…tail 64KB…", "exitCode": 0, "error": "",
   "createdAt": "…", "startedAt": "…", "finishedAt": "…"
 }
 ```
 
-## Agent 侧设计
+## Agent-Side Design
 
-### RPC 方法
+### RPC Method
 
-| 方法 | 参数 | 返回 | 说明 |
+| Method | Parameters | Returns | Description |
 |------|------|------|------|
-| `job.exec` | `{command, timeout_s?}` | `{exit_code, output, truncated, error, duration_ms}` | exit_code -1 = 启动失败/超时被杀 |
+| `job.exec` | `{command, timeout_s?}` | `{exit_code, output, truncated, error, duration_ms}` | exit_code -1 = startup failure/killed on timeout |
 
-- 跨平台：`sh -c`（unix）/ `cmd /C`（windows），`exec.CommandContext` + deadline；
-- unix 侧 `Setpgid` 进程组 + Cancel 杀整组：`sh -c` 派生的孙进程（如 sleep）
-  会握住输出管道，只杀直接子进程会让 `CombinedOutput` 等到孙进程自然结束
-  ——超时语义必须是「整组即刻终止」；
-- 非 agent.exec 类平台差异（容器内执行、幂等 Action 等）是后续类型的事，
-  provider 的 action 分发已留位。
+- Cross-platform: `sh -c` (unix) / `cmd /C` (windows), `exec.CommandContext` + deadline;
+- unix side: `Setpgid` process group + Cancel kills the whole group — grandchild processes spawned by
+  `sh -c` (such as sleep) hold the output pipe, so killing only the direct child would leave
+  `CombinedOutput` waiting until the grandchild exits naturally — the timeout semantics must be
+  "the whole group terminates immediately";
+- Platform differences outside agent.exec (in-container execution, idempotent Actions, etc.) belong to
+  later types; the provider's action dispatch already has a slot reserved.
 
-## 前端设计
+## Frontend Design
 
-- `web/src/pages/Jobs/index.tsx`：全机台账表（5s 轮询 + 手动刷新），
-  创建弹窗（在线 agent 下拉 + 命令 + 超时），详情弹窗（状态/退出码/输出尾部）；
-- `web/src/services/jobs.ts`：listJobs/createJob/getJob/cancelJob/createJobWithApproval（axios，Bearer 注入）；
-- 路由 `/jobs`，菜单「Job 执行」，perm `jobs:read`，创建按钮 `jobs:write`。
+- `web/src/pages/Jobs/index.tsx`: all-machine ledger table (5s polling + manual refresh),
+  create modal (online-agent dropdown + command + timeout), detail modal (state/exit code/output tail);
+- `web/src/services/jobs.ts`: listJobs/createJob/getJob/cancelJob/createJobWithApproval (axios, Bearer injection);
+- Route `/jobs`, menu "Job Execution", perm `jobs:read`, create button `jobs:write`.
 
-## 测试
+## Tests
 
-- storage：CRUD/倒序/limit（`internal/storage/job_test.go`）；
-- agent rpc：成功/非零退出/超时杀整组/截尾/越限/未知 action（`internal/agent/rpc/cov_job_provider_test.go`，windows 恒适用用例直跑）；
-- server：校验各 400 分支、离线 503、成功/失败 dispatch、列表/详情/405/404（`internal/server/cov_jobs_test.go`，假 agent 注入）；
-- 覆盖率：防御分支登记 `tool/known_uncoverable.txt`（SQLite 查询/写入不可致错、auth 上下文单测惯例、协议不可变形）。
+- storage: CRUD/descending/limit (`internal/storage/job_test.go`);
+- agent rpc: success/non-zero exit/timeout killing the group/tail truncation/out-of-range/unknown action (`internal/agent/rpc/cov_job_provider_test.go`, the cases always applicable on windows run directly);
+- server: each 400 branch of validation, offline 503, success/failure dispatch, list/detail/405/404 (`internal/server/cov_jobs_test.go`, fake agent injection);
+- Coverage: defensive branches registered in `tool/known_uncoverable.txt` (SQLite query/write cannot error, the auth-context unit test convention, protocol cannot be deformed).
 
-## 边界（明确不做）
+## Boundaries (Explicitly Not Doing)
 
-- **异步派发已由 P2 落地，不是当前“不做”项**：`POST /api/jobs` 持久化
-  `pending` 后启动后台派发并立即返回 201；pending/running 取消与台账过滤已实现。
-  **仍不做** SSE 实时推送；timeout 仍落为 `failed`，不设独立终态。
-- **不做 Workflow/Action**：Workflow 是「一组 Job 的编排」（依赖/并行/重试），
-  Action 是「带语义的幂等操作」，都在 Job 之上，本期只有 Job 本体；
-- **不做定时触发**：Job 与 cron 是两个平面——cron 是 agent 侧调度面（crontab
-  即状态），Job 是控制面执行台账；「定时跑 Job」= cron 写一条调用 `POST
-  /api/jobs` 的命令行，不引入新耦合；
-- **不做输出实时流**：终态一次性回传。流式输出（WebSocket attach）留待
-  远控/终端域统一设计。
+- **Asynchronous dispatch landed in P2; it is not a current non-goal**: `POST /api/jobs`
+  persists `pending`, starts background dispatch, and immediately returns 201. Pending/running
+  cancellation and ledger filtering are implemented. **SSE push remains out of scope**; timeout
+  still ends as `failed` rather than a separate terminal state.
+- **No Workflow/Action**: Workflow is "orchestration of a group of Jobs" (dependencies/parallelism/
+  retries), Action is "an idempotent operation with semantics"; both sit on top of Job, and this phase
+  has only Job itself;
+- **No scheduled triggering**: Job and cron are two planes — cron is the agent-side scheduling plane
+  (crontab is the state), Job is the control-plane execution ledger; "run a Job on a schedule" = cron
+  writes a command line that calls `POST /api/jobs`, introducing no new coupling;
+- **No real-time output streaming**: the terminal state returns everything at once. Streaming output
+  (WebSocket attach) is left to a unified design in the remote-control/terminal domain.
 
-## 后续生长点
+## Future Growth Points
 
-| 优先级 | 方向 | 依赖 |
+| Priority | Direction | Depends on |
 |--------|------|------|
-| P2 | Workflow：Job 编排（线性链/重试/取消，DAG/审批留 M2）——已落地（P2 异步化 + M1 编排 2026-10-09；M2a 变量/M2b 扇出/M2c 取消信号 2026-10-11，见 workflow-design） | 本模型 |
-| P0′ | 事件模型：Job 终态事件进统一事件总线 | Event 抽象立项 |
-| P5 | AI 接线：Job API 即 AI 的执行面（agent.exec 之外补结构化类型） | 审计与限额先行 |
+| P2 | Workflow: Job orchestration (linear chains/retries/cancellation, DAG/approval left to M2) — landed (P2 async-ification + M1 orchestration 2026-10-09; M2a variables/M2b fan-out/M2c cancel signal 2026-10-11, see [workflow-design](/guide/workflow-design)) | This model |
+| P0′ | Event model: Job terminal-state events enter a unified event bus | The Event abstraction project |
+| P5 | AI wiring: the Job API is AI's execution surface (add structured types beyond agent.exec) | Audit and quotas first |

@@ -1,12 +1,11 @@
-# 架构与边界
+# Architecture and Boundaries
 
-> 语言：**中文** ｜ [English](./architecture.en.md)
 
-本文以当前仓库实现为准，说明 Cockpit 的运行拓扑、模块职责和边界。它不是长期愿景文档；当代码行为变化时，应优先同步这里。
+This document is authoritative on the current repository implementation, describing Cockpit's runtime topology, module responsibilities, and boundaries. It is not a long-term vision document; when code behavior changes, this page should be updated first.
 
-## 总览
+## Overview
 
-Cockpit 当前由三个运行面组成：
+Cockpit currently consists of three runtime planes:
 
 ```text
 Browser Web UI
@@ -26,67 +25,67 @@ Cockpit Agent (cmd/cockpit-agent)
 Managed targets (host, Docker, PVE, OpenWrt, SSH/RDP/VNC service)
 ```
 
-Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连接 Server，因此 NAT 后节点不需要暴露入站端口。Web UI 只与 Server 通信，不直接访问 Agent 或内网目标。
+The Server is the central control plane; the Agent is the node-side execution plane. Agents connect to the Server proactively, so nodes behind NAT need not expose inbound ports. The Web UI talks only to the Server, never directly to Agents or intranet targets.
 
-## 进程边界
+## Process Boundaries
 
-| 进程 | 入口 | 职责 | 不负责 |
+| Process | Entry point | Responsibilities | Not responsible for |
 | --- | --- | --- | --- |
-| Cockpit Server | `cmd/cockpit` | HTTP API、Web UI 静态资源、Agent WebSocket 注册与路由、SQLite 持久化、认证、审计、告警、反向代理与远程会话编排 | 直接访问 NAT 后内网服务、直接采集 Agent 本机指标 |
-| Cockpit Agent | `cmd/cockpit-agent` | 节点能力检测、心跳和系统指标上报、RPC/代理/远程桌面执行、连接本机或本网络可达目标 | 用户认证、全局状态持久化、跨 Agent 调度决策 |
-| Web UI | `web/` | 登录、资源视图、工作台、监控、设置、远程连接交互 | 保存最终运行状态、绕过 Server 访问 Agent |
-| CLI | `cockpit init/sync/status/server/agent` | 本地初始化、inventory 同步、状态查询、启动 Server；`cockpit agent` 兼容 `cockpit-agent start` 的启动参数 | 长期运行时的 Agent 职责仍在 Agent 进程内 |
+| Cockpit Server | `cmd/cockpit` | HTTP API, Web UI static assets, Agent WebSocket registration and routing, SQLite persistence, authentication, auditing, alerting, reverse proxy and remote session orchestration | Directly accessing intranet services behind NAT, directly collecting the Agent's host metrics |
+| Cockpit Agent | `cmd/cockpit-agent` | Node capability detection, heartbeat and system metric reporting, RPC/proxy/remote desktop execution, connecting to local or locally reachable targets | User authentication, global state persistence, cross-Agent scheduling decisions |
+| Web UI | `web/` | Login, resource views, workbench, monitoring, settings, remote connection interactions | Storing final runtime state, bypassing the Server to access Agents |
+| CLI | `cockpit init/sync/status/server/agent` | Local initialization, inventory sync, status queries, starting the Server; `cockpit agent` accepts the same startup parameters as `cockpit-agent start` for compatibility | Long-running Agent duties still live inside the Agent process |
 
-## 数据边界
+## Data Boundaries
 
-| 数据 | 位置 | 角色 | 生命周期 |
+| Data | Location | Role | Lifecycle |
 | --- | --- | --- | --- |
-| 配置文件 | `config/cockpit.yaml` 或 `-config` 指定路径 | Server 启动配置，包括监听地址、数据库、JWT、邮件、通知、inventory | 启动读取；环境变量占位符会展开 |
-| Inventory YAML | `inventory.path` 或 `cockpit sync -inventory` | 声明式资产清单 | 手动 `cockpit sync` 或 `inventory.watch` 热加载都会通过同一套 Syncer 写入数据库 |
-| SQLite | `database.path` | 运行时查询和状态存储 | Server/CLI 打开时自动迁移 |
-| Agent Registry | Server 内存 | 当前在线 Agent 连接池和待响应 RPC | 进程内状态，Server 重启后丢失 |
-| Web UI 本地存储 | Browser `localStorage` | JWT、远控偏好、主题/站点名称/刷新间隔等 UI 本地偏好 | 浏览器侧状态，不作为系统真相源 |
+| Config file | `config/cockpit.yaml` or the path given via `-config` | Server startup configuration: listen address, database, JWT, email, notifications, inventory | Read at startup; environment variable placeholders are expanded |
+| Inventory YAML | `inventory.path` or `cockpit sync -inventory` | Declarative asset inventory | Both manual `cockpit sync` and `inventory.watch` hot-reload write to the database through the same Syncer |
+| SQLite | `database.path` | Runtime query and state store | Migrated automatically when opened by the Server/CLI |
+| Agent Registry | Server memory | Pool of currently online Agent connections and pending RPC responses | In-process state, lost after a Server restart |
+| Web UI local storage | Browser `localStorage` | JWT, remote-control preferences, theme/site name/refresh interval and other UI-local preferences | Browser-side state, not a system source of truth |
 
-当前的事实源不是单一的。Inventory 是声明式资产输入，SQLite 是 API 和 UI 的运行时查询面，Agent 心跳会更新在线状态和系统指标。需要区分“资产应当存在”和“节点当前在线/指标当前值”。
+The current sources of truth are not single. Inventory is declarative asset input, SQLite is the API and UI runtime query plane, and Agent heartbeats update online status and system metrics. It is necessary to distinguish "assets that should exist" from "a node currently online / current metric values".
 
-## 代码模块边界
+## Code Module Boundaries
 
-| 模块 | 主要职责 |
+| Module | Main responsibilities |
 | --- | --- |
-| `internal/server` | HTTP 路由、Agent WebSocket、API 聚合、远程会话、代理、告警循环、指标清理 |
-| `internal/agent` | Agent 生命周期、能力检测、心跳、消息循环、采集器、远程代理执行 |
-| `internal/protocol` | Server 与 Agent 的 WebSocket 消息结构、消息类型与解码 helper |
-| `internal/storage` | GORM/SQLite 模型、迁移、资源 CRUD、用户、审计、告警、指标、代理配置 |
-| `internal/inventory` | Inventory YAML schema、解析、校验、同步到 storage |
-| `internal/sync` | Server 运行期 inventory 文件监听；复用 `internal/inventory.Syncer` 将声明式资源同步到 storage |
-| `internal/auth` | 登录、JWT、中间件、TOTP、密码重置 |
-| `internal/proxy` | Server 侧监听代理端口、Agent 侧连接目标并转发数据 |
-| `internal/pve` / `internal/docker` / `internal/openwrt` | 第三方平台客户端 |
-| `web/src/services` | 前端 API 客户端；统一通过 `/api` 与 Server 通信 |
+| `internal/server` | HTTP routing, Agent WebSocket, API aggregation, remote sessions, proxy, alert loop, metric cleanup |
+| `internal/agent` | Agent lifecycle, capability detection, heartbeat, message loop, collectors, remote proxy execution |
+| `internal/protocol` | WebSocket message structures between Server and Agent, message types and decode helpers |
+| `internal/storage` | GORM/SQLite models, migrations, resource CRUD, users, auditing, alerts, metrics, proxy configuration |
+| `internal/inventory` | Inventory YAML schema, parsing, validation, syncing to storage |
+| `internal/sync` | Runtime inventory file watching by the Server; reuses `internal/inventory.Syncer` to sync declarative resources to storage |
+| `internal/auth` | Login, JWT, middleware, TOTP, password reset |
+| `internal/proxy` | Server-side proxy port listening; Agent-side connecting to targets and forwarding data |
+| `internal/pve` / `internal/docker` / `internal/openwrt` | Third-party platform clients |
+| `web/src/services` | Frontend API client; communicates with the Server uniformly through `/api` |
 
-跨模块调用应尽量遵守这些边界。比如 API handler 不应直接解析 inventory 文件；应通过 storage 查询运行时结果。Agent 不应直接写 Server 数据库；应通过协议消息让 Server 持久化。
+Cross-module calls should respect these boundaries. For instance, an API handler should not parse inventory files directly; it should query runtime results through storage. The Agent should not write to the Server database directly; it should have the Server persist things through protocol messages.
 
-## 控制流
+## Control Flow
 
-### Server 启动
+### Server Startup
 
-1. `cmd/cockpit` 读取 `-config`，或依次尝试 `./config/cockpit.yaml`、`./cockpit.yaml`、`/etc/cockpit/config.yaml`。
-2. Server 打开 SQLite 并自动迁移。
-3. 初始化 JWT、邮件配置、通知客户端、审计、代理管理器、远程会话管理器和 ticket 管理器。
-4. 必须通过 `ADMIN_PASSWORD` 初始化管理员密码；生产模式还会校验 `TOTP_ENCRYPTION_KEY`。
-5. 注册 HTTP/API/WebSocket 路由并开始监听。
+1. `cmd/cockpit` reads `-config`, or tries in turn `./config/cockpit.yaml`, `./cockpit.yaml`, `/etc/cockpit/config.yaml`.
+2. The Server opens SQLite and migrates automatically.
+3. Initializes JWT, email configuration, notification clients, auditing, the proxy manager, the remote session manager, and the ticket manager.
+4. The admin password must be initialized through `ADMIN_PASSWORD`; production mode additionally validates `TOTP_ENCRYPTION_KEY`.
+5. Registers the HTTP/API/WebSocket routes and starts listening.
 
-### Agent 注册与心跳
+### Agent Registration and Heartbeat
 
-1. `cockpit-agent start -server ws://host:9000/ws` 连接 Server；也可使用兼容入口 `cockpit agent -server ws://host:9000/ws`。
-2. Agent 运行能力检测器，形成 capability 列表。
-3. Agent 首包必须是 `register`。
-4. Server 校验重复连接和已配置的 Agent secret，接受后写入 SQLite 并加入内存 Registry。
-5. Agent 每 30 秒发送 `heartbeat`，其中可包含系统信息；Server 写入历史指标和快照。
+1. `cockpit-agent start -server ws://host:9000/ws` connects to the Server; the compatibility entry `cockpit agent -server ws://host:9000/ws` can also be used.
+2. The Agent runs capability detectors and forms a capability list.
+3. The Agent's first message must be `register`.
+4. The Server validates duplicate connections and a configured Agent secret; once accepted it writes to SQLite and adds it to the in-memory Registry.
+5. The Agent sends a `heartbeat` every 30 seconds, which may include system information; the Server writes historical metrics and snapshots.
 
-### Inventory 同步
+### Inventory Sync
 
-`cockpit sync` 是当前完整同步路径。它解析 `version: v1` 的 YAML，并同步以下资源：
+`cockpit sync` is the current complete sync path. It parses `version: v1` YAML and syncs the following resources:
 
 - Regions / Zones / Agents
 - Domains / Certificates
@@ -95,43 +94,43 @@ Server 是中心控制面，Agent 是节点侧执行面。Agent 主动连接 Ser
 - Gateways
 - Storages
 
-Server 的 `inventory.watch: true` 会监听单个 inventory 文件并热加载，当前实现复用 `inventory.Syncer`，与 `cockpit sync` 走同一套资源同步逻辑。`inventory.strict: true` 会把 inventory 路径缺失、解析失败或初始同步失败视为启动错误；默认 `false` 时只记录日志并继续启动 Server。
+Server `inventory.watch: true` watches a single inventory file and hot-reloads; the current implementation reuses `inventory.Syncer`, going through the same resource sync logic as `cockpit sync`. `inventory.strict: true` treats a missing inventory path, parse failure, or initial sync failure as a startup error; with the default `false` it only logs and continues starting the Server.
 
-### HTTP API 与 Web UI
+### HTTP API and Web UI
 
-Web UI 默认请求 `/api`。登录、Token 刷新、TOTP 验证、密码重置和 `/health` 是公开接口；`POST /api/stacks/webhook` 不走 JWT，而以 `X-Cockpit-Token` 验证。其他 `/api/` 资源接口通过 JWT 中间件保护。
+The Web UI requests `/api` by default. Login, token refresh, TOTP verification, password reset, and `/health` are public endpoints. `POST /api/stacks/webhook` is also outside JWT middleware and authenticates with `X-Cockpit-Token`; other `/api/` resource endpoints use JWT middleware.
 
-主要 API 面：
+Main API surfaces:
 
 - `/api/status`
-- `/api/me`、`/api/me/profile`、`/api/me/password`
+- `/api/me`, `/api/me/profile`, `/api/me/password`
 - `/api/settings`
-- `/api/agents`、`/api/agents/{id}/secret`
+- `/api/agents`, `/api/agents/{id}/secret`
 - `/api/resources/{compute-instances|domains|certificates|services|gateways|storages}`
-- `/api/users`（管理员管理用户）
-- `/api/alerts`（告警列表与已读标记）
+- `/api/users` (admin manages users)
+- `/api/alerts` (alert list and read markers)
 - `/api/metrics/*`
 - `/api/proxies`
-- `/api/remote/*`（tickets / sessions / terminal / guacamole / vault）
+- `/api/remote/*` (tickets / sessions / terminal / guacamole / vault)
 - `/api/admin/audit/*`
-- `/api/auth/totp/*`（generate / enable / disable 需 JWT；verify 公开）
+- `/api/auth/totp/*` (generate / enable / disable require JWT; verify is public)
 
-### 远程访问与代理
+### Remote Access and Proxy
 
-远程终端与桌面连接（Guacamole 隧道）使用短期 ticket：
+Remote terminal and desktop connections (Guacamole tunnels) use short-lived tickets:
 
-1. 浏览器先携带 JWT 请求 `POST /api/remote/tickets`。
-2. Server 生成 5 分钟有效、单次使用 ticket。
-3. 浏览器建立 WebSocket：terminal 把 ticket 放在 `Sec-WebSocket-Protocol`；Guacamole 优先放在 URL 的 `?ticket=`，缺少 query 时兼容从 `Sec-WebSocket-Protocol` 读取。
-4. Server 校验 ticket 后，把连接请求转成 `proxy_*` 消息发给对应 Agent（终端直连目标；桌面经 `guac:` 中继到 guacd）。
-5. Agent 连接目标服务并把数据通过 Server 转发回浏览器。
+1. The browser first carries its JWT in a `POST /api/remote/tickets` request.
+2. The Server generates a 5-minute-valid, single-use ticket.
+3. The browser connects over WebSocket: terminal sends the ticket in `Sec-WebSocket-Protocol`; Guacamole prefers the `?ticket=` URL query and falls back to `Sec-WebSocket-Protocol` when the query is absent.
+4. After validating the ticket, the Server converts the connection request into a `proxy_*` message to the corresponding Agent (terminal connects directly to the target; desktop is relayed via `guac:` to guacd).
+5. The Agent connects to the target service and forwards data back to the browser through the Server.
 
-这个边界保证浏览器不需要知道内网拓扑，也不需要直接连 Agent。
-远控目标默认只允许 `remote_control.allowed_targets` 中显式配置的主机名、IP 或 CIDR。
+This boundary ensures the browser needs neither to know the intranet topology nor to connect directly to Agents.
+Remote targets by default only permit hostnames, IPs, or CIDRs explicitly configured in `remote_control.allowed_targets`.
 
-## 协议边界
+## Protocol Boundaries
 
-Server 与 Agent 的消息统一为：
+Server–Agent messages are unified as:
 
 ```json
 {
@@ -142,29 +141,29 @@ Server 与 Agent 的消息统一为：
 }
 ```
 
-当前消息类型：
+Current message types:
 
-| 方向 | 类型 |
+| Direction | Type |
 | --- | --- |
 | Agent -> Server | `register`, `rpc_response`, `proxy_close`, `proxy_error`, `probe_report`, `exec_log` |
 | Server -> Agent | `rpc_request`, `ping`, `proxy_new` |
-| 双向 | `heartbeat`（Agent 上报、Server 回 ACK）、`error`, `proxy_data` |
+| Bidirectional | `heartbeat` (reported by the Agent, ACKed by the Server), `error`, `proxy_data` |
 
-`register` 必须是 Agent 建立 `/ws` 后的第一条消息。RPC 使用请求消息 ID 关联响应。代理数据使用 `proxyId`、`connId` 关联具体连接。
+`register` must be the Agent's first message after establishing `/ws`. RPC correlates responses using the request message ID. Proxy data correlates specific connections using `proxyId` and `connId`.
 
-## 安全边界
+## Security Boundaries
 
-- Server 管理员密码必须通过 `ADMIN_PASSWORD` 提供，长度至少 8 位。
-- 生产环境应设置 `PRODUCTION=true` 和强随机 `TOTP_ENCRYPTION_KEY`。
-- `ALLOWED_ORIGINS` 控制 WebSocket Origin；未设置时会接受所有来源，仅适合开发环境。
-- Web UI 静态目录由 `STATIC_DIR` 或 `server.static_dir` 指定；未设置时根路径只返回 API 运行提示。
-- Agent secret 是 Agent 认证边界。2026-10-18 起注册默认 fail-closed：未知 Agent 仅在携带 `server.agent_registration.enrollment_secret`（或开发环境显式 `allow_unknown`）时可注册，注册成功后其携带的 secret 即固化为该 Agent 的认证密钥；无 secret 的存量 Agent 重连默认拒绝，需显式 `allow_secretless`。已配置 secret 的 Agent 重连必须提供匹配密钥。
-- 远程连接 ticket 是内存态、5 分钟有效、单次使用；Server 重启后失效。
+- The Server admin password must be provided via `ADMIN_PASSWORD`, at least 8 characters long.
+- Production should set `PRODUCTION=true` and a strong random `TOTP_ENCRYPTION_KEY`.
+- `ALLOWED_ORIGINS` controls the WebSocket Origin; when unset, all origins are accepted, suitable only for development.
+- The Web UI static directory is specified by `STATIC_DIR` or `server.static_dir`; when unset, the root path returns only an API runtime notice.
+- Since 2026-10-18, Agent registration is fail-closed by default: an unknown Agent must present `server.agent_registration.enrollment_secret` (or use explicit development-only `allow_unknown`); its presented secret is then stored as the per-Agent authentication key. Existing Agents without a secret are rejected by default and require explicit `allow_secretless`; Agents with a configured secret must present the matching key on reconnect.
+- Remote connection tickets are in-memory, 5-minute valid, single-use; they expire after a Server restart.
 
-## 当前实现边界
+## Current Implementation Boundaries
 
-- Inventory 的目录拆分模型尚未成为主要实现路径；当前 CLI 示例和 parser 以单文件 `version: v1` YAML 为准。
-- `internal/agent/rpc` 的 SystemProvider 始终注册；Docker/PVE/OpenWrt Provider 由 `Agent.setupProviders` 按检测到的 capability 和环境变量（如 `DOCKER_HOST`、`PVE_TOKEN_ID`、`OPENWRT_HOST` 等）条件注册，凭据缺失时仅记录日志跳过，不影响基础心跳。
-- `/api/remote/sessions` 是内存会话台账（pending/connected/closed/failed），已接线到 terminal / guacamole 活会话生命周期（D-2026-10-12-4）；不是完整连接配置持久化，重启后台账清空。
-- Web UI 中部分偏好配置保存在浏览器本地，不进入 Server 数据库；`/api/settings` 当前仅作为兼容入口，前端本地偏好以浏览器存储值为准。
-- `docs/archive`（原 `docs/superpowers`）保存 TOTP、通知模块等历史设计稿和实施计划，仅供追溯，不代表当前运行架构；详见 [`docs/archive/README.md`](../archive/README.md)。
+- The directory-split model for inventory is not yet the main implementation path; the current CLI examples and parser are based on single-file `version: v1` YAML.
+- The SystemProvider in `internal/agent/rpc` is always registered; the Docker/PVE/OpenWrt Providers are conditionally registered by `Agent.setupProviders` based on detected capabilities and environment variables (such as `DOCKER_HOST`, `PVE_TOKEN_ID`, `OPENWRT_HOST`); when credentials are missing it only logs and skips, without affecting the base heartbeat.
+- `/api/remote/sessions` is an in-memory session ledger (pending/connected/closed/failed), wired into the terminal / guacamole live session lifecycle (D-2026-10-12-4); it is not full connection configuration persistence, and the ledger clears on restart.
+- Some preference settings in the Web UI are stored locally in the browser and do not enter the Server database; `/api/settings` currently serves only as a compatibility entry point, with frontend local preferences deferring to the browser-stored values.
+- `docs/archive` (formerly `docs/superpowers`) keeps historical design drafts and implementation plans for TOTP, the notification module, and others, for tracing only and not representing the current running architecture; see [`docs/archive/README.md`](/zh/archive/README).

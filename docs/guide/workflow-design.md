@@ -1,139 +1,152 @@
-# P2 方案设计：Workflow 与异步 Job
-
-> 语言：**中文** ｜ [English](./workflow-design.en.md)
+# P2 Design: Workflow and Asynchronous Job
 
 
-> 2026-10-09 立项；实现进度以本文「实现状态」节为准（M1 异步 Job + 线性
-> Workflow 当日落地，M2a 变量传递 / M2b 多目标扇出 / M2c 取消信号相继实现）。
-> P1 执行 Job 模型（jobs-design）已落地 `agent.exec` 最小闭环；
-> 本设计是它的下一生长点：Job 异步化 + 线性
-> Workflow 编排。设计边界遵守战略评审定调：Workflow 是「一组 Job 的编排」，
-> 只做控制面接线，不重造底层调度器。
+> Initiated 2026-10-09; for implementation progress see the "Implementation Status" section of this document (M1 asynchronous Job + linear
+> Workflow landed the same day, M2a variable passing / M2b multi-target fan-out / M2c cancel signal followed).
+> The P1 execution Job model ([jobs-design](/guide/jobs-design)) has already landed the minimal `agent.exec` closed loop;
+> this design is its next growth point: Job asynchronization + linear
+> Workflow orchestration. The design boundary follows the strategic review ruling: a Workflow is "orchestration of a set of
+> Jobs", doing control-plane wiring only, not rebuilding the underlying scheduler.
 
-## 为什么现在做
+## Why Now
 
-P1 的同步 RPC 模型（POST 即等待终态）有两个天花板：
+The synchronous RPC model of P1 (POST waits for the terminal state) has two ceilings:
 
-1. **最长 300s**：`agent.exec` 的 `timeout_s` 上限 300，浏览器 HTTP 请求
-   等不了更长；超过即 HTTP 层先断，台账里还可能出现「HTTP 断了但 Job 落了
-   终态」的双头现象。
-2. **编排无处挂接**：停机 → 备份 → 升级 → 起机 → 健康检查这类多步动作，
-   现在只能人手一步步点，或各自写脚本调 API。步骤失败后的处置（停 or 继续、
-   重试几次）没有落点。
+1. **At most 300s**: the `timeout_s` cap of `agent.exec` is 300 and a browser HTTP request
+   cannot wait longer; past that the HTTP layer drops first, and the ledger may even show
+   the dual-head anomaly of "HTTP dropped but the Job landed a terminal state".
+2. **Nowhere to attach orchestration**: multi-step actions like shutdown → backup → upgrade
+   → start → health check can only be clicked through by hand step by step, or each written
+   as its own script calling the API. There is no home for post-failure handling of a step
+   (stop or continue, how many retries).
 
-异步化不是独立功能——它是 Workflow 的前置：编排器必然在后台推进步骤，
-不可能同步等待。两者一并设计，一次把状态机扩到位。
+Asynchronization is not a standalone feature — it is a prerequisite for Workflow: an orchestrator
+necessarily advances steps in the background and cannot wait synchronously. Designing both
+together extends the state machine all at once.
 
-## 实现状态
+## Implementation Status
 
-- **M1 已实现（2026-10-09）**：异步 Job（W1/W2/W3 单条语义）+ 线性 Workflow
-  （W4-W9）+ 取消 + 台账过滤 + 权限/审计，全链 `internal/storage/workflow.go`、
-  `internal/server/api_workflow.go`、`web/src/pages/Workflows/`、
-  `web/src/services/workflows.ts`；POST /api/jobs 全异步化（W1）为破坏性语义
-  变更（原同步等待删除，消费者仅 web 一处）。真机验收按「验收清单」Workflow
-  节推进（探针四场景：成功链/失败停/重试/取消）。
-- **M2a 已实现（2026-10-10）**：步骤变量传递（M2 候选清单第一项），设计见
-  「M2 立项：步骤变量传递」节，824eb88 立项、97696ad 落地（含连带修复：
-  dispatchJob 改传解析后参数，见 V3）。
-- **M2b 已实现（2026-10-10）**：多目标扇出（M2 候选第二项），设计见「M2 立项：
-  多目标扇出」节——server 侧顺序扇出、agent 零改动；web 步骤编辑器多选 +
-  run 详情「N 台」聚合展开逐台明细同批落地；真机验收探针扩至 W10（双台
-  扇出成功/失败停/ghost 混入，12/12 PASS）。余下候选当时均未排期（取消信号
-  已于 10-11 作为 M2c 落地，见下条）。
-- **M2c 已实现（2026-10-11）**：取消信号（M2 候选第三项），设计见「M2 立项：
-  取消信号」节——`job.cancel` RPC 真击杀在途进程（C1-C10，含 pending 窗口
-  DB-only 条件取消与 fanout 聚合口径修复）；web Jobs 页 running/pending 行
-  取消入口同批落地。真机验收探针 W5/W9 语义翻新至击杀口径、新增 W11 变量
-  传递场景（M2a 端到端面），本机双实例 harness 13/13 PASS。DAG 维持 W4 压后、
-  审批门因孤儿 run 未解不开工、SSE 拍不做。
-- **M2d 已实现（2026-10-11）**：审批门（M2 候选第四项），设计见「M2 立项：
-  审批门」节——前置阻塞点（server 重启孤儿 run）已由 9079b52 重启清扫解掉，
-  本批把等待态落库不落 goroutine（D1），高危提交 202 进审批、批准才派发。
-  权限点 `approvals:read/write` 的注册当时漏登记（路由已挂 `approvals` 资源但
-  `resourceActions` 无该键），全角色对 `/api/approvals` 403、web「审批门」菜单
-  永不渲染——2026-10-15 文档审计发现并补齐（含回归测试）。
-  审批台账页 + Jobs 页「需审批执行」开关同批落地。DAG 列 M2 剩余序列末位、
-  SSE 拍不做。
-- **M2e 已实现（2026-10-12）**：DAG 依赖（M2 候选第五项），设计见「M2 立项：
-  DAG 依赖」节——步骤级 `depends_on` 依赖门控（G1-G8）：数组序即拓扑序，
-  依赖失败带 continue_on_error 时下游如实 skipped（步级新态），不引入并行
-  执行（同 F2 写路径决策）；web 依赖多选编辑器 + 时间线「已跳过」灰标 +
-  停因列。
-- M2+ 其余各项在「边界（明确不做）」；未实现项以本文设计为准。
-- P1 已实现部分不受影响：`agent.exec` 类型、job provider、权限点原样保留，
-  本设计只改「server 侧何时返回」与「谁在等待」。
+- **M1 implemented (2026-10-09)**: asynchronous Job (single-record semantics W1/W2/W3) + linear Workflow
+  (W4-W9) + cancellation + ledger filtering + permissions/audit, across the whole chain
+  `internal/storage/workflow.go`, `internal/server/api_workflow.go`, `web/src/pages/Workflows/`,
+  `web/src/services/workflows.ts`; making POST /api/jobs fully asynchronous (W1) is a breaking
+  semantic change (the original synchronous wait is removed, the only consumer is web).
+  Real-machine acceptance proceeded per the Workflow section of the "Acceptance Checklist"
+  (four probe scenarios: success chain / stop on failure / retry / cancel).
+- **M2a implemented (2026-10-10)**: step variable passing (the first item of the M2 candidate
+  list); design see the "M2 Initiation: Step Variable Passing" section, initiated at 824eb88,
+  landed at 97696ad (including an incidental fix: dispatchJob now passes the resolved parameters,
+  see V3).
+- **M2b implemented (2026-10-10)**: multi-target fan-out (the second M2 candidate); design see
+  the "M2 Initiation: Multi-Target Fan-Out" section — sequential fan-out on the server side,
+  zero agent changes; the web step editor multi-select plus the run detail "N machines" aggregate
+  with expandable per-machine detail landed in the same batch; the real-machine acceptance probe
+  was extended to W10 (two-machine fan-out success / stop on failure / ghost mixing, 12/12 PASS).
+  The remaining candidates were unscheduled at that time (the cancel signal landed on 10-11 as
+  M2c, see the next bullet).
+- **M2c implemented (2026-10-11)**: cancel signal (the third M2 candidate); design see the
+  "M2 Initiation: Cancel Signal" section — the `job.cancel` RPC really kills in-flight processes
+  (C1-C10, including DB-only conditional cancellation in the pending window and a fix to the
+  fan-out aggregation semantics); the cancel entry on the running/pending rows of the web Jobs
+  page landed in the same batch. The real-machine acceptance probes W5/W9 were redefined to the
+  kill semantics and W11 (variable passing, the end-to-end face of M2a) was added; the local
+  dual-instance harness passes 13/13. DAG stays deferred per W4, the approval gate is not started
+  because the orphan-run problem is unsolved, and SSE was decided against.
+- **M2d implemented (2026-10-11)**: approval gate (the fourth M2 candidate); design see the
+  "M2 Initiation: Approval Gate" section — the prior blocker (orphan runs after a server restart)
+  was cleared by the 9079b52 restart sweep; this batch puts the waiting state in the database
+  instead of a goroutine (D1), and a high-risk submission returns 202 into approval and is
+  dispatched only after approval. The `approvals:read/write` permission points were missed at
+  registration time at that moment (the route already mounted the `approvals` resource but
+  `resourceActions` had no such key), so every role got 403 on `/api/approvals` and the web
+  "Approval Gate" menu never rendered — found and fixed by the 2026-10-15 documentation audit
+  (including regression tests). The approval ledger page and the "requires approval to execute"
+  toggle on the Jobs page landed in the same batch. DAG is last in the remaining M2 sequence,
+  SSE decided against.
+- **M2e implemented (2026-10-12)**: DAG dependencies (the fifth M2 candidate); design see the
+  "M2 Initiation: DAG Dependencies" section — step-level `depends_on` dependency gating (G1-G8):
+  array order is topological order, when a dependency fails with continue_on_error the downstream
+  is truthfully marked skipped (a new step-level state), and no parallel execution is introduced
+  (the same write-path decision as F2); the web dependency multi-select editor, the grey "Skipped"
+  marker on the timeline, and the stop-reason column.
+- The remaining M2+ items are in "Boundaries (Explicitly Not Doing)"; unimplemented items follow
+  the design in this document.
+- The implemented parts of P1 are unaffected: the `agent.exec` type, the job provider and the
+  permission points are kept as-is; this design only changes "when the server side returns" and
+  "who waits".
 
-## 架构总览
+## Architecture Overview
 
 ```
-┌─ server ────────────────────────────────────────────────┐
-│ POST /api/jobs          POST /api/workflows/{id}/run    │
-│   建 Job(pending) ──┐     建 Run + 逐步建 Job(pending)   │
-│   立即返回 201      │            │                        │
-│                     ▼            ▼                        │
-│           dispatcher goroutine 编排器 goroutine          │
-│           CallAgent(job.exec)    逐步：建 Job → 等终态    │
-│           终态回写               失败按 continue_on_error  │
-│                                  决定停/续，run 落终态     │
-│ GET /api/jobs?status=&run=   GET /api/workflows/{id}/runs │
-└─────────────────────────────────────────────────────────┘
+┌─ server ─────────────────────────────────────────────────────────────────────────┐
+│ POST /api/jobs                    POST /api/workflows/{id}/run                   │
+│    create Job(pending) ──┐        create Run + stepwise Job                      │
+│    return 201 at once  │              │                                          │
+│                        ▼              ▼                                          │
+│           dispatcher goroutine    orchestrator goroutine                         │
+│           CallAgent(job.exec)     per step: create Job → await terminal state    │
+│           write back final state  failure: continue_on_error sets stop/continue  │
+│                                   run lands in a terminal state                  │
+│ GET /api/jobs?status=&run=        GET /api/workflows/{id}/runs                   │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-要点：**agent 侧零改动**。`job.exec` RPC 本就是「带超时同步执行、返回
-exit_code/输出」，编排器和单步 dispatcher 都只是 server 侧的 goroutine，
-等的是同一个 RPC。取消能力受 RPC 无取消帧的约束（D3），如实声明。
+Key point: **zero changes on the agent side**. The `job.exec` RPC already is "synchronous
+execution with a timeout, returning exit_code/output"; both the orchestrator and the single-step
+dispatcher are just server-side goroutines waiting on the same RPC. Cancellation capability is
+constrained by the RPC having no cancel frame (D3), stated honestly.
 
-## 关键决策
+## Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| W1 | POST /api/jobs 语义 | **全异步**：创建后立即 201 返回 pending Job 视图，后台 dispatch；原同步等待删除 | 消费者仅 web 一处（mobile 未接 jobs API），无兼容负担；「创建即返回 id」是台账模型的本义，P1 的同步返回是权宜 |
-| W2 | 状态机 | `pending → running → success \| failed \| cancelled`；**timeout 不设独立态**（保持 `failed` + error=`timed out after Ns`） | error 字段已可判定超时，独立态只增加过滤面；cancelled 是异步化后才有的真实能力，必须独立（running 被取消的 Job 不该计作 failed） |
-| W3 | 取消语义 | 只允许取消 **pending**（未派发）Job；running 拒绝（409，说明 job.exec 上限 300s 会自然结束）。Workflow run 取消 = 停止推进后续步骤 + 当前步骤同规则 | RPC 协议无取消帧，假装能取消 running 是撒谎；诚实边界是「派发前可撤，派发后等它回来」。agent 侧信号注入取消留 M2 |
-| W4 | 编排形态 | **线性步骤链**（steps 有序数组，逐步执行），非 DAG；步骤级 `continue_on_error` 与 `retry`（0-3 次，固定间隔 5s） | 个人基础设施最高频就是串行链（停机→备份→升级→起机→检查）；DAG 的 edges 表达在 UI 和存储里成本翻倍，等真实并行需求出现再扩。重试覆盖最常见韧性需求 |
-| W5 | 步骤与 Job 的关系 | 每步创建**真实 Job**（`jobs` 表加可空列 `workflow_run_id`），run 台账里每步可点开看输出/退出码 | 步骤不是影子记录——它就是一次执行，进统一台账、进既有审计 `job_run`；不新造「步骤日志」平行体系 |
-| W6 | 存储 | `workflows`（定义）+ `workflow_runs`（实例）两表；run 内嵌 steps 运行态 JSON 快照（含每步状态/尝试次数/关联 Job id）；AutoMigrate | 个人规模读多写少，步骤子表是过度设计；快照即事实（当时怎么跑的、每步结果） |
-| W7 | run 状态机 | `running → success \| failed \| cancelled`（无 pending——建 run 即开始推进）；部分失败 = failed，details 记明断点 | run 是进程性实体，建了就跑；「排队中」的 run 没有消费者 |
-| W8 | 并发约束 | 同一 workflow 同时至多一个 active run（409 拒绝）；不同 workflow 可并行 | 个人规模防重入（连点两次「运行」）；不做全局限流 |
-| W9 | 权限 | `workflows:read` / `workflows:write`；run/cancel 归 write；步骤 Job 沿用 `jobs:*` 既有面 | 与 cron/Job 同口径：台账可读（read），执行高危（write） |
-| W10 | 审计 | 定义类操作 `workflow_create/update/delete`；run 终态一条 `workflow_run`（resourceID=run id，details 含 workflow 名/steps 摘要/断点）；步骤 Job 自带 `job_run` | 定义是变更、run 是执行，两类分开；步骤已有审计不翻倍 |
-| W11 | 触发 | 手动 `POST /api/workflows/{id}/run`。「定时跑 Workflow」= cron 写一条调该 API 的命令（P1 边界节既有约定） | cron 是 agent 侧调度面、Job/Workflow 是控制面执行台账，两个平面不耦合；server 侧定时器是另一个立项 |
-| W12 | 步骤参数 | `{"name","type","target","parameters","timeout_s"?,"continue_on_error"?,"retry"?}`；type 白名单沿用 `jobTypes`（M1 仅 `agent.exec`） | 与 Job payload 同构，校验复用 `validateJobPayload`；新类型（容器操作、备份触发）注册进白名单即自动可用于编排 |
+| W1 | POST /api/jobs semantics | **Fully asynchronous**: return 201 with a pending Job view immediately after creation, dispatch in the background; the original synchronous wait is removed | The only consumer is web (mobile never wired the jobs API), so there is no compatibility burden; "return the id on creation" is the essence of the ledger model, P1's synchronous return was an expedient |
+| W2 | State machine | `pending → running → success \| failed \| cancelled`; **no separate state for timeout** (stay `failed` + error=`timed out after Ns`) | The error field already determines a timeout, a separate state only widens the filtering surface; cancelled is a real capability that only exists after asynchronization and must be independent (a Job cancelled while running should not count as failed) |
+| W3 | Cancel semantics | Only **pending** (undispatched) Jobs may be cancelled; running is rejected (409, explained by the 300s cap of job.exec ending naturally). Cancelling a Workflow run = stop advancing subsequent steps + the current step under the same rule | The RPC protocol has no cancel frame, pretending to cancel a running one is lying; the honest boundary is "revocable before dispatch, after dispatch wait for it to come back". Signal-injection cancellation on the agent side is left to M2 |
+| W4 | Orchestration shape | **Linear step chain** (an ordered array of steps executed one by one), not a DAG; step-level `continue_on_error` and `retry` (0-3 times, fixed 5s interval) | The most frequent thing in personal infrastructure is exactly a serial chain (shutdown→backup→upgrade→start→check); expressing DAG edges costs double in UI and storage, so extend only when real parallelism appears. Retry covers the most common resilience need |
+| W5 | Relationship between steps and Jobs | Each step creates a **real Job** (a nullable column `workflow_run_id` added to the `jobs` table); every step in the run ledger can be opened to see output/exit code | A step is not a shadow record — it is an execution, entering the unified ledger and the existing `job_run` audit; no parallel "step log" system is invented |
+| W6 | Storage | Two tables: `workflows` (definitions) + `workflow_runs` (instances); the run embeds a JSON snapshot of steps at runtime (with per-step status/attempt count/related Job id); AutoMigrate | At personal scale reads dominate writes, a steps subtable is over-engineering; the snapshot is the fact (how it ran, and each step's result) |
+| W7 | run state machine | `running → success \| failed \| cancelled` (no pending — creating a run starts advancing immediately); partial failure = failed, details records the break point | A run is a process entity, it runs once created; a run "queued" has no consumer |
+| W8 | Concurrency constraint | At most one active run per workflow at a time (rejected with 409); different workflows may run in parallel | At personal scale this prevents re-entrance (double-clicking "Run"); no global rate limiting |
+| W9 | Permissions | `workflows:read` / `workflows:write`; run/cancel belong to write; step Jobs reuse the existing `jobs:*` surface | Same convention as cron/Job: the ledger is readable (read), execution is high-risk (write) |
+| W10 | Audit | Definition operations `workflow_create/update/delete`; one `workflow_run` on run completion (resourceID=run id, details containing the workflow name/steps summary/break point); step Jobs carry `job_run` themselves | A definition is a change, a run is an execution, the two are separate; steps already have audit and are not doubled |
+| W11 | Trigger | Manual `POST /api/workflows/{id}/run`. "Run a Workflow on a schedule" = a cron entry invoking that API (an existing convention in the P1 boundary section) | cron is the agent-side scheduling surface while Job/Workflow is the control-plane execution ledger; the two planes are not coupled; a server-side timer is another project |
+| W12 | Step parameters | `{"name","type","target","parameters","timeout_s"?,"continue_on_error"?,"retry"?}`; the type whitelist reuses `jobTypes` (M1 only `agent.exec`) | Isomorphic to the Job payload, validation reuses `validateJobPayload`; a new type (container operations, backup triggering) becomes usable for orchestration automatically once registered in the whitelist |
 
 ## REST API
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |------|------|------|
-| `GET /api/workflows` | — | 定义列表 |
-| `POST /api/workflows` | `{name, description?, steps[]}` | 创建定义（≤20 步） |
-| `GET /api/workflows/{id}` | — | 定义详情 |
-| `PUT /api/workflows/{id}` | 同创建 | 更新（active run 存在时 409） |
-| `DELETE /api/workflows/{id}` | — | 删除定义（历史 run 保留） |
-| `POST /api/workflows/{id}/run` | — | 创建 run 并后台推进，201 返回 run 视图 |
-| `GET /api/workflows/{id}/runs` | `?status=` | 该定义的 run 台账 |
-| `GET /api/workflow-runs/{rid}` | — | run 详情（含 steps 快照） |
-| `POST /api/workflow-runs/{rid}/cancel` | — | 取消 run（W3 语义） |
-| `GET /api/jobs` | `?status=&target=&type=&workflow_run_id=` | P1 台账加过滤（run 详情页列步骤用） |
-| `POST /api/jobs/{id}/cancel` | — | 取消 pending Job（W3） |
-| `POST /api/jobs`（M2d） | `{..., approval:"required"}` | 高危提交：202 返回审批视图，不建 Job；批准后原样派发 |
-| `GET /api/approvals`（M2d） | `?status=` | 审批台账（惰性过期清扫） |
-| `GET /api/approvals/{id}`（M2d） | — | 单条详情（payload 解析为 parameters） |
-| `POST /api/approvals/{id}/approve`（M2d） | — | 批准并派发（重复/过期 409；agent 离线 503） |
-| `POST /api/approvals/{id}/reject`（M2d） | — | 驳回（终态，不建 Job） |
+| `GET /api/workflows` | — | Definition list |
+| `POST /api/workflows` | `{name, description?, steps[]}` | Create a definition (≤20 steps) |
+| `GET /api/workflows/{id}` | — | Definition detail |
+| `PUT /api/workflows/{id}` | Same as create | Update (409 when an active run exists) |
+| `DELETE /api/workflows/{id}` | — | Delete the definition (historical runs are kept) |
+| `POST /api/workflows/{id}/run` | — | Create a run and advance it in the background, 201 returns the run view |
+| `GET /api/workflows/{id}/runs` | `?status=` | Run ledger for this definition |
+| `GET /api/workflow-runs/{rid}` | — | Run detail (including the steps snapshot) |
+| `POST /api/workflow-runs/{rid}/cancel` | — | Cancel the run (W3 semantics) |
+| `GET /api/jobs` | `?status=&target=&type=&workflow_run_id=` | P1 ledger plus filtering (used by the run detail page to list steps) |
+| `POST /api/jobs/{id}/cancel` | — | Cancel a pending Job (W3) |
+| `POST /api/jobs` (M2d) | `{..., approval:"required"}` | High-risk submission: 202 returns an approval view, no Job is created; after approval it is dispatched as-is |
+| `GET /api/approvals` (M2d) | `?status=` | Approval ledger (lazy expiry sweep) |
+| `GET /api/approvals/{id}` (M2d) | — | Single-record detail (payload parsed into parameters) |
+| `POST /api/approvals/{id}/approve` (M2d) | — | Approve and dispatch (duplicate/expired 409; agent offline 503) |
+| `POST /api/approvals/{id}/reject` (M2d) | — | Reject (terminal, no Job created) |
 
-校验：name 非空 ≤64 字符；steps 非空 ≤20；step.name 同一 workflow 内唯一
-≤64；`timeout_s`/`command` 等沿用 P1 各限；`retry` 0-3。M2d：`approval`
-只收 `required`；进审批的 payload 必须先过 validateJobPayload（批准后原样
-派发，校验不可后置）。
+Validation: name non-empty and ≤64 characters; steps non-empty and ≤20; step.name unique within
+the same workflow and ≤64; `timeout_s`/`command` etc. reuse the P1 limits; `retry` 0-3. M2d:
+`approval` only accepts `required`; a payload going into approval must first pass
+validateJobPayload (after approval it is dispatched as-is, validation cannot be deferred).
 
-## 数据模型
+## Data Model
 
 ```go
 type Workflow struct {
     ID          string    `gorm:"primaryKey" json:"id"`
     Name        string    `json:"name"`
     Description string    `json:"description,omitempty"`
-    Steps       string    `json:"-"` // JSON 串，API 层解析
+    Steps       string    `json:"-"` // JSON string, parsed at the API layer
     CreatedBy   string    `json:"createdBy"`
     CreatedAt   time.Time `json:"createdAt"`
     UpdatedAt   time.Time `json:"updatedAt"`
@@ -142,17 +155,17 @@ type Workflow struct {
 type WorkflowRun struct {
     ID           string     `gorm:"primaryKey" json:"id"`
     WorkflowID   string     `gorm:"index" json:"workflowId"`
-    WorkflowName string     `json:"workflowName"` // 冗余，定义删除后台账可读
+    WorkflowName string     `json:"workflowName"` // denormalized, so the ledger stays readable after the definition is deleted
     Status       string     `gorm:"index" json:"status"`
     Actor        string     `json:"actor"`
-    Steps        string     `json:"-"` // 运行态快照 JSON（每步状态/尝试/JobID）
+    Steps        string     `json:"-"` // runtime snapshot JSON (per-step state / attempt / JobID)
     CreatedAt    time.Time  `json:"createdAt"`
     FinishedAt   *time.Time `json:"finishedAt,omitempty"`
 }
-// storage.Job 增列：WorkflowRunID string `gorm:"index;default:''"`
+// storage.Job gains a column: WorkflowRunID string `gorm:"index;default:''"`
 ```
 
-步骤快照形态：
+Step snapshot shape:
 
 ```json
 [
@@ -163,300 +176,341 @@ type WorkflowRun struct {
 ]
 ```
 
-## 前端
+## Frontend
 
-- `web/src/pages/Workflows/index.tsx`：定义列表（名称/步数/最近 run 状态/
-  运行按钮）+ 新建/编辑抽屉（步骤编辑器：逐行 name/target/命令/超时/
-  continue_on_error 开关/retry 下拉，上下移排序）；
-- run 详情：步骤时间线（每步状态徽标 + attempts + 跳转 Job 详情弹窗），
-  进行中 5s 轮询、终态停轮询；
-- Jobs 页：创建弹窗改异步语义（提交即关 + toast「已提交，可在台账查看」），
-  列表加状态过滤；pending 行出现「取消」按钮（`jobs:write`）；
-- 菜单「Workflow 编排」（`workflows:read`），perm `workflows:write` 控写入口。
+- `web/src/pages/Workflows/index.tsx`: definition list (name / step count / latest run status /
+  run button) + create/edit drawer (step editor: per-row name/target/command/timeout, a
+  continue_on_error switch, a retry dropdown, move up/down ordering);
+- run detail: step timeline (a status badge per step + attempts + a popup linking to Job detail),
+  5s polling while in progress, polling stops at a terminal state;
+- Jobs page: the create dialog switches to async semantics (closing on submit + a toast
+  "Submitted, viewable in the ledger"), and the list gains status filtering; a "Cancel" button
+  appears on pending rows (`jobs:write`);
+- Menu entry "Workflow Orchestration" (`workflows:read`), perm `workflows:write` gates the write
+  entry.
 
-## 测试
+## Testing
 
-- storage：两表 CRUD/快照回读/WorkflowRunID 关联（`internal/storage/workflow_test.go`）；
-- server：编排器推进（成功链/中间失败停/continue_on_error 跳过/retry 第二次成功/
-  run 取消停推进/pending Job 取消/running Job 取消 409/同 workflow 重入 409/
-  定义更新 active run 409/校验各 400）——agent 用假 provider 注入（`cov_jobs_test`
-  先例）；jobs 过滤参数（`cov_jobs_test.go` 扩）；
-- web：Workflows 页三态 + 步骤编辑器校验 + run 时间线轮询；Jobs 页异步语义与取消；
-- 覆盖率：新增分支按 100% 纪律收口，不可达防御按既有格式登记
-  `tool/known_uncoverable.txt`。
+- storage: two-table CRUD / snapshot read-back / WorkflowRunID linkage
+  (`internal/storage/workflow_test.go`);
+- server: orchestrator advancement (success chain / stop on a mid-chain failure /
+  continue_on_error skip / retry succeeding on the second attempt / run cancel stopping advancement
+  / pending Job cancel / running Job cancel 409 / re-entrant same workflow 409 / definition update
+  with an active run 409 / validation 400 each) — the agent is injected with a fake provider
+  (precedent: `cov_jobs_test`); jobs filter parameters (`cov_jobs_test.go` extended);
+- web: the three states of the Workflows page + step editor validation + run timeline polling;
+  async semantics and cancellation on the Jobs page;
+- Coverage: new branches are closed to the 100% discipline, unreachable defenses are registered
+  in the existing format in `tool/known_uncoverable.txt`.
 
-## 里程碑切分
+## Milestone Breakdown
 
-- **M1（本设计）**：异步 Job + 线性 Workflow + 取消（pending 语义）+
-  台账过滤 + 权限/审计。验收：探针跑通成功链/失败停/重试/取消四场景 +
-  真机连一台 agent 编排一轮。
-- **M2（候选，另行立项）**：步骤变量传递（见下节 M2a 立项）、多目标扇出
-  （见 M2b 立项）、取消信号（见 M2c 立项）、DAG 依赖、审批门（见 M2d 立项）、
-  SSE 推送。M2a/M2b/M2c/M2d 均已落地；DAG 维持 W4 压后等真实并行需求，
-  SSE 与全仓轮询模式冲突拍不做。
-- **不做**：定时触发器（W11 约定）、输出实时流（P1 边界节留远控域统一设计）、
-  Workflow 嵌套 Workflow（递归执行面先不碰）。
+- **M1 (this design)**: asynchronous Job + linear Workflow + cancellation (pending semantics) +
+  ledger filtering + permissions/audit. Acceptance: probes pass the four scenarios success chain /
+  stop on failure / retry / cancel + one orchestration round against a real machine agent.
+- **M2 (candidates, each a separate project)**: step variable passing (see the M2a initiation
+  below), multi-target fan-out (see the M2b initiation), cancel signal (see the M2c initiation),
+  DAG dependencies, approval gate (see the M2d initiation), SSE push. M2a/M2b/M2c/M2d have all
+  landed; DAG stays deferred per W4 until real parallelism appears, and SSE was decided against
+  because it conflicts with the repo-wide polling pattern.
+- **Not doing**: scheduled triggers (the W11 convention), real-time output streaming (the P1
+  boundary section leaves it to a unified remote-control design), Workflow nested inside Workflow
+  (the recursive execution surface is left alone for now).
 
-## M2 立项：步骤变量传递（M2a，2026-10-10）
+## M2 Initiation: Step Variable Passing (M2a, 2026-10-10)
 
-线性链最真实的缺口：后步要用前步产物（扫描输出喂给处理命令、备份路径
-喂给校验命令），现在只能落盘再读或整段复制粘贴。变量传递把输出在前步
-Job 与后步命令之间接起来——纯 server 侧编排器增强，agent 零改动，无
-schema 变更，是 M2 候选里最小的高价值增量。
+The most real gap in the linear chain: a later step needs the product of an earlier step (feeding
+scan output into a processing command, feeding a backup path into a verification command), and
+today the only options are writing to disk and reading it back or copy-pasting whole blocks.
+Variable passing connects the output between the earlier step's Job and the later step's command
+— a purely server-side orchestrator enhancement, zero agent changes, no schema change, the
+smallest high-value increment among the M2 candidates.
 
-### 关键决策
+### Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| V1 | 语法 | <span v-pre>`{{steps.NAME.output}}`</span>，NAME 为步骤 name（`[A-Za-z0-9_-]+`）；仅此一种形态 | 定义校验已保证 name 唯一；按名引用比按序号（原 M2 草案 `steps.N`）抗步骤重排，报错可读。`exit_code` 等其他字段暂不做，需要再加 |
-| V2 | 校验时机 | 定义保存时（`validateWorkflowPayload`）：引用的 name 必须存在于**更靠前**的步骤；未知名/前向引用 400 | 顺序链语义下前向引用必然拿到空值，保存期拒绝比运行期失败诚实；自引用同理 |
-| V3 | 替换时机 | 步骤开始前（进入重试循环前）解析一次，作用于 `sanitizeStepParams` 之后的参数树（递归 map/slice，仅 string 值；编排元键 name/retry/continue_on_error 不参与） | 重试各 attempt 用同一解析结果，语义稳定；目标字段 target 是资源 ID 不做替换。**连带修复 M1 遗留缺陷**：dispatchJob 原先传定义原参数——meta 键漏到 agent 且模板不解析（落库的是 sanitized 版，两处不一致）；现 dispatch 与落库同用解析后参数 |
-| V4 | 取值 | 前步最终 attempt 的 Job.Output 原文（≤64KB，尾部截断存储值）；源步骤失败（continue_on_error 放行）时用其已存输出（可能为空或错误输出）——与 W4 组合语义一致 | 64KB 是 agent 侧既有截断面，不新增上限；「引用失败步」是 continue_on_error 的自然延伸 |
-| V5 | 替换后再校验 | 解析结果过一遍 `validateJobPayload`，不过则该步直接 failed（快照记 stopReason），不派发 | 变量注入可能把命令撑过 16KB 上限；本地拒绝比发到 agent 再失败省一轮 RPC，行为确定 |
-| V6 | 字面量边界 | 仅精确匹配 <span v-pre>`{{steps.NAME.output}}`</span> 的 token 参与替换；其余 <span v-pre>`{{...}}`</span> 形态原样保留 | shell 里的 `{`、JSON 模板等不受影响；想写引用但名字拼错会在 V2 定义期被拦（unknown name），不会静默变字面量 |
+| V1 | Syntax | <span v-pre>`{{steps.NAME.output}}`</span>, where NAME is the step name (`[A-Za-z0-9_-]+`); this is the only form | Definition validation already guarantees name uniqueness; referencing by name rather than by index (the original M2 draft `steps.N`) survives step reordering and gives readable errors. Other fields such as `exit_code` are not implemented for now, add them when needed |
+| V2 | Validation timing | At definition save time (`validateWorkflowPayload`): a referenced name must exist in an **earlier** step; unknown name / forward reference returns 400 | Under sequential-chain semantics a forward reference necessarily yields an empty value, rejecting at save time is more honest than failing at runtime; self-reference likewise |
+| V3 | Substitution timing | Resolved once before the step starts (before entering the retry loop), applied to the parameter tree after `sanitizeStepParams` (recursive map/slice, string values only; the orchestration meta keys name/retry/continue_on_error do not participate) | Every retry attempt uses the same resolved result, so the semantics are stable; the target field is a resource ID and is not substituted. **Incidentally fixes a leftover M1 defect**: dispatchJob previously passed the raw definition parameters — meta keys leaked to the agent and templates were not resolved (what is persisted is the sanitized version, inconsistent between the two); now dispatch and persistence both use the resolved parameters |
+| V4 | Value source | The raw Job.Output of the previous step's final attempt (≤64KB, truncated at the tail for the stored value); when the source step failed (let through by continue_on_error) its already-stored output is used (possibly empty or an error output) — consistent with how W4 combines | 64KB is the existing truncation point on the agent side, no new cap is added; "referencing a failed step" is a natural extension of continue_on_error |
+| V5 | Validate after substitution | Run the resolved result through `validateJobPayload`; if it fails the step goes straight to failed (the snapshot records stopReason) and is not dispatched | Variable injection may push the command past the 16KB cap; rejecting locally saves an RPC round compared with sending it to the agent and failing there, and the behavior is deterministic |
+| V6 | Literal boundary | Only tokens exactly matching <span v-pre>`{{steps.NAME.output}}`</span> participate in substitution; other <span v-pre>`{{...}}`</span> forms are kept as-is | Braces in shell, JSON templates etc. are unaffected; a reference written with a misspelled name is blocked at definition time by V2 (unknown name) and never silently becomes a literal |
 
-### 不变式
+### Invariants
 
-- 定义文件（workflows 表 steps 列）保存**模板原文**；解析结果只落在该步
-  创建的 Job 行 Parameters 里（「快照即事实」W6 同款）。
-- run 步骤快照不重复存解析结果——Job 台账可查（W5）。
-- agent 侧零改动：`job.exec` 收到的就是已解析命令。
+- The definition file (the steps column of the workflows table) stores the **template source**;
+  the resolved result only lands in the Parameters of the Job row created by that step (the same
+  "the snapshot is the fact" idea as W6).
+- The run step snapshot does not store the resolved result again — it is queryable from the Job
+  ledger (W5).
+- Zero changes on the agent side: what `job.exec` receives is the already-resolved command.
 
-### 前端
+### Frontend
 
-零改动。步骤编辑器编辑的就是模板原文，替换对 UI 透明；提示文案后续有
-真实使用反馈再加。
+Zero changes. What the step editor edits is the template source, and substitution is transparent
+to the UI; the hint text will be added once there is real usage feedback.
 
-### 测试
+### Testing
 
-- server（`cov_workflow` 系）：定义期未知引用/前向引用 400；两步链解析
-  （假 provider 断言第二步 Job.Parameters 含第一步输出）；嵌套参数替换；
-  非 <span v-pre>`{{steps.*.output}}`</span> 的 <span v-pre>`{{...}}`</span> 原样保留；替换后超 16KB 步骤直接
-  failed 且无 Job 派发；引用失败步（continue_on_error）取错误输出。
-- 全部可达，无新增 known_uncoverable 登记（预计）。
+- server (the `cov_workflow` family): unknown reference / forward reference at definition time
+  returns 400; two-step chain resolution (a fake provider asserts the second step's
+  Job.Parameters contains the first step's output); nested parameter substitution; forms that
+  are not <span v-pre>`{{steps.*.output}}`</span> keep <span v-pre>`{{...}}`</span> as-is; a step
+  exceeding 16KB after substitution goes straight to failed with no Job dispatched; referencing a
+  failed step (continue_on_error) takes its error output.
+- All reachable, no new known_uncoverable registration expected.
 
-## M2 立项：多目标扇出（M2b，2026-10-10）
+## M2 Initiation: Multi-Target Fan-Out (M2b, 2026-10-10)
 
-单步只能打一台 agent，N 台同构操作（全机升级/批量重启/全量巡检）只能复制
-步骤或裸跑 N 次。扇出让一个步骤对 N 台 agent 各建真实 Job——server 侧编排
-增强，agent 零改动、协议零新增（与 M2a 同款边界）。选中它而非取消信号/
-DAG/审批门/SSE 的依据：logs M3 已验证过「server 并行扇出 + 降级归因」模式
-（agent 零改动），本批把它带进变更面编排；取消信号已另立 M2c（C1-C9）
-推进——RPC 协议面无结构新增（复用 rpc_request 帧 + router 点号方法），
-需重构 agent 读循环为并发派发，但 agent/server 同仓同发无兼容包袱；DAG
-被 W4 明确压后等真实并行需求；审批门有 server 重启孤儿 run 问题（等待态
-goroutine 不可复活）未解不开工；SSE 与全仓轮询模式冲突拍不做。
+A single step can only hit one agent, so N homogeneous operations (fleet-wide upgrade / batch
+restart / full inspection) can only be done by duplicating the step or running N times raw.
+Fan-out lets one step create a real Job for each of N agents — a server-side orchestration
+enhancement, zero agent changes, no protocol additions (the same boundary as M2a). Why this one
+over cancel signal / DAG / approval gate / SSE: logs M3 has already validated the "server-side
+parallel fan-out + degraded attribution" pattern (zero agent changes), and this batch brings it
+into change-affecting orchestration; the cancel signal was taken up separately as M2c (C1-C9) —
+no structural additions on the RPC protocol side (reusing the rpc_request frame + the router's
+dotted method), it requires refactoring the agent read loop into concurrent dispatch, but agent
+and server ship from the same repository with no compatibility burden; DAG is explicitly deferred
+by W4 until real parallelism appears; the approval gate is not started because the server-restart
+orphan-run problem (a waiting-state goroutine cannot be revived) is unsolved; SSE was decided
+against because it conflicts with the repo-wide polling pattern.
 
-### 关键决策
+### Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| F1 | 语法 | 步骤级可选 `targets: []string`（仅 workflow steps；standalone Job API 的单 `target` 不动）；`target` 与 `targets` 互斥（同现 400）；条目 trim 后非空、去重、≤20 台 | 单目标仍是绝大多数场景，保持主形态；数组直白；20 台=个人 infra 规模上限（WorkflowMaxSteps 同量级的 sanity 闸） |
-| F2 | 执行序 | **顺序扇出**：逐台完整跑（含各自重试周期），非并行 | 编排 goroutine 同步模型不变、零并发协调；变更面（exec 写操作）与 logs M3 查询面不同，并行扇出放大器在写路径不可接受；N 台最坏 N×(retry+1)×300s 可控 |
-| F3 | 失败策略 | 无 continue_on_error：首台失败即停步（后续目标不跑）；带 continue_on_error：跑完全部目标，步状态=失败但链继续 | 与 W5 失败停/继续语义同构，target 维度复用同一开关，无新概念 |
-| F4 | 重试 | 按目标独立完整重试周期；每次 attempt 仍是独立 Job 行 | W4「尝试历史进台账」逐台保留 |
-| F5 | 取消 | 目标边界检查取消（与既有步骤边界同机制，查 run.Status）；未跑目标记 `cancelled` + stopReason=`run cancelled` | W3「停止推进后续步骤」在更细粒度如实兑现；cancelled 是既有真实态 |
-| F6 | 快照 | 步骤行加 `targets[]`（agentId/status/jobId/attempts/stopReason，omitempty）；步级 Status=聚合（全成功才 success，否则 failed）；单目标步快照形状不变（Target/JobID 仍在步级） | 存量 run JSON 向前兼容（omitempty）；聚合态让时间线不改也自洽；run 详情展开按目标明细 |
-| F7 | 输出 | 扇出步**不提供**步骤输出：<span v-pre>`{{steps.NAME.output}}`</span> 解析为空串 | 多台输出拼接是伪精度；按目标取输出（per-target refs）等真实需求再立项；空串与 M2a「缺名取空串」同语义 |
-| F8 | 在线校验 | 建 run 前逐台校验 targets 全在线（既有幽灵防线同口径），缺一 503 并指明 steps[i] 的缺席者 | 与单目标 `registry.Get` 同款，扇出只是 N 次 |
+| F1 | Syntax | Optional step-level `targets: []string` (workflow steps only; the single `target` of the standalone Job API is untouched); `target` and `targets` are mutually exclusive (400 if both appear); entries are non-empty after trim, deduplicated, ≤20 machines | A single target is still the vast majority of scenarios, keeping it as the primary form; an array is straightforward; 20 machines = the personal infra scale ceiling (a sanity gate on the same order as WorkflowMaxSteps) |
+| F2 | Execution order | **Sequential fan-out**: each machine runs to completion (including its own retry cycle), not in parallel | The orchestrator goroutine's synchronous model is unchanged, with zero concurrency coordination; the change-affecting surface (exec write operations) differs from the logs M3 query surface, and a parallel fan-out amplifier is unacceptable on the write path; N machines worst case N×(retry+1)×300s is bounded |
+| F3 | Failure policy | Without continue_on_error: the first machine failing stops the step (later targets do not run); with continue_on_error: all targets run, step status=failure but the chain continues | Isomorphic to the W5 stop/continue failure semantics, the target dimension reuses the same switch, no new concept |
+| F4 | Retry | A full independent retry cycle per target; each attempt is still a separate Job row | W4's "attempt history goes into the ledger" is preserved per machine |
+| F5 | Cancellation | Cancellation is checked at target boundaries (the same mechanism as the existing step boundaries, reading run.Status); unrun targets are recorded `cancelled` + stopReason=`run cancelled` | W3's "stop advancing subsequent steps" is honored faithfully at a finer granularity; cancelled is an existing real state |
+| F6 | Snapshot | The step row gains `targets[]` (agentId/status/jobId/attempts/stopReason, omitempty); the step-level Status = aggregate (success only if all succeed, otherwise failed); the snapshot shape of single-target steps is unchanged (Target/JobID stay at the step level) | Existing run JSON stays forward compatible (omitempty); the aggregate state keeps the timeline self-consistent without changes; the run detail expands into per-target detail |
+| F7 | Output | A fan-out step **does not provide** step output: <span v-pre>`{{steps.NAME.output}}`</span> resolves to an empty string | Concatenating multi-machine output is false precision; per-target output references can be a separate project once the real need appears; the empty string carries the same semantics as M2a's "missing name yields an empty string" |
+| F8 | Online validation | Before creating a run, validate every target is online one by one (same convention as the existing ghost defense); if any is missing return 503 and name the absentee of steps[i] | Same as the single-target `registry.Get`, fan-out is just N of those |
 
-### 不变式
+### Invariants
 
-- 定义文件存 `targets` 原文；每台 attempt 落独立 Job 行（快照即事实 W6）。
-- 单目标路径（`target` 字段）行为逐字节不变——既有 run/探针场景零感知。
-- agent 零改动：每台收到的仍是自己的 `job.exec`。
+- The definition file stores the `targets` source; every machine's attempt lands as a separate Job
+  row (the snapshot is the fact, W6).
+- The single-target path (the `target` field) behaves byte for byte identically — existing runs
+  and probe scenarios notice nothing.
+- Zero agent changes: each machine still receives its own `job.exec`.
 
-### 前端
+### Frontend
 
-- 步骤编辑器：目标主机 Select 加多选切换（选多台即扇出形态，提交折成
-  `targets`）；单选仍提交 `target`。
-- run 详情时间线：扇出步行内「目标」列显示聚合（如 `3 台`），展开行按
-  目标列明细（agentId/状态/尝试/输出入口）。
+- Step editor: the target host Select gains a multi-select toggle (choosing several machines
+  means the fan-out form, submitted collapsed into `targets`); single selection still submits
+  `target`.
+- Run detail timeline: fan-out steps show the aggregate in the in-row "Targets" column (e.g.
+  `3 machines`), and the expanded row lists per-target detail (agentId/status/attempts/output
+  entry).
 
-### 测试
+### Testing
 
-- server（`cov_workflow` 系）：targets 校验矩阵（互斥/空/重复/超 20/空条目）；
-  两台顺序扇出成功聚合 success；首台失败停步（第二台无 Job）；continue_on_error
-  跑完全部且步 failed 链继续；按目标重试（首台 retry 后成功）；目标边界取消
-  （第二台记 cancelled）；建 run 在线校验缺一 503；扇出步输出引用解析空串；
-  单目标步快照形状回归（无 targets 键）。
-- web：编辑器双形态折返（target/targets）、时间线扇出步展开渲染。
+- server (the `cov_workflow` family): the targets validation matrix (mutual exclusion / empty /
+  duplicate / over 20 / empty entry); two-machine sequential fan-out succeeding and aggregating to
+  success; the first machine failing stops the step (no Job for the second); continue_on_error
+  runs everything with the step failed and the chain continuing; per-target retry (the first
+  machine succeeds on retry); cancellation at a target boundary (the second machine is recorded
+  cancelled); online validation before creating a run returning 503 when one is missing; output
+  references in a fan-out step resolving to an empty string; snapshot shape regression for
+  single-target steps (no targets key).
+- web: the editor switching back and forth between both forms (target/targets), expanded
+  rendering of fan-out steps on the timeline.
 
-## M2 立项：取消信号（M2c，2026-10-10）
+## M2 Initiation: Cancel Signal (M2c, 2026-10-10)
 
-W3 的取消只停推进：run 置 cancelled 后编排器在下一步边界停，**在途步骤
-的 Job 不被触碰**——失控命令要跑满 agent 侧超时（上限 300s）才自然结束。
-M2c 把取消做成真信号：server 下发 `job.cancel` RPC，agent 击杀在途进程
-（进程组 SIGKILL，孙进程一并死），Job 落 `cancelled` 终态。选中它而非
-DAG/审批门/SSE 的依据（2026-10-10 巡检拍板）：DAG 维持 W4 压后（等真实
-并行需求）；审批门有 server 重启孤儿 run 问题（等待态 goroutine 不可复活）
-未解不开工；SSE 与全仓轮询模式冲突拍不做。取消信号是 M2 候选里唯一
-「用户可感知的失控止血」增量。
+The W3 cancellation only stops advancement: after the run is set to cancelled the orchestrator
+stops at the next step boundary, and **the Jobs of in-flight steps are not touched** — a runaway
+command has to run out the agent-side timeout (cap 300s) before ending naturally. M2c makes
+cancellation a real signal: the server issues a `job.cancel` RPC and the agent kills the in-flight
+process (SIGKILL to the process group, grandchildren die too), and the Job lands in the
+`cancelled` terminal state. Why this one over DAG / approval gate / SSE (decided at the
+2026-10-10 inspection): DAG stays deferred per W4 (waiting for real parallelism); the approval
+gate is not started because the server-restart orphan-run problem (a waiting-state goroutine
+cannot be revived) is unsolved; SSE was decided against because it conflicts with the repo-wide
+polling pattern. The cancel signal is the only "user-perceivable stop-the-bleeding for runaways"
+increment among the M2 candidates.
 
-### 关键决策
+### Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| C1 | 信号载体 | `job.cancel` RPC 方法（params `{id}`），复用既有 `rpc_request` 帧，**不新增消息类型** | probe_report（B5）先例是 agent→server 主动上报、无既有通道才加消息类型；取消是 server→agent 指令，`rpc_request` 就是该方向标准载体，router `parseMethod` 已支持点号方法（`job.cancel` → provider=job, action=cancel），零协议结构新增 |
-| C2 | agent 读循环并发化 | `handleRPCRequest` 改 goroutine 派发（`go a.handleRPCRequest(msg)`） | **根本前提**：`messageLoop` 单 goroutine 串行，`job.exec` 阻塞期间（最长 300s）任何后续帧——含 cancel——都读不到。RPC 响应按消息 ID 相关（pending response map 互不干扰），`sendMessage`→`upstream.Enqueue` 已 goroutine 安全（writeLoop 串行写出），并发派发不破坏既有契约 |
-| C3 | agent 句柄表 | `JobProvider` 加 `map[jobID]*jobSession`（ctx cancel + mutex），镜像 logs follow 的 `followState.follows` 模式 | logs_follow 已验证「注册句柄 + 按 ID 查找 + 幂等关闭」；exec 的 ctx cancel 触发 `newJobCmd` 既有 `cmd.Cancel`（进程组 SIGKILL），**复用超时同款击杀路径**，不引入第二套 kill 机制 |
-| C4 | 击杀语义 | unix 进程组 SIGKILL（`Kill(-pid)`）；Windows 直接子进程 | `newJobCmd` 已实现（Setpgid + 组杀），超时路径同款；`sh -c` 派生的孙进程一并死，无孤儿。Windows 无进程组语义，维持既有直接子进程击杀 |
-| C5 | 幂等语义 | 未知/已结束 ID 的 cancel 返回成功空操作（`{cancelled:false}`），镜像 `FollowStop` | cancel 与 exec 完成存在天然竞态（job 恰在 cancel 到达前结束）；报错会让 server 无法区分「已停」与「早已结束」，幂等成功使 server 侧语义单一 |
-| C6 | server 单 Job 取消 | running 可撤：`CallAgent(job.cancel)` → 成功后**条件 UPDATE**（`WHERE status='running'`）落 cancelled；agent 不可达 → 409 如实拒绝。pending 维持 W3（DB-only），终态一律 409 | 「观察终态 ⟹ 状态可信」：只有 agent 确认击杀才落 cancelled，绝不假称已停；条件 UPDATE 防 check-then-update 竞态（GetJob 与 CancelJob 之间 pending→running 翻转窗口） |
-| C7 | 终态回写不覆盖取消 | `dispatchJobAsync` / `runWorkflowStep` 回写前**重读** job，若已 cancelled 则保留 cancelled（仅补 output/exitCode/error） | cancel 写与 exec 回写并发：exec 被击杀后返回 exit -1 / "signal: killed"，若无守卫会把 cancelled 覆盖成 failed；重读收敛竞态，无需加锁串行化 |
-| C8 | run 级取消联动 | `handleWorkflowRunCancel` 除置 run cancelled 外，查在途 step Job（`ListJobsFiltered` 按 running 与 pending 各查一轮）逐个走 C6 击杀路径；pending（建行未派发微秒窗口）DB-only 条件取消，0 行命中说明已翻转 running 则落到击杀路径兜底；在途步回写命中 C7 守卫，步骤快照记 cancelled + stopReason=`run cancelled`（F5 同口径） | W3 只停推进、失控命令跑满超时——M2c 的价值就在「真正停掉在途命令」；run 取消是用户最高频的「停下来」入口；pending 窗口不取消则台账永久留无终态的孤儿行 |
-| C9 | 步骤 cancelled ⟹ run cancelled | `advanceWorkflow` 单步分支补 cancelled 守卫（镜像扇出分支 F5 的 return）；若 run 仍 running（单 Job 取消场景）则 `finishWorkflowRun(cancelled)` | 步骤 Job 死则链断，run 不得僵尸悬挂（永不落终态）；单 Job 取消传播到 run 是直觉语义——用户杀了某步，期望整条链停 |
-| C10 | run 终态条件写 | `finishWorkflowRun` 与 run 取消处理器共用 `FinishWorkflowRun(id, status, WHERE status='running')` 条件 UPDATE（新增 storage 方法，同 C6 的 Job CancelJob 口径）；命中 0 行 → 取消处理器 409、编排器放弃改写 | C8 引入的杀手锏：击杀输给 exec 收尾时步骤以 failed 收场，`finishWorkflowRun(failed)` 会把已落 cancelled 的终态翻掉；两侧都走条件写后先到先得，后到者如实反馈（409 / 日志放弃），cancelled 与 failed/success 互不覆盖。原 `UpdateWorkflowRun` 全量 Save 保留给快照回写（recordStepResult / recordStepTargets）等非终态面 |
+| C1 | Signal carrier | The `job.cancel` RPC method (params `{id}`), reusing the existing `rpc_request` frame, **no new message type** | The probe_report (B5) precedent is an agent→server proactive report that adds a message type only when no existing channel exists; cancellation is a server→agent command, `rpc_request` is the standard carrier for that direction, and the router's `parseMethod` already supports dotted methods (`job.cancel` → provider=job, action=cancel), with zero structural protocol additions |
+| C2 | Concurrent agent read loop | `handleRPCRequest` switches to goroutine dispatch (`go a.handleRPCRequest(msg)`) | **Fundamental premise**: `messageLoop` is a single serial goroutine, and while `job.exec` blocks (up to 300s) no subsequent frame — including cancel — can be read. RPC responses are correlated by message ID (the pending response maps do not interfere), `sendMessage`→`upstream.Enqueue` is already goroutine safe (writeLoop writes serially), and concurrent dispatch does not break the existing contract |
+| C3 | Agent handle table | `JobProvider` gains a `map[jobID]*jobSession` (ctx cancel + mutex), mirroring the logs-follow `followState.follows` pattern | logs_follow has already validated "register handle + look up by ID + idempotent close"; the exec ctx cancel triggers the existing `cmd.Cancel` of `newJobCmd` (process-group SIGKILL), **reusing the same kill path as timeout**, without introducing a second kill mechanism |
+| C4 | Kill semantics | Process-group SIGKILL on unix (`Kill(-pid)`); on Windows the direct child process | `newJobCmd` already implements this (Setpgid + group kill), the same as the timeout path; grandchildren spawned by `sh -c` die too, leaving no orphans. Windows has no process-group semantics, so the existing direct-child kill is kept |
+| C5 | Idempotent semantics | A cancel for an unknown/finished ID returns success as a no-op (`{cancelled:false}`), mirroring `FollowStop` | There is an inherent race between cancel and exec completion (the job ends just before cancel arrives); returning an error would leave the server unable to distinguish "just stopped" from "ended long ago", and idempotent success keeps the server-side semantics single |
+| C6 | Server-side cancel of a single Job | running is revocable: `CallAgent(job.cancel)` → on success a **conditional UPDATE** (`WHERE status='running'`) lands cancelled; if the agent is unreachable → 409, rejected truthfully. pending stays as in W3 (DB-only), any terminal state is always 409 | "Observe the terminal state ⟹ the state is trustworthy": cancelled only lands after the agent confirms the kill, never falsely claiming it stopped; the conditional UPDATE guards against a check-then-update race (the pending→running flip window between GetJob and CancelJob) |
+| C7 | Terminal write-back must not overwrite cancellation | `dispatchJobAsync` / `runWorkflowStep` **re-read** the job before writing back; if it is already cancelled, cancelled is preserved (only output/exitCode/error are filled in) | The cancel write and the exec write-back are concurrent: after being killed exec returns exit -1 / "signal: killed", and without this guard cancelled would be overwritten with failed; re-reading converges the race without adding locks for serialization |
+| C8 | Run-level cancel linkage | Besides setting the run cancelled, `handleWorkflowRunCancel` looks up in-flight step Jobs (`ListJobsFiltered` querying running and pending in one pass each) and walks each through the C6 kill path; pending (the microsecond window between row creation and dispatch) is cancelled conditionally in the DB only, and 0 rows matched means it has already flipped to running so it falls back to the kill path; in-flight step write-back hits the C7 guard, and the step snapshot records cancelled + stopReason=`run cancelled` (same convention as F5) | W3 only stops advancement and a runaway command runs out the timeout — the value of M2c is exactly "really stopping in-flight commands"; run cancellation is the user's most frequent "stop" entry point; if the pending window is not cancelled the ledger permanently keeps an orphan row with no terminal state |
+| C9 | Step cancelled ⟹ run cancelled | The single-step branch of `advanceWorkflow` gains a cancelled guard (mirroring the return of the fan-out branch F5); if the run is still running (the single-Job cancel scenario) then `finishWorkflowRun(cancelled)` | If a step Job dies the chain breaks and the run must not hang as a zombie (never reaching a terminal state); propagating a single-Job cancel to the run is intuitive semantics — the user killed a step and expects the whole chain to stop |
+| C10 | Conditional write of the run terminal state | `finishWorkflowRun` and the run cancel handler share the `FinishWorkflowRun(id, status, WHERE status='running')` conditional UPDATE (a new storage method, same convention as C6's Job CancelJob); 0 rows matched → the cancel handler returns 409 and the orchestrator gives up the rewrite | The trump card introduced by C8: when the kill loses to exec finishing up, the step ends as failed, and `finishWorkflowRun(failed)` would flip an already-landed cancelled terminal state; once both sides use the conditional write the first one wins and the later one reports truthfully (409 / giving up in the log), with cancelled and failed/success never overwriting each other. The original full `UpdateWorkflowRun` Save is kept for non-terminal surfaces such as snapshot write-back (recordStepResult / recordStepTargets) |
 
-### 不变式
+### Invariants
 
-- agent 句柄表只在 exec 生命周期内持有（注册→执行→注销）；cancel 不新建
-  状态机，ctx cancel 即全部。注销顺序 **cancel-then-unregister**（LIFO
-  defer），防「已注销未击杀」微秒窗口漏杀。
-- `cancelled` 是 Job 既有真实终态（storage W3 已立）；cancel 写与 exec
-  回写的竞态由条件 UPDATE + 重读收敛，终态以库内为准。
-- run 终态：终态写一律走条件 UPDATE（C10），cancelled 与 failed/success
-  先到先得、互不覆盖——advanceWorkflow 步骤边界检查 + C9 cancelled 守卫
-  是流程面双保险，C10 是写面兜底；run 取消处理器自身 audit-then-update
-  （与 finishWorkflowRun 写序不变式同款：观察终态 ⟹ 无后续写）。
-- 审计动作不变（`job_cancel` / `workflow_cancel` 既有）；run 取消联动击杀
-  的 step Job 不另发 cancel 审计（其 exec 回写已有 `job_run` 审计）。
+- The agent handle table is held only for the lifetime of an exec (register → execute →
+  unregister); cancel does not build a new state machine, a ctx cancel is all there is. The
+  unregister order is **cancel-then-unregister** (LIFO defer), preventing a miss in the
+  "unregistered but not killed" microsecond window.
+- `cancelled` is an existing real terminal state of a Job (already established in storage W3);
+  the race between the cancel write and the exec write-back is converged by the conditional
+  UPDATE + re-read, and the terminal state is whatever is in the database.
+- Run terminal state: terminal writes always go through the conditional UPDATE (C10), cancelled
+  and failed/success are first-come-first-served and never overwrite each other — the
+  advanceWorkflow step boundary check + the C9 cancelled guard are the double insurance on the
+  flow side, and C10 is the backstop on the write side; the run cancel handler itself is
+  audit-then-update (same as the write-order invariant of finishWorkflowRun: observe the terminal
+  state ⟹ no subsequent writes).
+- The audit actions are unchanged (`job_cancel` / `workflow_cancel` exist already); step Jobs
+  killed through run cancel linkage do not emit a separate cancel audit (their exec write-back
+  already has a `job_run` audit).
 
-### 前端
+### Frontend
 
-- Jobs 页取消按钮：条件由仅 `pending` 扩到 `pending || running`（原代码
-  只对 pending 渲染按钮，running 行没有入口——不是纯行为升级，需改渲染
-  条件）；按钮形态/文案不变。
-- run 取消文案改口径：原「当前在途步骤将自然结束」（W3 语义）→
-  「在途步骤将被立即终止」（M2c 语义），Popconfirm 与成功提示两处同步。
-- run 时间线：在途步被击杀后显示 cancelled + stopReason `run cancelled`
-  （复用 F5 渲染路径，零新增组件）。
+- Cancel button on the Jobs page: the condition widens from only `pending` to `pending || running`
+  (the original code rendered the button only for pending and running rows had no entry — this is
+  not a pure behavior upgrade, the render condition must change); the button shape and text are
+  unchanged.
+- The run cancel wording changes stance: from "the current in-flight step will end naturally"
+  (W3 semantics) to "the in-flight step will be terminated immediately" (M2c semantics), updated
+  in both the Popconfirm and the success toast.
+- Run timeline: after an in-flight step is killed it shows cancelled + stopReason
+  `run cancelled` (reusing the F5 render path, zero new components).
 
-### 测试
+### Testing
 
-- agent（`rpc` 包）：exec 注册句柄 → cancel 击杀在途命令（真 `sleep` +
-  断言提前返回）；未知 ID 幂等成功；exec 自然结束后 cancel 幂等；并发
-  exec+cancel（`-race`）；`job.exec` 无 id 参数（旧调用形态）不注册、
-  cancel 空操作。
-- server（`cov_jobs` / `cov_workflow` 系）：running job cancel → 假 agent
-  收 `job.cancel` → job cancelled + 输出仍回写；agent 不可达 → 409 不落
-  cancelled；exec 回写不覆盖 cancelled（C7 守卫）；pending→running 翻转
-  竞态走条件 UPDATE；run cancel 联动击杀在途 step（C8，含 pending 窗口的
-  DB-only 条件取消 + 翻转兜底）；单步 Job 被杀
-  → run 落 cancelled（C9）；扇出步目标 Job 被杀 → 步 cancelled + 后续
-  目标不派发 + run 终态保持 cancelled（聚合 cancelled 与 C10 条件写双防
-  线）；run 已终态后取消 409（C10 条件写 0 行）；陈旧 running 视图的
-  cancel 拒绝（C6「job already finished」）；dispatch 无 params 时 id
-  注入（C1 契约）。
-- storage：`CancelJob` 条件 UPDATE（状态匹配才生效 + 重取消 0 行 +
-  `MarkJobCancelledOutput` 只补执行结果）；`FinishWorkflowRun` 条件终态
-  写（仅 running 生效，已终态 0 行不改写）。
-- 死防御与登录态分支按惯例登记 `tool/known_uncoverable.txt`（jobs 9 条 /
-  workflow 17 条，理由注记各自分支；仅竞态窗口可达的登记口径同 C10
-  0-rows 409 条目）。
+- agent (the `rpc` package): exec registers a handle → cancel kills the in-flight command (a real
+  `sleep` + asserting the early return); an unknown ID is idempotently successful; cancel after
+  exec ends naturally is idempotent; concurrent exec+cancel (`-race`); `job.exec` without an id
+  parameter (the old call form) does not register and cancel is a no-op.
+- server (the `cov_jobs` / `cov_workflow` families): running job cancel → a fake agent receives
+  `job.cancel` → the job becomes cancelled + the output is still written back; an unreachable
+  agent → 409 and no cancelled is landed; the exec write-back does not overwrite cancelled (the
+  C7 guard); the pending→running flip race goes through the conditional UPDATE; run cancel linkage
+  kills the in-flight step (C8, including the DB-only conditional cancellation for the pending
+  window + the flip fallback); a single-step Job killed → the run lands cancelled (C9); a fan-out
+  step's target Job killed → the step becomes cancelled + later targets are not dispatched + the
+  run terminal state stays cancelled (the aggregate cancelled and the C10 conditional write form
+  a double line of defense); cancelling after the run is already terminal returns 409 (0 rows
+  from the C10 conditional write); a cancel from a stale running view is rejected (C6's "job
+  already finished"); id injection when dispatch has no params (the C1 contract).
+- storage: the `CancelJob` conditional UPDATE (only effective on a state match + re-cancel yields
+  0 rows + `MarkJobCancelledOutput` only fills in the execution result); the `FinishWorkflowRun`
+  conditional terminal write (only effective for running, 0 rows for an already terminal state and
+  no rewrite).
+- Dead defenses and login-state branches are registered in `tool/known_uncoverable.txt` per
+  convention (9 entries for jobs / 17 for workflow, each annotated with its own branch reason; the
+  registration convention for entries reachable only in a race window is the same as the C10
+  0-rows 409 entry).
 
-## M2 立项：审批门（M2d，2026-10-11）
+## M2 Initiation: Approval Gate (M2d, 2026-10-11)
 
-高危 `agent.exec` 目前提交即执行：命令进了 `jobs:write` 的手就直达目标机。
-M2d 加一道显式二次确认——提交时可声明 `approval="required"`，请求落审批
-记录即返 202（不建 Job），审批人在台账里看到「目标 + 命令摘要 + 提交人 +
-到期」，批准后才按原 payload 派发。选中它作为 M2 收官项的依据（2026-10-10
-拍板「先解 server 重启孤儿 run 再立项」）：前置阻塞点已由 9079b52 重启清扫
-解掉；且审批等待态若沿用 W1 的 goroutine 语义，server 重启即丢待批——本批
-把等待态落库不落 goroutine，重启不丢（D1）。
+High-risk `agent.exec` currently executes on submission: once a command gets past `jobs:write` it
+reaches the target machine directly. M2d adds an explicit second confirmation — at submission you
+can declare `approval="required"`, and the request lands in an approval record and returns 202
+immediately (no Job created); the approver sees "target + command summary + submitter + expiry" in
+the ledger, and only after approval is it dispatched with the original payload. Why this one as
+the M2 closing item (decided 2026-10-10: "resolve the server-restart orphan run first, then start
+the project"): the prior blocker has been cleared by the 9079b52 restart sweep; also, if the
+approval waiting state reused W1's goroutine semantics, a server restart would lose the pending
+approvals — this batch puts the waiting state in the database instead of a goroutine, so a restart
+loses nothing (D1).
 
-### 关键决策
+### Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D1 | 等待态放哪 | SQLite `approvals` 表，不放 goroutine | M2b 时代立项阻塞点即「等待态 goroutine 不可复活」；落库后 server 重启不丢待批，台账天然可查 |
-| D2 | 提交入口与权限 | `POST /api/jobs` 加 `approval` 字段；提交仍走 `jobs:write`，台账/决策走 `approvals:read/write`（该权限点 2026-10-15 才补登记，此前端点对全员 403） | 门槛与执行权同面——审批的价值在「显式二次确认 + 审计分账」，不是权限提升；独立资源点管决策动作 |
-| D3 | 校验时机 | 提交时前置 validateJobPayload（坏 payload 400 不进审批；targets 扇出同样拒绝） | 批准后按原 payload 原样派发，校验若后置，批准的可能是执行不了的请求 |
-| D4 | 并发与过期收口 | `DecideApproval` 条件 UPDATE `WHERE status='pending' AND (expires_at IS NULL OR expires_at > ?)` 返回命中行数；0 行 → 409 | 重复批准/批准后驳回/过期批准都在一条 UPDATE 里闭合（C10 同口径）；TTL 过期不依赖清扫任务，惰性清扫只改台账展示 |
-| D5 | 批准时 agent 离线 | 批准终态已落、派发如实 503（不假称已派发）；重试面=重新提交 | 批准不可回滚也不假装成功；提交时不拦离线——等待窗口内 agent 可回线 |
-| D6 | payload 损坏 | 审计记 `dispatch=payload corrupt` + 500 | 现网不可达（D3 前置校验 + JSON 解码产物恒可序列化），纯防御；防御立场仍是「不假称已派发」 |
-| D7 | 审计分账 | submit（提交人）/approve（批准人）/reject（批准人）三动作各自落账 | 台账互链（approval.job_id 回写最佳努力）+ 审计上「谁提交、谁放行」分账 |
+| D1 | Where the waiting state lives | The SQLite `approvals` table, not a goroutine | The blocker for starting the project back in the M2b era was exactly "a waiting-state goroutine cannot be revived"; once stored in the database a server restart loses no pending approval, and the ledger is naturally queryable |
+| D2 | Submission entry and permissions | `POST /api/jobs` gains an `approval` field; submission still goes through `jobs:write`, and the ledger/decisions go through `approvals:read/write` (that permission point was only backfilled on 2026-10-15, before that every role got 403 on the endpoint) | The gate shares the surface of the execution right — the value of approval lies in "explicit second confirmation + split audit accounts", not in privilege escalation; a separate resource point governs the decision action |
+| D3 | Validation timing | validateJobPayload runs upfront at submission (a bad payload gets 400 and never enters approval; a targets fan-out is rejected too) | After approval the original payload is dispatched as-is; if validation were deferred, what got approved might be an unexecutable request |
+| D4 | Concurrency and expiry closure | `DecideApproval` conditional UPDATE `WHERE status='pending' AND (expires_at IS NULL OR expires_at > ?)` returns the number of rows matched; 0 rows → 409 | Duplicate approval / reject after approval / approval after expiry all close within a single UPDATE (same convention as C10); TTL expiry does not depend on a sweep task, and the lazy sweep only changes ledger display |
+| D5 | Agent offline at approval time | The approved terminal state has already landed and the dispatch honestly returns 503 (never falsely claiming it was dispatched); the retry surface = resubmit | Approval cannot be rolled back and must not pretend to succeed; offline is not blocked at submission time — the agent can come back online within the waiting window |
+| D6 | Corrupt payload | Audit records `dispatch=payload corrupt` + 500 | Unreachable in practice (D3's upfront validation + JSON decode products are always serializable), pure defense; the defensive stance is still "never falsely claim it was dispatched" |
+| D7 | Split audit accounts | The three actions submit (submitter) / approve (approver) / reject (approver) each record their own entry | The ledger cross-links (best-effort write-back of approval.job_id) + the audit splits "who submitted, who let it through" |
 
-不变式：
+Invariants:
 
-- 待批期间无 Job 行——「提交」与「执行」分账的库面体现（批准才建行）。
-- `approved`/`rejected`/`expired` 均终态，决策只从 `pending` 出发；过期未决
-  只能重新提交。
-- pending 审批行不依赖进程内状态，server 重启原样保留。
-- 派发复用 submitJob（与直接创建同一校验/同一 503 语义），actor 记提交人。
+- No Job row exists while an approval is pending — the database-level embodiment of splitting
+  "submission" from "execution" (a row is created only on approval).
+- `approved`/`rejected`/`expired` are all terminal, and decisions only start from `pending`; an
+  expired undecided item can only be resubmitted.
+- A pending approval row does not depend on in-process state and is preserved as-is across a
+  server restart.
+- Dispatch reuses submitJob (the same validation / same 503 semantics as direct creation), and the
+  actor records the submitter.
 
-### 前端
+### Frontend
 
-- `web/src/pages/Approvals/index.tsx`：审批台账页（5s 轮询 + 状态过滤 +
-  批准/驳回 Popconfirm 二次确认，批准弹层带命令摘要）；终态行显示回写
-  jobId 可复制；菜单「审批门」（`approvals:read`）、决策按钮
-  `approvals:write`（权限点由 `internal/storage/role.go` `resourceActions` 与
-  `allPermissions` 固定序列共同登记，缺一处即口径分裂）；
-- Jobs 页创建弹窗加「需审批执行」开关：走 `createJobWithApproval`，
-  toast「已提交审批，批准后开始执行」。
+- `web/src/pages/Approvals/index.tsx`: approval ledger page (5s polling + status filtering + a
+  second-confirmation Popconfirm for approve/reject, with the command summary in the approval
+  popover); terminal rows show a copyable write-back jobId; menu entry "Approval Gate"
+  (`approvals:read`), decision buttons `approvals:write` (the permission point is registered
+  jointly by `internal/storage/role.go` `resourceActions` and the fixed sequence of
+  `allPermissions`; missing one makes the convention diverge);
+- The create dialog on the Jobs page gains a "requires approval to execute" toggle: it goes
+  through `createJobWithApproval` and the toast says "Submitted for approval, execution starts
+  after approval".
 
-### 测试
+### Testing
 
-- storage：CRUD/条件终态写（命中一次、重复 0 行、过期 0 行、无到期恒可决）、
-  `SetApprovalJobID` 回写、批量过期只动到期 pending、关库错误面
-  （`internal/storage/approval_test.go`）；
-- server：全链（202 无 Job 行 → 批准 200 → Job 跑到终态 → 审计两笔）、驳回
-  不建 Job、重复决策 409、TTL 取负构造过期、路由守卫（空 id/405/未知 id）、
-  关库 500、corrupt payload 500、离线 agent 批准 503、长命令摘要截断、
-  RBAC 权限点（`internal/server/api_approvals_test.go`）；
-- web：Approvals 页台账渲染/批准/驳回/失败提示/状态过滤/无写权限隐藏操作、
-  Jobs 页开关分流（`web/src/pages/Approvals/index.test.tsx` 扩 Jobs 页）；
-- 覆盖率：新增分支按 100% 纪律收口，不可达防御按既有格式登记
-  `tool/known_uncoverable.txt`（approvals 5 条；jobs 行号随 submitJob 抽取
-  迁移）。
+- storage: CRUD / conditional terminal write (matched once, 0 rows when repeated, 0 rows when
+  expired, always decidable without an expiry), `SetApprovalJobID` write-back, batch expiry only
+  touching expired pending rows, the closed-database error surface
+  (`internal/storage/approval_test.go`);
+- server: the full chain (202 with no Job row → approve 200 → the Job runs to a terminal state →
+  two audit entries), reject creating no Job, a duplicate decision returning 409, a negative TTL
+  used to construct expiry, route guards (empty id / 405 / unknown id), closed database 500,
+  corrupt payload 500, approval with an offline agent returning 503, truncation of long command
+  summaries, RBAC permission points (`internal/server/api_approvals_test.go`);
+- web: ledger rendering / approve / reject / failure toast / status filtering / hiding actions
+  without write permission on the Approvals page, and the switch routing on the Jobs page
+  (`web/src/pages/Approvals/index.test.tsx` extended to the Jobs page);
+- Coverage: new branches are closed to the 100% discipline, unreachable defenses are registered
+  in the existing format in `tool/known_uncoverable.txt` (5 entries for approvals; the jobs line
+  numbers shift with the extraction of submitJob).
+## M2 Initiation: DAG Dependencies (M2e, 2026-10-11)
 
-## M2 立项：DAG 依赖（M2e，2026-10-11）
+W4 ruled that "a linear step chain is not a DAG, extend it only when a real parallelism need appears"; the 2026-10-11
+patrol decided to put DAG into the remaining M2 sequence (cancel signal → approval gate → DAG), and this batch
+lands it. The increment is not parallel execution (F2 already fixed ordered fan-out, and the write path introduces
+no concurrency coordination) but **dependency gating**: a step can declare `depends_on`, and when a dependency fails
+the downstream step is honestly skipped — expressing the conditional-branch semantics of "C needs A's success but
+does not need B".
 
-W4 拍「线性步骤链非 DAG，等真实并行需求再扩」；2026-10-11 巡检拍板把
-DAG 列入 M2 剩余序列（取消信号→审批门→DAG），本批落地。增量不是并行
-执行（F2 已定顺序扇出，写路径不引入并发协调），而是**依赖门控**：步骤可
-声明 `depends_on`，依赖失败时下游如实跳过，表达「C 需要 A 的成功，但不
-需要 B」的条件分支语义。
+### Key Decisions
 
-### 关键决策
-
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| G1 | 语法 | 步骤级 `depends_on: []string`（步骤顶层字段，与 `targets` 同级；不进 parameters） | 与 M2b `targets` 同形态；结构字段而非模板文本，保存期可校验 |
-| G2 | 引用方向 | 依赖**只能指向更靠前的步骤**（按定义数组序，须已声明的唯一 name） | 数组序即拓扑序，编排器循环顺序零改动、运行期无需拓扑排序；前向/自引用/未知一律保存期 400（M2a V2 同措辞「unknown or forward step reference」）；环在构造上不可能，无需运行期环检测 |
-| G3 | 执行序 | 保持数组顺序逐格推进（G2 保证这是合法拓扑序）；并行分支不做 | 编排 goroutine 单线程状态机与 F2 顺序扇出同决策面；并行留待真实需求再立 |
-| G4 | 跳过语义 | 任一步骤的依赖终态非 success（failed 或 skipped）→ 该步**跳过**：快照 status=`skipped`（步级新态，非 JobStatus 词表）、stopReason=`skipped: dependency <name> <failed\|skipped>`、attempts=0、无 Job 行；依赖链传递（跳过的步又被依赖 → 再跳过） | skipped 是如实陈述「没跑」，与 pending（还没轮到）区分；空输出与 M2a「缺名取空串」同语义 |
-| G5 | 失败策略交互 | 无 continue_on_error 的依赖失败仍停 run（W5 不变，下游根本不推进）；带 continue_on_error 时 run 继续，依赖它的步按 G4 跳过 | W5「继续的是链，不是对失败的豁免」——依赖声明是显式的输入假设，假设破了下游不跑 |
-| G6 | run 终态 | 语义不变：continue_on_error 的失败步不使 run 失败（W5 既有），跳过步同样不使 run 失败；run=success 但时间线含 skipped 步 | 与现有「run success + 时间线红 failed 步」同构，零新概念 |
-| G7 | 取消 | 不变：取消停在既有步边界；被跳过的步从不执行，无在途物可取消 | skipped 无 Job，与 pending 步同待遇 |
-| G8 | 扇出交互 | 门控在步级：扇出步的依赖不满足整步跳过，满足则逐台照常（目标边界取消/快照不变） | depends_on 与 targets 正交，两个维度各自成立 |
+| G1 | Syntax | Step-level `depends_on: []string` (a top-level step field, peer to `targets`; not inside parameters) | Same shape as M2b `targets`; a structural field rather than template text, so it can be validated at save time |
+| G2 | Reference direction | A dependency may point **only to an earlier step** (by definition-array order, and the name must already be declared and unique) | Array order is the topological order, so the orchestrator's loop order needs zero changes and no topological sort is needed at run time; forward, self and unknown references are all 400 at save time (the same wording as M2a V2, "unknown or forward step reference"); cycles are impossible by construction, so no run-time cycle detection is needed |
+| G3 | Execution order | Keep advancing cell by cell in array order (G2 guarantees this is a legal topological order); parallel branches are not done | The orchestrator's single-threaded state machine shares a decision surface with F2's ordered fan-out; parallelism waits until a real need appears |
+| G4 | Skip semantics | If any step's dependency ends in a non-success state (failed or skipped) → that step is **skipped**: snapshot status=`skipped` (a new step-level state, not part of the JobStatus vocabulary), stopReason=`skipped: dependency <name> <failed\|skipped>`, attempts=0, no Job row; the skip propagates (a skipped step that others depend on → skipped again) | skipped honestly states "it did not run", distinct from pending (not its turn yet); empty output shares the semantics with M2a's "a missing name yields an empty string" |
+| G5 | Interaction with the failure policy | A dependency failure without continue_on_error still stops the run (W5 unchanged, downstream never advances); with continue_on_error the run continues and the steps depending on it are skipped per G4 | W5's "continue the chain, not an exemption from failure" — a dependency declaration is an explicit input assumption, and once the assumption breaks the downstream does not run |
+| G6 | Run terminal state | Semantics unchanged: a failed step with continue_on_error does not fail the run (existing W5), and a skipped step likewise does not fail the run; run=success while the timeline contains skipped steps | Isomorphic to the existing "run success + a red failed step in the timeline", zero new concepts |
+| G7 | Cancellation | Unchanged: cancellation stops at existing step boundaries; a skipped step never executes, so there is nothing in flight to cancel | skipped has no Job, treated the same as pending steps |
+| G8 | Interaction with fan-out | Gating happens at step level: a fan-out step whose dependencies are unmet skips the whole step; if they are met it proceeds per host as usual (target-boundary cancellation and snapshots unchanged) | depends_on and targets are orthogonal; each dimension holds on its own |
 
-### 不变式
+### Invariants
 
-- 定义文件存 `depends_on` 原文（omitempty，无依赖的步骤无此键）；数组序为
-  执行序且为合法拓扑序（G2）。
-- 快照新增 `skipped` 步级状态；既有 JobStatus 词表（pending/running/
-  success/failed/cancelled）不加词。
-- 单目标步、扇出步的既有行为逐字节不变——无 `depends_on` 的 run 零感知。
-- agent 零改动、协议零新增（同 M2a/M2b 边界）。
+- The definition file stores the `depends_on` source text (omitempty; a step with no dependencies has no such key); array order is the execution order and is a legal topological order (G2).
+- The snapshot gains a `skipped` step-level state; the existing JobStatus vocabulary (pending/running/success/failed/cancelled) does not gain a word.
+- Existing behaviour for single-target steps and fan-out steps stays byte-identical — a run with no `depends_on` perceives nothing.
+- Zero agent changes, zero protocol additions (the same boundary as M2a/M2b).
 
-### 前端
+### Frontend
 
-- 步骤编辑器：`依赖步骤` 多选（仅列出当前步之前的 name；空列表不渲染该
-  控件），提交折成 `depends_on`；无依赖提交不带键。
-- run 时间线：`skipped` 灰标签「已跳过」，停因列显示 stopReason。
+- Step editor: a "dependent steps" multi-select (listing only names before the current step; the control is not rendered when the list is empty), folded into `depends_on` on submit; a submission with no dependencies carries no key.
+- Run timeline: a grey `skipped` label ("skipped"), with stopReason shown in the stop-reason column.
 
-### 测试
+### Testing
 
-- server（`cov_workflow` 系）：校验矩阵（未知/前向/自引用/重复/空条目/
-  trim）；依赖门控成功；依赖失败无 COE 停 run（下游无 Job）；依赖失败带
-  COE 下游跳过 + run success + 输出空串；传递跳过；扇出步依赖门控；取消
-  边界；快照形状（attempts 0、无 jobId、status skipped）。
-- web：编辑器多选项与折返、时间线 skipped 渲染。
+- server (`cov_workflow` family): the validation matrix (unknown / forward / self-reference / duplicate / empty entry / trim); dependency gating success; a dependency failure without COE stopping the run (no downstream Job); a dependency failure with COE skipping downstream + run success + empty-string output; transitive skipping; gating on a fan-out step; the cancellation boundary; snapshot shape (attempts 0, no jobId, status skipped).
+- web: the editor multi-select and its round-trip, and the skipped rendering in the timeline.
 
-## 边界自检（战略评审两问）
+## Boundary Self-Check (the two strategic-review questions)
 
-- 是否重造底层？否——编排器是 server 侧一个 goroutine 状态机，调度底层
-  仍是 OS 进程 + 既有 RPC 通道；没有引入队列/调度器中间件。
-- 走统一 Job 模型还是又开一条执行通道？统一——步骤即 Job，进同一台账、
-  同一权限、同一审计；Workflow API 只是编排层的 CRUD + run 控制。
+- Are we rebuilding something that already exists? No — the orchestrator is one server-side goroutine state machine, and the scheduling substrate is still OS processes plus the existing RPC channel; no queue/scheduler middleware was introduced.
+- Does it go through the unified Job model or open yet another execution channel? Unified — a step is a Job, entering the same ledger, the same permissions and the same audit; the Workflow API is only CRUD plus run control at the orchestration layer.

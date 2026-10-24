@@ -1,10 +1,9 @@
-# 核心概念
+# Core Concepts
 
-> 语言：**中文** ｜ [English](./concepts.en.md)
 
-## 资源模型
+## Resource Model
 
-Cockpit 使用 Region、Zone、Agent 和资源对象描述个人基础设施：
+Cockpit uses Region, Zone, Agent, and resource objects to describe personal infrastructure:
 
 ```text
 Region
@@ -16,21 +15,21 @@ Domain
   Certificate
 ```
 
-| 概念 | 说明 |
+| Concept | Description |
 | --- | --- |
-| Region | 地域或逻辑分组，例如 `home`、`jiangsu-huaian` |
-| Zone | Region 下的机房、网络区域或可用区 |
-| Agent | 运行在节点上的执行代理，主动连接 Server |
-| ComputeInstance | VM、容器、物理机等计算实例 |
-| Service | HTTP、TCP、数据库等服务 |
-| Domain | 域名及注册信息 |
-| Certificate | TLS 证书，通常挂在 Domain 下 |
-| Gateway | OpenWrt、pfSense 等网关 |
-| Storage | NFS、iSCSI、本地盘、Ceph 等存储 |
+| Region | A region or logical grouping, e.g. `home`, `jiangsu-huaian` |
+| Zone | A data center, network segment, or availability zone within a Region |
+| Agent | The execution agent running on a node, connects to the Server proactively |
+| ComputeInstance | Compute instances such as VMs, containers, physical machines |
+| Service | Services such as HTTP, TCP, databases |
+| Domain | A domain name and its registration info |
+| Certificate | TLS certificates, usually attached to a Domain |
+| Gateway | Gateways such as OpenWrt, pfSense |
+| Storage | Storage such as NFS, iSCSI, local disks, Ceph |
 
-## 配置与状态
+## Configuration and State
 
-Cockpit 当前有两个主要数据面：
+Cockpit currently has two main data planes:
 
 ```text
 Inventory YAML
@@ -44,18 +43,18 @@ SQLite
 Agent
 ```
 
-Inventory YAML 描述“希望系统知道哪些资产”。SQLite 保存 API 和 Web UI 查询所需的运行时视图，包括同步后的资源、用户、告警、审计、代理配置、系统指标和 Agent 在线状态。
+Inventory YAML describes "which assets we want the system to know about". SQLite holds the runtime view needed by the API and Web UI queries, including synced resources, users, alerts, audits, proxy configuration, system metrics, and Agent online status.
 
-需要注意：
+Notes:
 
-- `cockpit sync` 是手动 inventory 同步入口。
-- `inventory.watch: true` 的 Server 热加载复用同一套 Syncer，会同步 Agent、Domain、Certificate、ComputeInstance、Service、Gateway、Storage 等资源。
-- `inventory.strict: true` 会在 Server 启动时严格校验 inventory；默认 `false` 时启动失败风险会降级为日志。
-- Agent 心跳会上报在线状态和系统指标，但不会直接修改 inventory 文件。
+- `cockpit sync` is the manual inventory sync entry point.
+- Server hot-reload with `inventory.watch: true` reuses the same Syncer, syncing Agent, Domain, Certificate, ComputeInstance, Service, Gateway, Storage, and other resources.
+- `inventory.strict: true` makes the Server strictly validate the inventory at startup; with the default `false`, startup-failure risks degrade to logs.
+- Agent heartbeats report online status and system metrics, but never modify the inventory file directly.
 
-## Inventory 文件
+## Inventory File
 
-当前主路径是单文件 YAML：
+The current main path is a single-file YAML:
 
 ```yaml
 version: v1
@@ -104,7 +103,7 @@ services:
     interval: 60
 ```
 
-顶层字段当前包括：
+Top-level fields currently include:
 
 - `version`
 - `metadata`
@@ -117,13 +116,13 @@ services:
 - `resources`
 - `templates`
 
-`resources` / `templates` 已在 schema 中保留，但同步到数据库的主路径是明确的资源字段，例如 `computeInstances`、`services`、`gateways`、`storages`。
+`resources` / `templates` are reserved in the schema, but the main path synced to the database is the explicit resource fields such as `computeInstances`, `services`, `gateways`, `storages`.
 
-资源上的 `region` / `zone` 字段可省略：为空不阻塞同步，落库统一标记 `unknown`（显式值优先；`services`/`gateways`/`storages` 的地域写进各自 labels，用户在 labels 里显式给的键不被空字段覆盖）。Agent 注册侧同语义——未提供时默认 `unknown`（D-2026-10-08-1）。
+The `region` / `zone` fields on a resource can be omitted: leaving them empty does not block syncing; the database marks them uniformly as `unknown` (explicit values take priority; for `services`/`gateways`/`storages` the region goes into their respective labels, and keys the user explicitly provides in labels are not overwritten by empty fields). Agent registration follows the same semantics — defaulting to `unknown` when not provided (D-2026-10-08-1).
 
-## Agent 能力
+## Agent Capabilities
 
-Agent 启动时会运行能力检测器，并在注册消息中上报 capability：
+At startup the Agent runs capability detectors and reports the capabilities in the registration message:
 
 ```json
 {
@@ -132,55 +131,55 @@ Agent 启动时会运行能力检测器，并在注册消息中上报 capability
 }
 ```
 
-当前 capability 共 17 个，分两类来源。
+There are currently 17 capabilities in total, from two classes of origins.
 
-探测式（`internal/agent/detector/`，满足条件才上报）：
+Probed (`internal/agent/detector/`, reported only when conditions are met):
 
-| 能力 | 检测依据 |
+| Capability | Detection basis |
 | --- | --- |
-| `openwrt` | `/etc/openwrt_release`、`ubus`、`opkg` |
-| `pve-api` | `PVE_URL` 或常见 PVE API 地址 |
-| `docker-api` | `DOCKER_HOST` 或常见 Docker socket |
-| `hardware-monitor` | `smartctl`、温度传感器、UPS 工具 |
-| `firewall` | `nft` 或 `iptables` 可用（LookPath + `--version` 验证） |
-| `overlay` | `zerotier-cli` / `tailscale` / `wg` / `frp` 任一可用 |
-| `remote-services` | 本机常见远控端口探测（SSH 22 / RDP 3389 / VNC 590x / Telnet 23 / FTP 21） |
+| `openwrt` | `/etc/openwrt_release`, `ubus`, `opkg` |
+| `pve-api` | `PVE_URL` or common PVE API addresses |
+| `docker-api` | `DOCKER_HOST` or common Docker sockets |
+| `hardware-monitor` | `smartctl`, temperature sensors, UPS tools |
+| `firewall` | `nft` or `iptables` available (LookPath + `--version` verification) |
+| `overlay` | Any of `zerotier-cli` / `tailscale` / `wg` / `frp` available |
+| `remote-services` | Probing common remote-access ports on the local machine (SSH 22 / RDP 3389 / VNC 590x / Telnet 23 / FTP 21) |
 
-代码直报（`agent.go` `detectCapabilities`，按平台/环境满足即上报）：
+Directly reported in code (`agent.go` `detectCapabilities`, reported when platform/environment conditions are met):
 
-| 能力 | 上报条件 |
+| Capability | Report condition |
 | --- | --- |
-| `backup` | Linux（标准库打包，零外部依赖） |
-| `file` | 恒上报（标准库全平台可用） |
-| `nginx-proxy` | 探测到 nginx 可执行与版本 |
-| `traefik-proxy` | 探测到 Traefik file provider 动态目录 |
-| `cron` | `crontab` 命令可用 |
-| `logs` | `journalctl` 或 `docker` 至少一个可用 |
-| `drift` | `nginx-proxy` / `traefik-proxy` / `cron` / `docker-api` 任一存在 |
-| `ddns` | 恒上报（标准库出站 HTTP 探公网 IP） |
-| `service` | Windows（SCM）/ macOS（launchd）/ systemd 之一 |
-| `nas` | 软件 RAID（`/proc/mdstat`）或任一存储工具存在 |
+| `backup` | Linux (standard-library archiving, zero external dependencies) |
+| `file` | Always reported (standard library works on all platforms) |
+| `nginx-proxy` | nginx executable and version detected |
+| `traefik-proxy` | Traefik file-provider dynamic directory detected |
+| `cron` | `crontab` command available |
+| `logs` | At least one of `journalctl` or `docker` available |
+| `drift` | Any of `nginx-proxy` / `traefik-proxy` / `cron` / `docker-api` present |
+| `ddns` | Always reported (standard library outbound HTTP to probe the public IP) |
+| `service` | One of Windows (SCM) / macOS (launchd) / systemd |
+| `nas` | Software RAID (`/proc/mdstat`) or any storage tool present |
 
-> 历史注记：旧 `network-monitor` capability（WireGuard peer 数与 cloudflared
-> 进程级探测）已在 overlay M1 落地时删除（overlay-design.md D18），server/web
-> 无消费方。
+> Historical note: the old `network-monitor` capability (WireGuard peer counts and cloudflared
+> process-level probing) was removed when overlay M1 landed (overlay-design.md D18); the server/web
+> had no consumers.
 
-Agent 还会采集基础系统指标并通过心跳上报，包括 CPU、内存、磁盘、网络、系统版本、架构、负载和 uptime。
+The Agent also collects basic system metrics and reports them via heartbeats, including CPU, memory, disk, network, system version, architecture, load, and uptime.
 
 ## Server Registry
 
-Server 内存中的 Registry 只表示当前在线连接：
+The in-memory Server Registry represents only the currently online connections:
 
-- 注册成功的 Agent 会进入 Registry。
-- 重复 Agent ID 的活跃连接会被拒绝。
-- RPC、代理、远程终端和桌面会话都依赖 Registry 找到在线 Agent。
-- Server 重启后 Registry 清空，Agent 需要重连注册。
+- Agents that register successfully enter the Registry.
+- Active connections with a duplicate Agent ID are rejected.
+- RPC, proxy, remote terminal, and desktop sessions all rely on the Registry to find online Agents.
+- After a Server restart the Registry is emptied and Agents need to reconnect and register.
 
-SQLite 中的 Agent 记录表示历史和资源关联，不等同于“当前在线连接”。
+An Agent record in SQLite represents history and resource associations, and is not the same as a "currently online connection".
 
-## 远程访问
+## Remote Access
 
-远程访问不是 Browser 直连内网目标，而是：
+Remote access is not the Browser connecting directly to intranet targets; instead:
 
 ```text
 Browser
@@ -189,25 +188,25 @@ Browser
   -> target host:port
 ```
 
-终端与桌面连接都使用 `proxy_*` 消息做 TCP 数据转发：终端直连目标，RDP/VNC/SSH 桌面经 Guacamole（`guac:` 前缀中继到 guacd，见 远控桌面 Guacamole 设计）。
+Both terminal and desktop connections use `proxy_*` messages for TCP data forwarding: the terminal connects directly to the target; RDP/VNC/SSH desktops are relayed via Guacamole (the `guac:` prefix relays to guacd, see [Remote Desktop Guacamole Design](/remote-desktop-guacamole-design)).
 
-远程目标默认必须命中 `remote_control.allowed_targets` 中显式配置的主机名、IP 或 CIDR；开发/调试环境可以设置 `remote_control.allow_arbitrary_target: true` 跳过该限制。当前实现不会自动从 inventory 推导可远控目标。
+Remote targets by default must match hostnames, IPs, or CIDRs explicitly configured in `remote_control.allowed_targets`; development/debugging environments can set `remote_control.allow_arbitrary_target: true` to skip that restriction. The current implementation does not derive remotely controllable targets from the inventory automatically.
 
-RDP/VNC/SSH 桌面协议由 guacd 终结，Agent 只做 TCP 转发——Agent 无特殊构建标签要求，任意平台默认构建均可用。
+RDP/VNC/SSH desktop protocols are terminated by guacd; the Agent only does TCP forwarding — the Agent has no special build-tag requirements, and the default build works on any platform.
 
-远程连接的 Browser WebSocket 使用短期 ticket 认证。详见 协议与 API 边界。
+The remote-connection Browser WebSocket uses short-lived ticket authentication. See [Protocols and API Boundary](/guide/protocol) for details.
 
-## 安全概念
+## Security Concepts
 
-| 边界 | 当前实现 |
+| Boundary | Current implementation |
 | --- | --- |
-| 用户认证 | JWT Bearer token |
-| 管理员初始化 | `ADMIN_USERNAME` 可选，`ADMIN_PASSWORD` 必需 |
-| 二次验证 | TOTP，密钥通过 `TOTP_ENCRYPTION_KEY` 加密 |
-| Agent 认证 | 已配置 secret 的 Agent 必须在注册时提供匹配 secret |
-| WebSocket Origin | `ALLOWED_ORIGINS` 控制；未设置时适合开发但不适合生产 |
-| 远程连接 | 5 分钟、单次使用 ticket |
+| User authentication | JWT Bearer token |
+| Admin initialization | `ADMIN_USERNAME` optional, `ADMIN_PASSWORD` required |
+| Two-factor verification | TOTP, secret encrypted with `TOTP_ENCRYPTION_KEY` |
+| Agent authentication | Agents with a configured secret must present a matching secret at registration |
+| WebSocket Origin | Controlled by `ALLOWED_ORIGINS`; unset is fine for development but not for production |
+| Remote connections | 5-minute, single-use ticket |
 
-## 与历史设计的差异
+## Differences from Historical Designs
 
-仓库中有一些设计文档描述了更完整的 Git-first、目录拆分 inventory 和第三方集成愿景。当前实现已经具备 inventory 同步、Server/Agent 控制面、资源查询、监控、认证、审计、告警和远程连接，但仍应以本文和 架构与边界 中描述的代码事实为准。
+The repository contains some design documents describing a more complete Git-first, directory-split inventory and third-party integration vision. The current implementation already has inventory sync, the Server/Agent control plane, resource queries, monitoring, authentication, auditing, alerts, and remote connections, but the code facts described in this document and [Architecture and Boundaries](/guide/architecture) remain authoritative.

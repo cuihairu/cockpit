@@ -1,32 +1,31 @@
-# OpenWrt Agent 打包设计
+# OpenWrt Agent Packaging Design
 
-> 语言：**中文** ｜ [English](./openwrt-agent-design.en.md)
 
-## 背景与目标
+## Background and Goals
 
-cockpit-agent 面向个人混合基础设施，OpenWrt 路由器是其中最常见的
-真机节点。此前 nightly 构建只覆盖 linux-amd64 / windows-amd64 /
-darwin-arm64，OpenWrt 设备（musl + mipsel/mips/arm 等）无可用产物。
+cockpit-agent targets personal hybrid infrastructure, and OpenWrt routers are among the most common
+real-device nodes in it. Previously the nightly build covered only linux-amd64 / windows-amd64 /
+darwin-arm64, leaving OpenWrt devices (musl + mipsel/mips/arm, etc.) without a usable artifact.
 
-目标：CI 一键产出 OpenWrt 各主流架构的 **.ipk 安装包**（opkg 即装即
-用，procd 托管）与 tar.gz 手动包。
+Goal: CI produces, in one shot, **.ipk install packages for the major OpenWrt architectures** (install and
+run immediately with opkg, hosted by procd) plus tar.gz manual packages.
 
-## 前置：拆包根除 CGO 依赖
+## Prerequisite: Splitting Packages to Eliminate the CGO Dependency
 
-**根因**：agent 二进制曾把 sqlite 链进来。Go 的 import 是包级的——
-`cmd/cockpit-agent` 只用 start 命令，但该命令原放在 `internal/cli`，
-而 cli 包里的 init/status/sync 依赖 storage（gorm + mattn/go-sqlite3，
-Cgo 绑定），于是 agent 全量继承。agent 运行时根本不开数据库。
+**Root cause**: the agent binary used to link sqlite in. Go imports are at the package level —
+`cmd/cockpit-agent` only uses the start command, but that command originally lived in `internal/cli`,
+and the init/status/sync commands in the cli package depend on storage (gorm + mattn/go-sqlite3, a
+Cgo binding), so the agent inherited it all. The agent never opens a database at runtime.
 
-**修复**：按领域而非技术分层组织包——
+**Fix**: organize packages by domain rather than by technology layer —
 
-- `internal/cli/agent.go` → `internal/agent/startcmd.go`：agent 域
-  命令归 agent 自己的 namespace（`StartCmd` / `StartUsage`）
-- `internal/proxy/manager.go` → `internal/proxy/mgr/manager.go`：
-  proxy 数据面（handler）与管理面（mgr）分家，manager 对 storage 的
-  依赖不再污染 proxy 包
+- `internal/cli/agent.go` → `internal/agent/startcmd.go`: agent-domain
+  commands move into the agent's own namespace (`StartCmd` / `StartUsage`)
+- `internal/proxy/manager.go` → `internal/proxy/mgr/manager.go`:
+  the proxy data plane (handler) and management plane (mgr) are split; manager's
+  dependency on storage no longer pollutes the proxy package
 
-拆包后 agent 依赖闭包（`go list -deps ./cmd/cockpit-agent`）仅剩：
+After the split, the agent's dependency closure (`go list -deps ./cmd/cockpit-agent`) consists only of:
 
 ```
 internal/agent{,/detector,/provider,/rpc}
@@ -34,138 +33,138 @@ internal/{docker,openwrt,protocol,proxy,pve}
 core/{backoff,crash,execlog,healthprobe,heartbeat,logx,metrics,platform,register,report}
 ```
 
-（`internal/agent/rdp` 已随 grdp 删除手术移除，D-2026-10-07-1；core/ 十包为 agent-core 三层架构落地后新增。）
+(`internal/agent/rdp` was removed by the grdp excision surgery, D-2026-10-07-1; the ten core/ packages were added after the agent-core three-layer architecture landed.)
 
-无 storage、无 sqlite、无 gorm。**纯 Go 交叉编译一条命令出静态包**，
-不再需要 zig 或各架构 OpenWrt SDK：
+No storage, no sqlite, no gorm. **Pure Go cross-compilation, one command for a static package**,
+no more need for zig or the per-architecture OpenWrt SDK:
 
 ```sh
 CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat \
   go build -trimpath -ldflags '-s -w' -o cockpit-agent ./cmd/cockpit-agent
 ```
 
-（已验证：产出 9.7MB ELF 32-bit LSB MIPS, statically linked, stripped，
-musl/glibc 通吃。）
+(Verified: produces a 9.7MB ELF 32-bit LSB MIPS, statically linked, stripped,
+works with both musl and glibc.)
 
-## 架构矩阵
+## Architecture Matrix
 
-| GOARCH | GOARM/GOMIPS | OpenWrt arch 名 | 覆盖设备 |
+| GOARCH | GOARM/GOMIPS | OpenWrt arch name | Covered devices |
 |---|---|---|---|
-| mipsle | softfloat | mipsel | mt7621/mt7628 等主流路由 |
-| mips | softfloat | mips | ar71xx 等传统设备 |
-| arm64 | — | aarch64_generic | ARM 路由器/树莓派 |
-| arm | GOARM=7 | arm_cortex-a7_neon-vfpv4 | ipq40xx/mt7623 等 32 位 ARM |
-| amd64 | — | x86_64 | x86 软路由 |
+| mipsle | softfloat | mipsel | Mainstream routers such as mt7621/mt7628 |
+| mips | softfloat | mips | Traditional devices such as ar71xx |
+| arm64 | — | aarch64_generic | ARM routers/Raspberry Pi |
+| arm | GOARM=7 | arm_cortex-a7_neon-vfpv4 | 32-bit ARM such as ipq40xx/mt7623 |
+| amd64 | — | x86_64 | x86 soft routers |
 
-mips/mipsle 设定 `GOMIPS=softfloat`：主流 OpenWrt mips 设备
-（mt7621 等）为 soft-float。设备架构自查：`opkg print-architecture`
-或 `uname -m`。
+mips/mipsle set `GOMIPS=softfloat`: mainstream OpenWrt mips devices
+(such as mt7621) are soft-float. Device architecture self-check: `opkg print-architecture`
+or `uname -m`.
 
-## ipk 包结构
+## ipk Package Structure
 
-ipk 为 ar 归档（debian-binary + control.tar.gz + data.tar.gz），
-`ar` 手搓即可产出。内容：
+An ipk is an ar archive (debian-binary + control.tar.gz + data.tar.gz),
+which `ar` can produce by hand. Contents:
 
 ```
 /usr/bin/cockpit-agent
-/etc/init.d/cockpit-agent     # procd 服务脚本
-/etc/config/cockpit-agent     # UCI 配置（conffiles，升级保留）
+/etc/init.d/cockpit-agent     # procd service script
+/etc/config/cockpit-agent     # UCI config (conffiles, preserved on upgrade)
 ```
 
-- `control`：Package/Version/Architecture/Depends（无）/Provides。
-- `conffiles`：/etc/config/cockpit-agent（升级不覆盖用户配置）。
-- procd 脚本从 UCI 读参传给 `cockpit-agent start`：
+- `control`: Package/Version/Architecture/Depends (none)/Provides.
+- `conffiles`: /etc/config/cockpit-agent (user configuration not overwritten on upgrade).
+- The procd script reads parameters from UCI and passes them to `cockpit-agent start`:
 
 ```sh
-config_get server 等字段 → procd_set_param command \
+config_get server and other fields → procd_set_param command \
   /usr/bin/cockpit-agent start -server "$server" -secret "$secret" ...
-procd_set_param respawn / procd_set_param stdout/stderr（日志进 logd）
+procd_set_param respawn / procd_set_param stdout/stderr (logs go into logd)
 ```
 
-## UCI 配置面
+## UCI Configuration Surface
 
-agent 启动参数与 flags 一一映射（无独立配置文件，UCI 为唯一真源）：
+Agent startup parameters map one-to-one with flags (no separate config file; UCI is the sole source of truth):
 
 ```
 config agent 'main'
     option server  'wss://cockpit.example.com/ws'
     option secret  '...'
-    option id      ''      # 可选，默认自动生成
+    option id      ''      # optional, auto-generated by default
     option region  ''
     option zone    ''
     option labels  ''      # key1=v1,key2=[a,b]
 ```
 
-## CI 集成
+## CI Integration
 
-nightly.yml 新增 `build-openwrt` job（ubuntu-latest）：
+nightly.yml gains a `build-openwrt` job (ubuntu-latest):
 
-1. 矩阵交叉编译 5 架构（CGO_ENABLED=0，Go 原生工具链）
-2. `scripts/package-ipk.sh` 组装 ipk 与 tar.gz
-3. upload-artifact（cockpit-agent-openwrt-\<arch\>，含两种格式）
+1. Cross-compile the 5-architecture matrix (CGO_ENABLED=0, native Go toolchain)
+2. `scripts/package-ipk.sh` assembles the ipk and tar.gz
+3. upload-artifact (cockpit-agent-openwrt-\<arch\>, including both formats)
 
-手动触发即可用（workflow_dispatch 已有），不依赖 nightly 排程。
+Available via manual trigger (workflow_dispatch already exists), not dependent on the nightly schedule.
 
-## 安装与升级
+## Installation and Upgrade
 
-产物发布在 [nightly release](https://github.com/cuihairu/cockpit/releases/tag/nightly)：
-`cockpit-agent_<版本>_<架构>.ipk`（opkg 安装）与
-`cockpit-agent-openwrt-<架构>.tar.gz`（手动解包，文件树相同）。
+Artifacts are published on the [nightly release](https://github.com/cuihairu/cockpit/releases/tag/nightly):
+`cockpit-agent_<version>_<arch>.ipk` (opkg install) and
+`cockpit-agent-openwrt-<arch>.tar.gz` (manual unpack, identical file tree).
 
-### 1. 确认设备架构
+### 1. Confirm the Device Architecture
 
-路由器上执行 `opkg print-architecture`（或 `uname -m`），对照上表
-架构矩阵；主流 mt7621/mt7628 设备为 `mipsel`。
+Run `opkg print-architecture` on the router (or `uname -m`), and compare against the
+architecture matrix above; mainstream mt7621/mt7628 devices are `mipsel`.
 
-### 2. 下载并上传
+### 2. Download and Upload
 
-本地机器：
+On the local machine:
 
 ```sh
 gh release download nightly -R cuihairu/cockpit -p 'cockpit-agent_*_mipsel.ipk'
 scp cockpit-agent_*_mipsel.ipk root@192.168.1.1:/tmp/
 ```
 
-（浏览器下载：打开 release 页选对应架构的 .ipk 即可。）
+(Browser download: open the release page and pick the .ipk for the corresponding architecture.)
 
-### 3. 安装与配置
+### 3. Install and Configure
 
-路由器上：
+On the router:
 
 ```sh
 opkg install /tmp/cockpit-agent_*_mipsel.ipk
-# postinst 已自动执行 /etc/init.d/cockpit-agent enable
+# postinst has already run /etc/init.d/cockpit-agent enable
 uci set cockpit-agent.main.server='wss://cockpit.example.com/ws'
 uci set cockpit-agent.main.secret='YOUR_AGENT_SECRET'
 uci commit cockpit-agent
 /etc/init.d/cockpit-agent start
 ```
 
-### 4. 验证与排障
+### 4. Verify and Troubleshoot
 
 ```sh
-ubus call service list | grep -A3 cockpit-agent   # procd 运行状态
-logread | grep cockpit-agent                      # 日志（stdout/stderr 进 logd）
+ubus call service list | grep -A3 cockpit-agent   # procd run status
+logread | grep cockpit-agent                      # log (stdout/stderr goes into logd)
 ```
 
-Web UI 的 Agent 列表出现该设备即注册成功。启动失败最常见的两种：
-`server 未配置`（init 脚本拒绝启动，先 uci set server）与
-`connect failed`（server 地址不通/secret 不符，看 logread）。
+The device appearing in the Web UI's Agent list means registration succeeded. The two most common
+startup failures: `server 未配置` ("server not configured", the init script refuses to start; `uci set server` first) and
+`connect failed` (server address unreachable/secret mismatch; check logread).
 
-### 升级与卸载
+### Upgrade and Uninstall
 
 ```sh
-opkg install /tmp/cockpit-agent_新版本_mipsel.ipk   # UCI 配置保留（conffiles）
-opkg remove cockpit-agent                           # 卸载；/etc/config 按惯例保留
+opkg install /tmp/cockpit-agent_<newversion>_mipsel.ipk   # UCI config preserved (conffiles)
+opkg remove cockpit-agent                              # Uninstall; /etc/config kept as per convention
 ```
 
-无 opkg 场景（自编译固件裁掉了 opkg）：scp tar.gz 上去解包到根目录，
-`/etc/init.d/cockpit-agent enable && start` 同样可用——纯静态二进制
-无任何运行时依赖，musl/glibc 通吃。
+For setups without opkg (self-compiled firmware that strips out opkg): scp the tar.gz over and unpack
+it to the root directory; `/etc/init.d/cockpit-agent enable && start` works the same way — a pure
+static binary with no runtime dependencies, works with both musl and glibc.
 
-## 非目标
+## Non-Goals
 
-- LUCI 界面（个人使用，uci 足够）
-- opkg 软件源仓库托管（artifact 分发即可，后续需要再做）
-- macvtap/overlay 等网络能力在 OpenWrt 的适配验证（agent 核心监控
-  功能不依赖它们；运行异常再按需处理）
+- A LUCI interface (personal use; uci suffices)
+- Hosting an opkg software feed repository (artifact distribution suffices; do it later if needed)
+- Adaptation verification of networking capabilities such as macvtap/overlay on OpenWrt (the agent's
+  core monitoring functions do not depend on them; handle at runtime if abnormalities appear)

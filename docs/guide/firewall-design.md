@@ -1,45 +1,44 @@
-# 防火墙观测设计（iptables/nftables 只读）
+# Firewall Observation Design (iptables/nftables read-only)
 
-> 语言：**中文** ｜ [English](./firewall-design.en.md)
 
-## 背景
+## Background
 
-防火墙是安全面最后一块只读观测空白。个人 homelab 控制台「看一圈防火墙状态」是高频巡检动作：默认策略是否被人改过、有没有意外放行的端口、cockpit 自己依赖的入口是否还在。与 SMART/NAS/Overlay 同族——先观测，再告警，写操作远期再议（见 decision-log D-2026-10-07-3）。
+The firewall is the last blank spot in the read-only security-plane observation. "Look over the firewall state once" is a high-frequency inspection action for a personal homelab console: whether the default policy has been tampered with, whether there are inadvertently opened ports, and whether the ingress ports Cockpit itself depends on are still there. Same family as SMART/NAS/Overlay — observe first, alert second, write operations deferred (see decision-log D-2026-10-07-3).
 
-Cockpit 现状：
+Cockpit's current state:
 
-- agent 已有成熟的 per-agent 观测骨架可整体复刻：capability 探测（`internal/agent/detector/`）、白名单 provider（`internal/agent/rpc/smart_provider.go` 为范本）、server 纯转发端点（`internal/server/api_smart.go` 为范本）；
-- 全仓 grep 无任何 iptables/nftables 写路径——cockpit 至今不创建、不修改防火墙规则，本设计只观测。
+- The agent already has a mature per-agent observation skeleton that can be replicated wholesale: capability probing (`internal/agent/detector/`), a whitelist provider (`internal/agent/rpc/smart_provider.go` as the reference), and a pure-forwarding server endpoint (`internal/server/api_smart.go` as the reference);
+- A full-repo grep finds no iptables/nftables write path — cockpit has never created or modified firewall rules; this design observes only.
 
-本任务给 M1 补上数据面：**规则集快照只读观测 + Web 页只读三态**。不含巡检循环与告警（后续批次评估）、不含任何写操作。
+This task adds the data plane for M1: **ruleset snapshot read-only observation + a read-only three-state Web page**. It does not include the inspection loop and alerts (to be evaluated in a later batch), and no write operations.
 
-## 决策
+## Decisions
 
-- **D1 新建 firewall capability，不挂靠现有 detector**。现有 capability（hardware-monitor/openwrt/overlay 等）没有承载防火墙工具探测的语义位；`internal/agent/detector/firewall.go` 新建：`LookPath` 探测 `nft` 与 `iptables`，能找到任一即上报 `firewall` capability，metadata 带工具清单（如 `{"nft": true, "iptables": true}`）。两者皆缺（典型如 Windows/裸容器）→ 不上报 capability，页面走「无防火墙工具」空态，不报错（smart D1 同则）。
-- **D2 后端判定以实测为准，不猜发行版**。provider 运行 `nft list ruleset` 成功 → backend=`nftables`；失败或 nft 不存在但 `iptables-save` 成功 → backend=`iptables`。`iptables --version` 里的 `nf_tables`/`legacy` 字样只作 metadata 展示，不参与选择逻辑。
-- **D3 RPC 单方法 `firewall.status`**，只读、无入参、校验面为零（smart D2/overlay 同风格）。
-- **D4 数据面命令与超时**：
-  - nftables：`nft -j list ruleset`（JSON 一次拿全量）；
-  - iptables：`iptables-save`（IPv4，必须成功）+ `ip6tables-save`（IPv6，尽力而为——命令缺失或失败只追加 `error` 说明、不拖垮整包，IPv4 数据照常返回）；
-  - 超时：单命令 10s，整次 RPC 30s（smart D3 同量级）；
-  - 输出体积上限 4MB，超限均置 `truncated: true` 但截断语义分后端：nft 的 JSON 无法安全半解析 → 超限**不解析**，只回 meta + 截断说明；iptables-save 是行式文本 → 按行界截断（丢最后半行），已截部分照常解析。页面明确提示「规则集过大，仅显示前 4MB」；
-  - 读数命令失败 → `available=false` + `error` 原因，不像 SMART 逐盘粒度——防火墙是单集合，没有「部分成功」（唯一例外即上条 IPv6 尽力而为：v4 是主体，v6 只是补充）。
-- **D5 字段白名单，不透传原始 JSON**。nft `-j` 的完整对象树很大且含 counters 噪声，provider 解析为扁平规则列表：每条 `handle`（nft）/行号（iptables）、`text`（人读摘要）、`packets`/`bytes`（有则带）。iptables-save 逐行切 `*table`/`:chain policy`/规则行三元组。绝不把原始输出整段塞给前端（smart D4 同则）。
-- **D6 摘要统计与默认策略单列**。按 `family×table×chain` 聚合规则数；input/forward/output 等基础链的 `policy`（accept/drop）单列提升为页面徽标——「默认策略是不是 accept」是巡检第一眼。
-- **D7 cockpit 名下标注：预留识别、不在 M1 造空功能**。cockpit 现在不创建任何防火墙规则（全仓无写路径），M1 页面无标注可打。预留机制：将来 cockpit 引入规则时统一带注释标记（iptables `-m comment --comment "cockpit:xxx"`、nft `comment "cockpit:xxx"`），provider 识别 `cockpit:` 前缀置 `ownedByCockpit=true`，前端高亮。机制先写进本决策，代码等第一条规则真实存在时再启用。
-- **D8 权限现实**：`nft list ruleset`/`iptables-save` 需 root（CAP_NET_ADMIN/net_admin）。cockpit agent 默认以 root systemd 服务运行；非 root 部署 → `available=false` + 权限错误说明，页面提示（smart D6 同则）。OpenWrt 节点通常默认 root 且自带 nft（fw4），firewall capability 与 openwrt capability 并存不冲突，防火墙页对 OpenWrt 同样可用。
-- **D9 REST 纯转发不落库**：`GET /api/agents/{id}/firewall/status` 透传 RPC 结果，浏览类端点不记审计（smart D7 同则）。M1 无全局配置（不做巡检间隔），故无 `/api/firewall/config`。
-- **D10 权限位**：rbac `agentSubResources` 增 `"firewall/": "firewall"`（与 `"smart/": "smart"` 同构）；`firewall` 为单一权限档（M1 只读，无需 read/write 分档）。
-- **D11 前端 `/firewall` 页（只读三态）**：
-  1. agent 离线或无 firewall capability → 空态引导（「该主机未检测到 nftables/iptables 工具」）；
-  2. `available=false`（工具在但读数失败，典型为无权限）→ 说明态（`error` 原因 + 非 root 部署提示）；
-  3. 有数据 → 总览条（backend 类型、规则总数、input/forward/output 默认策略徽标）+ Collapse 按 family×table→chain 展开规则明细（`text` + counters）。
-  菜单名「防火墙」，`SafetyOutlined`，置于「磁盘健康」之后。`truncated=true` 时页顶 Alert。
-- **D12 不碰的东西**：只观测，无任何规则增删改路径；云安全组（AWS SG 等）不在范围；「写操作（规则增删）」明确留给后续批次且需真机验收纪律（decision-log D-2026-10-07-3 备选案已否决直接做写）。
+- **D1 Create a new firewall capability, do not attach it to an existing detector**. The existing capabilities (hardware-monitor/openwrt/overlay, etc.) carry no semantic slot for firewall tool detection; create `internal/agent/detector/firewall.go`: `LookPath` probes `nft` and `iptables`; if either is found, report the `firewall` capability with metadata carrying the tool list (e.g. `{"nft": true, "iptables": true}`). If both are absent (typical for Windows/bare containers) → do not report the capability, the page shows a "no firewall tools" empty state, no error (same rule as smart D1).
+- **D2 Backend determination is empirical, do not guess the distro**. The provider runs `nft list ruleset` successfully → backend=`nftables`; fails or nft absent but `iptables-save` succeeds → backend=`iptables`. The `nf_tables`/`legacy` wording inside `iptables --version` is only shown as metadata and does not participate in selection.
+- **D3 RPC single method `firewall.status`**, read-only, no parameters, zero validation surface (same style as smart D2/overlay).
+- **D4 Data-plane commands and timeouts**:
+  - nftables: `nft -j list ruleset` (JSON, gets everything in one shot);
+  - iptables: `iptables-save` (IPv4, must succeed) + `ip6tables-save` (IPv6, best-effort — if the command is missing or fails, only append an `error` explanation and do not sink the whole packet; the IPv4 data is returned as usual);
+  - Timeouts: 10s per command, 30s for the whole RPC (same order of magnitude as smart D3);
+  - Output size cap 4MB; on exceeding the cap, set `truncated: true`, but the truncation semantics differ by backend: nft's JSON cannot be safely half-parsed → on exceeding the cap **do not parse**, return only meta + a truncation note; iptables-save is line-based text → truncate on line boundaries (dropping the trailing half-line), and the already-captured portion parses as usual. The page clearly states "ruleset too large, showing only the first 4MB";
+  - Reading-command failure → `available=false` + the `error` reason, unlike SMART's per-disk granularity — a firewall is a single set, there is no "partial success" (the only exception being the IPv6 best-effort case above: v4 is the body, v6 is only a supplement).
+- **D5 Field whitelist, no raw JSON passthrough**. nft `-j`'s complete object tree is large and full of counter noise; the provider parses it into a flat rule list: per rule `handle` (nft) / line number (iptables), `text` (a human-readable summary), `packets`/`bytes` (carried when present). iptables-save is split line by line into the `*table`/`:chain policy`/rule-line triple. Never stuff the whole raw output to the frontend (same rule as smart D4).
+- **D6 Summary stats and default policy in their own column**. Aggregate rule counts by `family×table×chain`; the `policy` (accept/drop) of the base chains such as input/forward/output is promoted to a page badge — "is the default policy accept" is the first thing you see during inspection.
+- **D7 Cockpit's own labeling: reserved recognition, no empty M1 functionality**. Cockpit currently creates no firewall rules (no write path in the whole repo), so the M1 page has nothing to label. The reserved mechanism: when cockpit introduces rules in the future, they uniformly carry a comment marker (iptables `-m comment --comment "cockpit:xxx"`, nft `comment "cockpit:xxx"`), and the provider recognizes the `cockpit:` prefix to set `ownedByCockpit=true`, highlighted by the frontend. The mechanism is written into this decision now; the code is enabled when the first real rule exists.
+- **D8 Permission reality**: `nft list ruleset`/`iptables-save` require root (CAP_NET_ADMIN/net_admin). The cockpit agent runs by default as a root systemd service; non-root deployments → `available=false` + a permission-error explanation, with a page hint (same rule as smart D6). OpenWrt nodes usually run root by default and ship nft (fw4), so the firewall capability and openwrt capability coexist without conflict, and the firewall page works equally on OpenWrt.
+- **D9 REST pure forwarding, no persistence**: `GET /api/agents/{id}/firewall/status` passes through the RPC result; browsing endpoints are not audited (same rule as smart D7). M1 has no global config (no inspection interval), so there is no `/api/firewall/config`.
+- **D10 Permission point**: rbac `agentSubResources` adds `"firewall/": "firewall"` (isomorphic to `"smart/": "smart"`); `firewall` is a single permission tier (read-only in M1, no read/write split needed).
+- **D11 Frontend `/firewall` page (read-only three states)**:
+  1. Agent offline or no firewall capability → empty-state guidance ("this host has no nftables/iptables tools detected");
+  2. `available=false` (tools present but reading failed, typically no permissions) → an explanation state (`error` reason + a non-root deployment hint);
+  3. Data present → an overview bar (backend type, total rule count, input/forward/output default-policy badges) + a Collapse expanding rule details by family×table→chain (`text` + counters).
+  Menu name "firewall", `SafetyOutlined`, placed after "disk health". An Alert at the top of the page when `truncated=true`.
+- **D12 Things we do not touch**: observation only, no rule create/delete/modify path; cloud security groups (AWS SG, etc.) are out of scope; "write operations (rule add/delete)" are explicitly left to later batches and require real-device acceptance discipline (decision-log D-2026-10-07-3's alternative option of doing writes directly was rejected).
 
-## 数据结构
+## Data structure
 
-`firewall.status` 返回：
+`firewall.status` returns:
 
 ```json
 {
@@ -74,22 +73,22 @@ Cockpit 现状：
 }
 ```
 
-- iptables 后端：`backend="iptables"`，`iptablesVariant` 为 `nf_tables`/`legacy`（来自 `iptables --version`，仅展示）；iptables-save 输出按表切分，`family` 固定 `ipv4`/`ipv6`（对应 iptables-save / ip6tables-save）；规则 `handle` 省略，`text` 为规则行原文（`-A CHAIN` 之后的部分）。
-- `available=false` 时 tables 为空、`error` 带原因；工具全缺时 `backend=""`。`available=true` 时 `error` 仍可能非空（IPv6 读数失败的尽力而为说明、nft 超限 meta-only 说明）——`error` 是附加信息不是失败标志，以 `available` 为准。
-- `totalRules` 供总览条与后续告警批次做基线比对。
+- iptables backend: `backend="iptables"`, `iptablesVariant` is `nf_tables`/`legacy` (from `iptables --version`, display only); iptables-save output is split per table, `family` fixed to `ipv4`/`ipv6` (corresponding to iptables-save / ip6tables-save); rule `handle` is omitted, and `text` is the rule line itself (the part after `-A CHAIN`).
+- When `available=false`, tables is empty and `error` carries the reason; when all tools are missing, `backend=""`. `error` may still be non-empty when `available=true` (best-effort notes for IPv6 read failure, nft over-cap meta-only notes) — `error` is supplementary information, not a failure indicator; `available` governs.
+- `totalRules` is provided for the overview bar and for later alert batches to compare baselines.
 
-## 实现切分（M1，本任务）
+## Implementation split (M1, this task)
 
-1. **docs**：本文档；
-2. **agent**：`detector/firewall.go`（capability 探测）+ `rpc/firewall_parse.go`（nft JSON / iptables-save 文本纯函数解析）+ `rpc/firewall_provider.go`（`FirewallProvider`，Commander 可注入）+ `providers.go` 注册 + 测试；
-3. **server**：`api_firewall.go`（status 纯转发）+ 路由注册 + rbac 前缀 + 测试；
-4. **web**：类型 + api 方法 + `/firewall` 页 + 菜单/路由 + `tsc`/build 通过；
-5. **mobile**：不在 M1（firewall 观测页留后续批次，与 M3 三页同模式）。
+1. **docs**: this document;
+2. **agent**: `detector/firewall.go` (capability probing) + `rpc/firewall_parse.go` (pure-function parsing of nft JSON / iptables-save text) + `rpc/firewall_provider.go` (`FirewallProvider`, Commander injectable) + `providers.go` registration + tests;
+3. **server**: `api_firewall.go` (status pure forwarding) + route registration + rbac prefix + tests;
+4. **web**: types + api method + `/firewall` page + menu/route + `tsc`/build passing;
+5. **mobile**: not in M1 (the firewall observation page is left for later batches, same pattern as the M3 pages).
 
-## 测试要点
+## Test points
 
-- 解析器：nft JSON（含 counters/无 counters、comment 前缀识别、非法 JSON 不 panic）；iptables-save（多表、`:chain POLICY` 行、空表）；超限截断逻辑（nft meta-only / iptables 行界）；
-- provider：fake Commander 注入；nft 缺失走 iptables 分支；两命令全失败 → `available=false`；`--version` 解析 legacy/nf_tables；IPv6 尽力而为（失败省略不拖垮 v4）；
-- detector：nft/iptables 各自存在与全缺四种组合的 capability/metadata 断言；
-- server：离线 503、agent error 502 透传、rbac `firewall/` 前缀映射；
-- 前端：三态渲染（无 capability/available=false/正常数据）、truncated Alert、`tsc --noEmit` + vite build。
+- Parser: nft JSON (with counters / without counters, comment-prefix recognition, illegal JSON does not panic); iptables-save (multiple tables, `:chain POLICY` lines, empty tables); over-cap truncation logic (nft meta-only / iptables line boundaries);
+- Provider: fake Commander injection; nft missing falls into the iptables branch; both commands failing → `available=false`; `--version` parsing for legacy/nf_tables; IPv6 best-effort (failure omitted without sinking v4);
+- Detector: capability/metadata assertions for the four combinations of nft/iptables each present or both missing;
+- Server: offline 503, agent error 502 passthrough, rbac `firewall/` prefix mapping;
+- Frontend: three-state rendering (no capability / available=false / normal data), truncated Alert, `tsc --noEmit` + vite build.

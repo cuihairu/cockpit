@@ -1,56 +1,53 @@
-# UI 主题与皮肤
+# UI Theme and Skin
 
-> 语言：**中文** ｜ [English](./ui-theme-design.en.md)
 
-Web 与移动端各有一套 UI 外观设置。本文是外观体系的实现基线：色值表以本文为准，
-代码里的常量与本文不一致时以本文为准并同步修代码。
+Web and mobile each have their own set of UI appearance settings. This document is the implementation baseline of the appearance system: the color tables here are authoritative; when a constant in the code disagrees with this document, this document wins and the code is updated to match.
 
-## 一、两个正交维度
+## 1. Two orthogonal dimensions
 
-外观由两个**互相独立**的维度组合而成，用户可任意搭配：
+Appearance is a combination of two **mutually independent** dimensions that users can pair freely:
 
-| 维度 | 取值来源 | 决定什么 | 字段 |
+| Dimension | Value source | What it determines | Field |
 | --- | --- | --- | --- |
-| **主题色**（强调色） | 预设色板 | 按钮、标签、选中态、链接等**强调元素**的色相 | `themeColor` |
-| **主题皮肤**（中性色板） | 4 套皮肤预设 | 页面底、面板面、边框、文字的**中性色**与整体冷暖调 | `themeSkin` |
+| **Theme color** (accent color) | Preset palettes | The hue of **accent elements** such as buttons, tags, selected states, and links | `themeColor` |
+| **Theme skin** (neutral palette) | 4 skin presets | The **neutral colors** of page background, panel surface, border, and text, plus the overall warm/cool tone | `themeSkin` |
 
-再加一个明暗档位（`light` / `dark` / `auto`，`auto` 跟随系统 `prefers-color-scheme`）。
-组合空间 = 主题色 × 皮肤 × 档位，任一组合都成立。
+On top of that comes a light/dark mode (`light` / `dark` / `auto`, where `auto` follows the system's `prefers-color-scheme`).
+The combination space = theme color × skin × mode; every combination is valid.
 
-设计上这么切分的原因：强调色换了不该动整屏底色，整屏底色换了也不该把按钮色相
-一起改掉。历史上 Web 端把大量中性色硬编码在 `App.less` 里、并在
-`html[data-theme='dark']` 下整块覆写，导致加第三种底色就得复制一份覆盖块；
-现在色板数据化后，明暗与皮肤只表现为同一套 CSS 变量的不同取值。
+Why the split is designed this way: changing the accent color must not move the full-screen background color, and changing the background color must not drag the button hue along. Historically the Web side hard-coded many neutral colors in `App.less` and overrode them wholesale under
+`html[data-theme='dark']`, so adding a third background color meant copying another override block;
+now that palettes are data, light/dark and skin are just different values of the same set of CSS variables.
 
-## 二、皮肤清单
+## 2. Skin inventory
 
-四套皮肤，每套含浅色 / 深色两份色板：
+Four skins, each containing a light / dark pair of palettes:
 
-| key | 名称 | 定位 |
+| key | Name | Positioning |
 | --- | --- | --- |
-| `default` | 默认 · 雾白 | 冷中性灰，历史默认观感 |
-| `midnight` | 深邃 · 夜航 | 靛蓝夜幕，运维台气质 |
-| `eyecare` | 护眼 · 米纸 | 暖米纸色，久看不刺眼 |
-| `graphite` | 石墨 · 曜岩 | 零色相纯灰，最保守的底色 |
+| `default` | Default · Mist White | Cool neutral gray; the historical default look |
+| `midnight` | Deep · Night Flight | Indigo night sky; ops-console character |
+| `eyecare` | Eye Care · Rice Paper | Warm rice-paper tone; easy on the eyes over long viewing |
+| `graphite` | Graphite · Obsidian | Zero-hue pure gray; the most conservative background |
 
-`default` 即改造前的观感，作为回退基准：任何 `themeSkin` 取到非法值时回退到
-`default`（Web 端 `resolveThemeSkin`，移动端 `resolveAppSkin`）。
+`default` is exactly the pre-rework look and serves as the fallback baseline: whenever `themeSkin` resolves to an illegal value it falls back to
+`default` (`resolveThemeSkin` on Web, `resolveAppSkin` on mobile).
 
-### 色值表
+### Color value tables
 
-色板字段含义（两端同名，例外见注）：
+Palette field meanings (same names on both ends; exceptions noted):
 
-- `bg` 页面底色
-- `surface` 卡片 / 面板面
-- `surfaceAlt` 次级面（表头、条纹行）
-- `border` 主边框
-- `borderSoft` 更弱的分割线（表格行分隔）
-- `text` 主文字
-- `textMuted` 次级文字（列头、辅助说明）
+- `bg` page background color
+- `surface` card / panel surface
+- `surfaceAlt` secondary surface (table headers, striped rows)
+- `border` primary border
+- `borderSoft` even weaker separator (table row dividers)
+- `text` primary text
+- `textMuted` secondary text (column headers, helper notes)
 
-#### default · 雾白
+#### default · Mist White
 
-| 字段 | light | dark |
+| Field | light | dark |
 | --- | --- | --- |
 | bg | `#f8fafc` | `#0c0e14` |
 | surface | `#ffffff` | `#141620` |
@@ -61,9 +58,9 @@ Web 与移动端各有一套 UI 外观设置。本文是外观体系的实现基
 | textMuted | `#64748b` | `#94a3b8` |
 | inputBg | `#ffffff` | `#141620` |
 
-#### midnight · 夜航
+#### midnight · Night Flight
 
-| 字段 | light | dark |
+| Field | light | dark |
 | --- | --- | --- |
 | bg | `#f2f5fa` | `#070d1a` |
 | surface | `#ffffff` | `#0e1729` |
@@ -74,9 +71,9 @@ Web 与移动端各有一套 UI 外观设置。本文是外观体系的实现基
 | textMuted | `#5f7192` | `#8296bd` |
 | inputBg | `#ffffff` | `#0e1729` |
 
-#### eyecare · 米纸
+#### eyecare · Rice Paper
 
-| 字段 | light | dark |
+| Field | light | dark |
 | --- | --- | --- |
 | bg | `#f4efe4` | `#1a1712` |
 | surface | `#fbf7ee` | `#241f19` |
@@ -87,9 +84,9 @@ Web 与移动端各有一套 UI 外观设置。本文是外观体系的实现基
 | textMuted | `#7b6f5b` | `#a3937a` |
 | inputBg | `#fbf7ee` | `#241f19` |
 
-#### graphite · 曜岩
+#### graphite · Obsidian
 
-| 字段 | light | dark |
+| Field | light | dark |
 | --- | --- | --- |
 | bg | `#f4f4f5` | `#131313` |
 | surface | `#ffffff` | `#1c1c1e` |
@@ -100,128 +97,137 @@ Web 与移动端各有一套 UI 外观设置。本文是外观体系的实现基
 | textMuted | `#71717a` | `#9b9ba3` |
 | inputBg | `#ffffff` | `#1c1c1e` |
 
-### 顶栏 / 侧栏底色
+### Top bar / side bar background
 
-顶栏与侧栏底色不由皮肤直接给出，而是由 `bg` 与 `surface` 按档位推导
-（`chromeColor`）：浅色档取 `surface`（白底面板浮在灰底上，有层次），深色档取
-`bg`（整屏一色，避免深色下的双重边框感）。
+The top and side bar background is not given directly by the skin but derived from `bg` and
+`surface` per mode
+(`chromeColor`): the light mode takes `surface` (a white panel floating over a gray base, giving
+depth), the dark mode takes `bg` (one color across the whole screen, avoiding the double-border
+feel in dark mode).
 
-### hover 浓淡
+### Hover tint strength
 
-hover 态底色是**主题色**按皮肤给定的透明度叠加（`hoverAlpha`，Web 端每套皮肤
-light/dark 各有取值 0.03~0.08）。色相归主题色，浓淡归皮肤——所以暖色皮肤下的
-hover 不会因为底色偏黄而显脏。
+The hover-state background is the **theme color** overlaid at a skin-given opacity
+(`hoverAlpha`; on Web every skin has its own light/dark value in the 0.03~0.08 range). Hue
+belongs to the theme color, tint strength to the skin — so a hover on warm skins never looks
+muddy because of a yellowish base.
 
-## 三、Web 端实现
+## 3. Web implementation
 
-### CSS 变量
+### CSS variables
 
-`web/src/contexts/SettingsContext.tsx` 的 effect 按 `themeSkin` + 明暗档位 +
-`themeColor` 计算变量全集写到 `<html>` 的行内 style，并同步
-`data-skin="<key>"` 供调试与选择器使用：
+The effect in `web/src/contexts/SettingsContext.tsx` computes the full variable set from
+`themeSkin` + light/dark mode +
+`themeColor`, writes it to the inline style of `<html>`, and also syncs
+`data-skin="<key>"` for debugging and selectors:
 
-| 变量 | 来源 |
+| Variable | Source |
 | --- | --- |
-| `--cockpit-bg` | 色板 `bg` |
-| `--cockpit-surface` | 色板 `surface` |
-| `--cockpit-surface-alt` | 色板 `surfaceAlt` |
-| `--cockpit-border` | 色板 `border` |
-| `--cockpit-border-soft` | 色板 `borderSoft` |
-| `--cockpit-text` | 色板 `text` |
-| `--cockpit-text-muted` | 色板 `textMuted` |
-| `--cockpit-input-bg` | 色板 `inputBg` |
-| `--cockpit-chrome` | `chromeColor`（顶栏/侧栏） |
-| `--cockpit-hover` | 主题色 + `hoverAlpha` |
-| `--cockpit-primary` | 主题色原值 |
-| `--cockpit-primary-hover` | 深色档 `lightenColor(primary, .18)`，浅色档 `darkenColor(primary, .18)` |
-| `--cockpit-primary-strong` | 深色档 `lightenColor(primary, .42)`，浅色档 `darkenColor(primary, .24)` |
+| `--cockpit-bg` | palette `bg` |
+| `--cockpit-surface` | palette `surface` |
+| `--cockpit-surface-alt` | palette `surfaceAlt` |
+| `--cockpit-border` | palette `border` |
+| `--cockpit-border-soft` | palette `borderSoft` |
+| `--cockpit-text` | palette `text` |
+| `--cockpit-text-muted` | palette `textMuted` |
+| `--cockpit-input-bg` | palette `inputBg` |
+| `--cockpit-chrome` | `chromeColor` (top/side bars) |
+| `--cockpit-hover` | theme color + `hoverAlpha` |
+| `--cockpit-primary` | theme color, raw value |
+| `--cockpit-primary-hover` | dark mode `lightenColor(primary, .18)`, light mode `darkenColor(primary, .18)` |
+| `--cockpit-primary-strong` | dark mode `lightenColor(primary, .42)`, light mode `darkenColor(primary, .24)` |
 | `--cockpit-primary-soft` | `withAlpha(primary, .10)` |
 | `--cockpit-primary-faint` | `withAlpha(primary, .06)` |
 | `--cockpit-primary-border` | `withAlpha(primary, .20)` |
 
-强调色派生量在**运行时**由主题色 hex 计算，色相始终跟随主题色预设——改造前菜单、
-标签、按钮上硬编码了蔷薇红，切主题色时不跟着变。
+Accent-derived values are computed from the theme color hex **at runtime**, so the hue always
+follows the theme color preset — before the rework, menus,
+tags, and buttons hard-coded rose red, which did not follow theme color switches.
 
-`web/src/App.less` 里原先写死的中性色全部改为 `var(--cockpit-*, 兜底色)` 引用，
-兜底值即改造前的硬编码值，因此变量未就绪（首帧、SSR、测试环境）时页面观感不变。
-`html[data-theme='dark']` 的整块覆盖已删除，一套规则服务所有皮肤 × 档位；只剩语义色
-（success / warning / error）在深色下的提亮修正块。
+The neutral colors formerly hard-coded in
+`web/src/App.less` are now all `var(--cockpit-*, fallback)` references,
+with the fallbacks being exactly the pre-rework hard-coded values, so the look does not change while the variables are not ready (first frame, SSR, test environments).
+The wholesale `html[data-theme='dark']` override is deleted; one set of rules serves every skin × mode; only the semantic colors
+(success / warning / error) keep a brightening correction block for dark mode.
 
-### 组件库 token
+### Component library tokens
 
-`web/src/App.tsx` 的 `ConfigProvider` token 走同一份数据
-（`resolveSkinTokens`），保证 antd 组件的颜色与手写 CSS 同源：`colorBgLayout`
-取 `bg`、`colorBgContainer` 取 `surface`、`colorFillAlter` 取 `surfaceAlt`、
-`colorBorder` / `colorBorderSecondary`、`colorText` / `colorTextSecondary`、
-`Layout` 的 `headerBg` / `siderBg` 取 `chrome`，`bodyBg` 取 `bg`（页面底色）。
+The `ConfigProvider` tokens in `web/src/App.tsx` draw on the same data
+(`resolveSkinTokens`), so antd components share the same color source as the hand-written CSS: `colorBgLayout`
+takes `bg`, `colorBgContainer` takes `surface`, `colorFillAlter` takes `surfaceAlt`,
+`colorBorder` / `colorBorderSecondary`, `colorText` / `colorTextSecondary`,
+`Layout`'s `headerBg` / `siderBg` take `chrome`, and `bodyBg` takes `bg` (page background color).
 
-### 设置页
+### Settings page
 
-`web/src/pages/Settings/GeneralSettings.tsx` 里：
+Inside `web/src/pages/Settings/GeneralSettings.tsx`:
 
-- 「主题」Select 选主题色（标签保持为「主题」不变）
-- 「主题皮肤」由 `web/src/components/ThemeSkinCards` 渲染成卡片组：每张卡的缩略图
-  **用该皮肤自身色板内联绘制**（底 / 面板 / 边框 / 文字四色块），跟随当前明暗档位；
-  整组是 `role="radiogroup"`，卡片是 `role="radio"`。
+- The "Theme" Select picks the theme color (the label stays "Theme", unchanged)
+- "Theme skin" is rendered by `web/src/components/ThemeSkinCards` as a card group: each card's thumbnail
+  is **drawn inline with that skin's own palette** (four color blocks: base / panel / border / text) and follows the current light/dark mode;
+  the group is `role="radiogroup"`, each card is `role="radio"`.
 
-皮肤卡片点选**立即生效**（直接写 context，不经表单保存），因为皮肤是纯前端口径、
-即时可见的效果，让用户为了看效果去点「保存」没有意义。为防保存其它设置时被表单
-里的旧值回退，`useSettings.saveSettings` 用 `values.themeSkin ?? settings.themeSkin`。
+Clicking a skin card **takes effect immediately** (written straight to context, not through
+form save), because a skin is a pure frontend concern with an instantly visible effect —
+making users click "Save" just to see it would be pointless. To keep other settings saves from
+rolling it back with a stale form value, `useSettings.saveSettings` uses `values.themeSkin ?? settings.themeSkin`.
 
-### 持久化
+### Persistence
 
-Web 端设置整体存 localStorage（沿用既有 settings 通道），`themeSkin` 是
-`SettingsContext` 归一化的一等字段；刷新后由 effect 重放，无需额外接口。
+Web settings as a whole live in localStorage (reusing the existing settings channel); `themeSkin` is
+a first-class field normalized by `SettingsContext`; after a refresh the effect replays it, so no extra API is needed.
 
-## 四、移动端实现
+## 4. Mobile implementation
 
-- `mobile/lib/theme/app_theme.dart`：`AppSkin` / `SkinPalette` 与四套皮肤同名同值，
-  `buildAppTheme(skinKey, brightness)` 产出 `ThemeData`，深色底色取自 `dark` 色板。
-- `mobile/lib/main.dart`：`MaterialApp` 的 `theme` / `darkTheme` / `themeMode` 全部
-  接设置状态。
-- `mobile/lib/pages/settings_page.dart`：设置页「主题外观」入口，弹出
-  `_AppearanceSheet` 分「明暗档位」与「皮肤」两段；皮肤行用 `_SkinPreview` 画同款缩略图。
-- `mobile/lib/state/settings.dart`：`themeMode`（`system` / `light` / `dark`）/
-  `themeSkin` 字段 + `setThemeMode` / `setThemeSkin`，SharedPreferences 键
-  `theme_mode` / `theme_skin`。存量安装无这两个键，缺省「跟随系统 + 默认皮肤」。
+- `mobile/lib/theme/app_theme.dart`: `AppSkin` / `SkinPalette` match the four skins in both names and values;
+  `buildAppTheme(skinKey, brightness)` produces the `ThemeData`, with dark background colors taken from the `dark` palette.
+- `mobile/lib/main.dart`: `MaterialApp`'s `theme` / `darkTheme` / `themeMode` are all
+  wired to settings state.
+- `mobile/lib/pages/settings_page.dart`: the settings page's "Theme appearance" entry opens the
+  `_AppearanceSheet`, split into "light/dark mode" and "skin" sections; skin rows draw the same kind of thumbnail with `_SkinPreview`.
+- `mobile/lib/state/settings.dart`: `themeMode` (`system` / `light` / `dark`) /
+  `themeSkin` fields + `setThemeMode` / `setThemeSkin`, with SharedPreferences keys
+  `theme_mode` / `theme_skin`. Existing installs lack these two keys and default to "follow system + default skin".
 
-注意 Flutter 3.47 的两个坑：`ColorScheme.fromSeed` 产出的 `primary` 是 tonal 变体，
-必须显式 `copyWith(primary: cockpitAccent, ...)` 钉回强调色；`RadioListTile` 的
-`groupValue` / `onChanged` 已弃用，单选组要用 `RadioGroup<T>` 包裹。
+Note two Flutter 3.47 pitfalls: the `primary` produced by `ColorScheme.fromSeed` is a tonal variant,
+so you must explicitly `copyWith(primary: cockpitAccent, ...)` to pin the accent back; and `RadioListTile`'s
+`groupValue` / `onChanged` are deprecated — a radio group must be wrapped in `RadioGroup<T>`.
 
-## 五、两端口径一致性
+## 5. Cross-end semantic consistency
 
-「同步」的含义是**口径一致**，不是共享同一份存储：
+Being "in sync" means **consistent semantics**, not sharing one store:
 
-- 皮肤 key、名称、说明、以及色板全部色值两端完全相同（本文第二节即共同基线；唯一例外：Web 端 `inputBg` 色板字段在移动端 SkinPalette 中不存在），
-  在任意一端切皮肤，另一端选同一个 key 得到同一套颜色。
-- 服务端没有 UI 设置的持久化通道，因此两端各自存本地：Web 端 localStorage，
-  移动端 SharedPreferences。不存在「改一处、两端同时变」的实时下发。
-- **已知差异**：移动端暂不支持自定义强调色，强调色固定为 Web 默认主题色「蔷薇红」
-  `#e11d8f`（`mobile/lib/theme/app_theme.dart` 的 `cockpitAccent`）。Web 端切主题色
-  不会影响移动端。补齐移动端主题色选择后，此处需要同步更新。
+- Skin keys, names, descriptions, and every palette color value are fully identical on both ends (section 2 of this document is the shared baseline; the sole exception: the Web-side `inputBg` palette field does not exist in the mobile SkinPalette).
+  Switch skins on either end, pick the same key on the other end, and you get the same set of colors.
+- The server has no persistence channel for UI settings, so each end stores locally: localStorage on Web,
+  SharedPreferences on mobile. There is no real-time push where changing one end updates both at once.
+- **Known difference**: mobile does not yet support custom accent colors; the accent is fixed to the Web default theme color "rose red"
+  `#e11d8f` (`cockpitAccent` in `mobile/lib/theme/app_theme.dart`). Switching the theme color on Web
+  does not affect mobile. Once mobile gains theme color selection, this spot needs to be updated in sync.
 
-## 六、新增一套皮肤的流程
+## 6. Process for adding a new skin
 
-1. 在 `web/src/theme/themeSkins.ts` 的 `THEME_SKINS` 与
-   `mobile/lib/theme/app_theme.dart` 的 `appSkins` 里加同名同值条目。
-2. 在本文第二节补色值表。
-3. 跑两端单测（`web/src/theme/themeSkins.test.ts`、
-   `mobile/test/app_theme_test.dart`）确认回退与解析行为未变。
+1. Add an entry with the same name and values to `THEME_SKINS` in
+   `web/src/theme/themeSkins.ts` and to `appSkins` in
+   `mobile/lib/theme/app_theme.dart`.
+2. Add the color value table in section 2 of this document.
+3. Run both ends' unit tests (`web/src/theme/themeSkins.test.ts`,
+   `mobile/test/app_theme_test.dart`) to confirm the fallback and parsing behavior is unchanged.
 
-不需要改 `App.less`、不需要加 `data-theme` 覆盖块、不需要动组件代码——新皮肤
-自动出现在两端设置页的可选项里，并自动获得缩略预览。
+No `App.less` changes, no new `data-theme` override block, no component code changes — the
+new skin automatically appears among the options on both ends' settings pages and automatically
+gets a thumbnail preview.
 
-## 七、相关文件
+## 7. Related files
 
-| 文件 | 职责 |
+| File | Responsibility |
 | --- | --- |
-| `web/src/theme/themeSkins.ts` | 皮肤数据层、颜色工具、CSS 变量与 antd token 生成 |
-| `web/src/contexts/SettingsContext.tsx` | 设置归一化、`data-skin`、CSS 变量写入 |
-| `web/src/App.less` | 变量引用（不再按明暗覆写中性色） |
-| `web/src/App.tsx` | `ConfigProvider` token 接皮肤数据 |
-| `web/src/components/ThemeSkinCards/index.tsx` | 设置页皮肤卡片 + 缩略预览 |
-| `web/src/pages/Settings/GeneralSettings.tsx` | 设置页外观区块入口 |
-| `mobile/lib/theme/app_theme.dart` | 移动端皮肤与 `ThemeData` 构建 |
-| `mobile/lib/state/settings.dart` | 移动端设置状态与持久化 |
-| `mobile/lib/pages/settings_page.dart` | 移动端外观面板 |
+| `web/src/theme/themeSkins.ts` | Skin data layer, color utilities, CSS variable and antd token generation |
+| `web/src/contexts/SettingsContext.tsx` | Settings normalization, `data-skin`, CSS variable writing |
+| `web/src/App.less` | Variable references (neutral colors no longer overridden per light/dark) |
+| `web/src/App.tsx` | `ConfigProvider` tokens wired to skin data |
+| `web/src/components/ThemeSkinCards/index.tsx` | Settings-page skin cards + thumbnail preview |
+| `web/src/pages/Settings/GeneralSettings.tsx` | Entry to the appearance block of the settings page |
+| `mobile/lib/theme/app_theme.dart` | Mobile skins and `ThemeData` construction |
+| `mobile/lib/state/settings.dart` | Mobile settings state and persistence |
+| `mobile/lib/pages/settings_page.dart` | Mobile appearance panel |

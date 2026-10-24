@@ -1,50 +1,51 @@
-# 服务健康探针与自愈（Service Health）
+# Service Health Probes and Self-Healing
 
-> 语言：**中文** ｜ [English](./service-health-design.en.md)
 
-> 2026-09-28 立项。目标场景：docker VM（192.168.5.5）的 cloudflared tunnel
-> 反复「进程活着、连接僵死」——systemd 只看到 active，业务早已不通，目前
-> 靠外部 cron 看门狗临时兜底。本设计把这类「systemd 无感知的僵死」的检测
-> 与自愈做成 cockpit 内置能力：agent 周期探针（HTTP/TCP/systemd 三类）+
-> 白名单内的 systemctl 自愈 + 审计与仪表盘。与 [service-design](./service-design.md)
-> （三后端执行层）、[overlay-design](./overlay-design.md) M3/M3.5（daemon
-> 服务管理）同属服务管理面，见下方架构章。
+> Project initiated 2026-09-28. Target scenario: the cloudflared tunnel on a docker VM (192.168.5.5)
+> repeatedly goes into a "process alive, connection wedged" state — systemd only sees active, while
+> the business has long since been unreachable; currently propped up by an external cron watchdog.
+> This design makes the detection and self-healing of such "wedging that systemd cannot see" a cockpit
+> built-in capability: agent periodic probes (three kinds: HTTP/TCP/systemd) + systemctl self-healing
+> within a whitelist + auditing and dashboard. Along with [service-design](/guide/service-design)
+> (the three-backend execution layer) and [overlay-design](/guide/overlay-design) M3/M3.5 (daemon
+> service management), it belongs to the service management surface; see the architecture section below.
 >
-> 首个接入用例（cloudflared）的接入手册见「首个接入用例」一节；用户的 cron
-> 看门狗作为兜底保留，cockpit 版稳定后退役。
+> The onboarding manual for the first integration case (cloudflared) is in the "First Integration Case"
+> section; the user's cron watchdog is retained as a backstop and retired once the cockpit version is
+> stable.
 
-## 架构：服务管理面分层
+## Architecture: Service Management Surface Layers
 
-| 层 | 承载 | 职责 | 本文关系 |
+| Layer | Carrier | Responsibility | Relation to this doc |
 |----|------|------|----------|
-| 执行层 | `service.*`（service-design 三后端） | list/status/start/stop/restart/…、unit 文件 | 自愈动作**复用**其 restart 路径（同一校验/超时/argv 纪律） |
-| 观测层 | `overlay.daemon`（M3.5 读）、`overlay.service`（M3.5 写） | 组网工具 daemon 的安装态/运行态观测与启停 | 同为「面向特定服务面」的封装，白名单纪律同源（D27） |
-| 策略层 | **本文 `service.health.*`** | 探测（何时算不健康）+ 自愈（要不要动手）+ 留痕 | 不新增执行原语：判断与节流之上，动作全部落到执行层 |
+| Execution | `service.*` (service-design three backends) | list/status/start/stop/restart/…, unit files | Self-healing actions **reuse** its restart path (same validation/timeout/argv discipline) |
+| Observation | `overlay.daemon` (M3.5 read), `overlay.service` (M3.5 write) | Observing install/run state and starting/stopping networking-tool daemons | Also a wrapper "aimed at a specific service surface"; the whitelist discipline shares the same source (D27) |
+| Policy | **This doc's `service.health.*`** | Probing (when to call it unhealthy) + self-healing (whether to act) + leaving traces | No new execution primitives: on top of the decision and throttling, all actions land in the execution layer |
 
-策略层不另立 systemctl 调用通道——自愈 restart 走 `ServiceProvider.DoAction(unit, "restart")`
-同一函数，unit 名白名单、30s 超时、stderr 摘要透传全部继承（D1）。
+The policy layer does not establish a separate systemctl call channel — self-healing restart goes through `ServiceProvider.DoAction(unit, "restart")`,
+the same function, inheriting the unit-name whitelist, 30s timeout, and stderr-summary pass-through (D1).
 
-## 关键决策
+## Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D1 | 架构归属 | 挂在 `service` provider 上（方法 `service.health.config / health.status / health.now`），自愈经 `DoAction(unit,"restart")` | 用户语义「探针/自愈是服务管理的策略层」；复用执行层校验与超时，不出现第二条 systemctl 通道（同 M3.5 D27 的口子纪律，但权限资源同为 services 面） |
-| D2 | 探测执行位置 | **agent 侧**周期探测（本机回环 127.0.0.1 直达业务端口） | 僵死检测必须贴着本机；server 不可达时探测与自愈照常，事件缓冲待补报（D8）。server 只做配置权威与结果归集 |
-| D3 | 配置权威与下发 | server DB `Setting` KV（`service_health.config.<agentID>`）为唯一事实源；agent 只持运行副本。server 在「保存配置」与「agent 注册上线」两个时机经现有 `rpc_request` 通道全量推送 | 配置类走 Setting KV 与拨测 D1/SMART 间隔同心智；不新增协议消息类型；agent 丢弃本地状态换幂等 |
-| D4 | 探针类型 | `http`（GET 状态码**精确等于** expectStatus，默认 200）/ `tcp`（DialTimeout 连通即活）/ `systemd`（`systemctl is-active` 输出 `active`）；标准库零依赖 | cloudflared 场景只需要 http（/ready）；tcp 兜「进程监听还在」类；systemd 兜「systemd 自己能看见的挂」。均只读不写 |
-| D5 | 判定语义 | 连续 `failThreshold`（默认 3）次失败才判 down 并触发自愈；任一次成功即恢复（recovered），计数清零 | 过滤瞬时抖动（同拨测 D5 边沿语义的最小实现）；恢复不发「半个周期内又挂」的噪音事件 |
-| D6 | 自愈白名单 | per-agent `whitelist[]`（*.service 名单）随配置下发；**双端校验**：server 保存时拒绝 `heal=true` 且目标不在白名单的探针（报错文案指引改 `heal=false` 只告警）；agent 执行前再校验一道，非白名单只告警不动手。`cloudflared.service` 为首个候选 | M3.5 D27「白名单绝不能成为动任意 unit 的口子」纪律的延伸：自愈的破坏半径（无人值守重启）高于人工点击，必须显式点名；双端各挡一道同 D23 写操作纪律 |
-| D7 | 重启风暴退避 | unit 级滑动窗口台账：`backoffWindowSec`（默认 600）内最多 `maxRestartsInWindow`（默认 3）次 restart（含失败）；窗口耗尽只告警不动作，每窗口至多一条 `heal_backoff` 事件 | 用户要求「X 分钟内最多 Y 次」；台账按 unit 记（两个探针指向同一 unit 共享额度）；失败重启同样占额度——防对坏 unit 反复硬敲 |
-| D8 | 事件回传 | 不引新协议消息：agent 事件环形缓冲（256 条，满丢最旧）；server 归集循环每 30s 轮询 `service.health.status` 且 `drain=true`（拉取并清空）；仪表盘 GET 同一 RPC 但 `drain=false` 只窥不取（防浏览器读吞掉归集循环还没落审计的事件）；最新状态快照缓存进 `service_health.state.<agentID>` 供离线灰态 | 协议零改动（agent 无 server 方向 RPC 原语）；drain/peek 分口后事件唯一消费者是归集循环（审计/告警路径不被读路径竞态）；30s 归集延迟对「分钟级自愈链路」无感；轮询节奏固定不配置（探针间隔才是用户旋钮） |
-| D9 | 审计与告警 | 六类事件（probe_down/probe_recovered/heal_restarted/heal_failed/heal_blocked/heal_backoff）分流：自愈三态每条落审计 `service_health_heal / service_health_heal_failed / service_health_heal_blocked`，username=`cockpit-agent`，resourceID=`{agentID}/{unit}`，details 带探针结果摘要；down/blocked/backoff → 告警（title 含 probeId，未读去重，blocked/backoff 为 warning、down 为 error），recovered 不告警；六类全发通知（`service_health.down / .up / .healed / .heal_failed / .heal_blocked / .backoff`；需在 `notification.events` 显式启用——默认 config 仅启用 `certificate_*`/`service_down`/`agent_offline`/`domain_expired`） | 用户要求「每次自愈落审计」；recovered 与 backoff 不进审计（噪音类不记审计口径），但 backoff 必须「告警+通知」可见——额度耗尽意味着自愈已停摆，用户必须知道
-| D10 | RBAC | 查看 `services:read`，配置写入（PUT）与立即探测 `services:write` | 权限点清单已有 services 面（storage/role.go resourceActions），策略层不另立权限点；server 侧 PUT/check 用 `userHasPerm` 硬校验 |
-| D11 | 平台边界 | 自愈仅 Linux + systemd（`DetectSystemd()`）；非 systemd 平台带 `heal=true` 的配置在 agent 侧拒绝（server 侧校验先行）。http/tcp 探针 v1 同此边界 | DoAction 的 systemctl 路径即平台边界；Windows SCM/macOS launchd 的自愈后续按需扩（模型已在，只差执行器） |
-| D12 | 配置校验 | `id` 非空且 agent 内唯一（`^[a-z0-9][a-z0-9-]{0,63}$`）；`intervalSec` 5–3600（默认 30）；`timeoutSec` 1–30（默认 5）；`failThreshold` 1–60（默认 3）；`backoffWindowSec` 60–86400、`maxRestartsInWindow` 1–10；unit 名 `*.service` 白名单正则（复用 serviceUnitNameRe）；http target 必须 `http(s)://` URL；tcp target `host:port`（端口 1–65535，不含 scheme/路径） | 双端同规则（server 保存时、agent 装载时各一道，非法整包拒绝——配置是原子的，不做部分应用）；数值上限防「配置出一条 1s 间隔的自愈风暴」 |
-| D13 | agent 重启的已知边界 | agent 进程重启后连续失败计数清零（重新攒 threshold），事件缓冲清空 | 探针状态不落盘是有意取舍：agent 重启本身罕见，落盘引入「陈旧计数自愈」的新风险面；server 侧告警未读去重保证重攒期间不重复轰炸 |
+| D1 | Architectural placement | Mounted on the `service` provider (methods `service.health.config / health.status / health.now`), self-healing via `DoAction(unit,"restart")` | User semantics: "probes/self-healing are the policy layer of service management"; reuses the execution layer's validation and timeout, no second systemctl channel appears (same gap discipline as M3.5 D27, but the permission resource is likewise the services surface) |
+| D2 | Where probing runs | **Agent-side** periodic probing (direct to the business port over the local loopback 127.0.0.1) | Wedging detection must sit right on the local machine; when the server is unreachable, probing and self-healing still proceed, with events buffered for later report (D8). The server only acts as the configuration authority and result aggregator |
+| D3 | Configuration authority and delivery | Server DB `Setting` KV (`service_health.config.<agentID>`) is the sole source of truth; the agent holds only a runtime copy. The server pushes the full config over the existing `rpc_request` channel at two moments: "configuration saved" and "agent registers online" | Config-type data on Setting KV shares the mental model with the probing D1/SMART intervals; no new protocol message type; the agent discards local state for idempotence |
+| D4 | Probe types | `http` (GET status code **exactly equal** to expectStatus, default 200) / `tcp` (a successful DialTimeout means alive) / `systemd` (`systemctl is-active` outputs `active`); zero standard-library-only dependencies | The cloudflared scenario needs only http (/ready); tcp backstops the "process is still listening" class; systemd backstops "what systemd can itself see as dead". All read-only |
+| D5 | Decision semantics | Down is judged and self-healing triggered only after `failThreshold` consecutive failures (default 3); any single success recovers (recovered) and the counter resets | Filters out transient jitter (the minimal implementation of the same edge semantics as probing D5); recovery does not emit noisy "down again within half a cycle" events |
+| D6 | Self-healing whitelist | A per-agent `whitelist[]` (*.service list) is delivered with the config; **validated on both ends**: the server refuses on save any probe with `heal=true` whose target is not whitelisted (the error text guides toward `heal=false` for alerting only); the agent validates once more before executing, and a non-whitelisted target only alerts without acting. `cloudflared.service` is the first candidate | An extension of M3.5 D27's "the whitelist must never become a gap for acting on arbitrary units" discipline: self-healing's blast radius (unattended restarts) exceeds a manual click, so it must be named explicitly; one guard on each end follows the D23 write-operation discipline |
+| D7 | Restart-storm backoff | A per-unit sliding-window ledger: at most `maxRestartsInWindow` (default 3) restarts within `backoffWindowSec` (default 600) (counting failures too); when the window is exhausted only an alert fires with no action, at most one `heal_backoff` event per window | User requirement "at most Y times within X minutes"; the ledger is per unit (two probes pointing at the same unit share the quota); failed restarts also consume quota — prevents hammering a bad unit repeatedly |
+| D8 | Event reporting | No new protocol message: the agent's event ring buffer (256 entries, dropping the oldest when full); the server aggregation loop polls `service.health.status` every 30s with `drain=true` (pull and clear); the dashboard GETs the same RPC but with `drain=false`, peeking without taking (so browser reads don't swallow events the aggregation loop has not yet audited); the latest state snapshot is cached in `service_health.state.<agentID>` for offline gray state | Zero protocol change (the agent has no server-directed RPC primitive); after splitting drain/peek the event's only consumer is the aggregation loop (the audit/alerting path is not raced by read paths); a 30s aggregation delay is imperceptible for a "minute-scale self-healing chain"; the polling rhythm is fixed, not configurable (probe interval is the user's knob) |
+| D9 | Audit and alerting | Six event kinds (probe_down/probe_recovered/heal_restarted/heal_failed/heal_blocked/heal_backoff) are split: the three self-healing states each land in the audit as `service_health_heal / service_health_heal_failed / service_health_heal_blocked`, username=`cockpit-agent`, resourceID=`{agentID}/{unit}`, details carrying a probe-result summary; down/blocked/backoff → alert (title contains probeId, unread de-duplication, blocked/backoff are warnings, down is an error), recovered does not alert; all six kinds send a notification (`service_health.down / .up / .healed / .heal_failed / .heal_blocked / .backoff`; must be explicitly enabled in `notification.events` — the default config only enables `certificate_*`/`service_down`/`agent_offline`/`domain_expired`) | User requirement "every self-heal lands in the audit"; recovered and backoff do not enter the audit (noise classes are not audited), but backoff must be visible via "alert+notification" — an exhausted quota means self-healing has stalled, and the user must know |
+| D10 | RBAC | Read uses `services:read`; config writes (PUT) and immediate probing use `services:write` | The permission-point list already has a services surface (storage/role.go resourceActions); the policy layer does not establish separate permission points; server-side PUT/check hard-checks with `userHasPerm` |
+| D11 | Platform boundary | Self-healing is Linux + systemd only (`DetectSystemd()`); on non-systemd platforms a config with `heal=true` is refused on the agent side (server-side validation first). http/tcp probes share this boundary in v1 | DoAction's systemctl path is the platform boundary; Windows SCM/macOS launchd self-healing can be extended later as needed (the model exists, only the executor is missing) |
+| D12 | Config validation | `id` non-empty and unique within the agent (`^[a-z0-9][a-z0-9-]{0,63}$`); `intervalSec` 5–3600 (default 30); `timeoutSec` 1–30 (default 5); `failThreshold` 1–60 (default 3); `backoffWindowSec` 60–86400, `maxRestartsInWindow` 1–10; unit names match the `*.service` whitelist regex (reusing serviceUnitNameRe); http target must be an `http(s)://` URL; tcp target is `host:port` (port 1–65535, no scheme/path) | Same rules on both ends (one guard each when the server saves and when the agent loads; an invalid whole packet is refused — config is atomic, no partial application); numeric caps prevent "a configuration that becomes a 1s-interval self-healing storm" |
+| D13 | Known boundary of agent restarts | After the agent process restarts the consecutive-failure counter resets (rebuilding the threshold), and the event buffer is cleared | Probe state not persisting to disk is an intentional trade-off: agent restarts are themselves rare, and persisting introduces the new risk surface of "self-healing on stale counters"; server-side alert unread de-duplication guarantees no repeated hammering while rebuilding |
 
-## 数据模型
+## Data Model
 
-### 探针配置（server 存储 = 下发载荷，全量替换语义）
+### Probe Configuration (server storage = delivery payload, full-replacement semantics)
 
 ```json
 {
@@ -67,11 +68,11 @@
 }
 ```
 
-`unit` 在 `heal=true` 时必填；`type=systemd` 时 target 即 unit 本名（unit 字段
-缺省取 target）。探针 target 本身不受白名单约束（观测自由），受约束的只有
-自愈动作（D6）。
+`unit` is required when `heal=true`; for `type=systemd` the target is the unit name itself (the unit field
+defaults to target). The probe target itself is not constrained by the whitelist (observation is free); only
+the self-healing action is constrained (D6).
 
-### 运行态（agent 持有，server 轮询取回）
+### Runtime State (held by the agent, polled back by the server)
 
 ```json
 {
@@ -98,88 +99,94 @@
 }
 ```
 
-P6 起状态带判定语义与故障窗口：`openWindow` 非空 ⟺ 判定期 Faulty，
-`endedAt` 零值串 ⟺ 仍在故障中；`recentWindows` 为近期已关闭窗口（agent
-侧环形上限 64）。事件 `kind` ∈ `probe_down / probe_recovered /
-heal_restarted / heal_failed / heal_blocked / heal_backoff`。`states` 全量
-快照、`events` 为 drain 语义（取回即清空）。
+Since P6, state carries decision semantics and a fault window: `openWindow` non-empty ⟺ Faulty during the decision period,
+`endedAt` zero-value string ⟺ still faulted; `recentWindows` are recently closed windows (agent-side
+ring cap 64). Event `kind` ∈ `probe_down / probe_recovered /
+heal_restarted / heal_failed / heal_blocked / heal_backoff`. `states` is a full
+snapshot, `events` has drain semantics (taking them clears them).
 
-## RPC 契约
+## RPC Contract
 
-| 方法 | 参数 | 结果 | 说明 |
+| Method | Parameters | Result | Description |
 |------|------|------|------|
-| `service.health.config` | `{probes:[…], whitelist:[…]}` | `{applied: N}` | 全量替换；校验失败**整包拒绝**（D12）；装载即驱动引擎循环 |
-| `service.health.status` | `{}` | `{states, events}` | events drain；无配置时 `{states:{}, events:[]}` |
-| `service.health.now` | `{id}` | `{probe, status, lastError, consecutiveFails}` | 立即执行一次指定探针（计入连续失败计数与边沿判定，等同调度触发） |
+| `service.health.config` | `{probes:[…], whitelist:[…]}` | `{applied: N}` | Full replacement; a validation failure **refuses the whole packet** (D12); loading drives the engine loop |
+| `service.health.status` | `{}` | `{states, events}` | events drained; with no config `{states:{}, events:[]}` |
+| `service.health.now` | `{id}` | `{probe, status, lastError, consecutiveFails}` | Immediately runs the specified probe once (counts toward the consecutive-failure counter and edge decision, equivalent to a scheduled trigger) |
 
-## REST API（挂在 `/api/agents/{id}/health`）
+## REST API (mounted at `/api/agents/{id}/health`)
 
-| 路由 | 权限 | 审计 | 说明 |
+| Route | Permission | Audit | Description |
 |------|------|------|------|
-| `GET /api/agents/{id}/health` | services:read | 否 | `{config, states, online}`——在线时实时拉取 agent 运行态，离线回落缓存灰态 |
-| `PUT /api/agents/{id}/health` | services:write | `service_health_config` | 校验（D12 + D6 白名单）→ 落 Setting KV → 在线则推送 → 返回 `{applied, pushed}` |
-| `POST /api/agents/{id}/health/probes/{probeId}/check` | services:write | 否 | 转发 `service.health.now`（诊断动作，读语义不记审计） |
+| `GET /api/agents/{id}/health` | services:read | No | `{config, states, online}` — when online, pulls the agent's runtime state live; offline falls back to the cached gray state |
+| `PUT /api/agents/{id}/health` | services:write | `service_health_config` | Validate (D12 + D6 whitelist) → persist to Setting KV → push if online → return `{applied, pushed}` |
+| `POST /api/agents/{id}/health/probes/{probeId}/check` | services:write | No | Forwards `service.health.now` (a diagnostic action; read semantics, not audited) |
 
-agent 离线时 PUT 仍成功（配置已落库，注册上线时补推）——响应带 `pushed:false`
-提示。
+When the agent is offline a PUT still succeeds (the config is already persisted and will be pushed when it
+registers online) — the response carries `pushed:false`
+as a hint.
 
-## 首个接入用例：docker VM（192.168.5.5）cloudflared
+## First Integration Case: docker VM (192.168.5.5) cloudflared
 
-1. **部署 agent**：VM 上安装 `cockpit-agent`（systemd 服务，随包注册
-   `service` capability）；确认 `/services` 页能看到该机且 `cloudflared.service`
-   在列。
-2. **选定探针**：cloudflared 自带 metrics/ready 端点（`--metrics
-   127.0.0.1:20241` 时为 `http://127.0.0.1:20241/ready`，隧道连通才回 200）。
-   **不要用 systemd 探针做主探针**——「进程活着连接僵死」恰是 systemd 判
-   active 的盲区，http /ready 才能看见业务真相；systemd 探针可作为第二道
-   兜底（进程真死时 systemd 反而更快知道）。
-3. **配置探针**：面板 /services → 健康探针 → 新建：`id=cloudflared-ready`、
-   `type=http`、`target=http://127.0.0.1:20241/ready`、`intervalSec=30`、
-   `failThreshold=3`（≈90s 检出）、`heal=true`、`unit=cloudflared.service`。
-4. **白名单**：同一页把 `cloudflared.service` 加入该机自愈白名单——保存前
-   server 会拒绝「heal=true 但不在白名单」的配置（D6），这是有意的中途检查点。
-5. **观察一个真实故障**：手动 `kill -STOP` cloudflared 模拟僵死（进程在、
-   /ready 不应答），确认：~90s 内探针转 fail → 审计出现
-   `service_health_heal`（username=cockpit-agent）→ 服务被 restart → /ready
-   回 200 → recovered 事件入告警。
-6. **退避观察**：连续人为制造 4 次故障，第 4 次（窗口内 3 次额度用尽）应
-   只见 `heal_backoff` 告警、无 restart 审计——重启风暴被挡住。
-7. **cron 看门狗退役**：保留兜底 1–2 周，比对期间审计中 cockpit 版自愈
-   成功率，确认稳定后移除 cron 条目。
+1. **Deploy the agent**: install `cockpit-agent` on the VM (a systemd service, registering the
+   `service` capability with the package); confirm the /services page shows this machine and `cloudflared.service`
+   in the list.
+2. **Choose the probe**: cloudflared ships metrics/ready endpoints (when running with `--metrics
+   127.0.0.1:20241`, it is `http://127.0.0.1:20241/ready`, returning 200 only when the tunnel is connected).
+   **Do not use a systemd probe as the primary probe** — "process alive, connection wedged" is exactly
+   the blind spot where systemd judges active, and only the http /ready endpoint can see the business
+   truth; a systemd probe can serve as a second backstop (systemd knows faster when the process is truly dead).
+3. **Configure the probe**: panel /services → health probes → new: `id=cloudflared-ready`,
+   `type=http`, `target=http://127.0.0.1:20241/ready`, `intervalSec=30`,
+   `failThreshold=3` (≈90s detection), `heal=true`, `unit=cloudflared.service`.
+4. **Whitelist**: on the same page add `cloudflared.service` to this machine's self-healing whitelist —
+   the server refuses "heal=true but not whitelisted" configs before saving (D6); this is an intentional
+   mid-way checkpoint.
+5. **Observe a real fault**: manually `kill -STOP` cloudflared to simulate wedging (process present,
+   /ready not answering), and confirm: within ~90s the probe turns fail → the audit shows
+   `service_health_heal` (username=cockpit-agent) → the service is restarted → /ready
+   returns 200 → a recovered event lands in the alerts.
+6. **Observe backoff**: artificially create 4 faults in a row; the 4th (after the 3-quota in the window
+   is exhausted) should show only a `heal_backoff` alert with no restart audit — the restart storm is
+   blocked.
+7. **Retire the cron watchdog**: keep it as a backstop for 1–2 weeks, comparing the cockpit version's
+   self-healing success rate in the audit during the comparison period; remove the cron entry once
+   stability is confirmed.
 
-## P6：判定层上收公共探针（三语义 + 故障窗口）
+## P6: Hoisting the Decision Layer onto a Shared Probe (Three Semantics + Fault Windows)
 
-M1–M3 的判定逻辑（防抖阈值、边沿、恢复）原在 `service_health.go` 引擎内
-自持。P6 把它上收 `core/healthprobe.Guard`（与 probeagent 同源的公共件），
-引擎只留策略（事件边沿、自愈两道闸、台账）。
+The M1–M3 decision logic (debounce threshold, edges, recovery) was self-contained inside the `service_health.go` engine.
+P6 hoists it to `core/healthprobe.Guard` (a shared component with the same source as probeagent),
+leaving the engine with policy only (event edges, the two self-healing gates, the ledger).
 
-- **语义映射**：`heal=true` 探针判「受监控服务自己活没活」→ Liveness
-  （故障后果=自愈重启）；`heal=false` 判「依赖就绪没就绪」→ Readiness
-  （故障后果=只告警）。两语义判定行为一致，区别只随故障窗口留痕。
-- **锁序**：引擎持 `engine.mu` → `guard.mu`；Guard **不挂回调**，迁移边沿
-  由 `Record` 前后快照对比得出——不存在反向持锁路径，无 ABBA。
-- **连败计数**：`consecutiveFails` 跨状态迁移持续累计（故障期真实连败
-  读数），成功即清零——与 M1 行为一致。
-- **recovered 边沿**：只在 Guard 判 Faulty→Healthy 时发。亚阈值抖动
-  （未达阈值就恢复）不再发恢复事件——D5「任一次成功即恢复」的严格口径。
-- **heal 闸**：判定期在 Faulty 时，**每次失败**都过白名单/退避两道闸
-  （故障期内每周期都尝试再救，直至台账耗尽）——D7 预算语义，非仅迁移
-  那一刻。
-- **wire 新字段**（随状态快照上行，server 镜像透传 web）：`semantics`、
-  `openWindow`、`recentWindows`。`openWindow` 非空 ⟺ 判定期 Faulty；
-  `endedAt` 零值串（`0001-01-01T00:00:00Z`）⟺ 仍在故障中——
-  `time.Time` 的 `omitempty` 对结构体无效，前后端按零值判开合。
-- **web**：状态表新增「故障窗口」列——开窗红色置顶（`故障中 起`），
-  已关闭近几次走「近 N 次」摘要 + Tooltip 明细（起止时刻/语义/最近失败原因）。
+- **Semantic mapping**: `heal=true` probes ask "is the monitored service itself alive" → Liveness
+  (fault consequence = self-healing restart); `heal=false` probes ask "is the dependency ready" → Readiness
+  (fault consequence = alert only). Both semantics decide identically; the difference shows only in the fault-window trace.
+- **Lock ordering**: the engine holds `engine.mu` → `guard.mu`; the Guard **registers no callbacks**, so migration edges
+  are derived from before/after snapshot comparison in `Record` — there is no reverse lock-holding path, no ABBA.
+- **Failure streaks**: `consecutiveFails` keeps accumulating across state migrations (the true failure
+  streak during a fault), and resets on success — consistent with M1 behavior.
+- **recovered edge**: emitted only when the Guard judges Faulty→Healthy. Sub-threshold jitter
+  (recovering before reaching the threshold) no longer emits a recovery event — D5's strict
+  "any single success recovers" criterion.
+- **heal gate**: during Faulty in the decision period, **every failure** passes the whitelist/backoff gates
+  (each cycle during the fault attempts another rescue, until the ledger is exhausted) — D7's budget
+  semantics, not just the moment of migration.
+- **New wire fields** (sent up with the state snapshot, mirrored through by the server to the web): `semantics`,
+  `openWindow`, `recentWindows`. `openWindow` non-empty ⟺ Faulty during the decision period;
+  `endedAt` zero-value string (`0001-01-01T00:00:00Z`) ⟺ still faulted —
+  `time.Time`'s `omitempty` is ineffective for structs, so front and back ends judge open/closed by the zero value.
+- **web**: the state table gains a "fault window" column — an open window is pinned red at the top (`Faulted since`),
+  recently closed ones use a "last N" summary + Tooltip details (start/end times/semantics/most recent failure reason).
 
-## 实现与测试清单
+## Implementation and Test Checklist
 
-| 批次 | 内容 | 测试 |
+| Batch | Content | Tests |
 |------|------|------|
-| M1（agent） | `internal/agent/rpc/service_health.go`：引擎 + 三探针执行器 + 自愈（白名单/退避/事件环）+ provider 三动作接线 | 假 Commander/httptest 注入：三类探针判定、阈值边沿、恢复清零、白名单拦截、退避窗口、事件 drain、整包校验拒绝、非 systemd 平台 heal 拒绝 |
-| M2（server） | `internal/server/api_service_health.go`（API + 校验 + 推送）、`internal/server/service_health_scan.go`（30s 归集循环 + 审计 + 告警 + 通知 + 状态缓存）、注册上线补推钩子、events 常量、RBAC 路由 | API 校验矩阵（非法 target/白名单拒绝）、离线 PUT 落库不推送、归集循环事件→审计/告警/通知、缓存灰态、上线补推 |
-| M3（web） | /services 页「健康探针」面板：探针列表（状态徽标/连续失败/上次自愈）、编辑表单、白名单编辑、立即探测按钮 | vitest 组件测试 |
-| P6（core+agent+server+web） | `core/healthprobe` 三语义 Guard（Liveness/Readiness/Heartbeat + 故障窗口）；`service_health` 引擎判定上收（边沿事件/语义留痕/窗口同步）；server 镜像透传；web 故障窗口列 | 探针窗口开合/恢复断言、语义标记、连败跨迁移累计、server 透传往返、web 窗口列渲染 |
+| M1 (agent) | `internal/agent/rpc/service_health.go`: engine + three probe executors + self-healing (whitelist/backoff/event ring) + provider three-action wiring | Fake Commander/httptest injection: three probe decisions, threshold edges, reset on recovery, whitelist blocking, backoff window, event drain, whole-packet validation refusal, heal refusal on non-systemd platforms |
+| M2 (server) | `internal/server/api_service_health.go` (API + validation + push), `internal/server/service_health_scan.go` (30s aggregation loop + audit + alerts + notifications + state cache), register-online push hook, events constants, RBAC routing | API validation matrix (invalid target/whitelist refusal), offline PUT persists without pushing, aggregation loop events→audit/alert/notification, cached gray state, online push-back |
+| M3 (web) | The /services page "health probe" panel: probe list (status badge/consecutive failures/last self-heal), edit form, whitelist editing, immediate-probe button | vitest component tests |
+| P6 (core+agent+server+web) | `core/healthprobe` three-semantic Guard (Liveness/Readiness/Heartbeat + fault windows); `service_health` engine decision hoisting (edge events/semantic tracing/window sync); server mirror pass-through; web fault-window column | Probe window open/close/recovery assertions, semantic marking, failure streaks accumulating across migrations, server pass-through round trip, web window-column rendering |
 
-验收边界（留给真机）：真实 cloudflared 僵死注入（上面用例第 5/6 步）、
-跨机多 agent 归集节奏、GB 级无关（本能力无大数据路径）。
+Acceptance boundaries (left to live hardware): real cloudflared wedging injection (steps 5/6 of the case
+above), cross-machine multi-agent aggregation rhythm, GB-scale is irrelevant (this capability has no large-data
+path).

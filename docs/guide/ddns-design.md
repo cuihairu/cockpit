@@ -1,62 +1,61 @@
-# DDNS（动态域名解析）设计
+# DDNS (Dynamic Domain Resolution) Design
 
-> 语言：**中文** ｜ [English](./ddns-design.en.md)
 
-## 背景
+## Background
 
-家庭宽带公网 IP 会周期性变化，DDNS 让「域名 → 家庭出口 IP」保持同步，是在外访问 NAS/家庭服务的第一道依赖。Cockpit 已具备两个可复用基础：
+Home broadband public IPs change periodically, and DDNS keeps "domain → home egress IP" in sync; it is the first dependency for accessing a NAS / home services from outside. Cockpit already has two reusable foundations:
 
-- **DNS 写路径**（`docs/guide/dns-design.md`）：server 直连 Cloudflare API v4，`dns.Provider` 接口（ListRecords/Create/Update/Delete）与 token 管理（config.yaml / env，secret 不落盘）现成；
-- **巡检循环模式**（drift → smart 两轮验证）：ticker + Setting 动态间隔 + 真去重告警。
+- **DNS write path** (`docs/guide/dns-design.md`): the server calls the Cloudflare API v4 directly, and the `dns.Provider` interface (ListRecords/Create/Update/Delete) plus token management (config.yaml / env, secret never written to disk) are ready;
+- **Inspection loop pattern** (validated over two rounds: drift → smart): ticker + Setting-based dynamic interval + genuinely deduplicated alerts.
 
-缺的一块是「家里现在的公网 IP 是什么」——server 在云端，它看到的 WebSocket 对端地址不可靠（见 D2），IP 探测必须发生在家庭侧的 agent 上。
+The missing piece is "what is the home's current public IP" — the server is in the cloud, so the WebSocket peer address it sees is unreliable (see D2); IP probing must happen on the home-side agent.
 
-## 决策
+## Decisions
 
-- **D1 架构分工**：agent 只回答「本机所在网络的出口 IP」（新 RPC `ddns.ip`）；server 持有 DDNS 记录配置、跑巡检循环、调 Cloudflare 写记录。理由：DDNS 的目标 IP 在被观测网络内；而 DNS 写需要 token，token 只在 server（dns-design D2/D7）。
-- **D2 不用连接对端地址**：server 从 WebSocket `RemoteAddr` 拿到的理论上是家庭出口 IP，但 agent 可能经代理/overlay 出站，该地址语义不可靠；agent 主动探测（出站 HTTP 访问回显服务）语义清晰——「这台机器看到的出口 IP」。
-- **D3 IP 探测多源兜底**：回显服务国内可达性参差，按序尝试、取首个成功：
-  - IPv4：`api.ipify.org` → `api-ipv4.ip.sb` → `ipv4.icanhazip.com` → `4.ipw.cn`
-  - IPv6：`api6.ipify.org` → `api-ipv6.ip.sb` → `ipv6.icanhazip.com` → `6.ipw.cn`
-  - 单源超时 5s、一族总超时 15s；响应 trim 后必须过 `net.ParseIP` 且地址族匹配才采纳。源列表做成包级变量，测试可注入（httptest 假源）。
-- **D4 capability `ddns` 恒上报**：照 `file` capability 先例（标准库出站 HTTP，无外部依赖，无需 detector），在 `detectCapabilities` 里无条件追加；provider 提供 `ddns.ip` 单方法，返回 `{ipv4?, ipv6?}`（探测失败该族省略，不报错——DDNS 巡检按族取用）。是否作为 DDNS 的 IP 源由 server 侧配置绑定 agent 决定，与 capability 无关。
-- **D5 配置表 `DDNSConfig`**（SQLite，复刻 BackupConfig 模式）：`ID / AgentID / ZoneID / ZoneName / RecordName（如 home.example.com）/ Type（A|AAAA）/ Enabled / LastIP / LastUpdatedAt / CheckedAt / LastStatus（ok|failed|never）/ LastError`。storage 层 CRUD 五函数。
-- **D6 巡检循环**：`ddnsScanLoop` 复刻 drift/smart 模式；Setting 键 `ddns.scan_interval_seconds`，默认 300，min 60，max 86400，`0 = 关闭`。每轮：enabled 配置 → agent 在线 → `ddns.ip` 取对应族 IP → 每 zone 一次 `ListRecords(zone, type)` 找 name 匹配的记录 → 记录缺失则 `Create` → IP 变化则 `Update` → 回写表（LastIP/LastStatus/CheckedAt）。取不到 agent IP 只置 failed 状态，不动 DNS。
-- **D7 API 配额保护**：仅当「IP 变化」或「记录缺失」才写 Cloudflare；每轮每 zone 至多一次 ListRecords；同轮内同 zone 的多条配置共享查询结果。
-- **D8 告警**：巡检失败（agent 离线 / 探测不出 IP / Cloudflare 报错）→ `alert.Generator.CheckDDNS` 真去重 warning，title 按记录名（与 CheckDiskHealth 同构）。成功更新不告警（静默自愈），表内可见变更。
-- **D9 审计边界**：用户操作（增删改 DDNS 配置）记审计 `ddns_create / ddns_update / ddns_delete`；巡检的自动 DNS 变更不记审计——它不是用户操作，且 `DDNSConfig.LastIP/LastUpdatedAt` 已完整记录变更轨迹（与 drift/smart 巡检不记审计同则）。
-- **D10 REST**（全部 `/api/ddns` 前缀）：
-  - `GET /api/ddns` 配置列表；`POST /api/ddns` 创建；`PUT /api/ddns/{id}` 更新；`DELETE /api/ddns/{id}` 删除（用户操作，记审计）
-  - `POST /api/ddns/{id}/check` 立即同步检查单条（不等巡检周期），返回检查结果
-  - `GET/PUT /api/ddns/config` 全局巡检间隔（与 `/api/drift/config`、`/api/smart/config` 同构；0 = 关闭）
-  - 创建/更新校验：Type ∈ {A, AAAA}、RecordName 非空且过 `dns.ValidateInput` 同规则、AgentID 非空。zone 下拉复用已有 `GET /api/dns/zones`。
-- **D11 前端**：DNS 页改 Tabs——「记录管理」（现有内容）+「DDNS」。DDNS Tab：配置表（记录名/类型/绑定主机/当前 IP/状态徽标/最后检查时间）+ 新建/编辑 Modal（agent 下拉在线优先、zone 下拉、记录名、类型、启用 Switch）+ 立即检查按钮 + 巡检间隔设置（与 smart/drift 页同模式）。
-- **D12 安全**：探测到的 IP 必须过 `net.ParseIP` + 地址族匹配才进表、进 DNS；RecordName 复用 `dns.ValidateInput` 校验面；token 不出 server（D1 推论）。
+- **D1 Architecture split**: the agent only answers "the egress IP of the network this machine is on" (new RPC `ddns.ip`); the server holds the DDNS record config, runs the inspection loop, and calls Cloudflare to write records. Rationale: the DDNS target IP is inside the observed network; DNS writes need a token, and the token lives only on the server (dns-design D2/D7).
+- **D2 Do not use the connected peer address**: the `RemoteAddr` the server gets from the WebSocket is theoretically the home egress IP, but the agent may egress via a proxy/overlay, so that address's semantics are unreliable; the agent actively probing (outbound HTTP to an echo service) has clear semantics — "the egress IP this machine sees".
+- **D3 IP probing with multi-source fallback**: echo services have uneven reachability in China, so try them in order and take the first success:
+  - IPv4: `api.ipify.org` → `api-ipv4.ip.sb` → `ipv4.icanhazip.com` → `4.ipw.cn`
+  - IPv6: `api6.ipify.org` → `api-ipv6.ip.sb` → `ipv6.icanhazip.com` → `6.ipw.cn`
+  - Single-source timeout 5s, family total timeout 15s; the response, after trim, must pass `net.ParseIP` and match the address family to be accepted. The source list is a package-level variable, injectable in tests (fake sources via httptest).
+- **D4 Capability `ddns` is always reported**: following the `file` capability precedent (stdlib outbound HTTP, no external dependency, no detector needed), appended unconditionally inside `detectCapabilities`; the provider offers the single method `ddns.ip`, returning `{ipv4?, ipv6?}` (on probe failure that family is omitted, no error — the DDNS inspection takes it per family). Whether it is used as an IP source for DDNS is decided by the server-side config binding an agent, and is unrelated to the capability.
+- **D5 Config table `DDNSConfig`** (SQLite, replicating the BackupConfig pattern): `ID / AgentID / ZoneID / ZoneName / RecordName (e.g. home.example.com) / Type (A|AAAA) / Enabled / LastIP / LastUpdatedAt / CheckedAt / LastStatus (ok|failed|never) / LastError`. Five CRUD functions at the storage layer.
+- **D6 Inspection loop**: `ddnsScanLoop` replicates the drift/smart pattern; Setting key `ddns.scan_interval_seconds`, default 300, min 60, max 86400, `0 = disabled`. Each round: enabled configs → agent online → `ddns.ip` for the corresponding family IP → one `ListRecords(zone, type)` per zone to find the record with a name match → Create if the record is missing → Update if the IP changed → write back to the table (LastIP/LastStatus/CheckedAt). Failing to get the agent IP only sets a failed state; DNS is untouched.
+- **D7 API quota protection**: Cloudflare is written only when "the IP changed" or "the record is missing"; at most one ListRecords per zone per round; multiple configs for the same zone within a round share the query result.
+- **D8 Alerts**: inspection failure (agent offline / IP not obtainable / Cloudflare error) → a genuinely deduplicated warning via `alert.Generator.CheckDDNS`, with the title by record name (isomorphic with CheckDiskHealth). Successful updates raise no alert (silent self-healing), and the change is visible in the table.
+- **D9 Audit boundary**: user operations (creating/updating/deleting DDNS configs) are audited as `ddns_create / ddns_update / ddns_delete`; the automatic DNS changes of inspection are not audited — they are not user operations, and `DDNSConfig.LastIP/LastUpdatedAt` already fully records the change trail (same rule as drift/smart inspections not being audited).
+- **D10 REST** (all under the `/api/ddns` prefix):
+  - `GET /api/ddns` config list; `POST /api/ddns` create; `PUT /api/ddns/{id}` update; `DELETE /api/ddns/{id}` delete (user operation, audited)
+  - `POST /api/ddns/{id}/check` immediately syncs and checks a single entry (without waiting for the inspection period), returning the check result
+  - `GET/PUT /api/ddns/config` global inspection interval (isomorphic with `/api/drift/config` and `/api/smart/config`; 0 = disabled)
+  - Create/update validation: Type ∈ {A, AAAA}, RecordName non-empty and validated by `dns.ValidateInput` under the same rules, AgentID non-empty. The zone dropdown reuses the existing `GET /api/dns/zones`.
+- **D11 Frontend**: the DNS page changes to Tabs — "record management" (existing content) + "DDNS". DDNS tab: a config table (record name / type / bound host / current IP / status badge / last checked time) + a new/edit Modal (agent dropdown with online first, zone dropdown, record name, type, enable Switch) + a check-now button + an inspection interval setting (same pattern as the smart/drift pages).
+- **D12 Security**: a probed IP must pass `net.ParseIP` + family match before entering the table or DNS; RecordName reuses the `dns.ValidateInput` validation surface; the token never leaves the server (a consequence of D1).
 
-## 数据结构
+## Data structure
 
-`ddns.ip` 返回：
+`ddns.ip` returns:
 
 ```json
 { "ipv4": "203.0.113.7", "ipv6": "2001:db8::1" }
 ```
 
-`DDNSConfig`（storage 表）与 REST JSON 一一对应，`LastStatus`：
-- `never`：从未检查（新建后）
-- `ok`：上轮检查成功（含「IP 无变化」的安静轮）
-- `failed`：上轮失败（LastError 带原因）
+`DDNSConfig` (storage table) corresponds one-to-one with the REST JSON; `LastStatus`:
+- `never`: never checked (after creation)
+- `ok`: the last check succeeded (including quiet rounds where the IP did not change)
+- `failed`: the last check failed (LastError carries the reason)
 
-## 实现切分（M1，本任务）
+## Implementation split (M1, this task)
 
-1. **docs**：本文档；
-2. **agent**：`rpc/ddns_provider.go`（多源 IP 探测，Commander 不适用——出站 HTTP，http.Client 可注入）+ `detectCapabilities` 追加 ddns capability + `providers.go` 注册 + 测试（httptest 假源）；
-3. **storage**：`ddns.go` 表 CRUD + AutoMigrate + 测试；
-4. **server**：`api_ddns.go`（CRUD + check + 审计）+ `ddns_scan.go`（巡检循环）+ `alert.CheckDDNS` + api.go 分发 + 测试；
-5. **web**：DNS 页 Tabs 改造 + DDNS Tab + 类型 + api 方法 + build 通过。
+1. **docs**: this document;
+2. **agent**: `rpc/ddns_provider.go` (multi-source IP probing; Commander does not apply — this is outbound HTTP, so http.Client is injectable) + append the ddns capability in `detectCapabilities` + `providers.go` registration + tests (fake sources via httptest);
+3. **storage**: `ddns.go` table CRUD + AutoMigrate + tests;
+4. **server**: `api_ddns.go` (CRUD + check + audit) + `ddns_scan.go` (inspection loop) + `alert.CheckDDNS` + api.go dispatch + tests;
+5. **web**: DNS page Tabs rework + DDNS tab + types + api method + build passing.
 
-## 测试要点
+## Test points
 
-- agent：多源顺序兜底（首个成功即停）、坏响应拒绝（非 IP / 族不匹配）、全源失败省略该族、IPv4/IPv6 各自独立；
-- storage：CRUD 往返；
-- server：配置校验（Type 白名单、空名拒绝）；巡检三态（IP 变化更新 / 无变化跳过写 / agent 失败置 failed + 告警去重）；check 端点；记录缺失时 Create；
-- 前端：tsc + vite build。
+- agent: multi-source ordered fallback (stop at first success), rejecting bad responses (non-IP / family mismatch), omitting a family when all sources fail, IPv4/IPv6 independent;
+- storage: CRUD round trips;
+- server: config validation (Type allowlist, empty-name rejection); the three inspection states (update on IP change / skip write when unchanged / failed on agent failure + deduplicated alert); the check endpoint; Create when the record is missing;
+- frontend: tsc + vite build.

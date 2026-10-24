@@ -1,47 +1,46 @@
-# WebSocket 认证边界
+# WebSocket Authentication Boundary
 
-> 语言：**中文** ｜ [English](./websocket-token-auth.en.md)
 
-当前实现已经避免在远程连接 WebSocket URL 中直接携带 JWT。远程终端、VNC、桌面连接统一使用短期 ticket：terminal 入口仅经 `Sec-WebSocket-Protocol` 传递，guacamole 入口 URL query `?ticket=` 与子协议双通道（query 优先、子协议兜底）。
+The current implementation already avoids carrying a JWT directly in the remote-connection WebSocket URL. Remote terminal, VNC and desktop connections all use a short-lived ticket: the terminal entry point carries it only through `Sec-WebSocket-Protocol`, while the guacamole entry point uses both the URL query `?ticket=` and the subprotocol as a two-channel fallback (query first, subprotocol as fallback).
 
-## 当前流程
+## Current Flow
 
-1. Web UI 使用 JWT 调用 `POST /api/remote/tickets`。
-2. Server 生成内存态 ticket：
-   - 有效期 5 分钟。
-   - 单次使用。
-   - 绑定用户和连接参数。
-3. Web UI 建立 WebSocket 连接，并把 ticket 作为子协议值。
-4. Server 校验并消费 ticket，随后才升级连接并转发数据。
+1. The Web UI calls `POST /api/remote/tickets` using a JWT.
+2. The Server creates an in-memory ticket:
+   - Valid for 5 minutes.
+   - Single-use.
+   - Bound to the user and the connection parameters.
+3. The Web UI opens the WebSocket connection and passes the ticket as a subprotocol value.
+4. The Server validates and consumes the ticket, and only then upgrades the connection and forwards data.
 
 ```typescript
 const ticket = await createRemoteTicket(params)
 const ws = new WebSocket('/api/remote/terminal', [ticket])
 ```
 
-对应服务端入口：
+The corresponding server-side entry points:
 
 - `/api/remote/terminal`
 - `/api/remote/guacamole`
 
-terminal 入口从 `Sec-WebSocket-Protocol` 读取 ticket；guacamole 入口先读 URL query `?ticket=`、缺失再回退子协议。两者都不把认证 token 放进通用审计。
+The terminal entry point reads the ticket from `Sec-WebSocket-Protocol`; the guacamole entry point reads the URL query `?ticket=` first and falls back to the subprotocol when it is absent. Neither puts the authentication token into the generic audit trail.
 
-## 设计边界
+## Design Boundaries
 
-- JWT 只用于创建 ticket 的 HTTP API，不直接进入远程 WebSocket URL。
-- ticket 存在 Server 内存中，Server 重启后失效。
-- ticket 被成功验证后会立即标记为已消费，不能复用。
-- ticket 参数中可以包含 `agent_id`、`host`、`port`、`protocol`、`username`、`password`、`domain`、`width`、`height` 等连接参数。
+- JWT is used only for the HTTP API that creates tickets; it never enters the remote WebSocket URL directly.
+- Tickets live in Server memory and are invalidated when the Server restarts.
+- A ticket is marked consumed immediately after successful validation and cannot be reused.
+- The ticket parameters may include connection parameters such as `agent_id`, `host`, `port`, `protocol`, `username`, `password`, `domain`, `width` and `height`.
 
-## 安全注意
+## Security Notes
 
-生产环境还需要配合以下配置：
+Production deployments also need the following configuration:
 
-- 设置 `ALLOWED_ORIGINS`，限制 WebSocket Origin。
-- 使用 HTTPS/WSS 终止 TLS。
-- 避免在日志中打印 ticket 或远程连接密码。
-- 对远程连接和代理创建操作保留审计记录。
+- Set `ALLOWED_ORIGINS` to restrict WebSocket origins.
+- Terminate TLS with HTTPS/WSS.
+- Avoid printing tickets or remote-connection passwords in logs.
+- Keep audit records for remote-connection and proxy-creation operations.
 
-## 历史说明
+## Historical Note
 
-早期文档讨论过 URL query token、短期连接 token、Cookie 认证等方案。当前代码采用“短期 ticket + WebSocket 子协议”的组合方式，是本文档应遵循的实现基线。
+Earlier documentation discussed URL query tokens, short-lived connection tokens and Cookie authentication. The current code uses the combination "short-lived ticket + WebSocket subprotocol"; that is the implementation baseline this document should follow.

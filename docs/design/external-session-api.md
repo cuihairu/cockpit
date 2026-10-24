@@ -1,36 +1,33 @@
-# 外部新建远程会话接口契约（memex 接入，2026-10-15）
+# External Remote Session Creation API Contract (memex integration, 2026-10-15)
 
-> 语言：**中文** ｜ [English](./external-session-api.en.md)
 
-> 状态：**契约设计，未实现**（本文件先落档，实现随 memex 对接排期）。
-> 远控三协议链路（RDP/VNC/SSH 走 Guacamole，`telnet` 走
-> agent 通道）已全部落地：`docs/remote-access-integration-design.md` D1-D8。
-> memex 做群内服务器授权（谁、被授权、哪台、什么权限），需要调用本仓真正
-> 发起会话——本契约定义那个入口。
+> Status: **Contract design, not implemented** (this file lands first; implementation follows the memex integration schedule).
+> The three remote-access protocols (RDP/VNC/SSH via Guacamole, `telnet` via the
+> agent channel) have all landed: `docs/remote-access-integration-design.md` D1-D8.
+> memex handles group server authorization (who, authorized by whom, which machine,
+> which permission) and needs to invoke a session actually initiated by this repo —
+> this contract defines that entry point.
 
-## 职责边界（先立后谈）
+## Responsibility boundary (settled before discussion)
 
-| 事项 | 归属 |
+| Item | Owner |
 |------|------|
-| 授权关系存储（谁能用哪台、什么权限） | **memex**（不进本仓，见 E7） |
-| 凭据保管（口令/私钥/TOTP） | **persona**（本仓 vault 经 `docs/guide/persona-vault-mapping.md` 只读消费） |
-| 凭据下发 | **不做**（凭据永不经过 memex，见 E2/E7） |
-| 会话发起、票据、出口策略、录制、审计 | **本仓**（全部复用既有链路，零新增基础设施） |
+| Authorization relationship storage (who can use which machine, with what permission) | **memex** (not in this repo, see E7) |
+| Credential custody (passwords/keys/TOTP) | **persona** (this repo's vault consumes it read-only via `docs/guide/persona-vault-mapping.md`) |
+| Credential delivery | **Not done** (credentials never traverse memex, see E2/E7) |
+| Session initiation, tickets, egress policy, recording, audit | **This repo** (all reuse existing chains, zero new infrastructure) |
 
-## 决策
+## Decisions
 
-### E1 落档位置：独立文件，不并入 remote-access-integration-design.md
+### E1 Placement: a standalone file, not merged into remote-access-integration-design.md
 
-该文件是**已落地实现**的复核记录（D1-D8 均带实测验收），外部接口是
-**未实现的新设计**——两类状态混排会让「以文档为准审码」时无法区分
-幽灵功能与真实现。独立文件 + 状态头（未实现）保持口径干净；实现落地
-后在本文件勾销状态头并回链。
+That file is the **review record of landed implementation** (D1-D8 all carry real acceptance runs), while the external interface is a **new design that is not implemented** — mixing the two states makes it impossible to tell ghost features from real ones when reviewing code against the docs. A standalone file + status header (not implemented) keeps the framing clean; once the implementation lands, strike the status header here and link back.
 
-## 契约
+## Contract
 
-### E2 新建会话：`POST /api/external/remote/sessions`
+### E2 Create session: `POST /api/external/remote/sessions`
 
-**请求体（明确不含任何凭据字段）**：
+**Request body (explicitly contains no credential fields)**:
 
 ```json
 {
@@ -44,15 +41,11 @@
 }
 ```
 
-- `protocol` ∈ `ssh | rdp | vnc | telnet`（与 `handleRemoteSessionCreate` 白名单一致，
-  `internal/server/api_remote.go:654-660`）。
-- **无 `username`/`password`/`private_key`/`domain` 字段**——凭据由
-  `credential_ref` 命名 vault 条目（local provider path 或 persona 条目
-  UUID），会话建立时由服务端注入（E7 边界）。memex 全程接触不到凭据。
-- `requested_by` 是 memex 侧终端用户标识，只进审计归属，不做鉴权主体
-  （鉴权主体是 E3 的 caller token）。
+- `protocol` ∈ `ssh | rdp | vnc | telnet` (identical to the `handleRemoteSessionCreate` whitelist, `internal/server/api_remote.go:654-660`).
+- **No `username`/`password`/`private_key`/`domain` fields** — credentials are named by `credential_ref` pointing at a vault entry (a local provider path or a persona entry UUID) and are injected server-side when the session is established (E7 boundary). memex never touches credentials.
+- `requested_by` is the memex-side end-user identifier, used only for audit attribution and never as the authentication principal (the principal is E3's caller token).
 
-**返回 201**：
+**Returns 201**:
 
 ```json
 {
@@ -69,104 +62,69 @@
 }
 ```
 
-- `ticket` 为既有一次性票据（5 分钟、内存态、用后即焚，
-  `internal/server/ticket.go`；`?ticket=` query 即
-  `handleGuacamoleWebSocket` 现行入参，`internal/server/api_guacamole.go:308`）。
-- `channel` 选择见 E6：`guacamole`（rdp/vnc/ssh）或 `terminal`
-  （telnet 必走；memex 客户端说不了 guacamole 协议时 ssh 也可降级走
-  `terminal`，即 D6 移动端同款链路 `wss://…/api/remote/terminal`，票据经
-  **WebSocket 子协议**携带——`internal/server/api_remote.go:51-54`
-  `protocols[0]` 即 ticketID，与 guacamole 通道的 `?ticket=` query 不同）。
+- `ticket` is the existing one-time ticket (5 minutes, in-memory, burn-after-use, `internal/server/ticket.go`; the `?ticket=` query is the current input to `handleGuacamoleWebSocket`, `internal/server/api_guacamole.go:308`).
+- `channel` selection per E6: `guacamole` (rdp/vnc/ssh) or `terminal` (`telnet` must take this path; when the memex client cannot speak the guacamole protocol, ssh can also downgrade to `terminal`, i.e. the same chain as D6 mobile — `wss://…/api/remote/terminal`, where the ticket is carried over the **WebSocket subprotocol** — `internal/server/api_remote.go:51-54` `protocols[0]` is the ticketID, which differs from the guacamole channel's `?ticket=` query).
 
-**错误**（fail-closed，全部沿用既有语义）：
+**Errors** (fail-closed, all reusing existing semantics):
 
-| 状态 | 场景 |
+| Status | Scenario |
 |------|------|
-| 401 | caller token 缺失/错误 |
-| 400 | 字段校验失败 / 协议不在白名单 |
-| 403 | 目标不在 `remote_control` 白名单或 egress 策略拒绝（`matchRemoteEgress`，`internal/server/api_remote.go:460`） |
-| 404 | agent 离线 / `credential_ref` 无对应条目 / **caller 配置为空（端点整体 404 默认关，E3）** |
-| 503 | guacd 不可达（仅 guacamole 通道） |
+| 401 | caller token missing/wrong |
+| 400 | field validation failed / protocol not in the whitelist |
+| 403 | target not on the `remote_control` whitelist, or the egress policy denies it (`matchRemoteEgress`, `internal/server/api_remote.go:460`) |
+| 404 | agent offline / no entry matching `credential_ref` / **caller config empty (the endpoint 404s by default, E3)** |
+| 503 | guacd unreachable (guacamole channel only) |
 
-### E3 调用方身份：命名服务 token
+### E3 Caller identity: named service tokens
 
-`remote_control` 配置扩一节（`config/cockpit.yaml:94` 起；结构体
-`RemoteControlConfig`，`internal/config/config.go:140-156`）：
+The `remote_control` config gains a section (`config/cockpit.yaml:94` onward; struct `RemoteControlConfig`, `internal/config/config.go:140-156`):
 
 ```yaml
 remote_control:
   external_callers:
     - name: memex
-      token: "${COCKPIT_EXTERNAL_TOKEN_MEMEX}"   # secret 不落 yaml，env 注入
-      allowed_protocols: ["ssh", "rdp"]          # 可选，缺省全协议
-      allowed_agent_ids: ["office-agent"]        # 可选，缺省不限
+      token: "${COCKPIT_EXTERNAL_TOKEN_MEMEX}"   # secret not in yaml, injected via env
+      allowed_protocols: ["ssh", "rdp"]          # optional, default all protocols
+      allowed_agent_ids: ["office-agent"]        # optional, default unrestricted
 ```
 
-- 鉴权头沿用 webhook 先例：`X-Cockpit-Token`（常量时间比对；先例
-  `internal/config/config.go:32-35`、`stacks.webhook_token`，决策
-  D-2026-10-12-6）。**`external_callers` 未配置 = 端点 404，默认关**——
-  与 webhook 同一红线。
-- 人工 web 会话继续走 JWT；服务间调用不走用户 JWT（不冒充人、不共享
-  会话态）。caller `name` + `requested_by` 共同构成审计归属。
-- caller 级 `allowed_protocols`/`allowed_agent_ids` 是 memex 授权关系的
-  **粗粒度护栏**，不替代 memex 的细粒度授权（E7）。
+- The auth header follows the webhook precedent: `X-Cockpit-Token` (constant-time comparison; precedent `internal/config/config.go:32-35`, `stacks.webhook_token`, decision D-2026-10-12-6). **`external_callers` unconfigured = endpoint 404, off by default** — the same red line as webhooks.
+- Human web sessions continue to use JWT; service-to-service calls do not use a user JWT (no impersonating a person, no sharing session state). The caller's `name` plus `requested_by` together form the audit attribution.
+- Caller-level `allowed_protocols`/`allowed_agent_ids` are **coarse guardrails** over memex's authorization relationship; they do not replace memex's fine-grained authorization (E7).
 
-### E4 生命周期：查询与终止
+### E4 Lifecycle: query and terminate
 
-- `GET /api/external/remote/sessions` —— 只返回**本 caller** 发起的会话
-  （台账按 caller 名过滤；台账底座 `RemoteSessionManager`，
-  `internal/server/api_remote.go:596-604` 为全量视图，外部入口加过滤）。
-- `GET /api/external/remote/sessions/{id}` —— 单会话状态（pending/
-  connected/closed/failed；台账登记口径见 续批九 D-2026-10-12-4）。
-- `DELETE /api/external/remote/sessions/{id}` —— 终止：命中活会话先
-  `terminateLiveSession`（`internal/server/api_remote.go:675`）后收口台账，
-  同现有人工 DELETE 语义。**只能删自己发起的**，他方会话 404（不暴露存在性）。
-- 票据 5 分钟一次性不变；会话不因 memex 断连而终止（连接归 memex 客户端，
-  会话归台账）。
+- `GET /api/external/remote/sessions` — returns only sessions started by **this caller** (the ledger is filtered by caller name; the ledger base is `RemoteSessionManager`, `internal/server/api_remote.go:596-604` is the full view, the external entry adds filtering).
+- `GET /api/external/remote/sessions/{id}` — single session status (pending/connected/closed/failed; ledger registration framing see batch nine D-2026-10-12-4).
+- `DELETE /api/external/remote/sessions/{id}` — terminate: on hitting a live session, call `terminateLiveSession` (`internal/server/api_remote.go:675`) first and then close out the ledger, same as the existing manual DELETE semantics. **It can only delete sessions it started itself**; someone else's session returns 404 (existence is not disclosed).
+- The 5-minute one-time ticket is unchanged; a session is not terminated because memex disconnects (the connection belongs to the memex client, the session belongs to the ledger).
 
-### E5 审计与录制覆盖结论
+### E5 Conclusion on audit and recording coverage
 
-外部调用方走既有链路，**覆盖成立，零新增审计机制**；归属字段是唯一新增：
+External callers reuse the existing chain, so **coverage holds with zero new audit mechanisms**; the attribution field is the only addition:
 
-| 机制 | 覆盖 | 证据 |
+| Mechanism | Coverage | Evidence |
 |------|------|------|
-| 审计 | `auditRemoteStart/End/Failure` 全协议同款；外部会话 `Username` 记 `memex:<requested_by>`（caller name 前缀），凭据不进详情 | `docs/remote-access-integration-design.md` D5；`api_remote.go:423` 起各失败路径 |
-| 出口策略 | `matchRemoteEgress` agent_id 锚定，外部调用与人操同一套（403 fail-closed） | `api_remote.go:460-461` |
-| 录制 | guacamole 通道 → guacd `.guac`（`collectGuacRecording`）；terminal 通道 → asciinema 字符流 | `docs/guide/recording-design.md` D1；`remote-access-integration-design.md` D5 |
-| 会话台账 | Register/UpdateStatus/closed 全链路收口（续批九） | `internal/server/api_remote.go:642` 起既有 POST 创建 |
+| Audit | `auditRemoteStart/End/Failure` identical across protocols; external sessions record `Username` as `memex:<requested_by>` (caller name prefix), credentials stay out of the details | `docs/remote-access-integration-design.md` D5; each failure path from `api_remote.go:423` |
+| Egress policy | `matchRemoteEgress` anchored on agent_id; external calls and human operations share one policy (403 fail-closed) | `api_remote.go:460-461` |
+| Recording | guacamole channel → guacd `.guac` (`collectGuacRecording`); terminal channel → asciinema character stream | `docs/guide/recording-design.md` D1; `remote-access-integration-design.md` D5 |
+| Session ledger | Register/UpdateStatus/closed close out over the full chain (batch nine) | the existing POST creation from `internal/server/api_remote.go:642` |
 
-缺口（实现时补，均已含在契约内）：①审计归属前缀 `memex:` 需在会话创建时
-写入台账（`RemoteSessionRequest` 加 `initiator` 字段）；②caller 级协议/
-agent 护栏在 E2 校验链中先于 egress 执行。
+Gaps (to be filled at implementation time, already covered by this contract): ① the `memex:` audit attribution prefix must be written into the ledger at session creation (`RemoteSessionRequest` gains an `initiator` field); ② caller-level protocol/agent guardrails must run before egress in the E2 validation chain.
 
-### E6 协议通道选择（含移动端链路差异）
+### E6 Protocol channel selection (including mobile-chain differences)
 
-- `rdp/vnc` → `channel: guacamole`（像素流，memex 客户端需 guacamole 协议
-  或直接嵌 web 前端）。
-- `ssh` → `channel: guacamole`（默认，统一录制栈，D1/D3）；请求带
-  `"channel_override": "terminal"` 时走 agent 通道字符流——即 D6 移动端
-  同款（`/api/remote/terminal` + xterm 流）。Flutter 端无 guacamole 客户端
-  是 D6 维持独立链路的原因，memex 客户端同理适用。
-- `telnet` → 恒 `terminal`（D1：telnet 不进 guacd）。
-- 契约不承载终端内容：memex 拿 `ticket` + `ws_url` 后由其客户端直连 WS，
-  本仓不向 memex 转发/复用数据流。
+- `rdp/vnc` → `channel: guacamole` (pixel stream; the memex client needs the guacamole protocol or embeds the web frontend directly).
+- `ssh` → `channel: guacamole` (default, unified recording stack, D1/D3); when the request carries `"channel_override": "terminal"` it goes through the agent channel character stream — identical to D6 mobile (`/api/remote/terminal` + xterm stream). The absence of a guacamole client on the Flutter side is why D6 keeps a separate chain, and the same reasoning applies to the memex client.
+- `telnet` → always `terminal` (D1: telnet does not enter guacd).
+- The contract does not carry terminal content: once memex has the `ticket` + `ws_url` its client connects to the WS directly, and this repo neither forwards nor multiplexes the data stream to memex.
 
-### E7 不做的边界
+### E7 Boundaries of what is not done
 
-1. **不做凭据下发**：契约任何字段不接收、不返回凭据；`credential_ref`
-   只命名条目，运行时由服务端注入票据（`use_saved` 同语义，
-   `internal/server/api_remote.go:484` 起）。memex 侧永远拿不到口令/私钥。
-2. **不做授权关系存储**：谁能用哪台、什么权限是 memex + persona 的职责；
-   本仓只执行自己的两道护栏（`remote_control` 目标白名单/egress + E3
-   caller 护栏），不维护 memex 的授权矩阵。
-3. 不做会话代理/多路复用、不做新协议、不做 memex 侧 UI 嵌入规范
-   （票据即嵌入门票，5 分钟一次性是安全边界）。
+1. **No credential delivery**: no field of this contract accepts or returns credentials; `credential_ref` only names an entry, and at runtime the server injects the ticket (`use_saved` semantics, `internal/server/api_remote.go:484` onward). The memex side never obtains a password/key.
+2. **No authorization relationship storage**: who can use which machine with what permission is memex + persona's job; this repo only enforces its own two guardrails (the `remote_control` target whitelist/egress + E3 caller guardrails) and does not maintain memex's authorization matrix.
+3. No session proxying/multiplexing, no new protocols, and no memex-side UI embedding specification (the ticket is the embedding gate, and its 5-minute one-time nature is the security boundary).
 
-## 实现锚点（供后续排期，全部为既有件）
+## Implementation anchors (for later scheduling, all existing components)
 
-`handleTicketCreate` 请求形状（`api_remote.go:399-411`）、egress 校验与
-vault 注入顺序（`:460-500`：egress 先行、`use_saved` 后填）、会话台账
-（`:642-669`）、票据（`internal/server/ticket.go`）、guacamole WS
-（`api_guacamole.go:306-308`）、terminal WS（`api_remote.go:387`）。新代码
-预期只在：外部路由 + caller 鉴权中间件 + `credential_ref` 解析 +
-台账 `initiator` 字段。
+The `handleTicketCreate` request shape (`api_remote.go:399-411`), the egress check and vault injection order (`:460-500`: egress first, `use_saved` filled after), the session ledger (`:642-669`), the ticket (`internal/server/ticket.go`), the guacamole WS (`api_guacamole.go:306-308`), and the terminal WS (`api_remote.go:387`). New code is expected only in: the external route + caller auth middleware + `credential_ref` resolution + the ledger `initiator` field.

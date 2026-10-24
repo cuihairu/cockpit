@@ -1,157 +1,157 @@
 ---
-title: agent-core 架构重构——core/平台层/插件三层与构建矩阵（立项待批）
+title: agent-core architecture refactor — the core/platform/plugin three layers and the build matrix (proposal pending approval)
 ---
 
-# agent-core 架构重构简档
+# agent-core Architecture Refactor Brief
 
-> 语言：**中文** ｜ [English](./agent-core-architecture.en.md)
 
-## 状态
+## Status
 
-- 状态: **P1–P5 已落地（core/ 十包全量存在并接线；2026-10-15 复核）。** 实现进度以 §7 批次表标注为准。
-- 立项口径（用户令，2026-10-09）：
-  1. **核心抽取**：通用能力收进 core（注册/心跳/日志指标/配置热更/崩溃留位/重试/上报/执行审计 execlog/探活 system 角色），core 守住百行级文件、能力可裁剪，业务只写插件；
-  2. **平台差异分层**：不同平台特性（linux/windows/macos 各自的进程监管、路径、服务集成）放对应系统的独立目录（core / 平台适配层 / 业务插件 三层）；
-  3. **目标**：同一份 core+插件编译出针对性的平台特化 agent 产物（CI 矩阵按平台构建）。
-- 节奏对标：croupier `docs/design/agent-core-design.md`（core=零件箱不是框架、能力可裁、百行纪律、批次抽取、回退策略同款）。
-- 底稿（现状权威）：[架构与边界](../guide/architecture.md) · [Windows Agent 打包设计](../guide/windows-agent-design.md)（SCM 服务态已定稿）· [OpenWrt Agent 打包设计](../guide/openwrt-agent-design.md)（ipk/procd 已落地）· [服务健康探针与自愈设计](../guide/service-health-design.md)（healthprobe 的现成种子）。
+- Status: **P1–P5 landed (all ten `core/` packages exist and are wired up; re-verified 2026-10-15).** Implementation progress is authoritative per the annotations in the §7 batch table.
+- Proposal framing (user directive, 2026-10-09):
+  1. **Core extraction**: move generic capabilities into core (register/heartbeat/logging+metrics/config hot-reload/crash slot/retry/reporting/execution audit execlog/liveness in the system role). Core holds to hundred-line files, capabilities are prunable, and business code only writes plugins;
+  2. **Platform differences layered**: platform-specific features (process supervision, paths, service integration on linux/windows/macos) go into a dedicated directory for each OS (the three layers core / platform adaptation / business plugins);
+  3. **Goal**: the same core+plugins compile into platform-specialised agent artifacts (the CI matrix builds per platform).
+- Rhythm benchmark: croupier `docs/design/agent-core-design.md` (core is a parts bin not a framework, prunable capabilities, the hundred-line discipline, batched extraction, same rollback strategy).
+- Source material (authoritative on current state): [Architecture and boundaries](/guide/architecture) · [Windows Agent packaging design](/guide/windows-agent-design) (SCM service state finalized) · [OpenWrt Agent packaging design](/guide/openwrt-agent-design) (ipk/procd landed) · [Service health probe and self-healing design](/guide/service-health-design) (the ready-made seed of healthprobe).
 
-## 1. 定位：三层架构
+## 1. Positioning: the three-layer architecture
 
-**core 不是框架，是零件箱。** 不做 god-object 装配（注册/心跳/上报/执行留痕/指标等通用环已按此拆出，`internal/agent/agent.go` 现 696 行），每个能力一个独立小包，main 按需 import——没 import 的能力不参与编译，天然「按需可裁」。
-
-```text
-core/                 ① 通用能力层：百行级文件、零业务、零平台分支
-core/platform/        ② 平台适配层：唯一允许 GOOS 分支的地带（进程监管/路径/服务集成）
-internal/agent/       ③ 插件宿主 + 业务插件：Provider 注册表、能力检测、rpc Providers
-```
-
-依赖方向（单向，禁止倒灌）：
+**Core is not a framework, it is a parts bin.** No god-object assembly (the generic loops of register/heartbeat/report/execution-trail/metrics have already been split out this way — `internal/agent/agent.go` is now 696 lines); each capability is an independent small package that main imports as needed — capabilities that aren't imported do not participate in the build, which makes them "prunable on demand" for free.
 
 ```text
-cmd/cockpit-agent → internal/agent(插件) → core/* → internal/protocol
-                                    core/platform/* ← core 其余包不得 import
+core/                 ① Generic capability layer: hundred-line files, zero business logic, zero platform branches
+core/platform/        ② Platform adaptation layer: the only zone allowed to hold GOOS branches (process supervision/paths/service integration)
+internal/agent/       ③ Plugin host + business plugins: Provider registry, capability detection, rpc Providers
 ```
 
-三条不变量：
+Dependency direction (one-way, no backflow):
 
-1. **协议一份**：Server↔Agent 的 wire 类型唯一来源仍是 `internal/protocol`。core 各包允许 import 它——这是「core 不 import internal/」原则的**唯一白名单例外**（协议是双方共有物，不是 internal 私产）；若未来 core 需要彻底独立，届时把 protocol 升 top-level 另批执行。
-2. **平台分支一处**：GOOS 编译标签与运行时平台判定只准出现在 `core/platform/`。存量散落的平台文件（`machineid_*`、`rpc/service_windows_scm.go`、`rpc/job_provider_unix.go` 等）在 P4 批次收编，收编前按 §8 白名单登记，新增平台代码一律直接进平台层。
-3. **库选型不翻案**：gopsutil v3（不升 v4，随批次再议）、gorilla/websocket、protocol.Codec 序列化——core 只收拢用法不换库。
+```text
+cmd/cockpit-agent → internal/agent(plugins) → core/* → internal/protocol
+                                    core/platform/* ← no other core package may import it
+```
 
-## 2. 能力清单表（每项：已有/部分/新建/来源现状）
+Three invariants:
 
-| #  | 能力                     | 状态         | 来源与现状                                                                                                                     | core 包（拟）        |
+1. **One protocol**: the single source of truth for the Server↔Agent wire types remains `internal/protocol`. Core packages may import it — this is the **only whitelisted exception** to the "core does not import internal/" principle (the protocol is shared by both sides, not an internal private good); if core ever needs to be fully independent, protocol is promoted to top-level in a separate batch.
+2. **Platform branches in one place**: GOOS build tags and runtime platform detection may only appear in `core/platform/`. The scattered legacy platform files (`machineid_*`, `rpc/service_windows_scm.go`, `rpc/job_provider_unix.go`, etc.) are collected in batch P4; before collection they are registered in the §8 whitelist, and all new platform code goes straight into the platform layer.
+3. **No library re-litigation**: gopsutil v3 (not upgraded to v4, revisit per batch), gorilla/websocket, protocol.Codec serialization — core only consolidates usage, it does not swap libraries.
+
+## 2. Capability list table (each: existing / partial / new / current source)
+
+| #  | Capability                     | Status         | Source and current state                                                                                                                     | core package (planned)        |
 | -- | ------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | -------------------- |
-| 1  | 注册上线                 | **已有**     | agent.go register 首包链 + secret 校验；ID 由 machine-id 派生（`machineid_{linux,darwin,windows,other}.go`）                    | `core/register`      |
-| 2  | 心跳与存活               | **已有**     | 30s 心跳 + startedAt 运行时长 + 开放服务面捎带（servicesOnce 后台重探测）                                                       | `core/heartbeat`     |
-| 3  | 重试退避                 | **已有，手写** | agent.go 重连计时器/防并发重连；rpc 各 provider 内散落重试写法——上收为统一旋钮杜绝第四套                                        | `core/backoff`       |
-| 4  | 结构化日志               | **新建（选型）** | 现状 stdlib `log.Printf`；logx 以 **slog**（标准库，零三方依赖）落底，存量不强迁——新代码用 logx，随批次渐进                     | `core/logx`          |
-| 5  | 指标采集                 | **已有**     | collector.go：gopsutil v3 CPU/内存/磁盘/负载/host，155 行已是零件形态，原地归位                                                  | `core/metrics`       |
-| 6  | 统一上行                 | **已有**     | protocol.Codec + outbound channel；指标/服务面/注册/心跳全部走它——上收为编解码与通道薄封装                                      | `core/report`        |
-| 7  | 配置拉取与热更           | **新建**     | 现状仅启动 flags（docs/agent-config.md），无拉取热更；泛化「版本号轮询→拉取→热生效」通用件（server 侧 inventory.watch 同口径先例） | `core/configsync`    |
-| 8  | 执行审计（execlog）      | **已有**     | `core/execlog`：环 + 攒批上行（`execRecorder` + 30s 攒批），router Handle 单点埋点；协议 `exec_log` 消息类型已注册（P5 落地）                     | `core/execlog`       |
-| 9  | 探活（system 角色）      | **已有（P6 落地）** | `core/healthprobe`：Checker（HTTP/TCP）+ Guard 三语义（Liveness/Readiness/Heartbeat）防抖状态机 + 故障窗口时间线；service_health 策略层已切换（heal→liveness、纯告警→readiness，事件走迁移边沿，窗口随状态上行）；Heartbeat 语义与「探针记录按受监控 system 建模」留待 system 角色批 | `core/healthprobe`   |
-| 10 | 崩溃采集                 | **留位**     | 仅包骨架+接口占位不实现（分级方案届时按调研另批，对标 croupier crash-capture-survey 节奏）                                       | `core/crash`         |
-| 11 | 进程监管/服务集成/路径    | **已有，平台分散** | Windows SCM（service_windows.go 401 行 + svcargs）、darwin launchd（183 行）、openwrt procd（ipk/init.d）、linux systemd（install.sh） | `core/platform/<goos>`（§3） |
+| 1  | Registration and going live                 | **Existing**     | agent.go register first-packet chain + secret validation; the ID derives from the machine id (`machineid_{linux,darwin,windows,other}.go`)                    | `core/register`      |
+| 2  | Heartbeat and liveness               | **Existing**     | 30s heartbeat + startedAt uptime + piggybacking on the open-services surface (servicesOnce background re-probe)                                                       | `core/heartbeat`     |
+| 3  | Retry backoff                 | **Existing, hand-written** | the agent.go reconnect timer / concurrent-reconnect guard; scattered retry patterns inside the rpc providers — hoisted into one unified knob to prevent a fourth set                                        | `core/backoff`       |
+| 4  | Structured logging               | **New (selection)** | currently stdlib `log.Printf`; logx settles on **slog** (stdlib, zero third-party deps), legacy call sites are not force-migrated — new code uses logx, migrating progressively per batch                     | `core/logx`          |
+| 5  | Metrics collection                 | **Existing**     | collector.go: gopsutil v3 CPU/memory/disk/load/host, already 155 lines in parts shape, relocates in place                                                  | `core/metrics`       |
+| 6  | Unified uplink                 | **Existing**     | protocol.Codec + outbound channel; metrics/services/registration/heartbeat all go through it — hoisted into a thin codec+channel wrapper                                      | `core/report`        |
+| 7  | Config fetch and hot-reload           | **New**     | currently only startup flags (docs/agent-config.md), no fetch/hot-reload; generalise "version poll → fetch → hot-apply" (same framing as the server-side inventory.watch precedent) | `core/configsync`    |
+| 8  | Execution audit (execlog)      | **Existing**     | `core/execlog`: ring + batched uplink (`execRecorder` + 30s batching), a single instrumentation point in the router handler; protocol `exec_log` message type registered (P5 landed)                     | `core/execlog`       |
+| 9  | Liveness probe (system role)      | **Existing (landed in P6)** | `core/healthprobe`: Checker (HTTP/TCP) + Guard three-semantics (Liveness/Readiness/Heartbeat) debounced state machine + failure-window timeline; the service_health policy layer already switched (heal→liveness, alert-only→readiness, events on transition edges, windows uplink with state); Heartbeat semantics and "probe records modelled by the monitored system" wait for the system-role batch | `core/healthprobe`   |
+| 10 | Crash collection                 | **Slot reserved**     | package skeleton + interface placeholders only, no implementation (the tiered scheme will be decided per research, following the croupier crash-capture-survey rhythm)                                       | `core/crash`         |
+| 11 | Process supervision/service integration/paths    | **Existing, scattered per platform** | Windows SCM (service_windows.go 401 lines + svcargs), darwin launchd (183 lines), openwrt procd (ipk/init.d), linux systemd (install.sh) | `core/platform/<goos>` (§3) |
 
-> 上收边界（可裁的第一次应用）：`internal/agent/rpc/` 的 20+ Provider **全部留在插件面不进 core**——它们是 cockpit 的业务面；core 系未来任何小 agent 天然没有这些攻击面与体积。
+> The hoisting boundary (the first application of prunability): the 20+ Providers in `internal/agent/rpc/` **all stay on the plugin surface and do not enter core** — they are cockpit's business surface; any future small core-based agent naturally has neither these attack surfaces nor this size.
 
-## 3. 平台适配层（core/platform/）
+## 3. Platform adaptation layer (core/platform/)
 
-平台层对外只暴露一个契约，插件与 main 只认接口不认平台：
+The platform layer exposes exactly one contract; plugins and main only know the interface, never the platform:
 
 ```go
-// core/platform/host.go（契约示意，百行内）
+// core/platform/host.go (contract sketch, under a hundred lines)
 type Host interface {
-    Paths() Paths          // 配置/日志/数据目录（linux /etc/cockpit,~/.config；windows ProgramData；darwin ~/Library）
-    MachineID() string     // 机器标识派生（收编 machineid_*.go）
-    Signals() []os.Signal  // 信号/退出码约定（对齐 windows-agent-design 已定稿的进程内看护语义）
-    Services() ServiceManager // 服务管理面挂约（P7b）：windows 返回 SCM 实现；
-                              // darwin/linux 恒 nil（launchd/systemd 走业务
-                              // 插件通道，非平台事实），调用方回落自有通道
+    Paths() Paths          // config/log/data dirs (linux /etc/cockpit,~/.config; windows ProgramData; darwin ~/Library)
+    MachineID() string     // machine identifier derivation (collects machineid_*.go)
+    Signals() []os.Signal  // signal/exit-code contract (aligns with the finalized in-process supervision semantics in windows-agent-design)
+    Services() ServiceManager // service management surface hook (P7b): windows returns the SCM implementation;
+                              // darwin/linux always return nil (launchd/systemd go through the
+                              // business plugin channel, not a platform fact), so callers
+                              // fall back to their own channel
 }
 ```
 
-| 平台     | 进程监管                     | 服务集成                       | 现状收编来源                          |
+| Platform     | Process supervision                     | Service integration                       | Current collection source                          |
 | -------- | ---------------------------- | ------------------------------ | ------------------------------------- |
-| linux    | systemd 托管（install.sh 装unit）+ 信号优雅退出 | 安装脚本；行为不变             | install.sh + agent.go 信号路径        |
-| windows  | SCM 服务态 + **进程内看护**（连接失败 15s 重试不退进程，SCM failure actions 仅兜底硬崩） | agent 子命令 service install/uninstall/start/stop/status/run + Inno Setup 安装器 + rsrc 图标 | cmd/cockpit-agent/service_windows.go、svcargs.go |
-| darwin   | launchd plist                | 服务动词（launchd 实现 + stub） | rpc/service_launchd_darwin.go         |
-| openwrt  | procd（init.d 脚本）         | ipk 安装包（opkg 即装即用）     | openwrt-agent-design.md 既有产物      |
+| linux    | systemd supervision (install.sh installs the unit) + signal-based graceful exit | install script; behaviour unchanged             | install.sh + the agent.go signal path        |
+| windows  | SCM service state + **in-process supervision** (retry connection failure for 15s without exiting, SCM failure actions only as the backstop for hard crashes) | agent subcommands service install/uninstall/start/stop/status/run + Inno Setup installer + rsrc icon | cmd/cockpit-agent/service_windows.go, svcargs.go |
+| darwin   | launchd plist                | service verbs (launchd implementation + stub) | rpc/service_launchd_darwin.go         |
+| openwrt  | procd (init.d script)         | ipk package (install-and-run with opkg)     | openwrt-agent-design.md existing artifacts      |
 
-**构建机制**：`core/platform/{linux,windows,darwin}/` 目录内文件全量带 `//go:build <goos>` 标签；`core/platform/select_linux.go`（三行装配：`import _` 对应平台包并注册实现）同样按 GOOS 标签三选一。GOOS 决定装哪个实现，编译期完成、运行时零分支。
+**Build mechanism**: every file under `core/platform/{linux,windows,darwin}/` carries a `//go:build <goos>` tag; `core/platform/select_linux.go` (a three-line assembly: `import _` the matching platform package and register the implementation) is likewise one-of-three by GOOS tag. GOOS decides which implementation is installed, resolved at compile time with zero runtime branches.
 
-**退出语义契约**：任一平台的 agent 出厂即「合格被监管对象」——SIGTERM/SCM Stop/lanchd TERM 之一触发优雅退出（刷缓冲、断连接、退出码 0=主动停）；崩溃/硬杀退出码非 0，交给平台监管方（systemd Restart / SCM failure actions / launchd KeepAlive / procd respawn）按各自配置拉起。平台层保证这套语义在各平台一致，业务插件无感知。
+**Exit semantics contract**: on any platform an agent is a "qualified supervised subject" out of the factory — any one of SIGTERM / SCM Stop / launchd TERM triggers a graceful exit (flush buffers, drop connections, exit code 0 = deliberately stopped); a crash or hard kill exits non-zero and is handed to the platform supervisor (systemd Restart / SCM failure actions / launchd KeepAlive / procd respawn) to relaunch per its own configuration. The platform layer guarantees this semantics is consistent across platforms, and business plugins are unaware of it.
 
-## 4. 目录树（拟）
+## 4. Directory tree (planned)
 
 ```text
-core/                        # ① 通用能力层（同仓同 module，包级裁剪）
-  register/                  #   注册上线（machine-id 派生在平台层，这里组装首包）
-  heartbeat/                 #   心跳与存活（周期/捎带快照/重连挂起）
-  backoff/                   #   统一退避旋钮（薄封装，~60 行）
-  logx/                      #   slog 装配（标准库，零三方依赖）
-  metrics/                   #   gopsutil v3 采集器（可独立运行）
-  report/                    #   统一上行：Codec 封装 + outbound 通道 + 捎带
-  configsync/                #   版本轮询拉取 + 热生效
-  execlog/                   #   统一执行审计（本地留痕 + 上行）
-  healthprobe/               #   Liveness/Readiness/Heartbeat 三语义探针 + 故障窗口
-  crash/                     #   崩溃采集留位（骨架+接口，不实现）
-  platform/                  # ② 平台适配层（唯一 GOOS 分支地带）
-    host.go                  #   Host 契约
+core/                        # ① Generic capability layer (same repo, same module, pruned at package granularity)
+  register/                  #   Registration and going live (machine-id derivation lives in the platform layer, assembled here)
+  heartbeat/                 #   Heartbeat and liveness (period/piggyback snapshot/reconnect suspension)
+  backoff/                   #   Unified backoff knob (thin wrapper, ~60 lines)
+  logx/                      #   slog assembly (stdlib, zero third-party deps)
+  metrics/                   #   gopsutil v3 collector (can run standalone)
+  report/                    #   Unified uplink: Codec wrapper + outbound channel + piggybacking
+  configsync/                #   Version poll fetch + hot-apply
+  execlog/                   #   Unified execution audit (local trail + uplink)
+  healthprobe/               #   Liveness/Readiness/Heartbeat three-semantics probe + failure windows
+  crash/                     #   Crash collection slot (skeleton + interface, not implemented)
+  platform/                  # ② Platform adaptation layer (the only GOOS branch zone)
+    host.go                  #   Host contract
     select_linux.go / select_windows.go / select_darwin.go
-    linux/                   #   systemd/路径/信号（~/.ssh 默认等）
-    windows/                 #   SCM 全链/svcargs/ProgramData 路径
-    darwin/                  #   launchd plist/路径
-internal/agent/              # ③ 插件宿主 + 业务插件（rpc Providers 原地，Provider 注册表/能力检测不动）
-internal/protocol/           # 协议一份（core 唯一可 import 的 internal 包）
-cmd/cockpit-agent/           # main 薄壳：core 零件装配 + 平台层接线（116 行现状，更薄）
+    linux/                   #   systemd/paths/signals (~/.ssh defaults, etc.)
+    windows/                 #   Full SCM chain/svcargs/ProgramData paths
+    darwin/                  #   launchd plist/paths
+internal/agent/              # ③ Plugin host + business plugins (rpc Providers stay in place, Provider registry/capability detection unchanged)
+internal/protocol/           #   One protocol (the only internal package core may import)
+cmd/cockpit-agent/           #   main thin shell: core part assembly + platform layer wiring (116 lines today, thinner after)
 ```
 
-- 不建独立 Go module（单仓单人节奏下独立 module 是纯摩擦，同 croupier 判断）。
-- core 各包互不横向依赖（`backoff`/`logx` 这类叶包除外）；`platform/` 只被 main 与 register/heartbeat 等需要平台事实的包 import，方向恒为 `包 → platform`，platform 不 import 任何 core 兄弟包。
-- 存量平台文件收编映射（P4 批执行）：`machineid_*` → `platform/<goos>/machineid.go`；`localip.go` → `core/platform` 无关、留 `core/netutil` 或原地（P7a 已定：**原地保留**——纯网络事实零 GOOS 分支、仅注册路径消费，非平台事实不进平台层，通用度亦不足以立 core/netutil）；`rpc/service_windows_scm.go` → `platform/windows/`；`rpc/service_launchd_darwin.go` → `platform/darwin/`；`rpc/job_provider_{unix,windows}.go`、`file_stat_{unix,windows}.go`、`backup_hook_{unix,other}.go` → 就地保留为插件内平台文件并在 §8 白名单登记，P4 后新增一律进平台层。
+- No separate Go module (in a single-repo single-maintainer rhythm a separate module is pure friction, same judgement as croupier).
+- Core packages never depend on each other laterally (except leaf packages like `backoff`/`logx`); `platform/` is only imported by main and by packages that need platform facts such as register/heartbeat, and the direction is always `package → platform` — platform imports no core sibling package.
+- Mapping for collecting legacy platform files (executed in batch P4): `machineid_*` → `platform/<goos>/machineid.go`; `localip.go` → unrelated to `core/platform`, stays in `core/netutil` or in place (P7a settled: **keep in place** — pure network facts with zero GOOS branches, consumed only on the registration path, not a platform fact, and not general enough to justify a core/netutil); `rpc/service_windows_scm.go` → `platform/windows/`; `rpc/service_launchd_darwin.go` → `platform/darwin/`; `rpc/job_provider_{unix,windows}.go`, `file_stat_{unix,windows}.go`, `backup_hook_{unix,other}.go` → stay in place as in-plugin platform files and are registered in the §8 whitelist; after P4 everything new goes into the platform layer.
 
-## 5. 构建矩阵（平台特化产物）
+## 5. Build matrix (platform-specialised artifacts)
 
-现状已成立的部分不翻案：nightly `build-agent` 7 目标（linux amd64/arm64/arm、windows amd64/arm64、darwin amd64/arm64）+ `build-openwrt` 5 架 ipk（mipsel/mips/aarch64_generic/arm_cortex-a7_neon-vfpv4/x86_64）+ Windows setup.exe（Inno Setup 走查 job）。本次把「矩阵」从打包层升格为**架构承诺**：
+Parts already in place are not re-litigated: the nightly `build-agent` 7 targets (linux amd64/arm64/arm, windows amd64/arm64, darwin amd64/arm64) + `build-openwrt` 5 ipk architectures (mipsel/mips/aarch64_generic/arm_cortex-a7_neon-vfpv4/x86_64) + Windows setup.exe (the Inno Setup inspection job). This time the "matrix" is promoted from the packaging layer to an **architectural promise**:
 
-| 维度       | 取值                                                                 | 机制                                   |
+| Dimension       | Values                                                                 | Mechanism                                   |
 | ---------- | -------------------------------------------------------------------- | -------------------------------------- |
-| 目标平台   | linux amd64/arm64/arm · windows amd64/arm64 · darwin amd64/arm64 · openwrt mips/mipsle/arm64 | 既有 nightly matrix 收编为准           |
-| 平台层     | 随 GOOS 编译期自动选装（§3 select_*.go）                              | 编译标签，矩阵里零配置                 |
-| 插件面     | 运行时按 capability 检测裁剪（现状不变：docker/pve/openwrt/nginx…）   | detector + Provider 注册表             |
-| 编译期裁剪 | **留位不立项**：build tags 预置插件 profile（如 openwrt 极简面）      | 出现真实体积需求再批                   |
-| 打包形态   | tar.gz（linux/darwin）· zip（windows）· setup.exe（windows）· ipk（openwrt） | 既有打包 job 不动                      |
-| 验证       | 每目标构建绿 + Windows installer 走查 job + 探针真机回归              | 既有 CI + scripts/acceptance/          |
+| Target platform   | linux amd64/arm64/arm · windows amd64/arm64 · darwin amd64/arm64 · openwrt mips/mipsle/arm64 | the existing nightly matrix is the reference           |
+| Platform layer     | selected and installed automatically at compile time by GOOS (§3 select_*.go)                              | build tags, zero configuration in the matrix                 |
+| Plugin surface     | pruned at runtime by capability detection (unchanged today: docker/pve/openwrt/nginx…)   | detector + Provider registry             |
+| Compile-time pruning | **slot reserved, not proposed**: build tags predefine plugin profiles (e.g. an openwrt minimal surface)      | raised as a separate batch when a real size need appears                   |
+| Packaging form   | tar.gz (linux/darwin) · zip (windows) · setup.exe (windows) · ipk (openwrt) | existing packaging jobs untouched                      |
+| Verification       | green build per target + Windows installer inspection job + probe real-machine regression              | existing CI + scripts/acceptance/          |
 
-一句话：**同一份 core + 平台层 + 插件，矩阵按 GOOS 特化出 7+5 个产物**；平台差异全部消化在编译期平台层与打包形态，矩阵条目本身不携带平台 if 分支。
+In one sentence: **the same core + platform layer + plugins, with the matrix specialising into 7+5 artifacts by GOOS**; all platform differences are absorbed into the compile-time platform layer and the packaging form, and the matrix entries themselves carry no platform if branches.
 
-## 6. 验证口径（每批通用）
+## 6. Verification framing (shared by every batch)
 
-- **行为零变化**是硬门槛：抽取=原地切换 import，现有 `go test ./...` 全绿 + coverage 门禁（tool/coverage_check.sh）+ 真机探针回归（scripts/acceptance/ 各套）不红。
-- 平台批次（P4）加一条：Windows installer job 走查 + openwrt ipk 可安装 + darwin launchd 加载（nightly 既有走查面）。
-- web 面与本重构无交集，web 门禁不因本重构触发。
+- **Zero behaviour change** is the hard gate: extraction = switching imports in place, the existing `go test ./...` stays green + the coverage gate (tool/coverage_check.sh) + real-machine probe regression (the scripts/acceptance/ suites) stay unred.
+- The platform batch (P4) adds one line: the Windows installer job inspection + openwrt ipk installs + darwin launchd loads (all already covered by the nightly inspection surface).
+- The web surface has no intersection with this refactor, so the web gate is not triggered by it.
 
-## 7. 抽取批次（每批独立提交，CI 绿进下批）
+## 7. Extraction batches (each an independent commit, CI green before the next)
 
-| 批  | 内容                                                                                                                                 | 风险 | 测试策略                                                       | 状态 |
+| Batch  | Content                                                                                                                                 | Risk | Test strategy                                                       | Status |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------ | ---- | -------------------------------------------------------------- | ---- |
-| P1  | core/ 骨架 + `backoff`/`logx` 薄壳上收（agent.go 重连退避原地切 import，行为零变化）                                                  | 低   | 现有用例随迁 + 退避时序正反用例（注入点惯例不变）               | ✅ 已落地 |
-| P2  | `register`+`heartbeat`+`report` 上收——**agent.go 778 行拆环**：连接/重连/注册/心跳各自归位，agent.go 降为装配壳                        | 中   | agent_ws/agent_handler 既有用例随迁；注册-心跳-重连集成用例     | ✅ 已落地 |
-| P3  | `metrics`+`execlog`+`healthprobe`：collector 归位；执行审计落地（本地留痕+上行）；service_health 策略层切换到公共探针（三语义+故障窗口） | 中   | 采集器用例随迁；execlog 先落痕后上行的顺序用例；探针窗口开合/恢复断言 | ✅ 已落地 |
-| P4  | `platform/` 收编（SCM/launchd/machineid/路径）+ `configsync` + `crash` 留位；平台文件白名单清零                                        | 高   | 跨平台 CI 矩阵全绿 + installer/ipk/launchd 走查；信号退出语义用例 | ✅ 已落地（configsync 未做，见 todo） |
-| P5 | 协议 `exec_log` 消息 + 服务检测 agent + 探针上行接线 | — | execlog 先落痕后上行 + probe_report 上报用例 | ✅ 已落地 |
+| P1  | `core/` skeleton + hoisting the `backoff`/`logx` thin shells (the agent.go reconnect backoff switches imports in place, zero behaviour change)                                                  | Low   | existing cases migrate with it + positive and negative backoff timing cases (injection-point convention unchanged)               | ✅ Landed |
+| P2  | Hoisting `register`+`heartbeat`+`report` — **agent.go's 778 lines split into loops**: connect/reconnect/register/heartbeat each relocate, agent.go becomes an assembly shell                        | Medium   | existing agent_ws/agent_handler cases migrate; register-heartbeat-reconnect integration cases     | ✅ Landed |
+| P3  | `metrics`+`execlog`+`healthprobe`: the collector relocates; execution audit lands (local trail + uplink); the service_health policy layer switches to the shared probe (three semantics + failure windows) | Medium   | collector cases migrate; execlog trail-before-uplink ordering cases; probe window open/close/recovery assertions | ✅ Landed |
+| P4  | `platform/` collection (SCM/launchd/machineid/paths) + `configsync` + the `crash` slot; the platform-file whitelist drops to zero                                        | High   | full cross-platform CI matrix green + installer/ipk/launchd inspection; signal-exit semantics cases | ✅ Landed (configsync not done, see todo) |
+| P5 | Protocol `exec_log` message + service-detect agent + probe uplink wiring | — | execlog trail-before-uplink + probe_report reporting cases | ✅ Landed |
 
-- 与在途工作编排：Workflow M1 验收与探针线先行收尾，P1 在其后启动；批次间不留半成品依赖。
-- **回退策略**：每批 `cmd/cockpit-agent` 仍可从 internal 原路径编译（上收=内部实现切换 import），任一批叫停不留悬空引用。
+- Orchestration with in-flight work: Workflow M1 acceptance and the probe line close out first, then P1 starts; no half-finished dependency is left between batches.
+- **Rollback strategy**: in every batch `cmd/cockpit-agent` can still compile from the original internal paths (hoisting = an internal implementation switching imports), so halting any batch leaves no dangling references.
 
-## 8. 已知边界（诚实清单）
+## 8. Known boundaries (honest list)
 
-- **双路径过渡期**：P1–P4 期间 core/ 与 internal/ 并存（存量平台文件白名单：`rpc/file_stat_*`、`rpc/job_provider_*`、`rpc/backup_hook_*`、`rpc/service_{windows,launchd}_{model,stub}.go`——P4 后余量（`machineid_*`、`rpc/service_windows_scm.go`、`rpc/service_launchd_darwin.go` 已收编 core/platform，模型/stub 与插件内平台文件按 §批次映射就地保留）。
-- core 依赖 `internal/protocol` 是白名单例外（协议一份的代价）；若未来 core 要脱离本仓复用，protocol 升 top-level 另批执行。
-- `logx` 引入 slog 是新选型（标准库）：存量 `log.Printf` 不强迁，新代码用 logx，全量替换不做目标。
-- 百行纪律对 `platform/windows`（SCM 401 行收编）这类装配密集包可能破线：破线需在提交说明拆分层（SCM 交互与服务动词分文件），不当死数字硬拆。
-- 编译期插件裁剪、crash 采集、configsync 的 server 侧配置源面：本文只留位，均不立项。
-- OpenWrt 的 musl/mips 静态构建与 CGO=0 前提（openwrt-agent-design.md 拆包决策）是平台层的硬约束：core 各包不得引入 CGO 依赖，metrics 等三方面包新增依赖时须过静态编译检查。
+- **Dual-path transition period**: during P1–P4, core/ and internal/ coexist (the legacy platform file whitelist: `rpc/file_stat_*`, `rpc/job_provider_*`, `rpc/backup_hook_*`, `rpc/service_{windows,launchd}_{model,stub}.go` — after P4 the remainder is `machineid_*`, `rpc/service_windows_scm.go` and `rpc/service_launchd_darwin.go` collected into core/platform, while model/stub and in-plugin platform files stay in place per the §batch mapping).
+- core depending on `internal/protocol` is the price of "one protocol"; if core ever needs to be reused outside this repo, protocol is promoted to top-level in a separate batch.
+- Introducing slog in `logx` is a new selection (stdlib): legacy `log.Printf` is not force-migrated, new code uses logx, and a wholesale replacement is not a goal.
+- The hundred-line discipline may break for assembly-dense packages like `platform/windows` (collating SCM's 401 lines): a break must be explained in the commit message by splitting layers (SCM interaction vs service verbs into separate files), not enforced as a dead number.
+- Compile-time plugin pruning, crash collection, and configsync's server-side config source surface: this document only reserves slots for them, none is proposed.
+- OpenWrt's musl/mips static build and the CGO=0 premise (the packaging decision in openwrt-agent-design.md) are hard constraints of the platform layer: no core package may introduce a CGO dependency, and new dependencies in packages like metrics must pass the static-build check.

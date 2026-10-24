@@ -1,122 +1,90 @@
-# Server 自身数据库备份设计（备份管理补齐项）
+# Server's Own Database Backup Design (backup management follow-up item)
 
-> 语言：**中文** ｜ [English](./server-backup-design.en.md)
 
-> 2026-09-15 立项。对应 todo 备份管理遗留项「server 自身 SQLite 备份
-> （VACUUM INTO）」。前置：`backup-design.md` M1/M1.5（Agent 侧文件备份
-> 已闭环）。
+> Initiated 2026-09-15. Corresponds to the backup-management leftover todo item "backup the server's own SQLite (VACUUM INTO)". Prerequisite: `backup-design.md` M1/M1.5 (agent-side file backup already closed out).
 
-## 痛点
+## Pain points
 
-备份管理目前只覆盖 **Agent 侧文件**（配置/数据库/卷打包）。但面板自己的
-SQLite 库——Git-first CMDB 的全部资源记录（Agent/Domain/Certificate/
-Service/Gateway/Storage）、用户与权限、审计日志、告警、备份配置、探测
-历史、**会话录制元数据**——没有任何备份。磁盘损坏或误操作 `cockpit.db`
-一次，全部管理面数据归零，且 Agent 侧备份反而依赖这些配置才知道备什么。
+Backup management currently covers only **agent-side files** (config/database/volume packing). But the panel's own SQLite database — the Git-first CMDB's full set of resource records (Agent/Domain/Certificate/Service/Gateway/Storage), users and permissions, audit logs, alerts, backup configuration, probe history, **session recording metadata** — has no backup at all. One disk failure or one mishandled `cockpit.db`, and all management-plane data goes to zero — worse, agent-side backups depend on exactly this configuration to know what to back up.
 
-## 方案
+## Approach
 
-SQLite 原生 `VACUUM INTO 'path'`：在线（不停机不加读锁阻塞）产生当前
-数据库的**紧凑完整副本**，产物是普通 `.db` 文件，可直接改名替换回恢复。
-server 单侧改动，Agent 零感知。
+SQLite's native `VACUUM INTO 'path'`: online (no shutdown, no blocking read lock) produces a **compact complete copy** of the current database; the artifact is an ordinary `.db` file that can be renamed directly into place for recovery. Server-side-only change, zero agent awareness.
 
-## 决策
+## Decisions
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / notes |
 |---|------|------|------------|
-| D1 | 备份方式 | `VACUUM INTO`（storage 层暴露 `VacuumInto(path)`），非文件拷贝 | 文件拷贝在写入并发下可能产生撕裂页；VACUUM INTO 是 SQLite 官方推荐的在线备份路径，产物还顺带整理碎片 |
-| D2 | 存储 | `<db目录>/server-backups/cockpit-YYYYMMDD-HHMMSS.db`（0600）；**目录即事实源，不建 DB 表** | 文件名自带时间戳，列表 = 扫目录；无 per-record 字段需求（对比 BackupRun 需要任务状态机） |
-| D3 | 调度 | 独立 `serverBackupLoop`（1h ticker）：读 Setting 间隔，扫描目录最新文件时间戳，距今 ≥ 间隔才执行 | 与 drift 巡检同款「ticker + 时间戳对比，间隔动态可改」；不挂 agent 备份循环（那是 per-agent 配置驱动的 dispatchDue） |
-| D4 | 配置 | Setting `server_backup.interval_hours`（0=关闭，1-168，默认 24）+ `server_backup.retention_days`（0=永久，1-365，默认 7）；`GET/PUT /api/server-backups/config` | 全局配置 Setting 模式（probe/drift 同款）；默认每天备一次 |
-| D5 | 手动触发 | `POST /api/server-backups/run` 立即备份（同一路径复用），记审计 | 磁盘满/误删后想立刻留档的场景；与循环互不干扰（同秒冲突直接报错） |
-| D6 | REST | `GET /api/server-backups`（列表：文件名/时间/大小）、`GET .../{name}/download`、`DELETE .../{name}`；下载/删除记审计，列表/手动备份不记 | 与备份文件下载同款纪律（下载落 JWT blob、变更记审计）；手动备份是保护动作不是敏感读取 |
-| D7 | 文件名安全 | 只接受 `cockpit-\d{8}-\d{6}\.db` 严格模式；其余 400 | 下载/删除按名字寻址，必须防 `../` 穿越与任意文件删除 |
-| D8 | 恢复 | M1 不做在线恢复：下载产物 → 停服 → 替换 `cockpit.db` → 启动（README/文档说明） | SQLite 热替换正在写入的库必然损坏；停机替换是唯一安全路径 |
-| D9 | 失败语义 | VACUUM INTO 失败记日志，下一轮重试；不产生告警 | 磁盘满等环境问题，日志足够（与 drift error 态同级别处理） |
-| D10 | Web 入口 | `/backups` 页面加「面板数据库」分区卡片：配置行（间隔/保留）+ 立即备份按钮 + 文件列表（下载/删除） | 同一使用场景（备份），不新开页面 |
+| D1 | Backup method | `VACUUM INTO` (the storage layer exposes `VacuumInto(path)`), not file copy | File copy can produce torn pages under concurrent writes; VACUUM INTO is SQLite's officially recommended online backup path, and the artifact also defragments as a bonus |
+| D2 | Storage | `<db dir>/server-backups/cockpit-YYYYMMDD-HHMMSS.db` (0600); **the directory is the source of truth, no DB table** | The filename carries its own timestamp, so listing = scanning the directory; no per-record field needs (unlike BackupRun, which needs a task state machine) |
+| D3 | Scheduling | A standalone `serverBackupLoop` (1h ticker): read the interval from Settings, scan the directory's newest file timestamp, and run only when the gap ≥ the interval | The same "ticker + timestamp comparison, interval dynamically changeable" pattern as the drift inspection; not attached to the agent backup loop (that one is per-agent config-driven dispatchDue) |
+| D4 | Configuration | Settings `server_backup.interval_hours` (0=off, 1-168, default 24) + `server_backup.retention_days` (0=forever, 1-365, default 7); `GET/PUT /api/server-backups/config` | Global-config Settings pattern (same as probe/drift); default is a backup per day |
+| D5 | Manual trigger | `POST /api/server-backups/run` backs up immediately (same path reused), recorded in audit | The disk-full/accidental-delete case where you want a copy right now; does not interfere with the loop (a same-second conflict simply errors) |
+| D6 | REST | `GET /api/server-backups` (list: filename/time/size), `GET .../{name}/download`, `DELETE .../{name}`; download/delete recorded in audit, list/manual backup not | Same discipline as backup-file download (download goes through a JWT blob, changes recorded in audit); a manual backup is a protective action, not a sensitive read |
+| D7 | Filename safety | Accept only the strict pattern `cockpit-\d{8}-\d{6}\.db`; everything else 400 | Download/delete address files by name, so `../` traversal and arbitrary file deletion must be prevented |
+| D8 | Recovery | M1 has no online recovery: download the artifact → stop the service → replace `cockpit.db` → start (explained in README/docs) | Hot-swapping a SQLite database that is being written to will inevitably corrupt it; stop-and-replace is the only safe path |
+| D9 | Failure semantics | VACUUM INTO failure is logged and retried next round; no alert | Environmental issues like a full disk; logging suffices (handled at the same level as the drift error state) |
+| D10 | Web entry | The `/backups` page gets a "panel database" section card: config row (interval/retention) + a backup-now button + file list (download/delete) | Same usage scenario (backup); no new page |
 
-## 不做（后续版本）
+## Not doing (later versions)
 
-- 在线恢复/一键还原（D8）；
-- ~~异地传输（S3/rclone，与 Agent 备份的异地同一条路线一起做）~~ → M2 立项
-  （2026-09-19，前置路线 backup-design.md M2 rclone 已落地）；
-- 定制时刻调度（daily@HH:mm，interval 小时数够用）。
+- Online recovery / one-click restore (D8);
+- ~~Off-site transfer (S3/rclone, to be done together with the same route as agent backup off-site)~~ → M2 initiated (2026-09-19; the prerequisite route backup-design.md M2 rclone has landed);
+- Custom-time scheduling (daily@HH:mm; hour-based intervals are sufficient).
 
-## M2：异地传输——rclone（2026-09-19 设计）
+## M2: off-site transfer — rclone (designed 2026-09-19)
 
-### 痛点
+### Pain points
 
-M1 的本地备份与 `cockpit.db` 在**同一块盘**：误操作可回滚，但磁盘损坏时
-本地备份陪葬——痛点段「全部管理面数据归零」只有异地副本能真正兜住。
-backup-design.md M2 已在 Agent 侧落地 rclone 推送路线（remote:path 校验、
-argv 不走 shell、本地成功推送失败独立语义），server 侧复用同一条路线。
+M1's local backup and `cockpit.db` are on **the same disk**: mishandling can be rolled back, but if the disk dies the local backup dies with it — only an off-site copy can truly back up the pain point above, "all management-plane data goes to zero". backup-design.md M2 already landed the rclone push route on the agent side (remote:path validation, argv not through a shell, independent semantics for local success with push failure); the server side reuses the same route.
 
-### 决策
+### Decisions
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / notes |
 |---|------|------|------------|
-| D11 | 传输方式 | server 进程直接 exec `rclone copy --transfers 2 <file> <remoteDest>`，argv 不走 shell | 与 agent D18 同款；server 主机由用户安装 rclone 并自配 rclone.conf，cockpit 只是调用方 |
-| D12 | 凭据 | 只在 server 主机的 rclone.conf（rclone 默认路径），cockpit 不存储不展示任何凭据 | 对称 agent D19；API/Web 只出现 remote:path 目标字符串 |
-| D13 | 配置 | Setting `server_backup.remote_dest`（空=关闭）；**写时**校验同 agent D22 正则 `^[A-Za-z0-9][A-Za-z0-9._-]*:[^\x00-\x20\x7f]+$` + 512 字节上限；读时非法视为未配置并记日志 | remote 名不以 `-` 开头根除 flag 混淆（与 agent D22 同源同规则）；读宽松写严格，脏值不阻塞本地备份 |
-| D14 | 时机 | `runServerBackup` 成功后同步推送（定时循环与手动触发同一路径自然覆盖）；推送失败只记日志+通知，不影响备份 API 返回与本地成果 | 本地成功即有档，推送是增强（D21 语义对称）；单文件 copy 秒级，HTTP 内同步可接受 |
-| D15 | 超时 | `exec.CommandContext` 5 分钟超时（包级变量测试可缩短） | handler 内同步执行不能无限挂请求；与 agent pre-hook 超时同值（M3 D29） |
-| D16 | 状态记录 | **不落库**（D2「目录即事实源」不动摇）：推送结果记 `[remote]` 日志行；失败发通知（新事件 `server_backup.remote-failed`，白名单显式启用，notifier nil 时跳过） | 无 per-file 状态表，通知是唯一用户可感知的失败面（backup M2 D21 先例） |
-| D17 | 手动补推 | `POST /api/server-backups/{name}/sync-remote`：按**当前** remote_dest 推送指定本地文件，记审计（server_backup sync_remote） | 对称 agent D24；收到失败通知后的补救路径；rclone copy 幂等（同尺寸跳过） |
-| D18 | 探测与远端 | config GET 返回 `rclone_available`（每次 `exec.LookPath` 实时探测）；远端不做 retention 清理 | server 单进程无上报链路，实时探测后装 rclone 免重启（比 agent D23 的启动探测更简单，exec 本身每次也走 PATH）；远端清理有误删唯一异地档的风险，个人场景远端容量大，文档说明即可 |
+| D11 | Transfer method | The server process directly execs `rclone copy --transfers 2 <file> <remoteDest>`, argv not through a shell | Same as agent D18; the user installs rclone on the server host and configures rclone.conf themselves; cockpit is just the caller |
+| D12 | Credentials | Only in rclone.conf on the server host (rclone's default path); cockpit stores and displays no credentials | Symmetric with agent D19; the API/Web only ever shows the remote:path target string |
+| D13 | Configuration | Setting `server_backup.remote_dest` (empty=off); validated **on write** with the same regex as agent D22, `^[A-Za-z0-9][A-Za-z0-9._-]*:[^\x00-\x20\x7f]+$`, plus a 512-byte cap; on read an invalid value is treated as unconfigured and logged | A remote name not starting with `-` eliminates flag confusion (same origin and rule as agent D22); lenient on read, strict on write — a dirty value does not block local backup |
+| D14 | Timing | Synchronous push after `runServerBackup` succeeds (the scheduled loop and manual trigger are naturally both covered via the same path); push failure only logs + notifies, without affecting the backup API response or the local artifact | Local success means there is a copy; push is an enhancement (symmetric with D21 semantics); a single-file copy takes seconds, synchronous within HTTP is acceptable |
+| D15 | Timeout | `exec.CommandContext` with a 5-minute timeout (a package-level variable, shortenable in tests) | Synchronous execution inside a handler must not hang the request forever; same value as the agent pre-hook timeout (M3 D29) |
+| D16 | Status recording | **Not persisted** (D2's "directory is the source of truth" stands): the push result is logged in a `[remote]` log line; on failure a notification is sent (new event `server_backup.remote-failed`, explicitly enabled via allowlist, skipped when the notifier is nil) | No per-file status table; the notification is the only user-visible failure surface (backup M2 D21 precedent) |
+| D17 | Manual re-push | `POST /api/server-backups/{name}/sync-remote`: push the specified local file to the **current** remote_dest, recorded in audit (server_backup sync_remote) | Symmetric with agent D24; the remediation path after receiving a failure notification; rclone copy is idempotent (same size skips) |
+| D18 | Detection and remote | config GET returns `rclone_available` (a live `exec.LookPath` probe each time); no retention cleanup on the remote | A single server process has no reporting path, and live detection means installing rclone takes effect without a restart (simpler than agent D23's startup detection; exec itself goes through PATH each time anyway); remote cleanup risks deleting the only off-site copy — in a personal scenario the remote has ample capacity, so documenting it suffices |
 
-### 执行流程
+### Execution flow
 
 ```
-serverBackupLoop 到期 / POST /run
-  └─ runServerBackup()          VACUUM INTO 本地档（不变）
-       └─ pushServerBackupRemote(name)   remote_dest 非空时
-            ├─ exec rclone copy（5min 超时）
-            ├─ ok     → [remote] 日志，结束
-            └─ failed → [remote] 日志 + server_backup.remote-failed 通知
+serverBackupLoop expiry / POST /run
+  └─ runServerBackup()          VACUUM INTO local artifact (unchanged)
+       └─ pushServerBackupRemote(name)   when remote_dest is non-empty
+            ├─ exec rclone copy (5min timeout)
+            ├─ ok     → [remote] log, done
+            └─ failed → [remote] log + server_backup.remote-failed notification
 ```
 
-### M2 清单
+### M2 checklist
 
-- [x] notification：`ServerBackupRemoteFailed = "server_backup.remote-failed"` 常量
-- [x] server：`server_backup.go`——remote_dest Setting 读写/校验、
-      pushServerBackupRemote（超时/日志/通知）、runServerBackup 接线、
-      rclone_available 探测
-- [x] REST：config GET/PUT 加 remote_dest + rclone_available；
-      `POST /{name}/sync-remote`（文件名校验复用 D7 严格模式 + 审计）
-- [x] web：ServerBackupCard 配置行加「异地目标」输入（校验同正则）+
-      rclone 未安装提示；文件操作列加「补推」按钮（配置了 remote_dest 才显示）
-- [x] 测试：server 推送 ok/失败通知/未配置跳过/sync-remote 全路径/正则校验/
-      超时（fake rclone 脚本同 agent 模式）
-- [x] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] notification: `ServerBackupRemoteFailed = "server_backup.remote-failed"` constant
+- [x] server: `server_backup.go` — remote_dest Setting read/write/validation, pushServerBackupRemote (timeout/log/notification), runServerBackup wiring, rclone_available detection
+- [x] REST: config GET/PUT adds remote_dest + rclone_available; `POST /{name}/sync-remote` (filename validation reuses the D7 strict pattern + audit)
+- [x] web: the ServerBackupCard config row adds an "off-site target" input (validation uses the same regex) + an rclone-not-installed hint; the file operations column gets a "re-push" button (shown only when remote_dest is configured)
+- [x] tests: server push ok/failure notification/unconfigured skip/sync-remote full path/regex validation/timeout (fake rclone script, same pattern as agent)
+- [x] documentation wrap-up (this checklist checked) + todo.md sync
 
-M2 完成（2026-09-19）：server 7 新测试全绿 + notification 无回归 +
-web tsc 零新增错误（9 存量）+ build 过。实现与设计的落地差异：D15 超时
-除 `exec.CommandContext` 外补了 `cmd.WaitDelay = 1s`——测试暴露
-`CombinedOutput` 的 stdout 管道写端会被 rclone 的子进程（fake 脚本的
-sleep；真实 rclone 正常无子进程链）继承，`Wait` 等管道 EOF 被孤儿拖住
-直到孙进程退出，超时形同虚设；WaitDelay 到期强断管道即恢复语义，无需
-agent M3 D29 的进程组整杀平台分文件（server 侧无自由命令 hook 场景）。
+M2 complete (2026-09-19): 7 new server tests all green + no notification regression + web tsc with zero new errors (9 pre-existing) + build passing. Deviation between implementation and design: beyond `exec.CommandContext`, the D15 timeout adds `cmd.WaitDelay = 1s` — testing exposed that the stdout pipe write end of `CombinedOutput` gets inherited by rclone's child process (the fake script's sleep; real rclone normally has no child-process chain), so `Wait` waits for pipe EOF and gets dragged by the orphan until the grandchild exits, rendering the timeout moot; WaitDelay forcibly breaks the pipe on expiry, restoring the semantics — no need for agent M3 D29's platform-split process-group kill (no free-form command hook scenario on the server side).
 
-## M1 清单
+## M1 checklist
 
-- [x] storage：`VacuumInto(path)` + 单测（产物可打开、表存在）
-- [x] server：`server_backup.go`（Setting 读写 + 目录工具 + 备份执行 +
-      retention 清理 + 调度循环）+ server.go 启动接线
-- [x] REST：`api_server_backup.go` 列表/下载/删除/手动备份/配置 + 审计 +
-      serveAPI 接入
-- [x] web：/backups 页「面板数据库」卡片（配置 + 立即备份 + 列表）
-- [x] 测试：VacuumInto 产物合法性、文件名模式拒绝、API 全路径、retention
-      清理、间隔语义
-- [x] 文档收尾（本清单勾选）+ todo.md 同步
+- [x] storage: `VacuumInto(path)` + unit test (artifact openable, tables present)
+- [x] server: `server_backup.go` (Setting read/write + directory utilities + backup execution + retention cleanup + scheduling loop) + server.go startup wiring
+- [x] REST: `api_server_backup.go` list/download/delete/manual backup/config + audit + serveAPI hookup
+- [x] web: /backups page "panel database" card (config + backup now + list)
+- [x] tests: VacuumInto artifact validity, filename pattern rejection, full API paths, retention cleanup, interval semantics
+- [x] documentation wrap-up (this checklist checked) + todo.md sync
 
-M1 完成（2026-09-15）：server 6 测试全绿——VACUUM INTO 产物用真实 GORM
-重开能读到备前写入的数据（完整性硬验证）且权限 0600；文件名严格模式拒绝
-`../` 穿越与畸形名；配置语义（默认 24h/7d、0=关闭或永久、越界/非法回默认）；
-retention 清理过期删永久留；API 全路径（配置 GET/PUT 含越界 400、立即备份、
-列表、下载、删除、404/400、四类审计动作落库）。
+M1 complete (2026-09-15): 6 server tests all green — the VACUUM INTO artifact reopened with real GORM reads data written before the backup (hard integrity verification) with mode 0600; the strict filename pattern rejects `../` traversal and malformed names; config semantics (default 24h/7d, 0=off or forever, out-of-range/invalid falls back to defaults); retention cleanup deletes expired and keeps forever ones; full API paths (config GET/PUT incl. out-of-range 400, immediate backup, list, download, delete, 404/400, four categories of audit actions persisted).
 
-## 参考
+## References
 
-- 内部：[backup-design.md](./backup-design.md)（Agent 侧备份与任务模型）、
-  [recording-design.md](./recording-design.md)（retention 清理与下载审计模式）
-- 外部：SQLite 文档 Backup API / VACUUM INTO（3.27+）
+- Internal: [backup-design.md](/guide/backup-design) (agent-side backup and task model), [recording-design.md](/guide/recording-design) (retention cleanup and download audit patterns)
+- External: SQLite documentation Backup API / VACUUM INTO (3.27+)

@@ -1,216 +1,225 @@
-# P1 方案设计：Overlay 组网观测（ZeroTier / Tailscale / WireGuard / frp）
-
-> 语言：**中文** ｜ [English](./overlay-design.en.md)
+# P1 Design: Overlay Network Observability (ZeroTier / Tailscale / WireGuard / frp)
 
 
-> 2026-09-17。个人基础设施跨地域组网观测首期设计。背景：个人设施天然分散在
-> 云上、家里、公司等多地域，ZeroTier/Tailscale/WireGuard/frp 是把它们连成一网
-> 的命脉。本文只做 M1（运行态只读观测）设计决策与接口定义；管理面（控制器
-> API 成员授权）留 M2。
+> 2026-09-17. First-phase design for cross-region overlay networking observability of personal infrastructure.
+> Background: personal infrastructure is naturally scattered across the cloud, home, the office, and other
+> regions; ZeroTier/Tailscale/WireGuard/frp are the lifeline that stitches them into a single network. This
+> document only makes M1 (runtime read-only observability) design decisions and interface definitions; the
+> management plane (controller API member authorization) is left to M2.
 
-## 现状与痛点
+## Current State and Pain Points
 
-| 痛点 | 现状 | 后果 |
+| Pain point | Current state | Consequence |
 |------|------|------|
-| 组网运行态无处可查 | peer 掉线、延迟劣化、握手停滞都要逐台 SSH 敲命令 | 「家里设备连不上」排查靠猜 |
-| Cockpit 已有探测但太浅 | `NetworkDetector`（`network-monitor`）只到 WireGuard peer 数量与 cloudflared 进程级 | 看不到虚拟 IP、延迟、版本、最近握手 |
-| 多地域无统一视角 | 每台设备各自一个 `zerotier-cli` / `tailscale status` | 无法一屏对比「哪个地域的节点不在线」 |
-| 连接路径无语义 | Server 只知 Agent 来自哪个 IP，不知其虚拟网身份 | 分布式探测/排障无法按路径解释 |
+| Nowhere to query overlay runtime state | Peer going offline, latency degradation, and stalled handshakes all require SSHing into each box and typing commands | Troubleshooting "the device at home is unreachable" is guesswork |
+| Cockpit already probes, but far too shallow | `NetworkDetector` (`network-monitor`) only goes as far as WireGuard peer count and cloudflared at the process level | Virtual IP, latency, version, and last handshake are invisible |
+| No unified view across regions | Every device has its own `zerotier-cli` / `tailscale status` | No way to compare "which region's nodes are offline" on one screen |
+| The connection path carries no semantics | The Server only knows which IP an Agent came from, not its overlay identity | Distributed probing/troubleshooting cannot be explained per path |
 
-## 架构总览
+## Architecture Overview
 
-与 cron / logs 同一通道模型：**同步 RPC + server 纯转发**。四类工具状态都
-来自本机 CLI / 本地 admin API（毫秒到百毫秒级），30s RPC 超时绰绰有余。
+The same channel model as cron / logs: **synchronous RPC + pure pass-through on the server**. State for all
+four tool families comes from the local CLI / local admin API (millisecond to sub-hundred-millisecond), so a
+30s RPC timeout is more than enough.
 
 ```
-┌─ server ───────────────────────┐         ┌─ agent（组网工具所在主机）──────────┐
-│ GET /api/agents/{id}/overlay/  │ ──RPC─▶ │ overlay provider（新）               │
-│   status  纯转发不落库          │ ◀─RPC── │ zerotier-cli -j / tailscale --json  │
-│ Web /network 前端跨 agent 聚合  │         │ wg show dump(剥离密钥) / frp admin  │
-└────────────────────────────────┘         └─────────────────────────────────────┘
+┌─ server ───────────────────────────────┐         ┌─ agent (hosts overlay tools) ──────────┐
+│ GET /api/agents/{id}/overlay/          │ ──RPC─▶ │ overlay provider (new)                 │
+│   status  pass-through, no DB write    │ ◀─RPC── │ zerotier-cli -j / tailscale --json     │
+│ Web /network aggregates across agents  │         │ wg show dump (strip keys) / frp admin  │
+└────────────────────────────────────────┘         └────────────────────────────────────────┘
 ```
 
-跨地域视角由**前端聚合**实现：个人场景带 `overlay` 能力的 agent 是个位数，
-页面逐 agent 拉取后在前端聚合成全网节点表，server 不落库、无聚合状态。
+The cross-region view is realized by **frontend aggregation**: in a personal setup the number of agents
+carrying the `overlay` capability is in single digits, so the page fetches each agent in turn and aggregates
+in the frontend into a whole-network node table; the server persists nothing and keeps no aggregated state.
 
-## 关键决策
+## Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D1 | M1 工具范围 | ZeroTier、Tailscale、WireGuard 自建、frp 四类只读观测 | 用户确认全做；四类覆盖个人组网绝大多数形态（中心化虚拟网 ×2、自建隧道、端口映射穿透） |
-| D2 | 管理面 | M1 不做（ZeroTier Central / Tailscale API 的成员授权、除名留 M2） | 管理面引入 API token 配置与更高的误操作风险；观测先行验证数据模型 |
-| D3 | capability | 新增 `overlay`，与既有 `network-monitor` 并存 | `network-monitor` 语义是「监控特征」，不动它避免回归；后续版本再把其 WireGuard 部分收敛进 `overlay` |
-| D4 | 探测条件 | `zerotier-cli` / `tailscale` / `wg` / `frpc\|frps` 任一 LookPath 通过 → `overlay` capability；provider 内各 reader 再自检，缺席工具返回 `unavailable` | 门在 detector、粒度在 reader；一台装两个工具也只注册一个 provider |
-| D5 | RPC 方法 | 单方法 `overlay.status` 一次返回全部工具快照 | 四类都是只读快照，个人场景 peers 个位数到几十，一次拉齐省去前端多次往返；总量保护：每工具 peers 截断 200 |
-| D6 | **密钥安全** | 输出字段**白名单构造**：`wg show dump` 的 private key / preshared key 字段一律不进响应；ZeroTier/Tailscale/frp 输出天然无密钥 | wg dump 文本含私钥与预共享密钥，白名单比黑名单删除可靠 |
-| D7 | frp 分级观测 | 零配置：LookPath + 版本 + 进程存活；`COCKPIT_FRPC_ADMIN` / `COCKPIT_FRPS_ADMIN`（`host:port`）配置后调 admin API 拿隧道级状态——两侧路由不同（真机 frp 0.61.2 实证）：frpc `GET /api/status`（隧道表计数）、frps `GET /api/serverinfo`（`proxyTypeCount` 求和；frps 无 `/api/status`，调它 404） | frp 无状态 CLI；admin 端口是可选配置，不能为观测强求改用户 frp 配置 |
-| D8 | REST 挂载 | `GET /api/agents/{id}/overlay/status`，serveAPI `/agents/` 分支，JWT；浏览类**不记审计**（同 logs/cron 浏览口径） | M2 出现授权/除名等变更操作时才引入审计 |
-| D9 | 持久化 | 不落库——CLI 即事实源，server 纯转发 | 无状态同步问题；「全网视角」由前端逐 agent 拉取聚合 |
-| D10 | CLI 执行 | 每命令 5s 超时（context），argv 直传不经 shell，输出 1MB 截断 | tailscale status 在大网下可达百 ms 级，5s 兜底足够；同 logs 的纪律 |
+| D1 | M1 tool scope | Read-only observability of all four families: ZeroTier, Tailscale, self-hosted WireGuard, frp | The user confirmed doing all of them; the four families cover the overwhelming majority of personal overlay shapes (centralized virtual networks ×2, self-hosted tunnels, port-mapping traversal) |
+| D2 | Management plane | Not in M1 (member authorization and removal via the ZeroTier Central / Tailscale APIs are left to M2) | The management plane introduces API token configuration and a higher risk of misoperation; observability comes first to validate the data model |
+| D3 | capability | Add a new `overlay`, coexisting with the existing `network-monitor` | The semantics of `network-monitor` are "monitoring feature"; leaving it alone avoids regressions, and a later version converges its WireGuard part into `overlay` |
+| D4 | Detection condition | Any one of `zerotier-cli` / `tailscale` / `wg` / `frpc\|frps` passes LookPath → the `overlay` capability; each reader inside the provider then self-checks, and an absent tool returns `unavailable` | The gate lives in the detector, the granularity in the readers; a machine with two tools installed still registers only one provider |
+| D5 | RPC method | A single method `overlay.status` returns snapshots of all tools at once | All four are read-only snapshots; in personal setups peers number from single digits to a few dozen, so one round trip saves the frontend many; total-size guard: peers truncated to 200 per tool |
+| D6 | **Key security** | Output fields **constructed by allow-list**: the private key / preshared key fields of `wg show dump` never enter the response; ZeroTier/Tailscale/frp output naturally contains no keys | The wg dump text contains private keys and preshared keys, and an allow-list is more reliable than blacklisting them out |
+| D7 | Tiered frp observability | Zero-config: LookPath + version + process liveness; once `COCKPIT_FRPC_ADMIN` / `COCKPIT_FRPS_ADMIN` (`host:port`) is configured, call the admin API for tunnel-level state — the two sides use different routes (verified on real frp 0.61.2): frpc `GET /api/status` (tunnel table counts), frps `GET /api/serverinfo` (sum of `proxyTypeCount`; frps has no `/api/status`, calling it 404s) | frp has no stateful CLI; the admin port is optional configuration, and observability cannot demand that users reconfigure frp |
+| D8 | REST mounting | `GET /api/agents/{id}/overlay/status`, the serveAPI `/agents/` branch, JWT; browse-type requests are **not audited** (same criterion as logs/cron browsing) | Audit is only introduced once M2 gains mutating operations such as authorization/removal |
+| D9 | Persistence | Not persisted — the CLI is the source of truth, the server purely forwards | No state-sync problem; the "whole-network view" is aggregated by the frontend fetching each agent in turn |
+| D10 | CLI execution | 5s timeout per command (context), argv passed directly without a shell, output truncated at 1MB | tailscale status can reach hundreds of ms on a large network, so 5s is enough as a backstop; same discipline as logs |
 
-## 数据模型
+## Data Model
 
 ```jsonc
-// overlay.status 响应
+// overlay.status response
 {
   "tools": [
     {
       "tool": "zerotier",              // zerotier | tailscale | wireguard | frp
       "status": "ok",                  // ok | degraded | error | unavailable
       "version": "1.14.0",
-      "error": "",                     // status != ok/unavailable 时的摘要
-      "networks": [                    // zerotier / tailscale：本机加入的网络
+      "error": "",                     // summary when status != ok/unavailable
+      "networks": [                    // zerotier / tailscale: networks this host has joined
         { "id": "8056c2e21c", "name": "home", "status": "OK",
           "addresses": ["10.147.20.5"], "type": "private" }
       ],
-      "peers": [                       // 对端节点
+      "peers": [                       // remote nodes
         { "id": "7f3d0a9b12", "name": "nas", "virtualIps": ["10.147.20.2"],
           "version": "1.14.0", "latencyMs": 23, "online": true,
           "endpoint": "1.2.3.4/9993", "relay": "", "role": "peer",
           "lastHandshake": "2026-09-17T07:00:12Z" }
       ],
-      "interfaces": [                  // wireguard：接口维度
+      "interfaces": [                  // wireguard: per-interface dimension
         { "name": "wg0", "publicKey": "…=", "listenPort": 51820,
-          "peerCount": 2, "peers": [ /* 同 peers 结构 */ ] }
+          "peerCount": 2, "peers": [ /* same structure as peers */ ] }
       ]
     }
   ]
 }
 ```
 
-字段按工具取可用子集（解析器白名单构造，见 D6）；`lastHandshake` 统一 RFC3339
-UTC；`online` 语义按工具：ZeroTier 取 active path 存在、Tailscale 取 `Online`、
-WireGuard 取最近握手 < 3 分钟、frp 取 admin API 连通。
+Fields take the available subset per tool (the parser constructs by allow-list, see D6); `lastHandshake`
+is uniformly RFC3339 UTC; `online` semantics vary by tool: ZeroTier uses the presence of an active path,
+Tailscale uses `Online`, WireGuard uses last handshake < 3 minutes, frp uses admin API reachability.
 
-## Agent 侧设计
+## Agent-Side Design
 
-### 探测与注册
+### Detection and Registration
 
-- `internal/agent/detector/overlay.go`：`OverlayDetector`，优先级与 NetworkDetector 相邻；
-  四类任一可用 → `overlay` capability（metadata 携带各自可用标志）；
-- providers.go：`case "overlay"` 注册 `rpc.NewOverlayProvider(nil)`（reader 注入
-  `Commander` 同款抽象，测试可注入假输出）。
+- `internal/agent/detector/overlay.go`: `OverlayDetector`, priority adjacent to NetworkDetector;
+  any one of the four available → the `overlay` capability (metadata carries each availability flag);
+- providers.go: `case "overlay"` registers `rpc.NewOverlayProvider(nil)` (readers are injected with
+  the same `Commander` abstraction, so tests can inject fake output).
 
-### RPC 方法
+### RPC Method
 
-| 方法 | 参数 | 返回 | 说明 |
+| Method | Parameters | Returns | Description |
 |------|------|------|------|
-| `overlay.status` | `{}` | `{tools: [...]}` | 全部工具快照；单工具失败不影响其余（各自降级为 error/unavailable） |
+| `overlay.status` | `{}` | `{tools: [...]}` | Snapshots of all tools; a failure in one tool does not affect the rest (each degrades to error/unavailable on its own) |
 
-### 各工具解析要点
+### Per-Tool Parsing Notes
 
-| 工具 | 数据源 | 解析 | 安全 |
+| Tool | Data source | Parsing | Security |
 |------|--------|------|------|
-| ZeroTier | `zerotier-cli -j listnetworks` / `-j listpeers` | JSON；peers 的 `paths[]` 取 `active` 且 `preferred` 的一条为 endpoint | 无密钥字段 |
-| Tailscale | `tailscale status --json --peers`（旧版不认 `--peers` 则回退 `status --json`） | JSON；`Self` + `Peer{}`；`CurAddr` → endpoint、`Relay` → relay | 无密钥字段 |
-| WireGuard | `wg show all dump` | 行式表格；interface 行取 listen port / pubkey，peer 行取 endpoint / allowed-ips / latest-handshake / transfer | **interface 行 private key、peer 行 preshared key 字段丢弃**（白名单字段另构输出） |
-| frp | `frpc -v` / `frps -v`、`pgrep`、admin API（D7：frpc `/api/status`、frps `/api/serverinfo`） | JSON；frps 取 proxyTypeCount 汇总，frpc 取隧道表 | admin API 响应不含 token |
+| ZeroTier | `zerotier-cli -j listnetworks` / `-j listpeers` | JSON; from a peer's `paths[]`, take the entry that is both `active` and `preferred` as the endpoint | No key fields |
+| Tailscale | `tailscale status --json --peers` (older versions that do not accept `--peers` fall back to `status --json`) | JSON; `Self` + `Peer{}`; `CurAddr` → endpoint, `Relay` → relay | No key fields |
+| WireGuard | `wg show all dump` | Row-oriented table; the interface row supplies listen port / pubkey, the peer rows supply endpoint / allowed-ips / latest-handshake / transfer | **The private key field on the interface row and the preshared key field on peer rows are discarded** (allow-listed fields produce a separate output) |
+| frp | `frpc -v` / `frps -v`, `pgrep`, admin API (D7: frpc `/api/status`, frps `/api/serverinfo`) | JSON; frps aggregates proxyTypeCount, frpc takes the tunnel table | The admin API response contains no token |
 
-### 校验与保护
+### Validation and Guards
 
-- 全部只读，无写回路径，无 symlink/路径风险；
-- CLI 超时 5s（D10）；工具输出超 1MB 截断；
-- peers > 200 截断并在工具级 `error` 附截断提示。
+- Entirely read-only, no write-back path, no symlink/path risk;
+- 5s CLI timeout (D10); tool output truncated beyond 1MB;
+- peers > 200 are truncated, with a truncation note appended to the tool-level `error`.
 
-## Server 侧设计
+## Server-Side Design
 
-### REST API（server/api_overlay.go，挂 serveAPI `/agents/` 分支，JWT）
+### REST API (server/api_overlay.go, mounted on the serveAPI `/agents/` branch, JWT)
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |------|------|------|
-| GET | `/api/agents/{id}/overlay/status` | 纯转发 `overlay.status`；agent 离线 503；浏览器类不记审计 |
+| GET | `/api/agents/{id}/overlay/status` | Pure pass-through of `overlay.status`; 503 when the agent is offline; browse-type requests are not audited |
 
-## Web UI 设计
+## Web UI Design
 
-新增 `/network`「组网」页面，两层视图：
+Add a `/network` "Overlay" page with a two-tier view:
 
-- **全网总览**（跨地域视角，页面价值核心）：逐个拉取带 `overlay` 能力的
-  在线 agent 状态，前端聚合为节点表——每行 = 一台对端节点，列 = 节点名、
-  所在 agent、工具、虚拟 IP、延迟、在线态、版本、最近握手；同节点多路径
-  出现时按「延迟最低」合并并展示来源徽标；
-- **按 agent 分组**：每 agent 一个折叠面板，工具卡片（状态/版本/本机网络）
-  + peers 明细表；离线 agent 显示最后未知态并标注。
+- **Whole-network overview** (the cross-region view, the core value of the page): fetch the status of each
+  online agent carrying the `overlay` capability one by one and aggregate in the frontend into a node
+  table — one row = one remote node; columns = node name, owning agent, tool, virtual IP, latency, online
+  state, version, last handshake; when the same node appears on multiple paths, merge by lowest latency and
+  show a source badge;
+- **Grouped by agent**: one collapsible panel per agent, holding tool cards (status/version/local networks)
+  plus a peers detail table; offline agents show their last known state, labeled as such.
 
-组件沿 cron/proxy 页模式：agent 选择按 capability 过滤；轮询间隔跟随
-全局 refreshInterval 设置。
+Components follow the cron/proxy page pattern: the agent selector filters by capability; the polling
+interval follows the global refreshInterval setting.
 
-## 不做（后续项）
+## Not Doing (Later Items)
 
-- 管理面（ZeroTier Central / Tailscale API 成员授权、CMDB 对照发现未纳管设备）→ M2；
-- Agent 上报自身虚拟网身份到 Register/心跳（连接路径语义、按路径选路）→ 独立设计；
-- P2P 直连优化（server 与 agent 同网时 RPC 不经 server 中转）→ 远期；
-- `network-monitor` 旧 capability 的收敛合并 → 已完成（见 D18，capability 已删除）。
+- The management plane (ZeroTier Central / Tailscale API member authorization, CMDB reconciliation to
+  discover unmanaged devices) → M2;
+- Agents reporting their own overlay identity to Register/heartbeat (connection-path semantics, per-path
+  routing selection) → a separate design;
+- P2P direct-connection optimization (when server and agent are on the same network, RPC does not relay
+  through the server) → long term;
+- Converging the legacy `network-monitor` capability → done (see D18, the capability has been deleted).
 
-## M1 清单
+## M1 Checklist
 
-1. `internal/agent/detector/overlay.go` + 测试；
-2. `internal/agent/rpc/overlay_provider.go`（四 reader + 解析器 + Commander 注入）+ 解析器 fixture 测试（含 wg 密钥剥离断言）；
-3. `internal/agent/providers.go` 注册分支；
-4. `internal/server/api_overlay.go` + 转发测试；
-5. `web/src/pages/Network/`（总览 + 分组）+ 路由/菜单；
-6. `go test ./...`、`pnpm run build`、`scripts/e2e-smoke.sh` 不回归。
+1. `internal/agent/detector/overlay.go` + tests;
+2. `internal/agent/rpc/overlay_provider.go` (four readers + parsers + Commander injection) + parser fixture
+   tests (including assertions that wg keys are stripped);
+3. The registration branch in `internal/agent/providers.go`;
+4. `internal/server/api_overlay.go` + pass-through tests;
+5. `web/src/pages/Network/` (overview + grouping) + route/menu;
+6. `go test ./...`, `pnpm run build`, and `scripts/e2e-smoke.sh` show no regressions.
 
-## 参考
+## References
 
-- ZeroTier CLI JSON：`zerotier-cli -j help`，服务端 API（M2）`api.zerotier.com/api/v1`
-- Tailscale：`tailscale status --json`，API（M2）`api.tailscale.com`
-- WireGuard dump 格式：`wg(8)`；frp admin API：frp `Admin Server` 文档
+- ZeroTier CLI JSON: `zerotier-cli -j help`; server-side API (M2) `api.zerotier.com/api/v1`
+- Tailscale: `tailscale status --json`, API (M2) `api.tailscale.com`
+- WireGuard dump format: `wg(8)`; frp admin API: the frp `Admin Server` documentation
 
 ---
 
-# M2 方案设计：云端管理面 + 身份上报 + 旧能力收敛
+# M2 Design: Cloud Management Plane + Identity Reporting + Legacy Capability Convergence
 
-> 2026-09-19。M1 只读观测验证了数据模型与转发链路后，M2 补齐三块：
-> **A. 云管理面**（ZeroTier Central / Tailscale API 成员授权与除名，CMDB 对照）、
-> **B. agent 虚拟网身份上报**（Register 时携带，连接路径语义 + CMDB 对照的匹配键）、
-> **C. `network-monitor` 旧 capability 收敛**（已完成，见 D18）。A 与 B 互为表里：没有 B 的身份
-> 上报，A 的「未纳管设备」对照没有锚点。
+> 2026-09-19. After M1's read-only observability validated the data model and the forwarding chain, M2 fills
+> in three pieces: **A. the cloud management plane** (ZeroTier Central / Tailscale API member authorization
+> and removal, CMDB reconciliation), **B. agent overlay identity reporting** (carried at Register time, the
+> connection-path semantics plus the matching key for CMDB reconciliation), **C. convergence of the legacy
+> `network-monitor` capability** (done, see D18). A and B are two sides of the same coin: without B's identity
+> reporting, A's "unmanaged device" reconciliation has no anchor.
 
-## 架构总览
+## Architecture Overview
 
-管理面走 **server 直连云 API**（与 DNS M1 Cloudflare、ACME 同款出站路径），
-agent 不参与；观测走 M1 既有 agent RPC，不变。
+The management plane goes through the **server connecting straight to the cloud APIs** (the same outbound
+path as DNS M1's Cloudflare and ACME); agents are not involved. Observability keeps using M1's existing
+agent RPC, unchanged.
 
 ```
-┌─ server ─────────────────────────────┐      ┌─ 云端控制面 ──────────────┐
-│ overlay 云客户端（新，internal/overlay）│─HTTPS▶│ api.zerotier.com/api/v1   │
-│ GET /api/overlay/cloud   列表+对照     │      │ api.tailscale.com/api/v2  │
-│ POST/DELETE 变更（授权/除名）+ 审计     │      └───────────────────────────┘
-└──────────┬───────────────────────────┘
-           │ Register（既有管道）              ┌─ agent ───────────────────┐
-           ▼                                 │ overlay capability metadata│
-│ registry（capabilities 已全量存储）         │ + identity（新，M2-B）      │
-│ /api/agents 既有输出带 metadata → web 对照  │ zerotier-cli / tailscale   │
-└──────────────────────────────────────┘      └───────────────────────────┘
+┌─ server ─────────────────────────────────────┐       ┌─ cloud control plane ───────┐
+│ overlay cloud client (new, internal/overlay) │─HTTPS▶│ api.zerotier.com/api/v1     │
+│ GET /api/overlay/cloud  list + reconcile     │       │ api.tailscale.com/api/v2    │
+│ POST/DELETE mutations (authz/remove) + audit │       └─────────────────────────────┘
+└──────────┬───────────────────────────────────┘
+           │ Register (existing pipeline)              ┌─ agent ─────────────────────┐
+           ▼                                           │ overlay capability metadata │
+│ registry (capabilities fully stored)         │       │ + identity (new, M2-B)      │
+│ /api/agents output carries metadata → web    │       │ zerotier-cli / tailscale    │
+└──────────────────────────────────────────────┘       └─────────────────────────────┘
 ```
 
-CMDB 对照是**只读推导**：云端成员列表 × agent 上报身份，前端 join，不落库、
-无聚合状态——与 M1「全网视角前端聚合」同一哲学。
+CMDB reconciliation is a **read-only derivation**: the cloud member list × the agent-reported identity,
+joined in the frontend, nothing persisted, no aggregated state — the same philosophy as M1's "whole-network
+view aggregated in the frontend".
 
-## 关键决策
+## Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D11 | 管理面架构 | server 直连云 API，agent 不参与 | 管理凭据是账号级（一份 token 管全网成员），经 agent 中转徒增泄露面与部署耦合；观测（M1）在 agent、管理（M2）在 server，各自贴近事实源 |
-| D12 | 云凭据装载 | config.yaml `overlay.zerotier.api_token` / `overlay.tailscale.api_token`；env `ZEROTIER_API_TOKEN` / `TAILSCALE_API_TOKEN` 优先（secret 不落 yaml，同 DNS 纪律）；Tailscale 另有 `overlay.tailscale.tailnet`（默认 `-`，部分 token 形态要求显式 tailnet 名） | 完全复刻 DNS Cloudflare 模式；未配置统一 503 + 指名缺哪个键的引导文案；token 绝不进响应/错误/审计 |
-| D13 | API 面 | 读 `GET /api/overlay/cloud` 一次返回两 provider（未配置段 `configured:false`，单 provider 失败降级不整体 5xx）；变更四端点：`POST /api/overlay/cloud/zerotier/networks/{nwid}/members/{mid}`（body `{authorized:bool}`）、`DELETE .../members/{mid}`、`POST /api/overlay/cloud/tailscale/devices/{devid}/authorize`、`DELETE .../devices/{devid}` | 个人场景两 provider 一次拉齐省往返；读降级写精确；与 DNS `/api/dns` 同款路径组织 |
-| D14 | 变更审计 | 授权/取消授权记 `overlay_authz`、除名记 `overlay_remove`，resourceID=网络/设备与成员 ID，detail 只记布尔/名称，绝无 token | M1 D8 预告「变更操作引入审计」兑现；命名沿用 cron_apply/proxy_apply 风格 |
-| D15 | 身份上报位置 | `overlay` capability `metadata.identity`（Register 既有管道，零新增协议字段）；范围仅 ZeroTier + Tailscale | 中心化虚拟网才有云管理面，CMDB 对照语义只在两者成立（WireGuard 自建无控制面、frp 无成员概念）；metadata map 已随注册全量到 registry 与 /api/agents 输出，server/web 零存储改动 |
-| D16 | 身份提取实现 | detector 包内新文件 `overlay_identity.go` 轻量解析（`zerotier-cli -j info` + `-j listnetworks`、`tailscale status --json`），白名单字段，每命令 2s 超时，**失败静默跳过**（identity 键缺席 ≠ 探测失败，不阻塞注册） | 不搬 rpc 包整套解析器（避免包依赖调整，身份只需极少字段）；注册路径上的探测必须可失败（同 ddns/file「标准库轻实现」纪律）；刷新时机 = 重连重注册，心跳不携带——membership 低频变化，运行态权威在每次 overlay.status 实时拉取 |
-| D17 | CMDB 对照 | 匹配键：ZeroTier = member id ↔ agent 身份 node id（同为 10 位 hex，天然同键）；Tailscale = device id ↔ Self.ID；三态标注 `managed`（有对应 cockpit agent）/ `unmanaged`（云端有、面板无） / 数量汇总 | member/device id 由控制面分配且 agent 侧 CLI 原样上报，无映射歧义；`unmanaged` 是本设计核心卖点——发现未纳管设备；「agent 报了但云端没有」多为 token 范围问题，归入引导文案不做独立状态 |
-| D18 | `network-monitor` 收敛 | **删除** `detector/network.go` 的 NetworkDetector 与 `GetNetworkInterfaces`：capability 无 server/web 任何消费方（grep 验证），metadata 无下游 | M1 D3 预告收敛兑现；同仓同发无兼容包袱（service-design D9 重命名 systemd→service 先例）；cloudflared 隧道观测留后续按 frp D7 分级观测模式并入 overlay，M2 不做 |
-| D19 | ID 校验 | server 单端白名单：ZeroTier network id `^[0-9a-f]{16}$`、member id `^[0-9a-f]{10}$`、Tailscale device id `^[0-9]{1,20}$`，非法直接 400 | 云 API 是出站调用，不校验会被当作请求路径注入；无 agent 转发故无双端规则，单端即可 |
-| D20 | 云客户端实现 | `internal/overlay` 新包（ZeroTier/Tailscale 两 client + `NewXxxWithBase` httptest 注入变体），15s 超时，成员/设备输出白名单构造（token/密钥类字段天然不存在，防御性不透传原始 JSON） | 与 dns 包同构；WithBase 变体是 DNS M2 验证过的全 httptest 测试路径 |
+| D11 | Management-plane architecture | The server connects straight to the cloud APIs; agents are not involved | Management credentials are account-scoped (one token governs all network members), and relaying them through agents only widens the exposure surface and couples deployment; observability (M1) lives on the agent and management (M2) lives on the server, each closest to its source of truth |
+| D12 | Loading cloud credentials | config.yaml `overlay.zerotier.api_token` / `overlay.tailscale.api_token`; the env vars `ZEROTIER_API_TOKEN` / `TAILSCALE_API_TOKEN` take precedence (secrets do not land in yaml, same discipline as DNS); Tailscale additionally has `overlay.tailscale.tailnet` (default `-`; some token shapes require an explicit tailnet name) | An exact replica of the DNS Cloudflare pattern; when unconfigured, a uniform 503 plus guidance naming which key is missing; tokens never enter responses/errors/audit |
+| D13 | API surface | Read `GET /api/overlay/cloud` returns both providers in one call (an unconfigured section is `configured:false`, and a single provider failing degrades without turning the whole response into a 5xx); four mutation endpoints: `POST /api/overlay/cloud/zerotier/networks/{nwid}/members/{mid}` (body `{authorized:bool}`), `DELETE .../members/{mid}`, `POST /api/overlay/cloud/tailscale/devices/{devid}/authorize`, `DELETE .../devices/{devid}` | In a personal setup, fetching both providers at once saves a round trip; reads degrade, writes are precise; path organization matches DNS `/api/dns` |
+| D14 | Mutation auditing | Authorization/deauthorization records `overlay_authz`, removal records `overlay_remove`; resourceID = the network/device plus the member ID; details record only booleans/names, never tokens | M1's D8 foreshadowed "auditing is introduced for mutating operations", now delivered; naming follows the cron_apply/proxy_apply style |
+| D15 | Where identity is reported | The `overlay` capability's `metadata.identity` (the existing Register path, zero new protocol fields); scope is ZeroTier + Tailscale only | Only centralized virtual networks have a cloud management plane, so the CMDB reconciliation semantics only hold for those two (self-hosted WireGuard has no control plane, frp has no notion of members); the metadata map already reaches the registry and the /api/agents output in full at registration, so server/web need no storage changes |
+| D16 | Identity extraction implementation | A new file `overlay_identity.go` inside the detector package does lightweight parsing (`zerotier-cli -j info` + `-j listnetworks`, `tailscale status --json`), allow-listed fields, 2s timeout per command, **failures are silently skipped** (an absent identity key ≠ a failed detection and does not block registration) | Do not port the whole parser set from the rpc package (that would force package dependency changes; identity needs very few fields); a detection on the registration path must be allowed to fail (same discipline as ddns/file's "lightweight stdlib implementation"); refresh timing = re-registration on reconnect, not carried by the heartbeat — membership changes rarely, and the authoritative runtime state is fetched live on every overlay.status |
+| D17 | CMDB reconciliation | Matching keys: ZeroTier = member id ↔ the agent identity's node id (both 10-hex, naturally the same key); Tailscale = device id ↔ Self.ID; a tri-state annotation `managed` (a matching cockpit agent exists) / `unmanaged` (present in the cloud, absent from the panel), plus a count summary | member/device ids are assigned by the control plane and reported verbatim by the agent-side CLI, so there is no mapping ambiguity; `unmanaged` is the core selling point of this design — discovering unmanaged devices; "the agent reported it but the cloud does not have it" is usually a token-scope problem, so it is folded into the guidance text rather than made a separate state |
+| D18 | `network-monitor` convergence | **Delete** NetworkDetector and `GetNetworkInterfaces` from `detector/network.go`: no server/web consumer of the capability (verified by grep), and nothing downstream consumes the metadata | M1's D3 foreshadowed this convergence, now delivered; shipping from the same repo in the same release means no compatibility baggage (precedent: service-design D9 renaming systemd→service); cloudflared tunnel observation is left for later, merged into overlay following frp's tiered observation pattern from D7, not in M2 |
+| D19 | ID validation | A single-ended allow-list on the server: ZeroTier network id `^[0-9a-f]{16}$`, member id `^[0-9a-f]{10}$`, Tailscale device id `^[0-9]{1,20}$`; invalid values return 400 directly | The cloud APIs are outbound calls, and without validation the values could be injected into the request path; with no agent relay there is no need for rules on both ends, one end suffices |
+| D20 | Cloud client implementation | A new `internal/overlay` package (ZeroTier/Tailscale clients + `NewXxxWithBase` httptest-injection variants), 15s timeout, member/device output constructed by allow-list (token/key-style fields naturally do not exist; raw JSON is defensively not passed through) | Isomorphic to the dns package; the WithBase variant is the fully-httptest test path already validated by DNS M2 |
 
-## 云端数据模型（白名单构造）
+## Cloud Data Model (Allow-List Construction)
 
 ```jsonc
-// GET /api/overlay/cloud 响应
+// GET /api/overlay/cloud response
 {
   "zerotier": {
     "configured": true,
-    "error": "",                    // configured 但拉取失败时的降级摘要
-    "networks": [                   // Central API /network，只读列出（管理粒度在成员）
+    "error": "",                    // degraded summary when configured but the fetch fails
+    "networks": [                   // Central API /network, read-only listing (management granularity is at the member level)
       { "id": "8056c2e21c", "name": "home", "members": [
         { "id": "7f3d0a9b12", "name": "nas", "authorized": true,
           "online": true, "ips": ["10.147.20.2"], "version": "1.14.0",
@@ -219,7 +228,7 @@ CMDB 对照是**只读推导**：云端成员列表 × agent 上报身份，前�
     ]
   },
   "tailscale": {
-    "configured": false,            // 未配置 → 其余字段缺席，前端出引导卡
+    "configured": false,            // unconfigured → the remaining fields are absent, the frontend renders a guidance card
     "tailnet": "-",
     "error": "",
     "devices": [
@@ -232,232 +241,260 @@ CMDB 对照是**只读推导**：云端成员列表 × agent 上报身份，前�
 }
 ```
 
-`managed` 由 server 在拉取时与 registry 内 agent `metadata.identity` 对照计算
-（D17 匹配键），web 零推导——registry 是 server 进程内数据，server 算比前端
-再拉一遍 /api/agents 省一次往返；对照失败（registry 空）一律 `managed:false`
-不猜测。
+`managed` is computed by the server at fetch time by reconciling against the agents' `metadata.identity` in
+the registry (D17 matching keys); the web does zero derivation — the registry is in-process server data, so
+the server computing it saves the frontend another /api/agents round trip; if the reconciliation fails (empty
+registry) it is always `managed:false`, never a guess.
 
-## Agent 侧（M2-B）
+## Agent Side (M2-B)
 
-### identity 提取（detector/overlay_identity.go）
+### Identity Extraction (detector/overlay_identity.go)
 
-| 工具 | 命令 | 提取字段（白名单） |
+| Tool | Command | Extracted fields (allow-list) |
 |------|------|-------------------|
-| ZeroTier | `zerotier-cli -j info` | `address`（= node id）、`version` |
-| ZeroTier | `zerotier-cli -j listnetworks` | 每网 `id`、`name`、`status`、`assignedAddresses` |
-| Tailscale | `tailscale status --json` | `Self.ID`、`Self.HostName`、`Self.DNSName`、`Self.Tailscale IPs` |
+| ZeroTier | `zerotier-cli -j info` | `address` (= node id), `version` |
+| ZeroTier | `zerotier-cli -j listnetworks` | Per network: `id`, `name`, `status`, `assignedAddresses` |
+| Tailscale | `tailscale status --json` | `Self.ID`, `Self.HostName`, `Self.DNSName`, `Self.Tailscale IPs` |
 
-- 每命令 2s 超时；任一失败该工具 identity 缺席，不影响另一工具与其余探测；
-- 输出结果写入 `overlay` capability `metadata.identity`：
-  `{zerotier: {nodeId, networks: [{id,name,status,addresses}]}, tailscale: {id, hostName, dnsName, addresses}}`；
-- web 在 agent 分组视图渲染身份 chip（网络名 + 本机虚拟地址）。
+- 2s timeout per command; if any one fails, that tool's identity is absent, which does not affect the other
+  tool or the remaining detection;
+- The result is written to the `overlay` capability's `metadata.identity`:
+  `{zerotier: {nodeId, networks: [{id,name,status,addresses}]}, tailscale: {id, hostName, dnsName, addresses}}`;
+- The web renders an identity chip (network name + local virtual address) in the per-agent grouped view.
 
-### 不做
+### Not Doing
 
-- 心跳携带 identity（D16：低频变化，重注册刷新足够）；
-- WireGuard/frp 身份（D15：无云管理面对照语义）。
+- Carrying identity in the heartbeat (D16: it changes rarely, refreshing on re-registration is enough);
+- WireGuard/frp identity (D15: there is no cloud management plane to reconcile against).
 
-## Server 侧（M2-A）
+## Server Side (M2-A)
 
-### internal/overlay 云客户端
+### internal/overlay Cloud Client
 
-| 方法 | ZeroTier Central（api.zerotier.com/api/v1） | Tailscale（api.tailscale.com/api/v2） |
+| Method | ZeroTier Central (api.zerotier.com/api/v1) | Tailscale (api.tailscale.com/api/v2) |
 |------|---------------------------------------------|----------------------------------------|
-| 列表 | `GET /network` + 逐网 `GET /network/{id}/member` | `GET /tailnet/{tailnet}/devices` |
-| 授权 | `POST /network/{nwid}/member/{mid}` body `{authorized}` | `POST /device/{id}/authorize` |
-| 除名 | `DELETE /network/{nwid}/member/{mid}` | `DELETE /device/{id}` |
+| List | `GET /network` + per-network `GET /network/{id}/member` | `GET /tailnet/{tailnet}/devices` |
+| Authorize | `POST /network/{nwid}/member/{mid}` body `{authorized}` | `POST /device/{id}/authorize` |
+| Remove | `DELETE /network/{nwid}/member/{mid}` | `DELETE /device/{id}` |
 
-- Bearer token 认证；15s 超时（同 DNS client）；成员/设备解析白名单构造（D20）；
-- 两 client 均 `NewXxxWithBase` 变体支撑 httptest 全流程测试；
-- 网络名：ZT `/network` 列表项取 `config.name`（顶层 id 同取）；成员名取 `name`
-  （Central 显示名），缺省回退 node id 前六位展示。
+- Bearer token authentication; 15s timeout (same as the DNS client); member/device parsing is constructed
+  by allow-list (D20);
+- Both clients provide `NewXxxWithBase` variants to support end-to-end httptest testing;
+- Network name: for ZT take `config.name` from the `/network` list item (the top-level id is taken the same
+  way); the member name comes from `name` (the Central display name), falling back to the first six
+  characters of the node id for display.
 
-### REST API（server/api_overlay_cloud.go，JWT）
+### REST API (server/api_overlay_cloud.go, JWT)
 
-| 方法 | 路径 | 审计 |
+| Method | Path | Audit |
 |------|------|------|
-| GET | `/api/overlay/cloud` | 否（浏览类，同 M1 D8） |
-| POST | `/api/overlay/cloud/zerotier/networks/{nwid}/members/{mid}` | `overlay_authz`（detail 含 authorized 布尔） |
+| GET | `/api/overlay/cloud` | No (browse-type, same as M1 D8) |
+| POST | `/api/overlay/cloud/zerotier/networks/{nwid}/members/{mid}` | `overlay_authz` (details include the authorized boolean) |
 | DELETE | `/api/overlay/cloud/zerotier/networks/{nwid}/members/{mid}` | `overlay_remove` |
 | POST | `/api/overlay/cloud/tailscale/devices/{devid}/authorize` | `overlay_authz` |
 | DELETE | `/api/overlay/cloud/tailscale/devices/{devid}` | `overlay_remove` |
 
-- 未配置对应 provider：读 503 带引导文案（指名缺哪个键，同 requireDNS 各报各的）；
-  变更同样 503 不透传到云端；
-- 云端 4xx/5xx 原样映射 HTTP 状态并透出云端错误摘要（脱 token）；
-- 变更成功后 web 局部刷新 `GET /api/overlay/cloud`。
+- When the corresponding provider is unconfigured: reads return 503 with guidance text (naming which key is
+  missing, each reporting its own like requireDNS); mutations likewise return 503 and are not forwarded to
+  the cloud;
+- Cloud 4xx/5xx map the HTTP status as-is and surface the cloud error summary (tokens stripped);
+- After a successful mutation, the web partially refreshes `GET /api/overlay/cloud`.
 
-## Web UI（/network 页扩展）
+## Web UI (/network Page Extension)
 
-- 页面顶部 **Segmented「运行态观测 / 云端管理」**（默认观测，M1 视图不动）；
-- **云端管理**视图：
-  - 未配置 provider 出引导卡（配置方法 + env 优先提示，同 DNS/acme 引导卡样式）；
-  - ZeroTier：按 network 分组的成员表（成员名/ID/授权态 Switch/在线/虚拟 IP/
-    版本/最后在线/「面板纳管」徽标 + Tooltip 解释）；行操作：授权 Switch
-    （即时 POST）+ 除名 Popconfirm（member id = node id，设备重新 join 后
-    可再授权，可逆性够 Popconfirm 级）；
-  - Tailscale：设备表（名称/地址/归属 user/系统/在线/授权态/keyExpiry 过期高亮/
-    纳管徽标）；行操作：authorize 按钮 + **除名 Modal 输入设备名确认**
-    （设备删除需重新登录，破坏性高于 ZT，按 stack 删除确认模式）；
-  - 顶部对照汇总条：「云端 n 台设备，m 台未纳管」（unmanaged 展开提示）；
-- **运行态观测**视图补一处：agent 分组卡显示 identity chip（来自 capability
-  metadata，M2-B 上报）。
+- At the top of the page, a **Segmented "Runtime Observability / Cloud Management"** control (observability
+  by default; the M1 view is untouched);
+- The **Cloud Management** view:
+  - An unconfigured provider gets a guidance card (configuration method + the note that env takes
+    precedence, same style as the DNS/acme guidance cards);
+  - ZeroTier: a member table grouped by network (member name/ID/authorization Switch/online/virtual
+    IP/version/last seen/"managed by the panel" badge + a Tooltip explaining it); row actions: an
+    authorization Switch (immediate POST) + a removal Popconfirm (member id = node id; once the device joins
+    again it can be re-authorized, so it is reversible enough to deserve only a Popconfirm);
+  - Tailscale: a device table (name/addresses/owning user/OS/online/authorization state/keyExpiry expiry
+    highlight/managed badge); row actions: an authorize button + a **removal Modal that requires typing the
+    device name to confirm** (deleting a device requires logging in again, so it is more destructive than
+    ZT; follow the stack's delete-confirmation pattern);
+  - A reconciliation summary bar at the top: "n devices in the cloud, m unmanaged" (expanding to list the
+    unmanaged ones);
+- One addition to the **Runtime Observability** view: the per-agent group cards show an identity chip
+  (from the capability metadata, reported by M2-B).
 
-## M2 清单
+## M2 Checklist
 
-1. `internal/agent/detector/overlay_identity.go` + 提取测试（注入假命令、失败静默、字段白名单）；
-2. 删除 `detector/network.go` + 相关测试同步清理（M2-C，独立小提交可并入 feat(agent)）；
-3. `internal/overlay`（两 client + WithBase）+ httptest 全流程/降级/白名单测试；
-4. `internal/server/api_overlay_cloud.go` + 端点测试（校验 D19/审计/未配置 503/降级/managed 对照）；
-5. `web/src/pages/Network/` 云端管理视图 + 观测视图身份 chip；
-6. `go test ./...`、`pnpm run build` 不回归；设计文档清单勾选 + todo.md 条目更新。
+1. `internal/agent/detector/overlay_identity.go` + extraction tests (injecting fake commands, silent
+   failure, field allow-list);
+2. Delete `detector/network.go` + clean up the related tests in step (M2-C, can be folded into a small
+   standalone commit merged into feat(agent));
+3. `internal/overlay` (two clients + WithBase) + end-to-end/degradation/allow-list httptest tests;
+4. `internal/server/api_overlay_cloud.go` + endpoint tests (D19 validation/audit/unconfigured
+   503/degradation/managed reconciliation);
+5. The cloud management view in `web/src/pages/Network/` + the identity chip in the observability view;
+6. `go test ./...` and `pnpm run build` show no regressions; check off the design-doc checklist + update the
+   todo.md entries.
 
-## M2 落地差异补记
+## M2 Implementation Delta Notes
 
-- **未配置 provider 的读语义**：Server 侧 REST 小节写「读 503 带引导文案」，实现按 D13
-  段级语义——`GET /api/overlay/cloud` 恒 200，未配置段 `configured:false`、失败段段内
-  `error`（引导卡由 web 依 `configured` 渲染）；503 仅用于变更操作（指名缺哪个 env/yaml
-  键）。D13 是决策层、小节是实现描述，以决策为准，不回改原文。
-- **云端错误状态映射**：设计写「4xx/5xx 原样映射 HTTP 状态」，实现统一映射 **502** +
-  云端错误摘要（200 字符截断，脱 token），与 DNS M2 的上游错误处理同构；段级 `error`
-  字段承载摘要原文，状态细节不丢——上游不可达属网关语义，透传 401/403 反而误导为
-  用户对 cockpit 的认证问题。
-- **汇总条语义补强**：「云端 n 台设备，m 台未纳管」在 m=0 时显示为 info 级「全部与
-  面板 Agent 身份对上」，正向确认对照链路健康，而非仅报忧。
+- **Read semantics for an unconfigured provider**: the Server-side REST subsection says "reads return 503
+  with guidance text", but the implementation follows D13's per-section semantics — `GET /api/overlay/cloud`
+  is always 200, with an unconfigured section carrying `configured:false` and a failed section carrying an
+  in-section `error` (the web renders the guidance card based on `configured`); 503 is used only for
+  mutation operations (naming which env/yaml key is missing). D13 is the decision layer and the subsection is
+  an implementation description; the decision wins and the original text is not rewritten.
+- **Cloud error status mapping**: the design says "4xx/5xx map the HTTP status as-is", but the
+  implementation uniformly maps **502** + a cloud error summary (truncated at 200 characters, tokens
+  stripped), isomorphic to DNS M2's upstream error handling; the per-section `error` field carries the
+  original summary text so status detail is not lost — an unreachable upstream is gateway semantics, and
+  passing through 401/403 would instead mislead users into thinking it is an authentication problem with
+  cockpit.
+- **Stronger summary-bar semantics**: when m=0, "n devices in the cloud, m unmanaged" is shown as an
+  info-level "all of them match the panel's Agent identities", positively confirming that the reconciliation
+  chain is healthy rather than only reporting problems.
 
-## 参考
+## References
 
-- ZeroTier Central API v1：`https://api.zerotier.com/api/v1`（`GET /network`、
-  `POST/DELETE /network/{id}/member/{memberId}`，Bearer token）
-- Tailscale API v2：`https://api.tailscale.com/api/v2`（`GET /tailnet/{tailnet}/devices`、
-  `POST /device/{id}/authorize`、`DELETE /device/{id}`，Bearer token；`tailnet=-`
-  为 API 生成文档支持的默认 tailnet 简写，实现以真机 token 实测为准）
+- ZeroTier Central API v1: `https://api.zerotier.com/api/v1` (`GET /network`,
+  `POST/DELETE /network/{id}/member/{memberId}`, Bearer token)
+- Tailscale API v2: `https://api.tailscale.com/api/v2` (`GET /tailnet/{tailnet}/devices`,
+  `POST /device/{id}/authorize`, `DELETE /device/{id}`, Bearer token; `tailnet=-` is the shorthand for the
+  default tailnet supported by the API's generated documentation, and the implementation follows
+  measurements made with a real token)
 
 ---
 
-# M3 方案设计：独立部署路线——网络加入/离开 + daemon 服务管理
+# M3 Design: Standalone Deployment Path — Network Join/Leave + daemon Service Management
 
-> 2026-09-27。M1 观测、M2 云管理面把「看」和「云端授权」都收口了，但**本机
-> 侧的两类高频动作仍要 SSH**：①「这台机器加入/退出某个网络」②「tailscaled /
-> zerotier-one 挂了/没装/想禁止开机自启」。M3 把这两类动作收进面板。用户
-> 拍板走**独立部署路线**：组网 daemon 仍由用户装在主机上、归 systemd 管，
-> cockpit agent 只做调用者与状态管理者，绝不宿主 daemon 进程（详见 D21）。
+> 2026-09-27. M1's observability and M2's cloud management plane have closed off both "looking" and "cloud
+> authorization", but **two high-frequency local-side actions still require SSH**: ① "have this machine
+> join/leave a network" ② "tailscaled / zerotier-one has crashed / is not installed / should not start at
+> boot". M3 brings these two actions into the panel. The user decided on the **standalone deployment path**:
+> the overlay daemon is still installed by the user on the host and managed by systemd; the cockpit agent is
+> only the caller and the state manager, and never hosts the daemon process (see D21 for details).
 
-## 架构总览
+## Architecture Overview
 
-与 M1 同一通道模型：**同步 RPC + server 纯转发 + 审计**。差别只在写操作
-的防护等级：
+The same channel model as M1: **synchronous RPC + pure pass-through on the server + auditing**. The only
+difference lies in the protection level of write operations:
 
 ```
-┌─ server ────────────────────────────────┐        ┌─ agent ──────────────────────┐
-│ POST /api/agents/{id}/overlay/          │  ─RPC─▶ │ overlay.join / overlay.leave │
-│   networks/{netId}/join|leave           │  ◀RPC── │   → zerotier-cli join|leave  │
-│ GET  /api/agents/{id}/overlay/daemon    │  ─RPC─▶ │   → tailscale up|down        │
-│ POST /api/agents/{id}/overlay/service   │  ◀RPC─▶ │ overlay.daemon / overlay.service│
-│ RBAC overlay:admin + 审计三动作          │         │   → systemctl（单元名硬白名单）│
-└─────────────────────────────────────────┘         │ daemon 归 systemd，agent 只  │
-                                                    │ 管理不宿主；argv 直传不过 shell │
-                                                    └──────────────────────────────┘
+┌─ server ───────────────────────────────┐          ┌─ agent ────────────────────────────────────┐
+│ POST /api/agents/{id}/overlay/         │  ─RPC─▶  │ overlay.join / overlay.leave               │
+│   networks/{netId}/join|leave          │  ◀RPC──  │   → zerotier-cli join|leave                │
+│ GET  /api/agents/{id}/overlay/daemon   │  ─RPC─▶  │   → tailscale up|down                      │
+│ POST /api/agents/{id}/overlay/service  │  ◀RPC─▶  │ overlay.daemon / overlay.service           │
+│ RBAC overlay:admin + audit (3 actions) │          │   → systemctl (hard-coded unit allow-list) │
+└────────────────────────────────────────┘          │ daemon belongs to systemd, agent only      │
+                                                    │ manages, never hosts; argv direct, no shell│
+                                                    └────────────────────────────────────────────┘
 ```
 
-## 关键决策
+## Key Decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D21 | **部署形态：独立部署，不做 tsnet 内嵌** | cockpit agent **不引入 tsnet/内置 tailscaled**，组网 daemon 由用户装在主机、归 systemd 管理；agent 只执行 CLI 与 systemctl 动作。原则入档：**daemon 归 systemd，agent 只管理不宿主** | tsnet 内嵌意味着 tailscaled 生命周期挂进 cockpit agent 进程——agent 重启/升级即断网，cockpit 崩溃即失联（远程排障场景正需要它活着）；个人设施 daemon 本就常年自启，重复宿主徒增双 daemon 冲突面；独立部署同时保持 ZeroTier 可行（tsnet 只解决 Tailscale） |
-| D22 | RPC 方法面 | 新增 `overlay.join` / `overlay.leave`（参数 `{tool, networkId}`）与 `overlay.daemon`（读）/ `overlay.service`（写，参数 `{tool, action}`）；join/leave 成功返回**最新 status 快照 + identity** | 写操作与只读 `overlay.status` 分方法——server 端 RBAC/审计分流干净；成功回带快照省前端一次拉取（见 D26） |
-| D23 | ZeroTier join/leave | `zerotier-cli join\|leave <networkId>`，argv 直传不过 shell（D10 纪律）、5s 超时；networkId **16 位 hex** 白名单 **server + agent 双端校验**；CLI `200` 前缀应答视为成功（`101 already joined` 亦回快照） | ZeroTier 网络 ID 形态唯一（16-hex），双端各挡一道是写操作的最低注入纪律；200/101 应答语义按 `zerotier-cli(1)` 实测 |
-| D24 | Tailscale join/leave 语义（按 CLI 实际行为核实后定） | cockpit 场景里 Tailscale 的「网络」= tailnet，**没有按网络 ID 加入的 CLI 动作**；join = 先查 `tailscale status --json` 的 `BackendState`，`Running`（已登录）才执行 `tailscale up`——未登录时 `up` 是交互式认证流（打印 auth URL 等浏览器），非交互执行必挂，**故拒绝并回引导文案**；leave = `tailscale down`（断连但保留登录态，再 up 可回），**绝不用 `logout`**（清凭据 → 再 join 需交互重认证，破坏性翻倍）；networkId 传 `-` 或 tailnet DNS 后缀（如 `tailnet-name.ts.net`），与 `Self.DNSName` 去掉主机名首段推出的后缀做 EqualFold 比较，不一致 → 400（DNSName 形态不足 3 段时不比，宁可不比不可错杀） | `up/down/logout` 三态的「可再入」差异是决策核心：down 可逆、logout 不可逆（对用户而言）；authkey 自动注册不纳入——凭据下发属于装机流程，面板只服务已装机设备 |
-| D25 | WireGuard / frp | join/leave 与 service 一律返回 `unavailable` 并给出语义说明 | WireGuard 没有运行时 join 概念（配置即 `/etc/wireguard/*.conf` + `wg-quick`，接口增删属文件管理域，面板不做配置文件编辑）；frp 是端口穿透不是 overlay 网络（无成员/加入语义）。诚实报错好过强行映射 |
-| D26 | 成功后状态同步 | join/leave 响应携带**最新 `overlay.status` 快照**（agent 端本地重新拉取）与刷新后的 `identity`；server 收到响应后**就地更新 registry 内该 agent 的 `metadata.identity`**——身份经响应载荷上报，不动 WebSocket 协议面；其余时刻 identity 刷新时机仍是重连重注册（D16 不变） | WebSocket 协议只接受连接后**首条**消息为 register（`websocket.go handleWebSocket`），会话中途重注册不支持——响应载荷正是既有的反向通道，join/leave 这种「低频但状态跃迁」的写操作借它完成身份上报，CMDB 对照即时性够；运行态权威本就在每次 `overlay.status` 实时拉取，快照回带使前端无需二次请求 |
-| D27 | daemon/服务管理（M3.5） | `overlay.daemon` 读：按工具返回 `{installed, unitExists, active, enabled, version, missingGuide}`——CLI/daemon `LookPath` + 版本，systemd 单元经 `systemctl cat <unit>` 存在性、`is-active` / `is-enabled` 取态；`overlay.service` 写：action ∈ `start\|stop\|enable\|disable`，**单元名硬编码白名单** `{tailscale→tailscaled.service, zerotier→zerotier-one.service}`，不复用通用 service provider 面；非 systemd 平台读降级（unit 字段缺席）、写 unavailable；未装 → `missing` + 安装引导文案（apt/brew/官网脚本各一句） | 白名单只有这两个单元：overlay 页绝不能成为动任意 systemd 单元的口子（通用 service provider 存在是给 /services 页的，权限资源不同）；`daemon 归 systemd` 原则下 agent 只发 systemctl 指令，进程托管（`tailscale up` 拉 netsd 之类）不碰 |
-| D28 | RBAC | `overlay` 资源新增 **`admin`** 档（`resourceActions["overlay"] = [read, write, admin]`）；join/leave/service 四个写端点全要求 `overlay:admin`；**内置 operator 角色排除 `overlay:admin`**（与 `users`/`roles`/`settings:admin` 同纪律）——overlay 写操作能把主机踢出网络，必须显式授予；`role_test.go` 的 admin=全量 / operator=排除集断言同步更新 | 观测（read）与云端管理（write）的爆炸半径逐级升高，三档边界恰好匹配；admin 级授予只影响 join/leave/service，M2 云授权留在 write 不动 |
-| D29 | REST API + 审计 | `POST /api/agents/{id}/overlay/networks/{netId}/join`、`.../leave`（body `{tool}`）、`GET /api/agents/{id}/overlay/daemon`、`POST /api/agents/{id}/overlay/service`（body `{tool, action}`）；审计动作 `overlay_join` / `overlay_leave` / `service_toggle`，resourceID = `{agentID}/{tool}/{netId}` 与 `{agentID}/{unit}`；server 端 netId 正则白名单（ZT 16-hex / Tailscale `-` 或完整 tailnet DNS 后缀，锚定正则防交替分支退化成子串匹配）非法 400；agent 离线 503 | 路径组织延续 M1 `/agents/{id}/overlay/` 前缀；`GET daemon` 浏览类不记审计（M1 D8 口径）；三个写动作全留审计痕迹（与 cloud 段 `overlay_authz`/`overlay_remove` 命名同风格） |
-| D30 | Web UI | 运行态观测视图（M1）每个工具卡片上：**ZeroTier/Tailscale** 增「加入网络」按钮（netId 输入 Modal，ZT 侧提示 16-hex、Tailscale 侧提示 tailnet 名 + 需已登录）与「离开」按钮（Popconfirm，文案明示后果：down 可逆）；每工具增 **daemon 状态卡**（installed/active/enabled/version 徽标 + `missing` 时出安装引导 Alert + start/stop/enable/disable 按钮组）；全部操作 `PermGuard perm="overlay:admin"` | 动作就近放观测卡——决策依据（当前 peers/网络）与按钮同屏；`tailscale down` 类「离开」文案强调保留登录态可回，降低误操作心理预期差 |
+| D21 | **Deployment shape: standalone deployment, no embedded tsnet** | The cockpit agent **does not pull in tsnet / a built-in tailscaled**; the overlay daemon is installed by the user on the host and managed by systemd; the agent only executes CLI and systemctl actions. The principle goes on the record: **the daemon belongs to systemd, the agent only manages and never hosts** | Embedding tsnet means the tailscaled lifecycle hangs off the cockpit agent process — any agent restart/upgrade drops the network, and a cockpit crash means losing contact (exactly the scenario where remote troubleshooting needs it alive); personal-infrastructure daemons already autostart year-round, so double hosting only enlarges the two-daemon conflict surface; standalone deployment also keeps ZeroTier viable (tsnet only solves Tailscale) |
+| D22 | RPC method surface | Add `overlay.join` / `overlay.leave` (parameters `{tool, networkId}`) plus `overlay.daemon` (read) / `overlay.service` (write, parameters `{tool, action}`); a successful join/leave returns the **latest status snapshot + identity** | Write operations get methods of their own, separate from read-only `overlay.status`, which keeps RBAC/audit routing clean on the server; returning a snapshot on success saves the frontend one fetch (see D26) |
+| D23 | ZeroTier join/leave | `zerotier-cli join\|leave <networkId>`, argv passed directly without a shell (D10 discipline), 5s timeout; the networkId is a **16-hex-digit** allow-list validated on **both the server and the agent**; a CLI reply with a `200` prefix counts as success (`101 already joined` also returns a snapshot) | ZeroTier's network ID shape is unique (16-hex), so a check at each end is the minimum injection discipline for a write; the 200/101 reply semantics are based on measured `zerotier-cli(1)` behaviour |
+| D24 | Tailscale join/leave semantics (fixed after verifying actual CLI behaviour) | In the cockpit scenario a Tailscale "network" = a tailnet, and **there is no CLI action for joining by network ID**; join = first check `BackendState` from `tailscale status --json`, and only run `tailscale up` when it is `Running` (already logged in) — when not logged in, `up` is an interactive authentication flow (it prints an auth URL and waits for a browser), which is guaranteed to fail non-interactively, so **it is rejected and guidance text is returned**; leave = `tailscale down` (disconnects but keeps the login state, so up can bring it back), and **`logout` is never used** (clearing credentials means the next join needs interactive re-authentication, doubling the destructiveness); networkId passes `-` or a tailnet DNS suffix (e.g. `tailnet-name.ts.net`), compared EqualFold against the suffix derived from `Self.DNSName` with the first hostname label removed — on mismatch → 400 (when the DNSName has fewer than 3 labels no comparison is done; better to skip the comparison than to kill a legitimate request) | The difference in "can re-enter" across the three states `up/down/logout` is the core of this decision: down is reversible, logout is not (from the user's point of view); authkey auto-registration is out of scope — issuing credentials belongs to the install flow, and the panel only serves machines that are already installed |
+| D25 | WireGuard / frp | join/leave and service uniformly return `unavailable` with a semantic explanation | WireGuard has no runtime join concept (configuration means `/etc/wireguard/*.conf` + `wg-quick`; adding and removing interfaces belongs to the file-management domain, and the panel does not edit config files); frp is port traversal, not an overlay network (no member/join semantics). Honest errors beat a forced mapping |
+| D26 | Post-success state synchronization | The join/leave response carries the **latest `overlay.status` snapshot** (re-fetched locally by the agent) and the refreshed `identity`; after receiving the response the server **updates that agent's `metadata.identity` in place in the registry** — identity is reported through the response payload without touching the WebSocket protocol surface; at all other times the identity refresh timing is still re-registration on reconnect (D16 unchanged) | The WebSocket protocol only accepts **the first** message after connecting as a register (`websocket.go handleWebSocket`), and mid-session re-registration is not supported — the response payload is exactly the existing reverse channel, and low-frequency-but-state-jumping write operations such as join/leave borrow it to report identity, which is enough for CMDB reconciliation immediacy; the authoritative runtime state already lives in the live fetch on every `overlay.status`, and returning a snapshot means the frontend needs no second request |
+| D27 | daemon/service management (M3.5) | `overlay.daemon` read: per tool return `{installed, unitExists, active, enabled, version, missingGuide}` — `LookPath` + version for the CLI/daemon, and for the systemd unit, existence via `systemctl cat <unit>` with state taken from `is-active` / `is-enabled`; `overlay.service` write: action ∈ `start\|stop\|enable\|disable`, with a **hard-coded unit name allow-list** `{tailscale→tailscaled.service, zerotier→zerotier-one.service}`, not reusing the generic service provider surface; on non-systemd platforms reads degrade (the unit fields are absent) and writes return unavailable; not installed → `missing` + install guidance text (one line each for apt/brew/the official script) | The allow-list holds only these two units: the overlay page must never become a way to touch arbitrary systemd units (the generic service provider exists for the /services page, whose permission resource differs); under the `the daemon belongs to systemd` principle the agent only issues systemctl commands and never touches process supervision (things like `tailscale up` pulling up netsd) |
+| D28 | RBAC | Add an **`admin`** tier to the `overlay` resource (`resourceActions["overlay"] = [read, write, admin]`); all four write endpoints (join/leave/service) require `overlay:admin`; the **built-in operator role excludes `overlay:admin`** (same discipline as `users`/`roles`/`settings:admin`) — an overlay write can kick a host off the network, so it must be granted explicitly; the admin=full-set / operator=excluded-set assertions in `role_test.go` are updated accordingly | The blast radius grows tier by tier from observability (read) to cloud management (write), and the three tiers match exactly; an admin-tier grant affects only join/leave/service, while M2 cloud authorization stays at write |
+| D29 | REST API + auditing | `POST /api/agents/{id}/overlay/networks/{netId}/join`, `.../leave` (body `{tool}`), `GET /api/agents/{id}/overlay/daemon`, `POST /api/agents/{id}/overlay/service` (body `{tool, action}`); audit actions `overlay_join` / `overlay_leave` / `service_toggle`, resourceID = `{agentID}/{tool}/{netId}` and `{agentID}/{unit}`; a server-side netId regex allow-list (ZT 16-hex / Tailscale `-` or a full tailnet DNS suffix, with an anchored regex so the alternation cannot degrade into a substring match), invalid → 400; agent offline → 503 | Path organization continues the M1 `/agents/{id}/overlay/` prefix; `GET daemon` is a browse-type request and is not audited (M1 D8 criterion); all three write actions leave audit traces (naming in the same style as the cloud section's `overlay_authz`/`overlay_remove`) |
+| D30 | Web UI | In the runtime observability view (M1), on each tool card: **ZeroTier/Tailscale** get a "Join network" button (a Modal with a netId input — the ZT side hints 16-hex, the Tailscale side hints the tailnet name and that being logged in is required) and a "Leave" button (a Popconfirm whose text spells out the consequence: down is reversible); each tool also gets a **daemon status card** (installed/active/enabled/version badges + an install guidance Alert when `missing` + a start/stop/enable/disable button group); all operations use `PermGuard perm="overlay:admin"` | Actions sit right next to the observability cards — the decision inputs (current peers/networks) share the screen with the buttons; the "leave" copy for things like `tailscale down` emphasizes that the login state is kept and you can come back, narrowing the psychological expectation gap that leads to mistakes |
 
-## Agent 侧设计（rpc/overlay_provider.go 扩展）
+## Agent-Side Design (rpc/overlay_provider.go Extension)
 
-### RPC 方法面
+### RPC Method Surface
 
-| 方法 | 参数 | 返回 | 门禁 |
+| Method | Parameters | Returns | Gate |
 |------|------|------|------|
-| `overlay.join` | `{tool, networkId}` | `{status: <同 overlay.status>, identity: {…}}` | tool 白名单 + 双端校验；5s |
-| `overlay.leave` | `{tool, networkId}` | 同上 | 同上 |
-| `overlay.daemon` | `{}` | `{tools: [{tool, installed, unitExists, active, enabled, version, missingGuide}]}` | 只读 |
-| `overlay.service` | `{tool, action}` | `{tool, unit, action, result}`（systemctl 退出码非 0 → 错误） | 单元名白名单（D27）；5s |
+| `overlay.join` | `{tool, networkId}` | `{status: <same as overlay.status>, identity: {…}}` | tool allow-list + validation on both ends; 5s |
+| `overlay.leave` | `{tool, networkId}` | Same as above | Same as above |
+| `overlay.daemon` | `{}` | `{tools: [{tool, installed, unitExists, active, enabled, version, missingGuide}]}` | Read-only |
+| `overlay.service` | `{tool, action}` | `{tool, unit, action, result}` (a non-zero systemctl exit code → error) | unit name allow-list (D27); 5s |
 
-### 各工具命令语义（argv 直传）
+### Per-Tool Command Semantics (argv Passed Directly)
 
-| 工具 | join | leave | 说明 |
+| Tool | join | leave | Notes |
 |------|------|-------|------|
-| ZeroTier | `zerotier-cli join <16hex>` | `zerotier-cli leave <16hex>` | 应答 `200`/`101` 前缀为成功 |
-| Tailscale | 需 `BackendState==Running` → `tailscale up`；否则错误 + 引导「先在该机 `tailscale up` 登录」 | `tailscale down` | networkId 仅作审计与一致性校验（D24） |
+| ZeroTier | `zerotier-cli join <16hex>` | `zerotier-cli leave <16hex>` | A `200`/`101` reply prefix means success |
+| Tailscale | Requires `BackendState==Running` → `tailscale up`; otherwise an error + guidance to "log in on that machine with `tailscale up` first" | `tailscale down` | networkId is only used for auditing and consistency validation (D24) |
 | WireGuard / frp | `unavailable` | `unavailable` | D25 |
 
-### daemon 检测细则
+### daemon Detection Details
 
-| 项 | 方法 | 备注 |
+| Item | Method | Notes |
 |------|------|------|
-| installed | CLI `LookPath`（zerotier-cli / tailscale）+ daemon 存在（zerotier-one / tailscaled 同项） | 任一缺 → installed=false |
-| version | `<cli> version` 输出取版本串 | 失败留空 |
-| unitExists | `systemctl cat <unit>` 退出码 | 非 systemd 平台跳过（字段缺席） |
-| active / enabled | `systemctl is-active / is-enabled <unit>` | 同上 |
-| missingGuide | installed=false 时给安装命令摘要文案 | apt/brew/官方脚本各一句，静态字符串 |
+| installed | CLI `LookPath` (zerotier-cli / tailscale) + daemon present (zerotier-one / tailscaled, same rule) | If either is missing → installed=false |
+| version | Take the version string from the `<cli> version` output | Left empty on failure |
+| unitExists | `systemctl cat <unit>` exit code | Skipped on non-systemd platforms (the field is absent) |
+| active / enabled | `systemctl is-active / is-enabled <unit>` | Same as above |
+| missingGuide | When installed=false, give a summary of the install commands | One line each for apt/brew/the official script, static strings |
 
-## Server 侧设计
+## Server-Side Design
 
-### REST API（`api_overlay.go` 扩展，JWT + RBAC）
+### REST API (`api_overlay.go` Extension, JWT + RBAC)
 
-| 方法 | 路径 | 权限 | 审计 |
+| Method | Path | Permission | Audit |
 |------|------|------|------|
-| GET | `/api/agents/{id}/overlay/daemon` | `overlay:read` | 否（浏览类） |
+| GET | `/api/agents/{id}/overlay/daemon` | `overlay:read` | No (browse-type) |
 | POST | `/api/agents/{id}/overlay/networks/{netId}/join` | `overlay:admin` | `overlay_join` |
 | POST | `/api/agents/{id}/overlay/networks/{netId}/leave` | `overlay:admin` | `overlay_leave` |
 | POST | `/api/agents/{id}/overlay/service` | `overlay:admin` | `service_toggle` |
 
-- join/leave 成功：server 把响应内新快照原样返回（web 无需二次拉取）；
-- `requiredPerms` 挂载：`/overlay/networks/`、`/overlay/service` 前缀要求
-  `overlay:admin`，`/overlay/daemon` 前缀 `overlay:read`——沿用
-  `acme issue/deploy → acme:admin` 的 special-case 模式（agentSubResources
-  现有 `overlay/` 条目保持 write 级，admin 前缀先判）；
-- agent 端错误（未登录 Tailscale 引导、CLI 报错）原样透出 502 + 摘要
-  （M2 差异补记的上游错误口径）。
+- Successful join/leave: the server returns the new snapshot from the response verbatim (the web needs no
+  second fetch);
+- `requiredPerms` mounting: the `/overlay/networks/` and `/overlay/service` prefixes require
+  `overlay:admin`, and the `/overlay/daemon` prefix requires `overlay:read` — following the
+  `acme issue/deploy → acme:admin` special-case pattern (the existing `overlay/` entry in
+  agentSubResources stays at write level; the admin prefix is checked first);
+- Agent-side errors (the Tailscale not-logged-in guidance, CLI errors) are surfaced verbatim as 502 + a
+  summary (the upstream-error criterion from the M2 implementation delta notes).
 
-## 不做（后续项）
+## Not Doing (Later Items)
 
-- authkey 交互式注册 / 邀请零Tier网络 token 下发（装机域，D24）；
-- WireGuard 接口文件管理（属文件管理器域，D25）；
-- daemon 日志查看（logs provider 已可覆盖 journald 单元）；
-- 中途重注册刷新 registry identity（协议限制，D26）。
+- authkey interactive registration / ZeroTier network invite-token issuance (install-flow domain, D24);
+- WireGuard interface file management (belongs to the file manager domain, D25);
+- Viewing daemon logs (the logs provider already covers journald units);
+- Refreshing the registry identity via mid-session re-registration (protocol limitation, D26).
 
-## M3 清单
+## M3 Checklist
 
-1. agent `overlay.join/leave/daemon/service` RPC + 假 Commander 注入测试（argv 断言、双端校验、Tailscale 前置态、200/101 应答、白名单单元拒绝）；
-2. server `api_overlay.go` 四端点 + RBAC `overlay:admin` + 审计三动作 + 端点测试（转发/校验/离线 503/审计/权限矩阵）；
-3. `internal/storage/role.go` `resourceActions["overlay"] += admin`、operator 排除 + `role_test.go` 断言更新；
-4. `web/src/pages/Network/` 加入/离开 Modal + 二次确认 + daemon 状态卡（含 missing 引导）；
-5. 本文档（已落）+ todo.md 与能力矩阵回填；
-6. 门禁：`go vet`、`go test -race -short ./...`、web vitest + build 全绿。
+1. agent `overlay.join/leave/daemon/service` RPC + fake Commander injection tests (argv assertions,
+   validation on both ends, the Tailscale pre-state, 200/101 replies, rejection of non-allow-listed units);
+2. server `api_overlay.go` four endpoints + RBAC `overlay:admin` + three audit actions + endpoint tests
+   (forwarding/validation/offline 503/audit/permission matrix);
+3. `internal/storage/role.go` `resourceActions["overlay"] += admin`, operator exclusion + `role_test.go`
+   assertion updates;
+4. `web/src/pages/Network/` join/leave Modal + secondary confirmation + daemon status card (including the
+   missing guidance);
+5. This document (already landed) + todo.md and the capability matrix backfill;
+6. Gates: `go vet`, `go test -race -short ./...`, web vitest + build all green.
 
-### M3 落地补记（2026-09-27）
+### M3 Implementation Delta Notes (2026-09-27)
 
-清单 6 项全部落地，实现期对设计的三处修正（均已回写上表）：
+All six checklist items landed; the implementation phase made three corrections to the design (all written
+back into the tables above):
 
-1. **tailnet 名正则整体锚定**（D24/D29）：初稿 `^-|xxx` 的交替分支未整体
-   加括号，`^` 只约束第一支，第二支退化为无锚子串匹配——任何含合法域名
-   形态子串的字符串都能混过校验。修正为 `^(-|…)$` 整体锚定；netId 口径
-   同步定为 `-` 或**完整 tailnet DNS 后缀**（与 `Self.DNSName` 去主机名
-   首段的提取结果同口径比较，EqualFold）。
-2. **daemon 版本探测后置**：CLI 未安装（LookPath 失败）时跳过 `--version`
-   探测，不再对缺失二进制发起必然失败的执行。
-3. **D26 身份通道**按上文修订执行：身份经 join/leave 响应载荷上报，
-   server `Agent.UpdateOverlayIdentity` 以 copy-on-write 就地更新 registry。
+1. **The tailnet name regex is anchored as a whole** (D24/D29): in the draft the alternation in `^-|xxx`
+   was not wrapped as a group, so `^` only constrained the first branch and the second degraded into an
+   unanchored substring match — any string containing a valid domain-shaped substring could slip past
+   validation. Fixed to a fully anchored `^(-|…)$`; the netId criterion is correspondingly defined as `-`
+   or a **full tailnet DNS suffix** (compared EqualFold under the same criterion as the extraction result of
+   `Self.DNSName` with the first hostname label removed).
+2. **daemon version probing is deferred**: when the CLI is not installed (LookPath fails), the
+   `--version` probe is skipped instead of firing an execution that is guaranteed to fail against a missing
+   binary.
+3. The **D26 identity channel** is implemented per the revision above: identity is reported through the
+   join/leave response payload, and the server's `Agent.UpdateOverlayIdentity` updates the registry in place
+   with copy-on-write.
 
-## 参考
+## References
 
-- `zerotier-cli(1)`：join/leave 应答码（200/101）；`tailscale up|down|logout`
-  语义：KB《The tailscale CLI》(kb/1080)——`up` 未登录走交互式认证流，`down`
-  断连保留登录态，`logout` 清凭据；
-- systemd 单元名：tailscale 官方安装脚本落盘 `tailscaled.service`，ZeroTier
-  包 `zerotier-one.service`（`systemctl cat` 存在性检测依据）；
-- 生命周期归属原则：D21；服务面隔离理由：D27。
+- `zerotier-cli(1)`: the join/leave reply codes (200/101); `tailscale up|down|logout` semantics: the KB
+  article "The tailscale CLI" (kb/1080) — `up` runs an interactive authentication flow when not logged in,
+  `down` disconnects while keeping the login state, `logout` clears credentials;
+- systemd unit names: the tailscale official install script writes `tailscaled.service`, the ZeroTier
+  package writes `zerotier-one.service` (the basis for `systemctl cat` existence detection);
+- Lifecycle-ownership principle: D21; the reason for isolating the service surface: D27.

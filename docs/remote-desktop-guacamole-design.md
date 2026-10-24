@@ -1,268 +1,150 @@
-# 远程桌面设计：Apache Guacamole 集成（guacd + guacamole-common-js）
+# Remote Desktop Design: Apache Guacamole Integration (guacd + guacamole-common-js)
 
-> 语言：**中文** ｜ [English](./remote-desktop-guacamole-design.en.md)
 
-> 2026-09-23 用户拍板立项。此前远控桌面走自行开发路线（grdp 纯 Go RDP 客户端 +
-> 自行开发 canvas 渲染/扫描码输入/剪贴板），本设计定案**集成 Apache Guacamole**
-> 替换之。本文档只做方案设计，实现另行确认。
+> 2026-09-23 the user approved this project. Previously the remote desktop went down a self-developed route (grdp pure-Go RDP client + self-developed canvas rendering / scancode input / clipboard); this design settles on **integrating Apache Guacamole** as the replacement. This document covers design only; implementation is confirmed separately.
 >
-> 2026-10-07 更新：Guacamole 路线已实现落地；旧 grdp / noVNC 自行开发路线已从
-> 代码库整体删除（D-2026-10-07-1），文中对旧路线的描述仅作历史背景。
+> 2026-10-07 update: the Guacamole route has been implemented and landed; the old grdp / noVNC self-developed route has been deleted from the codebase entirely (D-2026-10-07-1), and descriptions of the old route in this document serve only as historical background.
 
-## 痛点：为什么现在要换掉自行开发路线
+## Pain Point: Why Replace the Self-Developed Route Now
 
-Cockpit 远控桌面现状是「三套协议三套栈」，且**没有一套是可靠的**：
+Cockpit's remote desktop status quo is "three protocols, three stacks," and **not one of them is reliable**:
 
-- **RDP**（自行开发 grdp 路线）：`internal/agent/rdp/session.go` 用纯 Go 的
-  `github.com/nakagami/grdp` 终结 RDP 协议，位图回调 → `screen_update` 脏矩形
-  → web 自行开发 `useCanvasRenderer` 帧缓冲合成。问题不在「能不能跑通」，而在
-  **协议覆盖广度**：grdp 对 NLA/CredSSP、TLS/RDP security 协商、RemoteFX/GFX
-  图形管道的支持远弱于 FreeRDP/xfreerdp 这类工业级实现。真实 Windows Server
-  （尤其强制 NLA 的机器）连通性存疑，而 RDP 恰恰是「连不通就是零价值」的协议
-  ——办公场景下用户要连的 Windows 机器默认强制 NLA，这不是边缘情况。
-- **VNC**（noVNC 路线）：浏览器内跑 RFB 协议，agent 只做二进制 TCP 透传。
-  这条路是**唯一能用**的，但仅覆盖 VNC；且 noVNC 与 grdp 是两套输入/渲染/
-  剪贴板模型，UI 层无法收敛。
-- **SSH**（xterm.js 路线）：刚打通（见 `internal/proxy/ssh_session.go`，
-  agent 侧 `crypto/ssh` 终结协议 + PTY）。**SSH 是字符终端不是图形桌面**，
-  走 xterm.js 是对的，不该被桌面方案绑架。
+- **RDP** (self-developed grdp route): `internal/agent/rdp/session.go` terminates the RDP protocol with pure-Go `github.com/nakagami/grdp`, bitmap callbacks → `screen_update` dirty rects → self-developed `useCanvasRenderer` framebuffer compositing on the web side. The problem is not "can it run at all" but **protocol coverage breadth**: grdp's support for NLA/CredSSP, TLS/RDP security negotiation, and the RemoteFX/GFX graphics pipeline is far weaker than industrial-grade implementations like FreeRDP/xfreerdp. Connectivity to real Windows Server machines (especially those enforcing NLA) is questionable, and RDP is precisely the protocol where "cannot connect means zero value" — in office scenarios the Windows machines users want to reach enforce NLA by default; this is not an edge case.
+- **VNC** (noVNC route): runs the RFB protocol in the browser; the agent only does binary TCP passthrough. This path is the **only one that works**, but it covers VNC only; and noVNC and grdp are two separate input/rendering/clipboard models, so the UI layer cannot converge.
+- **SSH** (xterm.js route): just got working (see `internal/proxy/ssh_session.go`, agent side terminates the protocol with `crypto/ssh` + PTY). **SSH is a character terminal, not a graphical desktop**; going with xterm.js is correct and it should not be held hostage by the desktop solution.
 
-自行开发路线还有隐性成本：渲染（帧缓冲合成、脏矩形、ResizeObserver 合帧）、
-输入（DOM 事件 → 扫描码 → RDP 虚拟键）、剪贴板（浏览器 Clipboard API ↔
-RDP cliprdr）、分辨率协商——**每一项都是协议细节的重复造轮子**，且每加一个
-协议（如将来要 SPICE）就要再抄一遍。
+The self-developed route also has hidden costs: rendering (framebuffer compositing, dirty rects, ResizeObserver frame merging), input (DOM events → scancodes → RDP virtual keys), clipboard (browser Clipboard API ↔ RDP cliprdr), resolution negotiation — **every one of these is reinventing protocol-detail wheels**, and each protocol added (e.g. SPICE in the future) means copying it all again.
 
-结论：桌面协议（RDP/VNC）交给成熟协议引擎，Cockpit 只做它擅长的——
-会话、权限、审计、动态 inventory。
+Conclusion: hand desktop protocols (RDP/VNC) to a mature protocol engine, and Cockpit does only what it is good at — sessions, permissions, auditing, dynamic inventory.
 
-## 架构决策
+## Architecture Decisions
 
-### D1 只用 guacd + guacamole-common-js，**跳过 guacamole-web 的 Java 层**
+### D1 Use only guacd + guacamole-common-js, **skip guacamole-web's Java layer**
 
-这是本设计最核心的一刀，理由是**避免两套身份/权限/审计体系**：
+This is the single most core cut of this design, and the reason is **avoiding two identity/permission/audit systems**:
 
-Apache Guacamole 官方发行是三层：`guacd`（C 协议守护进程）+
-`guacamole-common-js`（浏览器 JS 库）+ `guacamole-web`（Java servlet 容器
-应用，含 JDBC 用户/连接管理）。绝大多数「Guacamole 集成」失败就失败在引了
-完整的 `guacamole-web`——它自带一套用户表、连接配置表、权限表，于是 Cockpit
-的 RBAC（`internal/auth` + `permAll` 权限点）和 Guacamole 的用户库变成**两套
-要人工同步的真相源**，审计也裂成两半（Cockpit 的 `auditRemoteStart/End` +
-Guacamole 自己的 connection history）。这与本项目一贯的「单一事实源」纪律
-（inventory-first、DB 放索引文件放内容）直接冲突。
+The official Apache Guacamole distribution is three layers: `guacd` (C protocol daemon) + `guacamole-common-js` (browser JS library) + `guacamole-web` (Java servlet container application, including JDBC user/connection management). Most "Guacamole integration" failures fail precisely because the full `guacamole-web` was brought in — it ships its own user table, connection-config table, and permission table, so Cockpit's RBAC (`internal/auth` + `permAll` permission points) and Guacamole's user store become **two sources of truth requiring manual sync**, and auditing splits in half (Cockpit's `auditRemoteStart/End` + Guacamole's own connection history). This directly conflicts with this project's consistent "single source of truth" discipline (inventory-first, DB holds indexes and files hold content).
 
-拆开看三层各自的角色就清楚该留谁：
+Looking at each of the three layers' roles separately makes clear which to keep:
 
-- **guacd**：纯协议翻译守护进程。它**没有用户概念**——给它一条
-  `RDP → host:3389` 的指令，它就去连并把 RDP 翻译成 Guacamole 指令流。
-  连接凭据（用户名/密码）是每条连接传入的，不在 guacd 里存。这正是我们要的
-  「协议引擎」边界：它替我们终结 RDP/VNC 协议，但不碰我们的业务模型。
-- **guacamole-common-js**：浏览器端 JS 库，实现 Guacamole 协议的
-  `Guacamole.Tunnel`（传输）、`Guacamole.Display`（canvas 渲染）、
-  `Guacamole.Keyboard`/`Guacamole.Mouse`（输入）、`Guacamole.Client`（会话
-  状态机）。它**也不含用户/连接管理**——参数（protocol/host/port/凭据）
-  是调用方给的。这层替我们干掉自行开发渲染/输入/剪贴板三座大山。
-- **guacamole-web**：Java servlet + JDBC，负责「谁可以连哪台机器」。
-  **这层 Cockpit 已经有了**：RBAC 权限点（`terminal:write` 等）+
-  `matchRemoteEgress` 出口策略 + 动态 inventory（agent 上报的
-  `remote-services` capability）+ 一次性票据（`internal/server/ticket.go`）。
-  引它就是引第二套，且它的「静态连接配置」模型与 Cockpit 的
-  动态 inventory 理念相反（见 `reference-projects.md` 的 Guacamole 缺点
-  记录）。
+- **guacd**: a pure protocol-translation daemon. It **has no concept of users** — give it an instruction like `RDP → host:3389` and it connects and translates RDP into a Guacamole instruction stream. Connection credentials (username/password) are passed in per connection and are not stored in guacd. This is exactly the "protocol engine" boundary we want: it terminates the RDP/VNC protocol for us but never touches our business model.
+- **guacamole-common-js**: the browser-side JS library, implementing the Guacamole protocol's `Guacamole.Tunnel` (transport), `Guacamole.Display` (canvas rendering), `Guacamole.Keyboard`/`Guacamole.Mouse` (input), and `Guacamole.Client` (session state machine). It **also contains no user/connection management** — parameters (protocol/host/port/credentials) are supplied by the caller. This layer takes out the three mountains of self-developed rendering/input/clipboard for us.
+- **guacamole-web**: Java servlet + JDBC, responsible for "who may connect to which machine." **Cockpit already has this layer**: RBAC permission points (`terminal:write` etc.) + the `matchRemoteEgress` egress policy + dynamic inventory (the agent-reported `remote-services` capability) + one-time tickets (`internal/server/ticket.go`). Bringing it in means bringing in a second system, and its "static connection config" model is the opposite of Cockpit's dynamic inventory philosophy (see the Guacamole downsides note in `reference-projects.md`).
 
-许可证上同理成立：Cockpit 是 **Apache License 2.0**，guacd 与
-guacamole-common-js 同为 Apache 2.0，同许可证集成零传染风险；guacamole-web
-虽也是 Apache 2.0（不构成障碍），但**跳过它的理由是架构重复，不是许可证**。
+The licensing argument holds the same way: Cockpit is **Apache License 2.0**, and guacd and guacamole-common-js are both Apache 2.0, so same-license integration carries zero contagion risk; guacamole-web is also Apache 2.0 (not an obstacle), but **the reason to skip it is architectural duplication, not licensing**.
 
-### D2 隧道走 Go WS 网关反代 guacd，不暴露 guacd 端口
+### D2 The tunnel goes through a Go WS gateway reverse-proxying guacd; do not expose the guacd port
 
-guacd 只讲 Guacamole 协议，默认监听 TCP `4822`。浏览器侧
-`guacamole-common-js` 的 `Guacamole.Tunnel` 有两个实现：
-`Guacamole.HTTPTunnel`（HTTP 长轮询，走 `guacamole-web` 的 servlet）和
-`Guacamole.WebSocketTunnel`（WebSocket，URL 指向服务端 WS 端点）。**没有
-「浏览器直连 guacd」这条路**——guacd 不是 HTTP 服务，且内网端口不该暴露。
+guacd speaks only the Guacamole protocol and listens on TCP `4822` by default. On the browser side, `guacamole-common-js`'s `Guacamole.Tunnel` has two implementations: `Guacamole.HTTPTunnel` (HTTP long-polling, going through `guacamole-web`'s servlet) and `Guacamole.WebSocketTunnel` (WebSocket, URL pointing at a server-side WS endpoint). **There is no "browser connects directly to guacd" path** — guacd is not an HTTP service, and an intranet port should not be exposed.
 
-所以需要一个 WS 网关：浏览器 WS ↔ Go 后端 ↔ guacd TCP。这个位置正好是
-Cockpit server 已经坐着的（现有 `/api/remote/terminal`、`/api/remote/guacamole`
-都是「浏览器 WS ↔ server ↔ agent WS / guacd TCP」的双跳管道，server 本就是远控网关）。
+So a WS gateway is needed: browser WS ↔ Go backend ↔ guacd TCP. This position is exactly where the Cockpit server already sits (the existing `/api/remote/terminal` and `/api/remote/guacamole` are both "browser WS ↔ server ↔ agent WS / guacd TCP" two-hop pipelines; the server is already the remote-access gateway).
 
-> **实现修正（2026-10-18）**：guacd 并不直连用户目标。Server 每会话经 agent 建立
-> 出口转发，并为该会话起一个绑定 Server→guacd 路由本地 IP 的中继 listener；
-> `connect` 指令里的 hostname/port 是**中继地址**，真实目标由 agent 从自身网络位
-> 拨出（`internal/server/guac_relay.go`、`api_guacamole.go`）。`GUACD_ADDR`、
-> `GUAC_RELAY_BIND_ADDR`、`GUAC_RELAY_HOST` 环境变量见 [guacd-deploy](./guacd-deploy.md)。
-> 下文骨架代码（骨架 2）保留设计期原貌。
+> **Implementation correction (2026-10-18)**: guacd does not dial the user's target directly. Per session, the server establishes egress forwarding through the agent and starts a relay listener bound to the local IP selected by the Server→guacd route; the hostname/port in the `connect` instruction is the **relay address**, and the real target is dialed by the agent from its own network position (`internal/server/guac_relay.go`, `api_guacamole.go`). The `GUACD_ADDR`, `GUAC_RELAY_BIND_ADDR`, `GUAC_RELAY_HOST` env vars are documented in [guacd-deploy](/guacd-deploy).
+> The skeleton code below (skeleton 2) is kept in its design-time form.
 
-放 Go 而不是放 guacamole-web 的理由同 D1：网关这里要做的不只是字节转发，
-还有**会话生命周期、票据校验、权限判定、审计落库**——全是 Cockpit 已有的
-能力。guacamole-web 的 `GuacamoleWebSocketTunnelEndpoint` 做的是同样的事，
-但它用 Java 的 session + 它的权限表，又回到两套体系。
+The reasons to put it in Go rather than in guacamole-web are the same as D1: what the gateway does here is more than byte forwarding — there is also **session lifecycle, ticket validation, permission checks, audit persistence** — all capabilities Cockpit already has. guacamole-web's `GuacamoleWebSocketTunnelEndpoint` does the same thing, but with Java sessions + its permission tables, which lands back in two systems.
 
-反代的具体形态：Go 后端与 guacd 之间**用 Guacamole 原生 TCP 协议**（不用
-guacd 的 WebSocket 模式），因为 guacd 的协议本就是「指令流 + base64 chunk」
-的文本协议，TCP 转发最直接；Go 侧把 WS 的文本帧 ↔ guacd 的 TCP 流做双向
-管道，**不解析指令内容**（除了握手阶段的 `select`/`size`/`audio`/`video`
-参数指令需要 Go 构造）。这样协议演进（Guacamole 1.5.x 新指令）由
-guacamole-common-js 与 guacd 自己对齐，Go 网关不跟随。
+The concrete shape of the reverse proxy: between the Go backend and guacd **use the native Guacamole TCP protocol** (not guacd's WebSocket mode), because guacd's protocol is already a "instruction stream + base64 chunk" text protocol and TCP forwarding is the most direct; the Go side does bidirectional piping between WS text frames ↔ guacd's TCP stream and **does not parse instruction content** (except that during the handshake the `select`/`size`/`audio`/`video` parameter instructions need to be constructed by Go). This way protocol evolution (new instructions in Guacamole 1.5.x) is aligned between guacamole-common-js and guacd themselves, and the Go gateway does not follow along.
 
-### D3 复用现有票据与 401 递归刷新链路
+### D3 Reuse the existing ticket and 401 recursive-refresh chain
 
-现有票据语义（`internal/server/ticket.go`）：`POST /api/remote/tickets`
-→ 一次性票据、5 分钟有效、`ValidateTicket` 即消费（`Consumed` 标记）。
-这是为「WS 握手凭证」设计的——握手一次即作废，泄漏窗口 5 分钟。
+Existing ticket semantics (`internal/server/ticket.go`): `POST /api/remote/tickets` → one-time ticket, valid for 5 minutes, `ValidateTicket` consumes on use (`Consumed` flag). This was designed as the "WS handshake credential" — invalidated after one handshake, with a 5-minute leak window.
 
-Guacamole 隧道**复用同一条签发票据的端点与审计**，票据仍是 WS 握手凭证
-（一次性语义不变），差异只在「握手成功后 server 侧持有 guacd TCP 连接直到
-会话结束」而非「转发到 agent」。这样对前端是一致的体验：`createRemoteTicket`
-→ 拿 ticket → 连 WS；对后端审计是一致的：`auditRemoteStart` 记
-`Protocol: "rdp"`/`"vnc"`，会话结束 `auditRemoteEnd` 记 duration。
+The Guacamole tunnel **reuses the same ticket-issuing endpoint and auditing**; the ticket remains the WS handshake credential (one-time semantics unchanged), and the only difference is that "after a successful handshake the server side holds the guacd TCP connection until the session ends" rather than "forwarding to the agent." This gives the frontend a consistent experience: `createRemoteTicket` → get ticket → connect WS; and gives backend auditing consistency: `auditRemoteStart` records `Protocol: "rdp"`/`"vnc"`, and at session end `auditRemoteEnd` records duration.
 
-**为什么票据保持一次性**：Guacamole 隧道虽然长连接，但「建立隧道」这个动作
-本身就是一次性握手。连接断了要重连就重新申请票据——这与现有 terminal/desktop
-的重连行为一致（`TerminalModal` 的「重连」按钮就是重新 `createRemoteTicket`）。
-把票据改成会话级长效凭证只会扩大泄漏窗口，收益为零。
+**Why the ticket stays one-time**: although the Guacamole tunnel is a long-lived connection, the act of "establishing the tunnel" is itself a one-time handshake. If the connection drops and a reconnect is needed, apply for a new ticket — consistent with the existing terminal/desktop reconnect behavior (the "reconnect" button in `TerminalModal` just calls `createRemoteTicket` again). Making the ticket a session-level long-lived credential would only widen the leak window, for zero benefit.
 
-**票据传递走双通道**（实现期核实 common-js 后的对齐）：guacamole-common-js 的
-`WebSocketTunnel.connect(data)` 是 `new WebSocket(url + "?" + data, "guacamole")`
-——**subprotocol 硬编码 `"guacamole"`**，`data` 拼进 URL query，无法自定义
-subprotocol 传票据。故网关读票据两路都认：
+**Ticket transport over a dual channel** (alignment verified against common-js during implementation): guacamole-common-js's `WebSocketTunnel.connect(data)` is `new WebSocket(url + "?" + data, "guacamole")` — the **subprotocol is hard-coded as `"guacamole"`**, and `data` is appended into the URL query, so there is no way to carry the ticket via a custom subprotocol. Hence the gateway accepts the ticket on both paths:
 
-- URL query `?ticket=`（**首选**）：前端 `client.connect("ticket=" + ticket)`
-  即落到 query；票据仍是一次性 5 分钟票据，泄漏窗口不变；
-- `Sec-WebSocket-Protocol[0]`（兼容位）：自定义 Tunnel 或不走 common-js 时
-  沿用 terminal/desktop 的同款形状。
+- URL query `?ticket=` (**primary**): the frontend's `client.connect("ticket=" + ticket)` lands it in the query; the ticket is still a one-time 5-minute ticket, leak window unchanged;
+- `Sec-WebSocket-Protocol[0]` (compatibility slot): a custom Tunnel or paths not going through common-js keep the same shape as terminal/desktop.
 
-query 形态票据不进审计/日志（WS 路径被 `AuditMiddleware` 跳过，由专门的
-远控审计覆盖；`auditRemoteStart` 只记 ticket.ID 不记 URL）。
+The query-form ticket does not enter audit/logs (WS paths are skipped by `AuditMiddleware` and covered by the dedicated remote-access audit; `auditRemoteStart` records only ticket.ID, not the URL).
 
-**隧道内部控制指令由网关终结**（协议分层）：`WebSocketTunnel` 会周期发
-`ping`（opcode 为空 = `Guacamole.Tunnel.INTERNAL_DATA_OPCODE`），期望服务端
-「respond with an identical ping」；`receiveTimeout=15s` 无数据即关隧道、
-`unstableThreshold=1.5s` 判连接不稳。静止桌面下不回显 ping 必然断线，故网关
-在 `wsToGuacd` 拦断 opcode 长度为 0 的指令并原样回显（只读首段长度前缀判
-opcode 是否为空，不解析参数内容），**绝不转发 guacd**（guacd 不认识 tunnel
-层指令）。握手时网关另发 `0.,N.<sessionID>;` 作 tunnel UUID（内部指令单元素
-→ `setUUID`）。这层拦截是「照抄官方 Tunnel 分层」的必要组成，不是自由发挥
-——guacamole-web 的 WebSocketTunnelEndpoint 同样在此分层。
+**Tunnel-internal control instructions are terminated by the gateway** (protocol layering): `WebSocketTunnel` periodically sends `ping` (empty opcode = `Guacamole.Tunnel.INTERNAL_DATA_OPCODE`) and expects the server to "respond with an identical ping"; with no data for `receiveTimeout=15s` the tunnel is closed, and `unstableThreshold=1.5s` marks the connection unstable. On an idle desktop, failing to echo the ping inevitably drops the connection, so the gateway intercepts instructions with opcode length 0 in `wsToGuacd` and echoes them verbatim (it reads only the first segment's length prefix to determine whether the opcode is empty, without parsing argument content) and **never forwards them to guacd** (guacd does not know tunnel-layer instructions). At handshake the gateway additionally sends `0.,N.<sessionID>;` as the tunnel UUID (single-element internal instruction → `setUUID`). This interception layer is a necessary part of "copying the official Tunnel layering," not free improvisation — guacamole-web's WebSocketTunnelEndpoint layers the same way.
 
-401 递归刷新链路照搬现有实现，两侧都有先例：
+The 401 recursive-refresh chain copies the existing implementation, with precedents on both sides:
 
-- web `services/api.ts:138` 的 401 拦截 + `refreshToken()`（`/auth/refresh`；拦截器现位于 138 行、refreshToken 165 行），
-  且 mobile `api/client.dart:83-91` 明确记录了**递归刷新防护**：
-  `extra['skipRefresh'] == true` 的请求（即刷新请求自身）收到 401 不再触发
-  刷新，直接交给 `onUnauthorized`——否则刷新失败会无限递归。
-- Guacamole 隧道的票据申请走同一个 `remoteClient`（已有 Bearer 拦截器），
-  401 行为完全一致；WS 握手本身不带 JWT（票据即凭证），故 WS 路径不需要
-  刷新，重连时经 `createRemoteTicket` 自然走一遍 401 刷新。
+- web's 401 interception at `services/api.ts:138` + `refreshToken()` (`/auth/refresh`; the interceptor now sits at line 138, refreshToken at 165), and mobile's `api/client.dart:83-91` explicitly documents the **recursive-refresh guard**: requests with `extra['skipRefresh'] == true` (i.e. the refresh request itself) that receive a 401 do not trigger another refresh and go straight to `onUnauthorized` — otherwise a failed refresh would recurse infinitely.
+- The Guacamole tunnel's ticket application goes through the same `remoteClient` (which already has the Bearer interceptor), with identical 401 behavior; the WS handshake itself carries no JWT (the ticket is the credential), so the WS path needs no refresh, and on reconnect `createRemoteTicket` naturally runs through the 401 refresh once.
 
-这条「复用」的意义在于**不发明第二套鉴权失败语义**：用户 token 过期后的行为
-（无感刷新 → 失败登出回登录页）在普通 API、终端、桌面、Guacamole 隧道上
-是同一个。
+The point of this "reuse" is **not inventing a second auth-failure semantics**: the behavior after a user's token expires (silent refresh → on failure, log out back to the login page) is the same across ordinary APIs, terminal, desktop, and the Guacamole tunnel.
 
-### D4 会话/权限/审计放 Go 后端，guacd 无状态
+### D4 Session/permission/audit in the Go backend; guacd is stateless
 
-guacd 是**无状态协议翻译器**：一次 `connect` 指令建一条 TCP 到目标，
-翻译指令流，`disconnect` 即结束。它不知道「谁」在连——用户名/密码是
-`connect` 指令的参数。这个特性决定了职责划分：
+guacd is a **stateless protocol translator**: one `connect` instruction opens one TCP connection to the target, translates the instruction stream, and `disconnect` ends it. It does not know "who" is connecting — username/password are parameters of the `connect` instruction. This property determines the division of responsibilities:
 
-- **Go 后端**：票据签发（含 `matchRemoteEgress` 出口策略校验）、
-  `terminal:write` 权限点判定、`auditRemoteStart/End/Failure` 落库、
-  `RemoteSessionManager` 会话登记（pending/connected/closed/failed）、
-  会话录制开关与保留策略。
-- **guacd**：只翻译协议。凭据经 Go 网关透传到 `connect` 指令，**不落
-  guacd 日志、不进 guacd 配置**（guacd 的 `GUACD_LOG_LEVEL` 建议保持
-  `info` 以下，避免指令内容进日志）。
-- **guacamole-common-js**：只渲染与输入。它对「谁能连」零感知。
+- **Go backend**: ticket issuance (including the `matchRemoteEgress` egress policy check), `terminal:write` permission point check, `auditRemoteStart/End/Failure` persistence, `RemoteSessionManager` session registry (pending/connected/closed/failed), session recording toggle and retention policy.
+- **guacd**: translates protocol only. Credentials are passed through the Go gateway into the `connect` instruction, **never written to guacd logs or guacd config** (guacd's `GUACD_LOG_LEVEL` should stay at `info` or below to keep instruction content out of logs).
+- **guacamole-common-js**: rendering and input only. It has zero awareness of "who may connect."
 
-这与现有 `remote_audit.go` 的纪律一致：审计详情**不含口令**
-（`auditRemoteStart` 注释明确「不写 password」），Guacamole 路径同样遵守。
+This is consistent with the existing discipline in `remote_audit.go`: audit details **must not contain passwords** (the `auditRemoteStart` comment explicitly says "do not write password"), and the Guacamole path follows the same rule.
 
-### D5 guacd 用 docker-compose 部署
+### D5 guacd deployed with docker-compose
 
-guacd 是独立 C 守护进程，官方镜像 `guacamole/guacd`（guacd 单进程镜像）。
-用 docker-compose 部署而不是要求宿主机装 guacd，理由：
+guacd is a standalone C daemon; the official image is `guacamole/guacd` (the guacd-only image). Deploy with docker-compose rather than requiring guacd installed on the host, for these reasons:
 
-- 与 Cockpit 的 stacks/Docker 能力一致（用户本就有 Docker 主机）；
-- guacd 依赖 FreeRDP/VNC 客户端库（libguac-client-rdp 等），源码编译
-  依赖链长，镜像已经把这些编好；
-- 版本升级（Guacamole 1.5.x → 1.6.x）只动 compose 的 image tag；
-- guacd 无持久化状态，容器无状态可随意重建。
+- Consistent with Cockpit's stacks/Docker capability (users already have Docker hosts);
+- guacd depends on FreeRDP/VNC client libraries (libguac-client-rdp etc.); building from source has a long dependency chain, and the image already has them compiled;
+- Version upgrades (Guacamole 1.5.x → 1.6.x) touch only the image tag in compose;
+- guacd has no persistent state, so the container is stateless and can be rebuilt at will.
 
-代价是多一个容器要管——但这正是 stacks 功能的价值场景（见
-`stack-deploy-design.md`），用 Cockpit 自己部署自己的 guacd 是自洽的。
+The cost is one more container to manage — but that is exactly the value scenario of the stacks feature (see `stack-deploy-design.md`); Cockpit deploying its own guacd with its own tooling is self-consistent.
 
-## 阶段 1 验收范围
+## Phase 1 Acceptance Scope
 
-阶段 1 目标是**「连得上、操作得了」**，不做音频、不做文件传输、不做剪贴板
-高级格式（纯文本剪贴板属基础输入输出，包含在内）：
+Phase 1's goal is **"can connect, can operate"** — no audio, no file transfer, no advanced clipboard formats (plain-text clipboard counts as basic I/O and is included):
 
-1. **浏览器 RDP 连 Windows**
-   - 目标：Windows 专业版/企业版/Server 的远程桌面服务（`termsrv`），
-     支持 NLA（CredSSP）认证。
-   - **Win11 Home 无 RDP server**：Windows 家庭版不提供远程桌面**服务端**
-     （只能作为客户端连别人）。这是微软的产品线划分，不是本方案缺陷。
-     因此 Win11 Home 机器的验收走 **VNC 兜底**——装 TightVNC/Vino 等 VNC
-     server，Guacamole 的 VNC 协议引擎连之。阶段 1 验收项「RDP 连 Windows」
-     的目标机器是专业版/Server，家庭版机器另列「VNC 兜底」子项。
-2. **VNC 连 Linux**：Linux 桌面的 VNC server（TigerVNC/TightVNC/x11vnc），
-     支持 VNC 密码认证。
-3. **iPad Safari 触控可用**：iPadOS Safari 的触控事件映射到 Guacamole
-   鼠标指令（`Guacamole.Mouse` 已处理 touch → mouse），单指移动/点击、
-   双指滚动可操作；屏幕旋转后 `size` 指令重新协商分辨率。
+1. **Browser RDP to Windows**
+   - Target: the remote desktop service (`termsrv`) of Windows Pro/Enterprise/Server, supporting NLA (CredSSP) authentication.
+   - **Win11 Home has no RDP server**: Windows Home does not provide the remote desktop **server** (it can only act as a client connecting to others). This is Microsoft's product-line segmentation, not a defect of this design. Therefore acceptance for Win11 Home machines goes through the **VNC fallback** — install a VNC server such as TightVNC/Vino, and Guacamole's VNC protocol engine connects to it. The target machines of the Phase 1 acceptance item "RDP to Windows" are Pro/Server; Home machines get a separate "VNC fallback" sub-item.
+2. **VNC to Linux**: VNC servers of Linux desktops (TigerVNC/TightVNC/x11vnc), supporting VNC password authentication.
+3. **iPad Safari touch usable**: iPadOS Safari touch events map to Guacamole mouse instructions (`Guacamole.Mouse` already handles touch → mouse); single-finger move/click and two-finger scroll are operable; after screen rotation the `size` instruction renegotiates the resolution.
 
-**不在阶段 1**：音频（见风险章节）、文件传输（`Guacamole.Filesystem`）、
-剪贴板富格式（RTF/HTML）、SFTP 文件传输叠加（Guacamole 的 RDP 驱动器
-重定向）。
+**Not in Phase 1**: audio (see risk section), file transfer (`Guacamole.Filesystem`), rich clipboard formats (RTF/HTML), SFTP file-transfer stacking (Guacamole's RDP drive redirection).
 
-## 方案对比
+## Option Comparison
 
-| 方案 | 覆盖协议 | 许可证 | 关键取舍 |
+| Option | Protocols Covered | License | Key Trade-offs |
 |------|---------|--------|---------|
-| **noVNC** | **仅 VNC**（RFB） | MPL 2.0 | 轻量、浏览器内跑 RFB，Cockpit 已用。但**只覆盖 VNC**，RDP 还得另找一套；与 RDP 栈无法共享渲染/输入/剪贴板代码。若确定只做 VNC 它够用，但阶段 1 明确要求 RDP。 |
-| **RustDesk Web** | RustDesk 自有协议（不是 RDP/VNC） | **AGPL 3.0** | 性能好（自行开发编解码）、开箱即用。**排除理由是许可证传染**：AGPL 要求分发衍生作品时整个作品开源，Cockpit 是 Apache 2.0，集成 AGPL 组件会使整个组合件受 AGPL 约束，与项目许可证选择冲突。且 RustDesk 协议是自有协议，**连不了标准 RDP/VNC 服务器**——它要两端都装 RustDesk，与「连用户已有 Windows 远程桌面」的需求不符。 |
-| **xterm.js** | 字符终端（SSH/telnet） | Apache 2.0 | 已用于 SSH（`TerminalModal`），**但这不是桌面方案**。xterm.js 是终端模拟器，渲染的是字符网格不是像素；RDP/VNC 的图形流无处安放。**SSH 单走 xterm.js 是对的**，不该被桌面方案绑架——Guacamole 也支持 SSH，但我们已自行开发打通（agent 侧 `crypto/ssh` + PTY），替换收益低于迁移成本。 |
-| **自行开发（grdp + canvas）** | RDP（部分） | MIT（grdp） | 现状。**否**：协议覆盖弱于 FreeRDP（NLA/CredSSP/TLS 协商/RemoteFX/GFX），真实 Windows 连通性存疑；渲染/输入/剪贴板三块全要自己维护；每加一个协议重抄一遍。沉没成本不构成继续投入的理由。 |
-| **Guacamole（guacd + common-js）** | **RDP / VNC / SSH / Telnet** | Apache 2.0 | **取**：协议引擎是 FreeRDP/VNC 客户端库（工业级覆盖），渲染/输入/剪贴板由 common-js 承担，与 Cockpit 同许可证零传染；guacd 无状态、无用户概念，与「业务在 Go 后端」的边界干净。代价是多一个 guacd 进程 + Guacamole 协议隧道网关要自己写（但网关正是 Cockpit 已在坐的位置）。 |
+| **noVNC** | **VNC only** (RFB) | MPL 2.0 | Lightweight, runs RFB in the browser, already used by Cockpit. But **covers VNC only**; RDP would still need another stack; cannot share rendering/input/clipboard code with the RDP stack. It would be enough if we only did VNC, but Phase 1 explicitly requires RDP. |
+| **RustDesk Web** | RustDesk's proprietary protocol (not RDP/VNC) | **AGPL 3.0** | Good performance (self-developed codecs), works out of the box. **Excluded for license contagion**: AGPL requires the whole work to be open-sourced when distributing derivatives; Cockpit is Apache 2.0, and integrating an AGPL component would bind the entire combined work to AGPL, conflicting with the project's license choice. Also, the RustDesk protocol is proprietary and **cannot connect to standard RDP/VNC servers** — it requires RustDesk installed on both ends, which does not fit the "connect to the user's existing Windows remote desktop" requirement. |
+| **xterm.js** | Character terminal (SSH/telnet) | Apache 2.0 | Already used for SSH (`TerminalModal`), **but this is not a desktop solution**. xterm.js is a terminal emulator; it renders a character grid, not pixels; RDP/VNC graphics streams have nowhere to go. **SSH alone on xterm.js is right** and should not be held hostage by the desktop solution — Guacamole supports SSH too, but we have already built it ourselves (agent side `crypto/ssh` + PTY), and the replacement benefit is lower than the migration cost. |
+| **Self-developed (grdp + canvas)** | RDP (partial) | MIT (grdp) | Status quo. **No**: protocol coverage weaker than FreeRDP (NLA/CredSSP/TLS negotiation/RemoteFX/GFX), real-Windows connectivity questionable; rendering/input/clipboard all self-maintained; recopy everything for each protocol added. Sunk cost is not a reason to keep investing. |
+| **Guacamole (guacd + common-js)** | **RDP / VNC / SSH / Telnet** | Apache 2.0 | **Take it**: the protocol engine is the FreeRDP/VNC client libraries (industrial-grade coverage); rendering/input/clipboard are carried by common-js; same license as Cockpit, zero contagion; guacd is stateless with no user concept, a clean boundary with "business in the Go backend." The cost is one more guacd process + writing the Guacamole protocol tunnel gateway ourselves (but the gateway is exactly the seat Cockpit already occupies). |
 
-**为什么不用 Teleport**（顺带记）：Teleport 是身份为中心的访问平台，
-包含证书短时效、审批流、会话录制，能力比 Guacamole 全。但它**自带一套
-用户/角色/资源模型**（与 guacamole-web 同样的「第二套体系」问题），且桌面
-协议支持（RDP）需 Teleport 的 desktop access，部署形态是整套集群。Cockpit
-是个人/小团队控制台，引入 Teleport 是拿大炮打蚊子且模型冲突。Guacamole
-的「只做协议翻译」边界更贴合。
+**Why not Teleport** (noted in passing): Teleport is an identity-centric access platform, including short-lived certificates, approval flows, and session recording — more complete capabilities than Guacamole. But it **ships its own user/role/resource model** (the same "second system" problem as guacamole-web), and desktop protocol support (RDP) requires Teleport's desktop access, whose deployment shape is a whole cluster. Cockpit is a personal/small-team console; bringing in Teleport is using a cannon to swat a mosquito plus a model conflict. Guacamole's "protocol translation only" boundary fits better.
 
-## 骨架代码
+## Skeleton Code
 
 ### 1. guacd docker-compose
 
 ```yaml
-# deployments/guacd/docker-compose.yml（按仓库 deployments/ 约定）
+# deployments/guacd/docker-compose.yml (per the repo's deployments/ convention)
 services:
   guacd:
     image: guacamole/guacd:1.5.5
     container_name: cockpit-guacd
     restart: unless-stopped
     ports:
-      # 仅绑定内网/回环：Go 后端反代连接此端口，不对外暴露
+      # bind intranet/loopback only: the Go backend reverse-proxies to this port; not exposed externally
       - "127.0.0.1:4822:4822"
     volumes:
-      - guacd-recordings:/var/lib/guacamole:rw   # session recording 落盘
-      - guacd-drive:/var/lib/guacamole/drive:rw  # 阶段二文件传输用
+      - guacd-recordings:/var/lib/guacamole:rw   # session recording on disk
+      - guacd-drive:/var/lib/guacamole/drive:rw  # for phase-two file transfer
     environment:
-      # 日志不含指令内容；勿开 debug（会打出 connect 参数含口令）
+      # logs contain no instruction content; do not enable debug (it would print connect parameters incl. passwords)
       GUACD_LOG_LEVEL: info
       TZ: Asia/Shanghai
-    # guacd 无状态，可随重建；recording 卷是唯一持久化面
+    # guacd is stateless and can be rebuilt at will; the recording volume is the only persistent surface
 volumes:
   guacd-recordings:
   guacd-drive:
 ```
 
-要点：端口绑 `127.0.0.1`（Go 网关同机反代；跨机部署时绑内网地址并靠
-防火墙收口）；`/var/lib/guacamole` 是 guacd 默认 recording 目录（见风险
-章节「session recording 白捡」）；`GUACD_LOG_LEVEL` 不开 debug（guacd
-debug 会打印 `connect` 指令参数，含口令）。
+Key points: the port binds `127.0.0.1` (the Go gateway reverse-proxies on the same host; in cross-host deployment bind an intranet address and close it off with a firewall); `/var/lib/guacamole` is guacd's default recording directory (see the "session recording for free" part of the risk section); `GUACD_LOG_LEVEL` stays off debug (guacd debug prints `connect` instruction parameters, including passwords).
 
-### 2. Go 会话接口（WS 网关反代 guacd）
+### 2. Go session interface (WS gateway reverse-proxying guacd)
 
 ```go
 // internal/server/api_guacamole.go
@@ -276,9 +158,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// GuacamoleSession 一条 Guacamole 桌面会话：浏览器 WS ↔ guacd TCP 双跳管道。
-// 职责：票据校验（握手时）+ 出口策略 + 审计 + 双向字节管道。
-// 不解析 Guacamole 指令内容（握手阶段构造 connect/size 除外）。
+// GuacamoleSession is one Guacamole desktop session: a browser WS ↔ guacd TCP two-hop pipeline.
+// Responsibilities: ticket validation (at handshake) + egress policy + audit + bidirectional byte pipe.
+// Does not parse Guacamole instruction content (except constructing connect/size at handshake).
 type GuacamoleSession struct {
 	ID       string
 	UserID   string
@@ -292,78 +174,73 @@ type GuacamoleSession struct {
 	done     chan struct{}
 }
 
-// handleGuacamoleWebSocket 浏览器 ↔ server 段：WS 文本帧即 Guacamole 协议指令。
-// 票据走双通道：URL query ?ticket=（首选，common-js 硬编码 subprotocol
-// "guacamole" 且 connect 数据拼 query）/ Sec-WebSocket-Protocol（兼容位）。
+// handleGuacamoleWebSocket is the browser ↔ server leg: WS text frames are Guacamole protocol instructions.
+// The ticket goes over a dual channel: URL query ?ticket= (primary, since common-js hard-codes subprotocol
+// "guacamole" and appends connect data to the query) / Sec-WebSocket-Protocol (compatibility slot).
 func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// 1. 票据：Sec-WebSocket-Protocol[0] → ValidateTicket（一次性消费）
-	// 2. 权限：terminal:write + matchRemoteEgress(agentID, host, port)
-	// 3. 拨 guacd TCP（127.0.0.1:4822，超时 10s）——实现修正：见上文 D2 注记，
-	//    实际为「经 agent 建出口 + 起接口绑定中继，connect 走中继地址」
-	// 4. 升级 WS（Subprotocols 回显 ticketID）
-	// 5. 构造握手指令发 guacd：size / audio / video / connect
-	//    connect 参数：protocol=rdp|vnc, hostname, port, username, password…
-	//    （凭据来自 ticket.Params，同 handleTerminalWebSocket 的 proxy_new 下发）
-	// 6. auditRemoteStart（Protocol: rdp|vnc, Session: sessionID）
-	// 7. 双向管道：
-	//      WS → guacd：conn.Write(ws 文本帧内容)
-	//      guacd → WS：bufio.Scanner 按 Guacamole 指令边界切分 → ws.WriteMessage
-	// 8. 任一侧断开 → sendGuacamoleClose → auditRemoteEnd（含 duration）
+	// 1. Ticket: Sec-WebSocket-Protocol[0] → ValidateTicket (one-time consumption)
+	// 2. Permissions: terminal:write + matchRemoteEgress(agentID, host, port)
+	// 3. Dial guacd TCP (127.0.0.1:4822, 10s timeout) — implementation correction: see the D2 note
+	//    above; in reality the server builds agent egress plus an interface-bound relay, and
+	//    connect uses the relay address
+	// 4. Upgrade WS (Subprotocols echo back the ticketID)
+	// 5. Construct handshake instructions to send to guacd: size / audio / video / connect
+	//    connect parameters: protocol=rdp|vnc, hostname, port, username, password…
+	//    (credentials come from ticket.Params, same as handleTerminalWebSocket's proxy_new dispatch)
+	// 6. auditRemoteStart (Protocol: rdp|vnc, Session: sessionID)
+	// 7. Bidirectional pipe:
+	//      WS → guacd: conn.Write(ws text frame content)
+	//      guacd → WS: bufio.Scanner splits on Guacamole instruction boundaries → ws.WriteMessage
+	// 8. Either side disconnects → sendGuacamoleClose → auditRemoteEnd (with duration)
 }
 
-// Guacamole 指令是「逗号分隔长度前缀 + 分号结尾」的文本协议，
-// 例如：4.size,1.1,4.1024,3.768;
-// 管道转发用 bufio.Reader 流式透传即可，无需解析。
+// Guacamole instructions are a text protocol of "comma-separated length prefixes + semicolon terminator",
+// e.g.: 4.size,1.1,4.1024,3.768;
+// Pipeline forwarding can stream through with bufio.Reader; no parsing needed.
 ```
 
-**为什么 Go 侧不解析指令内容**（除握手构造与隧道内部指令判别外）：Guacamole
-协议是 guacamole-common-js 与 guacd 之间的私有协议，版本随 Guacamole 发行版
-演进。Go 网关如果解析指令（如为了「审计键入内容」），就要跟着协议版本改，且
-会重新引入「输入含密码」的泄漏面（见 `recording-design.md` D4）。**网关只做
-字节管道**，协议演进由 Guacamole 两端自己对齐；唯一的最小解析是读首段长度
-前缀判定 opcode 是否为空（隧道内部指令，见 D3），该分层与 guacamole-web 的
-WebSocketTunnelEndpoint 同构。
+**Why the Go side does not parse instruction content** (aside from handshake construction and tunnel-internal instruction detection): the Guacamole protocol is a private protocol between guacamole-common-js and guacd, evolving with Guacamole releases. If the Go gateway parsed instructions (e.g. to "audit keystrokes"), it would have to change with protocol versions and would reintroduce a "input contains passwords" leak surface (see `recording-design.md` D4). **The gateway is a byte pipe only**; protocol evolution is aligned by the two Guacamole ends themselves; the only minimal parsing is reading the first segment's length prefix to determine whether the opcode is empty (tunnel-internal instructions, see D3); that layering is isomorphic to guacamole-web's WebSocketTunnelEndpoint.
 
-### 3. 前端 guacamole-common-js 接入骨架
+### 3. Frontend guacamole-common-js integration skeleton
 
 ```ts
 // web/src/components/GuacamoleModal/index.tsx
 import Guacamole from 'guacamole-common-js'
 
 /**
- * Guacamole 桌面 Modal：guacamole-common-js 承担渲染/输入/剪贴板，
- * 本组件只负责「申请票据 → 建隧道 → 生命周期」。
+ * Guacamole desktop Modal: guacamole-common-js carries rendering/input/clipboard;
+ * this component only handles "apply for ticket → establish tunnel → lifecycle".
  */
 const GuacamoleModal: React.FC<Props> = ({ visible, onClose, agentId, host, port, protocol, username, password }) => {
   const clientRef = useRef<Guacamole.Client | null>(null)
   const displayRef = useRef<HTMLDivElement>(null)
 
   const connect = useCallback(async () => {
-    // 1. 申请票据（复用 createRemoteTicket；401 刷新链路已内置在 remoteClient）
+    // 1. Apply for a ticket (reuse createRemoteTicket; the 401 refresh chain is already built into remoteClient)
     const { ticket } = await createRemoteTicket({
       agentId, host, port,
       protocol: protocol as RemoteProtocol,
       username, password,
     })
 
-    // 2. 隧道：票据走 URL query（common-js 的 WebSocketTunnel 硬编码
-    // subprotocol "guacamole" 且把 connect(data) 拼进 URL query，无法用
-    // Sec-WebSocket-Protocol 传票据——上游实现约束，见 D3「票据双通道」）
+    // 2. Tunnel: the ticket goes in the URL query (common-js's WebSocketTunnel hard-codes
+    // subprotocol "guacamole" and appends connect(data) to the URL query, so the ticket
+    // cannot go via Sec-WebSocket-Protocol — an upstream implementation constraint, see D3 "ticket dual channel")
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const tunnel = new Guacamole.WebSocketTunnel(
       `${wsProtocol}//${window.location.host}/api/remote/guacamole`,
     )
-    // guacamole-common-js 的 WebSocketTunnel 自己处理 Guacamole 协议
-    // 的 chunk/base64 编解码与 ping 保活——不要在这里自由发挥（见风险章节）
+    // guacamole-common-js's WebSocketTunnel itself handles the Guacamole protocol's
+    // chunk/base64 codec and ping keepalive — do not improvise here (see risk section)
 
-    // 3. 客户端：Display/Keyboard/Mouse 全由 common-js 承担
+    // 3. Client: Display/Keyboard/Mouse are all carried by common-js
     const client = new Guacamole.Client(tunnel)
     clientRef.current = client
 
     const display = client.getDisplay()
     displayRef.current?.appendChild(display.getElement())
 
-    // 触控 → 鼠标：common-js 的 Guacamole.Mouse 已处理 touch 事件
+    // Touch → mouse: common-js's Guacamole.Mouse already handles touch events
     const mouse = new Guacamole.Mouse(display.getElement())
     mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (state) => {
       client.sendMouseState(state)
@@ -372,7 +249,7 @@ const GuacamoleModal: React.FC<Props> = ({ visible, onClose, agentId, host, port
     keyboard.onkeydown = (keysym) => client.sendKeyEvent(1, keysym)
     keyboard.onkeyup = (keysym) => client.sendKeyEvent(0, keysym)
 
-    // 4. 剪贴板（纯文本）
+    // 4. Clipboard (plain text)
     client.onclipboard = (streams, mimetype) => {
       if (mimetype !== 'text/plain') return
       const reader = new Guacamole.StringReader(streams[0])
@@ -381,8 +258,9 @@ const GuacamoleModal: React.FC<Props> = ({ visible, onClose, agentId, host, port
       reader.onend = () => navigator.clipboard.writeText(text)
     }
 
-    // connect(data) 的 data 落到 WS URL query；网关凭票据换出真凭据，
-    // 浏览器侧零凭据（见「为什么参数由服务端放进 connect 指令」）
+    // The data of connect(data) lands in the WS URL query; the gateway exchanges the ticket
+    // for the real credentials, zero credentials on the browser side
+    // (see "Why parameters are placed into the connect instruction by the server")
     client.connect(`ticket=${encodeURIComponent(ticket)}`)
   }, [agentId, host, port, protocol, username, password])
 
@@ -391,216 +269,118 @@ const GuacamoleModal: React.FC<Props> = ({ visible, onClose, agentId, host, port
 }
 ```
 
-**为什么参数（凭据）由服务端放进 `connect` 指令而非前端**：
-guacamole-common-js 的 `client.connect(data)` 可传参数字符串，服务端也可
-在 `connect` 指令里带参数。**选服务端**是因为凭据已在 ticket.Params 里
-（`handleTicketCreate` 存储），前端不需要经手——减少一次凭据在浏览器
-内存/网络上的暴露面，且与 `handleTerminalWebSocket` 的
-`proxy_new` 下发凭据同款（前端传 ticket，agent 拿到的是已解析的凭据）。
+**Why parameters (credentials) are placed into the `connect` instruction by the server rather than the frontend**: guacamole-common-js's `client.connect(data)` can take a parameter string, and the server can also carry parameters in the `connect` instruction. **Choose the server** because the credentials are already in ticket.Params (stored by `handleTicketCreate`), so the frontend never needs to handle them — this removes one exposure of credentials in browser memory/on the network, and it is the same shape as `handleTerminalWebSocket`'s `proxy_new` credential dispatch (the frontend passes the ticket; the agent receives resolved credentials).
 
-## 风险与边界
+## Risks and Boundaries
 
-### H.264/帧率：按办公场景验收，不追求媒体级
+### H.264/frame rate: accept against office scenarios; do not chase media-grade
 
-Guacamole 1.5.x 的 RDP 驱动支持 GFX/AVC444（H.264）硬件编码路径，
-VNC 侧无 H.264（RFB 协议本身是像素/伪像素编码）。**验收标准定为办公
-场景**：文本编辑器滚动流畅、窗口拖动不明显掉帧、输入延迟可接受（主观
-「不难受」），**不以帧率数值/码率为目标**。
+Guacamole 1.5.x's RDP driver supports the GFX/AVC444 (H.264) hardware encoding path; the VNC side has no H.264 (the RFB protocol itself is pixel/pseudo-pixel encoding). **The acceptance bar is set at office scenarios**: text-editor scrolling is smooth, window dragging shows no obvious frame drops, input latency is acceptable (subjectively "not painful"), and **frame-rate numbers/bitrate are not the target**.
 
-理由：Cockpit 的远控场景是「远程运维/应急处理」（改配置、看日志、重启
-服务），不是看视频/3D。媒体级验收（如 30fps 稳定、<100ms 输入延迟）会把
-工作量引向调优 guacd 的 FreeRDP 编解码参数，而这些参数的收益在办公场景
-下感知弱。阶段 1 若办公场景流畅即可收；若特定目标机器卡顿，先查
-guacd 的 `disable-audio`/`color-depth`/`resize-method` 参数，再考虑
-是否为网络问题。
+Rationale: Cockpit's remote-access scenario is "remote ops/incident response" (edit configs, read logs, restart services), not watching video/3D. Media-grade acceptance (e.g. stable 30fps, <100ms input latency) would funnel effort into tuning guacd's FreeRDP codec parameters, whose benefit is barely perceptible in office scenarios. In Phase 1, if the office scenario is smooth, that is a pass; if a specific target machine stutters, first check guacd's `disable-audio`/`color-depth`/`resize-method` parameters, then consider whether it is a network issue.
 
-**H.264 是否启用不由我们配**：FreeRDP 的 AVC/H.264 需要目标 Windows 支持
-（RemoteFX/GFX 或 AVC444），guacd 会自动协商。我们不强制开启也不禁止
-——协商结果即事实。
+**Whether H.264 is enabled is not configured by us**: FreeRDP's AVC/H.264 requires target-Windows support (RemoteFX/GFX or AVC444), and guacd negotiates it automatically. We neither force it on nor forbid it — the negotiation result is the fact.
 
-### 音频放阶段二
+### Audio deferred to Phase 2
 
-**（实现期源码核实修正）** 音频流走 Guacamole 协议的 `audio,<streamIndex>,<mimetype>;`
-流创建指令 + `blob` 数据流，由**服务端主动推**（非 connect 参数），自动经 Go
-网关的字节管道透传——网关零改动；客户端用 `onaudio` 或
-`Guacamole.AudioPlayer.getInstance(stream, mimetype)` 播放，内置 `RawAudioPlayer`
-支持 `audio/L8`/`audio/L16`（raw PCM）。设计骨架里「connect 指令的 audio 参数」
-表述已按源码核实修正。
+**(Corrected against source during implementation)** Audio streams use the Guacamole protocol's `audio,<streamIndex>,<mimetype>;` stream-creation instruction + the `blob` data stream, pushed **proactively by the server** (not a connect parameter), and pass automatically through the Go gateway's byte pipe — zero gateway changes; the client plays with `onaudio` or `Guacamole.AudioPlayer.getInstance(stream, mimetype)`, and the built-in `RawAudioPlayer` supports `audio/L8`/`audio/L16` (raw PCM). The design skeleton's phrasing of "the connect instruction's audio parameter" has been corrected per source verification.
 
-Guacamole 支持音频（RDP 的 `rdpsnd`、VNC 无音频），但：
+Guacamole supports audio (RDP's `rdpsnd`; VNC has no audio), but:
 
-1. 浏览器音频播放需用户手势解锁（iOS Safari 尤其严格），静音/音量控制
-   要自己接 UI；
-2. guacd 音频编解码（如 RDP 的 Opus/MP3）与浏览器 `Guacamole.Audio`
-   的播放链路要对齐；
-3. 运维场景下桌面音频价值低（不像远程影音）。
+1. Browser audio playback requires a user gesture to unlock (iOS Safari especially strict); mute/volume controls need UI wiring of our own;
+2. guacd's audio codecs (e.g. RDP's Opus/MP3) must line up with the browser `Guacamole.Audio` playback chain;
+3. In ops scenarios desktop audio has low value (unlike remote media).
 
-**收益/成本比低**，故明确推迟。架构上不留死角（源码核实）：音频流本就在
-字节管道里透传，`guacConnectArgs` 不传 `disable-audio` 即默认启用，
-阶段二只加静音/音量控制 UI（静音用 `AudioContext.suspend()/resume()`，
-音量需自定义 AudioPlayer 插 GainNode）即可，不影响阶段一的协议路径。
+**The benefit/cost ratio is low**, hence the explicit deferral. Architecturally there is no dead angle (source-verified): audio streams are already passed through inside the byte pipe; as long as `guacConnectArgs` does not pass `disable-audio` it is enabled by default; Phase 2 only adds the mute/volume-control UI (mute via `AudioContext.suspend()/resume()`, volume requires a custom AudioPlayer plugging in a GainNode), without touching the Phase 1 protocol path.
 
-### 隧道二进制帧 chunk/base64 规则照抄官方 Tunnel 实现
+### Tunnel binary-frame chunk/base64 rules copied from the official Tunnel implementation
 
-**这是最容易自作聪明翻车的一处**，故单独强调：
+**This is the easiest place to outsmart oneself and crash**, hence the standalone emphasis:
 
-Guacamole 协议的指令流里，二进制数据（位图、音频帧、剪贴板文件）不是直接
-塞进指令的，而是走「**流**」机制：`blob` 指令携带 base64 chunk（带流索引），
-`end` 指令收尾。`guacamole-common-js` 的 `Guacamole.Tunnel` 实现里有
-`sendMessage` 的 opcode 组装（长度前缀格式 `length.opcode,arg1,arg2...;`）
-和 base64 chunk 的切分规则。
+In the Guacamole protocol's instruction stream, binary data (bitmaps, audio frames, clipboard files) is not stuffed directly into instructions but goes through the "**stream**" mechanism: the `blob` instruction carries a base64 chunk (with a stream index), and the `end` instruction closes it. `guacamole-common-js`'s `Guacamole.Tunnel` implementation contains `sendMessage`'s opcode assembly (length-prefix format `length.opcode,arg1,arg2...;`) and the base64 chunk splitting rules.
 
-**规则**：
+**Rules**:
 
-1. Go 网关**不重新实现** chunk/base64 编解码——网关只做 WS 文本帧 ↔
-   guacd TCP 流的字节管道，两侧的编解码各自由 `guacamole-common-js`
-   与 guacd 完成；
-2. 若将来必须在 Go 侧构造指令（如握手阶段的 `connect`），**照抄**
-   [guacamole-common-js 的 `Guacamole.Tunnel.sendMessage`](https://github.com/apache/guacamole-client-commonjs)
-   的长度前缀格式与 [`guac-hawk-bit`](https://github.com/apache/guacamole-server) 的
-   指令解析，**不要自由发挥**——协议是私有的，格式错一处就是静默断流，
-   调试成本极高（指令流不透明）；
-3. 版本对齐：guacamole-common-js 的版本与 guacd 的版本要匹配到同一
-   Guacamole 发行版（1.5.x 配 1.5.x）。协议是私有的，跨版本不保证兼容。
+1. The Go gateway does **not** reimplement chunk/base64 codec — the gateway is only a byte pipe between WS text frames ↔ the guacd TCP stream; the codecs on both ends are done by `guacamole-common-js` and guacd respectively;
+2. If instructions must be constructed on the Go side in the future (e.g. the handshake-phase `connect`), **copy** the length-prefix format of [guacamole-common-js's `Guacamole.Tunnel.sendMessage`](https://github.com/apache/guacamole-client-commonjs) and the instruction parsing of [`guac-hawk-bit`](https://github.com/apache/guacamole-server) — **do not improvise** — the protocol is private; one wrong format detail means a silent stream cut with extremely high debugging cost (the instruction stream is opaque);
+3. Version alignment: the guacamole-common-js version and the guacd version must match to the same Guacamole release (1.5.x pairs with 1.5.x). The protocol is private; cross-version compatibility is not guaranteed.
 
-这条风险的根因是「私有协议 + 无 schema」：Guacamole 协议没有公开的 IDL/
-schema，格式约定只存在于两端实现代码里。照抄比自己写快且对。
+The root cause of this risk is "private protocol + no schema": the Guacamole protocol has no public IDL/schema; the format conventions exist only in the two ends' implementation code. Copying is faster and more correct than writing it ourselves.
 
-### guacd session recording：白捡的审计回放
+### guacd session recording: audit replay for free
 
-**这是集成 Guacamole 的意外红利**，值得单独说：
+**This is an unexpected dividend of integrating Guacamole**, worth a separate section:
 
-guacd 原生支持把会话录成 **`.guac` 格式**（Guacamole session recording），
-在 `connect` 指令里传 `recording-path` + `recording-name` 参数即自动录制，
-无需我们解析/转发任何像素数据。录出来的 `.guac` 文件可以用官方的
-`guacplay`（guacamole-server 自带工具）或 `guacenc` 回放/转码。
+guacd natively supports recording sessions as **`.guac` format** (Guacamole session recording): pass `recording-path` + `recording-name` parameters in the `connect` instruction and recording happens automatically, with no need for us to parse/forward any pixel data. The recorded `.guac` files can be replayed/transcoded with the official `guacplay` (a tool shipped with guacamole-server) or `guacenc`.
 
-对照 Cockpit 现状：终端侧已有 asciinema v2 录制（`recording-design.md`，
-M1 落地：`recording.go` + `TerminalRecording` 表 + `/recordings` 回放页），
-但**桌面侧（RDP/VNC）录制明确列为「不做」**（见 recording-design.md
-D1/不做节：「VNC/RDP 像素流录制（WebM/图片序列，体积大回放重）」）。
-当时否掉的原因是**自行开发录制成本高**——像素流录制要自己写格式、自己写
-回放器、体积大。
+Compare with Cockpit's status quo: the terminal side already has asciinema v2 recording (`recording-design.md`, M1 landed: `recording.go` + the `TerminalRecording` table + the `/recordings` replay page), but **desktop-side (RDP/VNC) recording is explicitly listed as "not doing"** (see recording-design.md D1/not-doing section: "VNC/RDP pixel-stream recording (WebM/image sequences; large volume, heavy replay)"). The reason it was rejected then was the **high cost of self-developed recording** — pixel-stream recording means writing our own format and our own player, with large volumes.
 
-Guacamole 路线下这个成本**几乎为零**：guacd 写 `.guac` 文件，我们只需：
+Under the Guacamole route this cost is **nearly zero**: guacd writes the `.guac` file, and we only need to:
 
-1. `connect` 指令加 `recording-path`（指向 guacd 容器卷）+
-   `recording-name`（会话 ID）两个参数；
-2. 会话结束后把 `.guac` 文件从 guacd 卷收集到 Cockpit 的
-   `data/recordings/` 目录（与 asciinema `.cast` 同目录，`recording.go`
-   的 retention/清理逻辑直接复用）；
-3. 回放：阶段二做 Web 回放器（解析 `.guac` 格式），或先用官方 `guacplay`
-   离线回放（CLI 工具）。
+1. Add `recording-path` (pointing at the guacd container volume) + `recording-name` (the session ID) parameters to the `connect` instruction;
+2. After the session ends, collect the `.guac` file from the guacd volume into Cockpit's `data/recordings/` directory (same directory as asciinema `.cast`; the retention/cleanup logic in `recording.go` is reused directly);
+3. Replay: Phase 2 builds a web player (parsing the `.guac` format), or start with the official `guacplay` for offline replay (CLI tool).
 
-**这直接补强了 `recording-design.md` 的「不做」缺口**，且与既有
-`recording.enabled` / `recording.retention_days` 设置项语义对齐。阶段一
-先落「录制落盘」（guacd 侧白捡），Web 回放器放阶段二。
+**This directly fills the "not doing" gap in `recording-design.md`** and aligns semantically with the existing `recording.enabled` / `recording.retention_days` settings. Phase 1 lands "recording to disk" first (free on the guacd side); the web player goes to Phase 2.
 
-代价：`.guac` 是 Guacamole 私有格式（同风险「私有协议」），脱离 Guacamole
-生态不能回放——但 asciinema `.cast` 是开放格式可脱离 Cockpit 回放，两者
-互补（终端开放格式、桌面 Guacamole 格式）。
+The cost: `.guac` is a Guacamole-proprietary format (same "private protocol" risk) and cannot be replayed outside the Guacamole ecosystem — but asciinema `.cast` is an open format replayable outside Cockpit; the two complement each other (terminal open format, desktop Guacamole format).
 
-## 凭据保管语义：凭据保险箱（credential vault）
+## Credential Storage Semantics: Credential Vault
 
-> 2026-10-02 用户实测提出：每次连接都要手输密码/私钥，要求参照阿里云密码箱
-> 做「保险箱」，并明确对齐两点——**服务端加密保管每台机器的凭据** +
-> **查看/管理凭据需再次验证身份**。已落地（`0d2f9da`）：Guacamole 弹窗与
-> 内置终端两个入口同款接入；管理入口收在连接弹窗内，不另做独立管理页。
+> Raised by the user in real testing on 2026-10-02: having to hand-type the password/private key on every connection was unacceptable; they asked for a "vault" modeled on the Alibaba Cloud password box, with two explicit alignments — **server-side encrypted storage of each machine's credentials** + **re-verifying identity to view/manage credentials**. Already landed (`0d2f9da`): the Guacamole modal and the built-in terminal, the two entry points, are wired the same way; the management entry lives inside the connection modal, with no separate management page.
 
-### 两条路径：默认不落盘 vs 显式保存
+### Two Paths: Default No-Persistence vs. Explicit Save
 
-- **默认路径（不变）**：口令/私钥只进 `ticket.Params` → guacd `connect`
-  指令 / agent SSH 拨号，不写库、不进审计——D4 与 `remote_audit.go`
-  「不写 password」的既有纪律照旧成立；
-- **保存路径（显式动作）**：连接弹窗勾选「保存凭据到服务器」→ 提交前先过
-  二次验证 → 明文仅在提交瞬间经手，`storage.Encrypt`（AES-256-GCM，密钥由
-  `TOTP_ENCRYPTION_KEY` 派生，`internal/storage/crypto.go` 与 TOTP 同设施）
-  加密后落 `remote_credentials` 表；`password_enc`/`private_key_enc` 的 json
-  tag 为 `-`，密文字段永不序列化——明文只进不出，列表接口仅回
-  username/domain/has_password/has_private_key 元数据；
-- **隔离与覆盖**：按登录用户隔离，`idx_remote_cred_target`
-  （user_id+agent_id+host+port+protocol）五列联合唯一——同目标重复保存视为
-  更新，与 `services/desktop.ts` localStorage 记用户名的同目标覆盖语义对齐。
+- **Default path (unchanged)**: passwords/private keys go only into `ticket.Params` → the guacd `connect` instruction / the agent's SSH dialing; never written to the DB, never into audit — the existing discipline of D4 and `remote_audit.go`'s "do not write password" continues to hold;
+- **Save path (explicit action)**: check "save credentials to the server" in the connection modal → pass second-factor verification before submitting → plaintext is handled only at the instant of submission; after encryption with `storage.Encrypt` (AES-256-GCM, key derived from `TOTP_ENCRYPTION_KEY`; `internal/storage/crypto.go` shares the same facility as TOTP) it lands in the `remote_credentials` table; the json tags of `password_enc`/`private_key_enc` are `-`, so ciphertext fields are never serialized — plaintext goes in but never out; the list API returns only username/domain/has_password/has_private_key metadata;
+- **Isolation and overwrite**: isolated per logged-in user; `idx_remote_cred_target` (user_id+agent_id+host+port+protocol) is a five-column composite unique — saving again for the same target counts as an update, aligned with the same-target overwrite semantics of `services/desktop.ts` remembering usernames in localStorage.
 
-### 连接注入：浏览器侧零凭据不变
+### Connection Injection: Zero Credentials on the Browser Side, Unchanged
 
-- **用已存凭据连接**：前端只发 `use_saved: true`，不携带任何凭据字段——
-  服务端按（用户、agent、host、port、protocol）查库解密，填充请求里缺失的
-  username/password/private_key/domain（显式传入的值优先）；查无已存凭据
-  → 400 `no saved credential for this target`；
-- **出口策略照旧先行**：`matchRemoteEgress` 在 use_saved 解析之前执行
-  （`api_remote.go` 注释「egress 校验照旧先行」）——保险箱不构成绕过
-  `remote_control.allowed_targets` 的旁路；
-- **审计**：`RemoteSessionDetails.AuthSource` 记 `saved` / `user`（空 =
-  无凭据，如 VNC 匿名、agent 默认密钥），详情仍不写密码。
+- **Connect with saved credentials**: the frontend sends only `use_saved: true`, carrying no credential fields — the server looks up and decrypts by (user, agent, host, port, protocol), filling in the missing username/password/private_key/domain of the request (explicitly passed values take precedence); if no saved credential exists → 400 `no saved credential for this target`;
+- **Egress policy still goes first**: `matchRemoteEgress` runs before use_saved resolution (comment in `api_remote.go`: "egress validation still goes first") — the vault does not constitute a bypass around `remote_control.allowed_targets`;
+- **Auditing**: `RemoteSessionDetails.AuthSource` records `saved` / `user` (empty = no credentials, e.g. VNC anonymous or the agent's default key); details still never write the password.
 
-### 管理操作二次验证（对齐阿里云密码箱）
+### Second-Factor Verification for Management Operations (Aligned with the Alibaba Cloud Password Box)
 
-- `POST /api/remote/vault/verify`：登录密码（bcrypt 比对）或 TOTP 动态码
-  （`ValidateTOTPCode`，TOTP 开启时二者皆可）→ 签发 **10 分钟多次使用**
-  vault token（服务端内存 map，过期条目在下次签发时懒清理）；
-- 列表/保存/删除（`/api/remote/vault/credentials`）挂 `X-Vault-Token`
-  校验，缺失/过期 401 提示重新验证；token 只存前端内存（module 变量，
-  不进 localStorage），关页面即失效；
-- **便利性分层**：用已存凭据**连接**仅凭登录态（保险箱的便利点所在），
-  **删除已存凭据**必过二次验证（破坏性管理动作，交互上「先验证、可取消」）。
+- `POST /api/remote/vault/verify`: login password (bcrypt comparison) or a TOTP one-time code (`ValidateTOTPCode`; when TOTP is enabled, either works) → issues a **10-minute multi-use** vault token (server-side in-memory map; expired entries are lazily cleaned at the next issuance);
+- List/save/delete (`/api/remote/vault/credentials`) hang off `X-Vault-Token` validation; missing/expired returns 401 prompting re-verification; the token lives only in frontend memory (a module variable, not in localStorage) and expires when the page closes;
+- **Layered convenience**: *connecting* with saved credentials needs only the login state (that is the vault's convenience point); **deleting saved credentials** always requires second-factor verification (a destructive management action; interaction is "verify first, cancellable").
 
-### 文案口径
+### Wording
 
-「口令默认不落盘」指默认路径；勾选保存后的表述是「AES-GCM 加密存储于服务端，
-浏览器不再经手明文」。两句分别对应上面两条路径，不可互相替读；「不进日志」
-指 guacd 与审计侧（D4），落库的是用户显式要求保存的密文。
+"Passwords are not persisted by default" refers to the default path; the wording after checking save is "stored encrypted with AES-GCM on the server; the browser never handles plaintext again." The two sentences correspond to the two paths above and must not be read as substitutes for each other; "never into logs" refers to the guacd and audit sides (D4); what lands in the DB is ciphertext the user explicitly asked to save.
 
-## 不做（后续版本）
+## Not Doing (Future Versions)
 
-- **音频**（见风险章节，阶段二）；
-- **文件传输**：Guacamole 的 `Guacamole.Filesystem` + RDP 驱动器重定向 /
-  VNC 的 SFTP 叠加。与 Cockpit 的 `file-manager-design.md` 路线重叠，
-  先用文件管理器（agent 侧 RPC）覆盖文件进出，桌面内文件传输按需再议；
-- **剪贴板富格式**（RTF/HTML）：阶段一纯文本；
-- **Web `.guac` 回放器**：阶段一用官方 `guacplay` 离线回放，Web 回放器
-  阶段二（可复用 `/recordings` 页面的播放器骨架）；
-- ~~**SSH/telnet 走 Guacamole**~~（**2026-09-25 废止 SSH 部分**：三协议统一
-  第三方栈的新方向已落地 SSH 接入，见
-  [remote-access-integration-design](./remote-access-integration-design.md)；
-  体验差异（guacd 服务端渲染图块 vs xterm.js 字符网格）经「内置终端（经
-  Agent）」兜底入口消化，agent 通道不删。**telnet 维持不做**——无加密、
-  遗留调试用，继续走 xterm.js）：原理由——SSH 已自行开发打通
-  （`internal/proxy/ssh_session.go`，agent 侧 `crypto/ssh` + PTY + TOFU
-  host key），xterm.js 体验优于 Guacamole 的终端仿真；telnet 同理。
-  **桌面协议（RDP/VNC）走 Guacamole，字符终端（SSH/telnet）走 xterm.js**
-  ——两者不互相绑架；
-- **替换 agent 侧 RDP（grdp）**：阶段一 Guacamole 路线**新增**到 server 侧，
-  agent 侧 grdp 保留为「无 guacd 部署时的降级路径」或按阶段一验收结果
-  决定废弃。两套并存期不宜过长，阶段一验收后定夺；
-- **保险箱独立管理页**：列表/删除/二次验证收在连接弹窗内（见「凭据保管
-  语义」节），Settings 下的独立管理页按需再议。
+- **Audio** (see risk section, Phase 2);
+- **File transfer**: Guacamole's `Guacamole.Filesystem` + RDP drive redirection / VNC's SFTP stacking. Overlaps with Cockpit's `file-manager-design.md` route; file in/out is covered first by the file manager (agent-side RPC); in-desktop file transfer to be discussed as needed;
+- **Rich clipboard formats** (RTF/HTML): Phase 1 is plain text;
+- **Web `.guac` player**: Phase 1 uses the official `guacplay` for offline replay; the web player in Phase 2 (can reuse the player skeleton of the `/recordings` page);
+- ~~**SSH/telnet over Guacamole**~~ (**2026-09-25: the SSH part voided**: the new direction of unifying all three protocols on a third-party stack has landed SSH access, see [remote-access-integration-design](/remote-access-integration-design); the experience difference (guacd server-side-rendered tiles vs. xterm.js character grid) is absorbed by the "built-in terminal (via Agent)" fallback entry; the agent channel is not deleted. **telnet stays not-doing** — unencrypted, legacy debugging use, keeps going through xterm.js): original rationale — SSH was already built by us (`internal/proxy/ssh_session.go`, agent side `crypto/ssh` + PTY + TOFU host key), and the xterm.js experience beats Guacamole's terminal emulation; same for telnet. **Desktop protocols (RDP/VNC) go through Guacamole; character terminals (SSH/telnet) go through xterm.js** — the two do not hold each other hostage;
+- **Replacing the agent-side RDP (grdp)**: in Phase 1 the Guacamole route is **added** on the server side; the agent-side grdp is retained as a "degradation path when no guacd is deployed" or deprecated per the Phase 1 acceptance results. The two coexisting for long is inappropriate; the decision comes after Phase 1 acceptance;
+- **A standalone vault management page**: list/delete/second-factor verification live inside the connection modal (see the "Credential Storage Semantics" section); a standalone management page under Settings to be discussed as needed.
 
-## 里程碑
+## Milestones
 
-**阶段 1：连得上、操作得了**（本设计的验收范围）
+**Phase 1: can connect, can operate** (the acceptance scope of this design)
 
-1. guacd docker-compose 落地（`deployments/guacd/docker-compose.yml`）；
-2. Go WS 网关反代（`internal/server/api_guacamole.go`）+ 票据/审计/出口策略；
-3. web `GuacamoleModal`（guacamole-common-js）替换 `DesktopModal` 的 RDP/
-   VNC 入口（或并列入口灰度）；
-4. 验收：浏览器 RDP 连 Windows 专业版/Server（NLA）、VNC 连 Linux、
-   Win11 Home VNC 兜底、iPad Safari 触控可用。
+1. guacd docker-compose lands (`deployments/guacd/docker-compose.yml`);
+2. Go WS gateway reverse proxy (`internal/server/api_guacamole.go`) + ticket/audit/egress policy;
+3. web `GuacamoleModal` (guacamole-common-js) replaces `DesktopModal`'s RDP/VNC entry (or a parallel entry behind a flag);
+4. Acceptance: browser RDP to Windows Pro/Server (NLA), VNC to Linux, Win11 Home VNC fallback, iPad Safari touch usable.
 
-**阶段 2：补强**
+**Phase 2: reinforcements**
 
-- 音频；
-- `.guac` Web 回放器 + 与 `/recordings` 页面整合；
-- 文件传输（按需）；
-- grdp 路线去留定夺。
+- Audio;
+- `.guac` web player + integration with the `/recordings` page;
+- File transfer (as needed);
+- Deciding the grdp route's fate.
 
-## 参考
+## References
 
-- [Apache Guacamole 架构](https://guacamole.apache.org/doc/gug/architecture.html)
+- [Apache Guacamole architecture](https://guacamole.apache.org/doc/gug/architecture.html)
 - [guacamole-common-js API](https://guacamole.apache.org/doc/gug/guacamole-common-js.html)
-- [Guacamole 协议（指令格式）](https://guacamole.apache.org/doc/gug/protocol-reference.html)
-- [guacd 参数（recording-path 等）](https://guacamole.apache.org/doc/gug/configuring-guacamole.html)
-- 项目内：`docs/guide/recording-design.md`（终端录制，桌面录制缺口）、
-  `docs/guide/reference-projects.md`（Guacamole 参考记录）、
-  `internal/server/ticket.go`（票据语义）、`internal/server/remote_audit.go`
-  （远控审计）、`web/src/services/api.ts`（401 刷新）
+- [Guacamole protocol (instruction format)](https://guacamole.apache.org/doc/gug/protocol-reference.html)
+- [guacd parameters (recording-path etc.)](https://guacamole.apache.org/doc/gug/configuring-guacamole.html)
+- In-project: `docs/guide/recording-design.md` (terminal recording, desktop recording gap), `docs/guide/reference-projects.md` (Guacamole reference notes), `internal/server/ticket.go` (ticket semantics), `internal/server/remote_audit.go` (remote-access audit), `web/src/services/api.ts` (401 refresh)

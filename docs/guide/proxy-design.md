@@ -1,112 +1,112 @@
-# P1 方案设计：反向代理管理（Nginx 站点可视化下发）
-
-> 语言：**中文** ｜ [English](./proxy-design.en.md)
+# P1 Design: Reverse Proxy Management (visualised delivery of Nginx sites)
 
 
-> 2026-09-15。P1「反向代理/路由管理」首期设计。todo.md 原文：「Nginx/Caddy/Traefik
-> 配置可视化与下发，把『网关』资源从记录升级为可管理对象」。本文只做设计决策与接口定义。
+> 2026-09-15. First-phase design for P1 "reverse proxy / routing management". The original todo.md wording: "visualised configuration and delivery of Nginx/Caddy/Traefik, promoting the 'gateway' resource from a record to a manageable object". This document only makes design decisions and interface definitions.
 
-## 现状与痛点
+## Current state and pain points
 
-| 痛点 | 现状 | 后果 |
+| Pain point | Current state | Consequence |
 |------|------|------|
-| 加一个站点要 SSH + 手写 server 块 | 复制旧配置改域名，`nginx -t` + reload | 格式/转义错一次，全站 502 |
-| 站点现状无处可查 | 域名→上游映射只在运维者脑子里 | 半年后不知道哪个端口是什么服务 |
-| 改错配置影响面大 | 直接改生产 conf，坏了手忙脚乱回滚 | reload 失败期间用户报障 |
-| Gateway 资源只是记录 | inventory 的 Gateway 是网络设备档案，与 Nginx 反代无关 | 「可管理」无从谈起 |
+| Adding a site requires SSH + hand-writing a server block | copy an old config and change the domain, `nginx -t` + reload | one mistake in format/escaping and the whole site 502s |
+| There's nowhere to look up the current site inventory | the domain→upstream mapping exists only in the operator's head | six months later nobody knows which port runs which service |
+| A bad config edit has a large blast radius | editing production conf directly, panicking to roll back when it breaks | users report outages while the reload is failing |
+| The Gateway resource is only a record | inventory's Gateway is a network device profile, unrelated to the Nginx reverse proxy | "manageable" never gets off the ground |
 
-## 架构总览
+## Architecture overview
 
-与文件管理器同一通道模型：**同步 RPC + server 纯转发**。Nginx 配置片段是 KB 级文本，
-`nginx -t` + reload 秒级完成，30s RPC 超时绰绰有余，不需要异步任务模型。
+Same channel model as the file manager: **synchronous RPC + the server purely forwards**. An Nginx config
+snippet is KB-scale text, `nginx -t` + reload completes in seconds, and a 30s RPC timeout is ample — there is
+no need for an async task model.
 
 ```
-┌─ server ─────────────────────┐        ┌─ agent（nginx 所在主机）────────┐
-│ REST /api/agents/{id}/proxy  │ ─RPC─▶ │ nginx provider（新）             │
-│ 站点 CRUD + 审计             │ ◀─RPC─ │ 渲染 → nginx -t → 写文件 → reload│
-│ 不落库：文件即状态           │        │ 只管 cockpit-*.conf，其余零接触  │
+┌─ server ─────────────────────┐        ┌─ agent (the host nginx runs on) ────────┐
+│ REST /api/agents/{id}/proxy  │ ─RPC─▶ │ nginx provider (new)                    │
+│ site CRUD + audit            │ ◀─RPC─ │ render → nginx -t → write file → reload│
+│ no persistence: files are state│        │ only touches cockpit-*.conf, zero contact│
 └──────────────────────────────┘        └─────────────────────────────────┘
 ```
 
-## 关键决策
+## Key decisions
 
-| # | 决策 | 选择 | 理由 |
+| # | Decision | Choice | Rationale |
 |---|------|------|------|
-| D1 | M1 后端范围 | 仅 **Nginx**（宿主机裸装/systemd）；Caddy/Traefik 后续独立扩展 | 个人云最普遍；`nginx -t` 校验与平滑 reload 成熟；容器化 nginx 的配置挂载路径复杂，后补 |
-| D2 | 管理边界 | cockpit 只管理 `/etc/nginx/conf.d/cockpit-*.conf` 自己名下的片段，**用户已有配置零接触** | 不解析任意 nginx 语法（正则解析 server 块是出了名的脆弱）；从根上不可能弄坏既有站点 |
-| D3 | 站点元数据 | 文件头 `# cockpit:meta {json}` 内嵌，读取时只解析自己写的文件 | 回读自己渲染的产物无需真正解析 nginx 语法，roundtrip 可靠 |
-| D4 | 应用流程 | 渲染 → `nginx -t` → 写文件 → reload；**`nginx -t` 失败不落盘**；reload 失败自动回滚文件再试一次 | 语法错误绝不落盘；「apply 失败站点照旧」的强保证 |
-| D5 | reload 方式 | 优先 `systemctl reload nginx`，失败 fallback `nginx -s reload` | systemd 环境 service 语义正确；裸装/容器内无 systemd 走信号 |
-| D6 | 执行模型 | 全同步 RPC | 配置片段小、命令秒级，异步任务模型是过度设计 |
-| D7 | 站点模型 | `{name, serverNames[], upstream, scheme(http/https), tlsCert, tlsKey, websocket, extra}` | 覆盖个人云 90% 场景（反代 + WS + 证书）；非常规指令经 `extra` 直通，`nginx -t` 兜底 |
-| D8 | capability | `nginx-proxy`，`exec.LookPath("nginx")` + `nginx -v` 探测；仅检测通过的 agent 注册 provider 并上报 capability | 无 nginx 的主机不出现假能力 |
-| D9 | REST 挂载 | `/api/agents/{id}/proxy/...`，复用文件管理器的 serveAPI `/agents/` 分发模式 | 按 agent 作用域，一机一 nginx |
-| D10 | 持久化 | **不落库**——站点状态以 agent 侧文件为唯一事实源，server 纯转发 + 审计 | 无 server/agent 状态同步问题；apply/delete 记审计即可追溯 |
+| D1 | M1 backend scope | **Nginx only** (bare host install / systemd); Caddy/Traefik come later as separate extensions | Most universal in personal clouds; `nginx -t` validation and graceful reload are mature; containerised nginx has a complex config mount layout, added later |
+| D2 | Management boundary | cockpit only manages its own `/etc/nginx/conf.d/cockpit-*.conf` snippets, **with zero contact with existing user config** | It doesn't parse arbitrary nginx syntax (regex-parsing server blocks is notoriously fragile); it's structurally impossible to break an existing site |
+| D3 | Site metadata | Embedded in a file header `# cockpit:meta {json}`, and only files cockpit itself wrote are parsed on read | Reading back its own rendered output needs no real nginx parsing, so the roundtrip is reliable |
+| D4 | Apply flow | render → `nginx -t` → write file → reload; **a failed `nginx -t` never reaches disk**; a failed reload automatically rolls the file back and retries once | Syntax errors never land on disk; a strong guarantee of "if apply fails, the site stays as it was" |
+| D5 | reload method | `systemctl reload nginx` first, falling back to `nginx -s reload` | Under systemd the service semantics are correct; bare installs/containers without systemd use the signal |
+| D6 | Execution model | Fully synchronous RPC | Config snippets are small and commands take seconds, so an async task model is over-engineering |
+| D7 | Site model | `{name, serverNames[], upstream, scheme(http/https), tlsCert, tlsKey, websocket, extra}` | Covers 90% of personal-cloud scenarios (reverse proxy + WS + certificates); unconventional directives pass straight through `extra`, with `nginx -t` as the backstop |
+| D8 | capability | `nginx-proxy`, detected via `exec.LookPath("nginx")` + `nginx -v`; only agents that pass detection register the provider and report the capability | Hosts without nginx don't show a fake capability |
+| D9 | REST mount | `/api/agents/{id}/proxy/...`, reusing the file manager's serveAPI `/agents/` dispatch pattern | Scoped per agent, one nginx per machine |
+| D10 | Persistence | **Not persisted** — site state has the agent-side file as its single source of truth, with the server purely forwarding + auditing | No server/agent state sync problem; auditing apply/delete is enough for traceability |
 
-## Agent 侧设计
+## Agent-side design
 
-### 探测与注册
+### Detection and registration
 
-- `detector` 不动——`internal/agent/agent.go` 探测函数：`exec.LookPath("nginx")` 通过
-  后跑 `nginx -v 2>&1` 取版本，成功则追加 `nginx-proxy` capability
-  （metadata: `{version, confDir}`）；
-- `providers.go`：按检测到的 `nginx-proxy` capability 注册 `NewNginxProvider`；
-  conf 目录可用 `COCKPIT_NGINX_CONF_DIR` 覆盖（默认 `/etc/nginx/conf.d`，
-  兼容 sites-enabled 风格的发行版自行配置）。
+- The `detector` is untouched — the probe function in `internal/agent/agent.go`: after `exec.LookPath("nginx")`
+  passes, run `nginx -v 2>&1` to get the version, and on success append the `nginx-proxy` capability
+  (metadata: `{version, confDir}`);
+- `providers.go`: register `NewNginxProvider` based on the detected `nginx-proxy` capability;
+  the conf directory can be overridden with `COCKPIT_NGINX_CONF_DIR` (default `/etc/nginx/conf.d`;
+  distributions with a sites-enabled style configure their own).
 
-### RPC 方法
+### RPC methods
 
-| 方法 | 参数 | 返回 | 说明 |
+| Method | Parameters | Returns | Notes |
 |------|------|------|------|
-| `proxy.status` | `{}` | `{installed, version, confDir, siteCount, reloadMode}` | 概览；reloadMode = systemctl / signal |
-| `proxy.sites` | `{}` | `{sites: [{name, serverNames, upstream, scheme, websocket, updatedAt}]}` | 列 cockpit 名下站点（解析 meta） |
-| `proxy.site.get` | `{name}` | `{name, meta, content}` | 查看渲染后的配置全文 |
-| `proxy.site.apply` | `{site}` | `{name, file}` | 校验 → `nginx -t` → 写 → reload（失败回滚） |
-| `proxy.site.delete` | `{name}` | `{}` | 删片段文件 → reload；reload 失败恢复文件 |
+| `proxy.status` | `{}` | `{installed, version, confDir, siteCount, reloadMode}` | overview; reloadMode = systemctl / signal |
+| `proxy.sites` | `{}` | `{sites: [{name, serverNames, upstream, scheme, websocket, updatedAt}]}` | list sites under cockpit's name (parsing meta) |
+| `proxy.site.get` | `{name}` | `{name, meta, content}` | view the full rendered config |
+| `proxy.site.apply` | `{site}` | `{name, file}` | validate → `nginx -t` → write → reload (roll back on failure) |
+| `proxy.site.delete` | `{name}` | `{}` | delete the snippet file → reload; restore the file if reload fails |
 
-**注**：实施时 wire method 前缀为 `nginx.*` / `traefik.*`（按引擎分派，见下方 M2 清单的实施偏差记录），上表沿用设计期命名。
+**Note**: the implemented wire method prefix is `nginx.*` / `traefik.*` (dispatched by engine, see the implementation-deviation notes in the M2 checklist below); the table above keeps the design-time naming.
 
-### 站点参数与校验（双端同规则）
+### Site parameters and validation (same rules on both ends)
 
-| 字段 | 规则 |
+| Field | Rule |
 |------|------|
-| `name` | `^[a-z0-9][a-z0-9_-]{0,63}$`（backupNameRe 同款），文件名 `cockpit-site-<name>.conf` 的一部分 |
-| `serverNames` | 1–16 个，每个匹配 `^[A-Za-z0-9*.\-]{1,253}$`（域名/通配符） |
-| `upstream` | `^[A-Za-z0-9.:\-]{1,253}$`，形如 `127.0.0.1:3000` |
+| `name` | `^[a-z0-9][a-z0-9_-]{0,63}$` (same as backupNameRe), part of the filename `cockpit-site-<name>.conf` |
+| `serverNames` | 1–16 entries, each matching `^[A-Za-z0-9*.\-]{1,253}$` (domain/wildcard) |
+| `upstream` | `^[A-Za-z0-9.:\-]{1,253}$`, of the form `127.0.0.1:3000` |
 | `scheme` | `http` / `https` |
-| `tlsCert` / `tlsKey` | scheme=https 时必填，绝对路径；**上传证书走文件管理器**（file.write），职责不重复 |
-| `websocket` | bool；true 时渲染 Upgrade/Connection 头 + `proxy_http_version 1.1` |
-| `extra` | 0–4KB 自由文本，原样插入 server 块尾部（高级用户直通口） |
+| `tlsCert` / `tlsKey` | mandatory when scheme=https, absolute paths; **certificate upload goes through the file manager** (file.write) so responsibilities don't overlap |
+| `websocket` | bool; when true, renders Upgrade/Connection headers + `proxy_http_version 1.1` |
+| `extra` | 0–4KB of free text, inserted verbatim at the end of the server block (a straight-through for advanced users) |
 
-### 渲染与应用流程
+### Render and apply flow
 
 ```
-render(site) → 片段文本（首行 meta 注释）
+render(site) → snippet text (first line is the meta comment)
   ↓
-nginx -t                      失败 → 返回 stderr 摘要，不落盘
+nginx -t                      failure → return an stderr summary, nothing lands on disk
   ↓
-写 cockpit-site-<name>.conf   旧文件内容先读入内存
+write cockpit-site-<name>.conf  the old file content is read into memory first
   ↓
-reload                        失败 → 回滚旧内容（或删除新文件）→ 再 reload → 返回错误
+reload                        failure → roll back the old content (or delete the new file) → reload again → return the error
 ```
 
-- `nginx -t`：`exec.CommandContext(ctx, "nginx", "-t")`，10s 超时，stderr 全文截断
-  2KB 返回给 UI；
-- reload：`systemctl reload nginx`（10s 超时，与 `nginx -t` 共用 `nginxTestTimeout`）失败 → `nginx -s reload`；两者皆失败按
-  reload 失败处理（回滚）；
-- meta 注释：单行压缩 JSON，`# cockpit:meta {...}`；不含敏感信息（证书是路径引用）。
+- `nginx -t`: `exec.CommandContext(ctx, "nginx", "-t")`, 10s timeout, with the full stderr truncated
+  to 2KB and returned to the UI;
+- reload: `systemctl reload nginx` (10s timeout, shared with `nginx -t` via `nginxTestTimeout`) failing → `nginx -s reload`; if both fail treat it
+  as a reload failure (roll back);
+- meta comment: single-line compressed JSON, `# cockpit:meta {...}`; contains no sensitive information (certificates are path references).
 
-> 拦截语义注记（2026-10-07 真机探针实证，措辞修正）：新片段的**语法/证书错误由
-> reload 的前置解析同步拦截**——`nginx -s reload` 的 -s 进程在发 SIGHUP 前先自解
-> 析全量配置，坏片段在该进程即报 emerg、退出非零 → 走上述回滚路径；pre-write 的
-> `nginx -t` 实际只护存量配置（apply 前提健康检查）。**bind 冲突是唯一异步盲区**：
-> -s 进程不 bind socket，master 侧 bind 失败（如端口已被占）落在 error.log，apply
-> 返回 200 且片段留盘，但旧配置继续服役——数据面安全（「apply 失败站点照旧」仍成
-> 立），上报层无法同步感知；systemctl 模式同构（debian nginx.service 的 ExecReload
-> 即 `nginx -s reload`）。同步错误摘要如需闭环，候选做法是 reload 后嗅探 error.log
-> （启发式），留 M2 评估。
+> Interception semantics note (worded per real-machine probe evidence from 2026-10-07): **syntax/certificate
+> errors in a new snippet are intercepted synchronously by the parse preceding reload** — the `nginx -s reload`
+> -s process parses the full config itself before sending SIGHUP, so a bad snippet reports emerg in that
+> process and exits non-zero → it takes the rollback path above; the pre-write `nginx -t` actually only
+> guards the existing config (a health check before apply). **A bind conflict is the only asynchronous blind
+> spot**: the -s process doesn't bind sockets, so a master-side bind failure (e.g. the port is taken) lands in
+> error.log, apply returns 200 and the snippet stays on disk, but the old config keeps serving — the data
+> plane is safe ("if apply fails, the site stays as it was" still holds), but the reporting layer cannot
+> perceive it synchronously; the systemctl mode is isomorphic (debian's nginx.service ExecReload is
+> `nginx -s reload`). If synchronous error summaries need to be closed, the candidate approach is sniffing
+> error.log after reload (heuristic), left for M2 evaluation.
 
-### 渲染模板（http 站点示例）
+### Render template (http site example)
 
 ```nginx
 # cockpit:meta {"name":"blog","serverNames":["blog.example.com"],...}
@@ -124,58 +124,59 @@ server {
 }
 ```
 
-- https：`listen 443 ssl` + `ssl_certificate/-key`，并渲染第二个 server 块
-  做 80 → https 301 跳转；
-- websocket：location 内追加 `proxy_http_version 1.1` + Upgrade/Connection 头；
-- `extra` 原样追加在 location 块之后、server 块内。
+- https: `listen 443 ssl` + `ssl_certificate/-key`, plus a second server block rendering
+  the 80 → https 301 redirect;
+- websocket: appends `proxy_http_version 1.1` + Upgrade/Connection headers inside the location;
+- `extra` is appended as-is after the location block, inside the server block.
 
-## Server 侧设计
+## Server-side design
 
-### REST API（server/api_proxy_sites.go，挂 serveAPI `/agents/` 分支，JWT）
+### REST API (server/api_proxy_sites.go, mounted on the serveAPI `/agents/` branch, JWT)
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Notes |
 |------|------|------|
-| GET  | `/api/agents/{id}/proxy/status` | 转发 proxy.status |
-| GET  | `/api/agents/{id}/proxy/sites` | 转发 proxy.sites |
-| GET  | `/api/agents/{id}/proxy/sites/{name}` | 转发 proxy.site.get（含配置全文） |
-| PUT  | `/api/agents/{id}/proxy/sites/{name}` | body 为站点参数 → proxy.site.apply + 审计 proxy_apply |
-| DELETE | `/api/agents/{id}/proxy/sites/{name}` | proxy.site.delete + 审计 proxy_delete |
+| GET  | `/api/agents/{id}/proxy/status` | forwards proxy.status |
+| GET  | `/api/agents/{id}/proxy/sites` | forwards proxy.sites |
+| GET  | `/api/agents/{id}/proxy/sites/{name}` | forwards proxy.site.get (with the full config) |
+| PUT  | `/api/agents/{id}/proxy/sites/{name}` | body is the site params → proxy.site.apply + audit proxy_apply |
+| DELETE | `/api/agents/{id}/proxy/sites/{name}` | proxy.site.delete + audit proxy_delete |
 
-- 参数校验 server 侧执行与 agent 相同规则（双端防御）；`nginx -t` 的 stderr 摘要
-  原样回给 UI（这是用户修正输入的关键信息）；
-- 审计：`ResourceProxySite = "proxy_site"`，动作 proxy_apply / proxy_delete；
-  detail 记 name/domain/upstream，**不含证书内容**（只有路径）。
+- Parameter validation on the server side follows the same rules as the agent (defence on both ends); the `nginx -t` stderr summary
+  is returned to the UI as-is (this is the key information for the user to correct their input);
+- Audit: `ResourceProxySite = "proxy_site"`, actions proxy_apply / proxy_delete;
+  the detail records name/domain/upstream and **no certificate content** (paths only).
 
-## Web UI 设计
+## Web UI design
 
-- 新页面 `/proxy`「反向代理」（菜单，ArrowRightOutlined）：
-  - **Agent 选择**：下拉，标注 nginx 版本（无 capability 的 agent 禁选并提示）；
-  - **状态卡**：nginx 版本 / 配置目录 / 站点数 / reload 方式；
-  - **站点列表** Table：名称 / 域名（Tag）/ 上游 / 协议（http / https Tag）/
-    WebSocket / 更新时间 / 操作（配置、编辑、删除 Popconfirm）；
-  - **新建/编辑 Modal**：名称、域名（tags 多值）、上游、协议 Radio、
-    证书路径/私钥路径（https 时出现，提示「证书文件可经工作台-文件上传」）、
-    WebSocket 开关、高级指令 TextArea；保存失败展示 nginx -t 错误摘要；
-  - **配置查看 Modal**：只读 pre 展示渲染后的完整片段。
+- A new `/proxy` "Reverse Proxy" page (menu, ArrowRightOutlined):
+  - **Agent selection**: a dropdown annotating the nginx version (agents without the capability are disabled with a hint);
+  - **Status card**: nginx version / config directory / site count / reload method;
+  - **Site list** Table: name / domain (Tag) / upstream / scheme (http / https Tag) /
+    WebSocket / updated time / actions (view config, edit, delete Popconfirm);
+  - **Create/edit Modal**: name, domains (tags multi-value), upstream, scheme Radio,
+    certificate path/private key path (shown for https, with a hint that "certificate files can be uploaded via Workbench - Files"),
+    WebSocket toggle, advanced directives TextArea; a failed save shows the nginx -t error summary;
+  - **Config view Modal**: a read-only pre showing the complete rendered snippet.
 
-## M2：Traefik 后端（设计，2026-09-18）
+## M2: Traefik backend (design, 2026-09-18)
 
-D1 承诺的后端扩展。**M2 仅 Traefik，且只走 file provider 动态目录**——
-`providers.file.directory` 指向的目录里每个 YAML 文件是一段独立动态配置，
-与 nginx `conf.d` 片段模式同构，D2「自己名下片段、用户配置零接触」原样
-成立。Caddy 暂缓：Caddyfile 是整文件语义，按站点分片必须改用户主文件加
-`import` 行，与零接触原则冲突（见不做清单）。
+The backend extension promised by D1. **M2 is Traefik only, and only via the file provider's dynamic
+directory** — each YAML file in the directory pointed at by `providers.file.directory` is an independent
+dynamic config, isomorphic to nginx's `conf.d` snippet pattern, so D2's "only its own snippets, zero contact
+with user config" holds unchanged. Caddy is deferred: a Caddyfile is whole-file semantics, so splitting it per
+site means editing the user's main file to add `import` lines, which conflicts with the zero-contact principle
+(see the not-doing list).
 
-| # | 决策 | 内容 | 理由 / 备注 |
+| # | Decision | Content | Rationale / notes |
 |---|------|------|------------|
-| D11 | 后端范围 | 仅 Traefik file provider；渲染/校验/应用按 backend 抽象（`SiteRenderer`/`SiteApplier`），RPC 方法名 `proxy.*` 不变，provider 持有 backend 实现分发 | 方法表不动 server 与 web 路由；nginx 行为零变化 |
-| D12 | 目录探测与 capability | 动态目录取值：`COCKPIT_TRAEFIK_DIR` 覆盖 → 静态配置 `/etc/traefik/traefik.yml`（或 `.yaml`）解析 `providers.file.directory` → 缺省 `/etc/traefik/dynamic`；capability `traefik-proxy` = 目录存在（目录入 metadata 供 provider 初始化）。**不依赖 LookPath("traefik")** | Traefik 大多容器化跑，宿主机常无二进制；目录（含 docker 挂载的宿主侧路径）才是事实源；env 覆盖与 `COCKPIT_NGINX_CONF_DIR` 同惯例；版本探测失败仅置 version 空 |
-| D13 | 校验与应用 | 无 `nginx -t`/reload 等价物：渲染后 `yaml.Unmarshal` 语法自检 + router→service 引用一致性校验，**校验失败不落盘**；file provider 热加载（watch）。坏文件语义（真机实测 traefik:v3.5.6 修正，非局部隔离）：目录中任一坏文件（YAML/Go template 语法错，含非 cockpit 的用户文件）→ watcher callback 整体失败，**整目录热更新冻结**——存量站点保留末次有效配置照常服务，新变更（含面板下发）落盘成功但被拒载；坏文件删除/修复（含面板重下发覆盖）后的下一轮 watch 事件**自动解冻**，冻结期积压的变更一并生效 | 比 nginx 弱在无全局预检且坏文件影响面是整目录（但仅冻结「新变更」，存量流量不受扰动）、强在无 reload 失败回滚分支；apply 流程退化为 渲染→自检→原子写；自检保证 cockpit 自己永不产出坏文件——坏文件只能来自手工编辑/第三方工具，恰是 drift `drifted` 态的暴露面，面板重下发即治愈并连带解冻 |
-| D14 | 渲染映射 | 同站点模型（D7 字段不变）：`serverNames` → router rule 的 `Host(...)` 多值；`upstream` → service `loadBalancer.servers[].url`；https → 443 router `tls=true` + 文件级 `tls.certificates`（certFile/keyFile 路径引用，ACME 推送文件直引）+ 80 router 挂 `redirectScheme` 中间件永久跳转；**`websocket` 字段 no-op**（Traefik 原生透传 WS，字段保留兼容面板）；**`extra` 不支持**——非空时校验直接拒绝 | 跳转按站点双 router 而非静态 entrypoint 配置（不碰静态配置=零接触）；拒绝 extra 避免渲染任意 YAML 片段的注入面 |
-| D15 | 元数据与 drift | meta 首行 YAML 注释 `# cockpit:meta {json}` 与 nginx 同构；drift kind 白名单扩 `traefik`（`dynamicDir/cockpit-site-<name>.yml`，读文件即 current），drift 页 KIND_LABEL 加标签 | BaselineRecorder/diff 链路通用，仅扩 snapshot 分支与白名单 |
-| D16 | server / web | server 纯转发不感知 backend，零改动；web 状态卡显示 backend 名称与版本（无二进制则「-」），编辑 Modal 的 extra 控件在 traefik 后端禁用并提示不支持，其余 UI 复用 | 后端差异收敛在 agent 渲染层与两处 UI 提示 |
+| D11 | Backend scope | Traefik file provider only; rendering/validation/apply abstracted per backend (`SiteRenderer`/`SiteApplier`), RPC method names unchanged, the provider holds the backend implementation dispatch | The method table doesn't move server or web routing; nginx behaviour is unchanged |
+| D12 | Directory detection and capability | Dynamic directory value: `COCKPIT_TRAEFIK_DIR` override → parse `providers.file.directory` from the static config `/etc/traefik/traefik.yml` (or `.yaml`) → default `/etc/traefik/dynamic`; the capability `traefik-proxy` = the directory exists (the directory goes into metadata for provider init). **Does not depend on LookPath("traefik")** | Traefik mostly runs containerised and the host often has no binary; the directory (including the host-side path of a docker mount) is the source of truth; the env override follows the same convention as `COCKPIT_NGINX_CONF_DIR`; a failed version probe just leaves version empty |
+| D13 | Validation and apply | No `nginx -t`/reload equivalent: after rendering, `yaml.Unmarshal` self-check + router→service reference consistency validation, **and nothing lands on disk if validation fails**; the file provider hot-reloads (watches). Bad-file semantics (corrected per real-machine measurement on traefik:v3.5.6, not locally isolated): any bad file in the directory (YAML/Go template syntax errors, including non-cockpit user files) → the watcher callback fails as a whole and **the whole directory's hot update freezes** — existing sites keep serving their last valid config, new changes (including those delivered by the panel) land on disk successfully but are refused; after the bad file is deleted/fixed (including being overwritten by a panel re-delivery), the next watch event **thaws it automatically** and the changes queued during the freeze all take effect | Weaker than nginx in having no global pre-check and a blast radius of the whole directory (but only new changes freeze, existing traffic is undisturbed); stronger in having no reload-failure rollback branch; the apply flow degrades to render→self-check→atomic write; the self-check guarantees cockpit itself never produces a bad file — bad files can only come from manual edits/third-party tools, which is exactly the exposure surface of the drift `drifted` state, and a panel re-delivery cures it while also unfreezing |
+| D14 | Render mapping | Same site model (D7 fields unchanged): `serverNames` → multiple values in the router rule's `Host(...)`; `upstream` → the service's `loadBalancer.servers[].url`; https → a 443 router with `tls=true` + file-level `tls.certificates` (certFile/keyFile path references, ACME-pushed files referenced directly) + the 80 router hung on a `redirectScheme` middleware for a permanent redirect; **`websocket` is a no-op** (Traefik passes WS natively, the field is kept for panel compatibility); **`extra` is unsupported** — when non-empty, validation rejects it outright | Redirects use two routers per site rather than static entrypoint config (not touching static config = zero contact); rejecting extra avoids the injection surface of rendering arbitrary YAML fragments |
+| D15 | Metadata and drift | The first-line YAML comment `# cockpit:meta {json}` is isomorphic with nginx; the drift kind whitelist extends to `traefik` (`dynamicDir/cockpit-site-<name>.yml`, reading the file is the current state), and the drift page's KIND_LABEL gains a label | The BaselineRecorder/diff chain is generic, only the snapshot branch and whitelist are extended |
+| D16 | server / web | The server purely forwards and is unaware of the backend, zero changes; the web status card shows the backend name and version ("-" when there is no binary), the edit Modal's extra control is disabled on the traefik backend with an "unsupported" hint, everything else is reused | Backend differences collapse into the agent render layer and two UI hints |
 
-渲染片段示例（https 站点）：
+Rendered snippet example (an https site):
 
 ```yaml
 # cockpit:meta {"name":"blog","serverNames":["blog.example.com"],...}
@@ -207,56 +208,56 @@ tls:
       keyFile: /path/privkey.pem
 ```
 
-router/service 命名 `cockpit-<site>`（冲突域在 Traefik 全局命名空间，
-加前缀避免与用户动态文件撞名）。
+Router/service naming is `cockpit-<site>` (the collision domain is Traefik's global namespace, so a
+prefix avoids clashing with the user's dynamic files).
 
-### M2 清单（2026-09-18 实施）
+### M2 checklist (implemented 2026-09-18)
 
-- [x] agent：`traefik_provider.go`（探测/渲染/yaml 自检/原子写）+ capability
-      追加；drift 白名单扩 traefik。实施偏差：D11 原文「RPC 方法名 `proxy.*`
-      不变」与代码现实不符——M1 的 method 前缀实际是 `nginx.*`，实施按现实
-      走 `traefik.*`，server `proxyRPCPrefix` 按 agent capability 分流
-      （nginx 优先，旧 agent 回退 `nginx.*`）；D11 的意图（server 转发不
-      感知后端差异）不受影响
-- [x] server：转发逻辑零改动，仅 method 前缀按 capability 分流 + drift kind
-      白名单加 traefik（现有 5 端点对 traefik agent 透传有测试覆盖）
-- [x] web：状态卡「后端」行 + 生效方式热加载文案 + 片段后缀/提示语按后端
-      切换 + extra 禁用；drift 页 KIND_LABEL/COLOR 加 traefik
-- [x] 测试：渲染两形态（http / https+跳转+证书引用）、yaml 自检拒绝
-      （引用缺失 service / 无 http 段）、meta roundtrip、extra 拒绝不落盘、
-      生命周期（apply→get→delete + 基线登记/清除）、目录探测（env 覆盖/
-      静态配置解析）、drift 四态+diff+目标校验、server 前缀分流（仅 nginx/
-      仅 traefik/双后端/旧 agent 回退 + traefik 审计）
-- [x] 真机验收（列入 todo.md，2026-09-30 完成）：Traefik 容器
-      （traefik:v3.5.6）挂载宿主目录作 file provider 动态目录，探针
-      `scripts/acceptance/traefik/` 10/10——新增/修改/删除热加载、meta 回读、
-      https 301 跳转 + 证书文件引用加载（自有 CA 握手验证）、extra 拒绝、
-      drift 四态 + record、审计留痕；**坏文件语义实测修正 D13**（见上）
+- [x] agent: `traefik_provider.go` (detection/render/yaml self-check/atomic write) + capability
+      append; the drift whitelist extended to traefik. Implementation delta: D11's wording "RPC method names
+      unchanged `proxy.*`" doesn't match the code reality — M1's method prefix is actually `nginx.*`, so the
+      implementation followed reality with `traefik.*`, and the server's `proxyRPCPrefix` dispatches by agent
+      capability (nginx first, old agents fall back to `nginx.*`); D11's intent (the server doesn't perceive
+      backend differences when forwarding) is unaffected
+- [x] server: forwarding logic unchanged, only the method prefix dispatched by capability + traefik added to the drift kind
+      whitelist (the existing 5 endpoints have test coverage for traefik agent pass-through)
+- [x] web: a "backend" row on the status card + hot-reload wording + snippet suffix/hints switching per backend
+      + extra disabled; the drift page's KIND_LABEL/COLOR gained traefik
+- [x] tests: both render forms (http / https+redirect+certificate reference), yaml self-check rejection
+      (missing service reference / no http section), meta roundtrip, extra rejection without writing to disk,
+      lifecycle (apply→get→delete + baseline registration/clearing), directory detection (env override /
+      static config parsing), drift four states + diff + target validation, server prefix dispatch (nginx only/
+      traefik only/dual backend/old agent fallback + traefik audit)
+- [x] Real-machine acceptance (listed in todo.md, completed 2026-09-30): a Traefik container
+      (traefik:v3.5.6) mounting a host directory as the file provider dynamic directory, probe
+      `scripts/acceptance/traefik/` 10/10 — add/modify/delete hot reload, meta read-back,
+      https 301 redirect + certificate file reference loading (verified by handshake with our own CA), extra rejection,
+      drift four states + record, audit trail; **bad-file semantics measured, correcting D13** (see above)
 
-## 不做（后续项）
+## Not doing (later items)
 
-- Caddy（Caddyfile 渲染）：Caddyfile 整文件语义，按站点分片必须改用户主文件加
-  import 行，与 D2 零接触冲突；除非有真实需求且接受一次性主文件协作，暂缓；
-- 流量统计 / 访问日志分析：需要日志采集管道，独立立项；
-- 证书签发与续期联动：P1 证书资源与 acme 集成后一起做；
-- upstream 健康检查 / 负载均衡多后端：个人场景单上游先够用；
-- 容器化 nginx：配置挂载路径发现复杂，等真实需求。
+- Caddy (Caddyfile rendering): a Caddyfile is whole-file semantics, so per-site splitting means editing the user's main file to add
+  import lines, which conflicts with D2's zero contact; deferred unless there's a real need and a one-time main-file collaboration is acceptable;
+- Traffic statistics / access log analysis: needs a log collection pipeline, a separate item;
+- Certificate issuance and renewal linkage: do it together once the P1 certificate resource and acme integration land;
+- upstream health checks / multi-backend load balancing: a single upstream is enough for personal scenarios first;
+- Containerised nginx: config mount path discovery is complex, wait for a real need.
 
-## M1 清单
+## M1 checklist
 
-- [x] agent：`internal/agent/rpc/nginx_provider.go`（探测/渲染/nginx -t/写/reload/回滚）
-      + capability 追加 + 按能力注册
-- [x] server：`api_proxy_sites.go`（5 端点 + 双端参数校验 + 审计）+ serveAPI 接入
-      + audit 常量
-- [x] web：`/proxy` 页面（agent 选择/状态卡/站点列表/编辑 Modal/配置查看）+ 路由菜单
-- [x] 测试：渲染模板各形态（http/https+跳转/ws/extra）、参数校验、meta roundtrip、
-      nginx -t 失败不落盘、reload 失败回滚、server 转发与审计
-- [x] 文档收尾 + todo.md 同步
+- [x] agent: `internal/agent/rpc/nginx_provider.go` (detection/render/nginx -t/write/reload/rollback)
+      + capability append + registration by capability
+- [x] server: `api_proxy_sites.go` (5 endpoints + parameter validation on both ends + audit) + serveAPI integration
+      + audit constants
+- [x] web: the `/proxy` page (agent selection/status card/site list/edit Modal/config view) + routing menu
+- [x] tests: render template forms (http/https+redirect/ws/extra), parameter validation, meta roundtrip,
+      nginx -t failure not landing on disk, reload failure rollback, server forwarding and audit
+- [x] documentation wrap-up + todo.md synced
 
-## 参考
+## References
 
-- 内部：[file-manager-design.md](./file-manager-design.md)（/agents/ 分发与证书上传通道）、
-  [stack-deploy-design.md](./stack-deploy-design.md)（命令探测与 provider 注册）、
-  `todo.md` P1 反向代理条目
-- 外部：Nginx 官方 docs（proxy_set_header 惯例组合）、
-  [nginxconfig.io](https://nginxconfig.io/)（渲染模板的参数化思路）
+- Internal: [file-manager-design.md](/guide/file-manager-design) (the /agents/ dispatch and certificate upload channel),
+  [stack-deploy-design.md](/guide/stack-deploy-design) (command detection and provider registration),
+  the P1 reverse proxy item in `todo.md`
+- External: official Nginx docs (the conventional proxy_set_header combination),
+  [nginxconfig.io](https://nginxconfig.io/) (the parameterised approach to render templates)

@@ -1,31 +1,30 @@
-# 协议与 API 边界
+# Protocol and API Boundaries
 
-> 语言：**中文** ｜ [English](./protocol.en.md)
 
-本文记录当前 Server、Agent、Web UI 之间的通信边界。
+This document records the communication boundaries between the current Server, Agent, and Web UI.
 
-## 通信面
+## Communication Surfaces
 
-| 通信面 | 发起方 | 入口 | 认证 |
+| Surface | Initiator | Entry | Auth |
 | --- | --- | --- | --- |
-| Web UI HTTP API | Browser | `/api/*` | JWT Bearer；登录/密码重置为公开接口，Stacks webhook 使用 `X-Cockpit-Token` |
-| Agent 控制通道 | Agent | `/ws` | 首条 `register` 消息；未知 Agent 需 enrollment secret，重连需 per-Agent secret |
-| 远程终端 | Browser | `/api/remote/terminal` | 短期 ticket，经 `Sec-WebSocket-Protocol` 传递 |
-| Guacamole 桌面（RDP/VNC/SSH） | Browser | `/api/remote/guacamole` | 短期 ticket，经 `?ticket=` 传递（缺省时回退子协议） |
+| Web UI HTTP API | Browser | `/api/*` | JWT Bearer; login/password reset are public, Stacks webhook uses `X-Cockpit-Token` |
+| Agent control channel | Agent | `/ws` | First `register` message; unknown Agents need enrollment secret, reconnects need per-Agent secret |
+| Remote terminal | Browser | `/api/remote/terminal` | Short-lived ticket, passed via `Sec-WebSocket-Protocol` |
+| Guacamole desktop (RDP/VNC/SSH) | Browser | `/api/remote/guacamole` | Short-lived ticket, passed via `?ticket=` (falls back to `Sec-WebSocket-Protocol`) |
 
 ## Agent WebSocket
 
-Agent 使用 WebSocket 主动连接 Server：
+The Agent actively connects to the Server over WebSocket:
 
 ```text
 cockpit-agent start -server ws://server:9000/ws
 ```
 
-兼容入口 `cockpit agent -server ws://server:9000/ws` 使用同一套启动参数。
+The compatible entry `cockpit agent -server ws://server:9000/ws` uses the same startup parameters.
 
-连接建立后，第一条消息必须是 `register`。如果第一条消息不是注册消息，Server 会关闭连接。
+After the connection is established, the first message must be `register`. If the first message is not a registration message, the Server closes the connection.
 
-消息 envelope：
+Message envelope:
 
 ```json
 {
@@ -38,7 +37,7 @@ cockpit-agent start -server ws://server:9000/ws
 
 ### register
 
-方向：Agent -> Server
+Direction: Agent -> Server
 
 ```json
 {
@@ -68,11 +67,12 @@ cockpit-agent start -server ws://server:9000/ws
 }
 ```
 
-默认 fail-closed：未知 Agent 的 `secret` 必须匹配 Server 配置的
-`server.agent_registration.enrollment_secret`；成功注册后该值成为此 Agent 的认证密钥，
-后续重连继续使用。匿名注册仅适用于显式开启 `allow_unknown` 的开发环境。
+Registration is fail-closed by default: an unknown Agent's `secret` must match the
+Server's `server.agent_registration.enrollment_secret`. After registration, that value
+becomes the Agent's authentication secret and is required on reconnect. Anonymous
+registration is only available when `allow_unknown` is explicitly enabled for development.
 
-Server 接受后返回同类型消息：
+After the Server accepts, it returns the same message type:
 
 ```json
 {
@@ -85,17 +85,17 @@ Server 接受后返回同类型消息：
 }
 ```
 
-注册约束：
+Registration constraints:
 
-- `agentId` 为空时 Server 可生成 ID，但 Agent 当前也会基于主机名生成默认 ID。
-- 如果数据库中已有该 Agent 且配置了 secret，注册必须提供匹配 secret。
-- Registry 中已有同 ID 活跃连接时，新连接会被拒绝。
+- When `agentId` is empty, the Server can generate an ID, but the Agent currently also generates a default ID based on the hostname.
+- If the database already has that Agent and a secret is configured, registration must provide the matching secret.
+- When the registry already has an active connection with the same ID, the new connection is rejected.
 
 ### heartbeat
 
-方向：Agent -> Server
+Direction: Agent -> Server
 
-Agent 每 30 秒上报一次心跳。心跳可包含系统信息，Server 会写入系统指标历史和快照。
+The Agent reports a heartbeat every 30 seconds. The heartbeat can carry system information, and the Server writes it into system metrics history and snapshots.
 
 ```json
 {
@@ -115,13 +115,13 @@ Agent 每 30 秒上报一次心跳。心跳可包含系统信息，Server 会写
 }
 ```
 
-Server 返回 `heartbeat` ACK，并复用请求消息 ID。
+The Server returns a `heartbeat` ACK, reusing the request message ID.
 
 ### rpc_request / rpc_response
 
-方向：Server -> Agent -> Server
+Direction: Server -> Agent -> Server
 
-RPC payload 使用 `method` 和 `params`。方法名按 `<provider>.<action>` 解析；没有 provider 前缀时默认 provider 是 `system`。
+RPC payloads use `method` and `params`. Method names are resolved by `<provider>.<action>`; without a provider prefix, the default provider is `system`.
 
 ```json
 {
@@ -133,7 +133,7 @@ RPC payload 使用 `method` 和 `params`。方法名按 `<provider>.<action>` �
 }
 ```
 
-响应必须复用请求 ID：
+The response must reuse the request ID:
 
 ```json
 {
@@ -145,39 +145,40 @@ RPC payload 使用 `method` 和 `params`。方法名按 `<provider>.<action>` �
 }
 ```
 
-注意：SystemProvider 在 Agent 启动时始终注册；PVE、Docker、OpenWrt Provider 由 `Agent.setupProviders` 按检测到的 capability 和环境变量（如 `PVE_URL`/`PVE_TOKEN_ID`/`PVE_TOKEN_SECRET`、`DOCKER_HOST`、`OPENWRT_HOST`/`OPENWRT_USER`/`OPENWRT_PASS`）条件注册。凭据缺失时该 Provider 仅记录日志跳过，不影响其他 Provider 和基础心跳。
+Note: SystemProvider is always registered at Agent startup; the PVE, Docker, and OpenWrt providers are conditionally registered by `Agent.setupProviders` based on detected capabilities and environment variables (such as `PVE_URL`/`PVE_TOKEN_ID`/`PVE_TOKEN_SECRET`, `DOCKER_HOST`, `OPENWRT_HOST`/`OPENWRT_USER`/`OPENWRT_PASS`). When credentials are missing, that provider is skipped with a log only, without affecting the other providers or the basic heartbeat.
 
-## 代理消息
+## Proxy Messages
 
-代理消息用于 Server 通过在线 Agent 访问 Agent 本机或其网络可达的 TCP 目标。
+Proxy messages let the Server reach the Agent itself or TCP targets reachable from its network through an online Agent.
 
-> 注：代理仅支持 TCP 转发；`proxyType` 入参非 `tcp` 一律 400 拒绝（`udp`
-> 曾被接受但数据面仍按 TCP 拨号——静默错转，已改为诚实失败，见 D-2026-10-08-2）。
+> Note: the proxy supports TCP forwarding only; a `proxyType` param other than `tcp` is rejected with 400
+> (`udp` was once accepted while the data plane still dialed TCP — a silent misroute; it now fails
+> honestly, see D-2026-10-08-2).
 
-| 类型 | 方向 | 用途 |
+| Type | Direction | Purpose |
 | --- | --- | --- |
-| `proxy_new` | Server -> Agent | 要求 Agent 建立到目标的连接 |
-| `proxy_data` | 双向 | 转发连接数据 |
-| `proxy_close` | 双向 | 关闭连接 |
-| `proxy_error` | Agent -> Server | 报告代理错误 |
+| `proxy_new` | Server -> Agent | Ask the Agent to establish a connection to the target |
+| `proxy_data` | Bidirectional | Forward connection data |
+| `proxy_close` | Bidirectional | Close the connection |
+| `proxy_error` | Agent -> Server | Report proxy errors |
 
-关键字段：
+Key fields:
 
-- `proxyId`：代理配置或会话 ID。
-- `connId`：单条连接 ID。
-- `target`：Agent 侧要连接的 `host:port`。
-- `data`：数据内容；JSON 编码时可能是 base64 字符串或字节数组。
+- `proxyId`: proxy config or session ID.
+- `connId`: per-connection ID.
+- `target`: the `host:port` the Agent should connect to.
+- `data`: data content; when JSON-encoded, possibly a base64 string or byte array.
 
-## 远程连接 ticket
+## Remote Connection Ticket
 
-Browser 不直接把 JWT 放进远程 WebSocket URL。流程是：
+The browser does not put the JWT directly into the remote WebSocket URL. The flow is:
 
-1. Browser 携带 JWT 调 `POST /api/remote/tickets`。
-2. Server 生成 5 分钟有效、单次使用 ticket。
-3. Browser 建立 WebSocket：terminal 把 ticket 作为 `Sec-WebSocket-Protocol` 的第一个值；Guacamole 优先使用 URL `?ticket=`，未提供 query 时才从 `Sec-WebSocket-Protocol` 读取。
-4. Server 校验并消费 ticket，然后开始转发。
+1. The browser calls `POST /api/remote/tickets` with the JWT.
+2. The Server generates a 5-minute, single-use ticket.
+3. The browser opens a WebSocket: terminal sends the ticket as the first `Sec-WebSocket-Protocol` value; Guacamole prefers the `?ticket=` URL query and reads the subprotocol only when the query is absent.
+4. The Server validates and consumes the ticket, then starts forwarding.
 
-创建 ticket：
+Creating a ticket:
 
 ```http
 POST /api/remote/tickets
@@ -194,7 +195,7 @@ Content-Type: application/json
 }
 ```
 
-响应：
+Response:
 
 ```json
 {
@@ -203,19 +204,19 @@ Content-Type: application/json
 }
 ```
 
-随后连接：
+Then connect:
 
 ```javascript
 new WebSocket("ws://server:9000/api/remote/terminal", [ticket])
 ```
 
-远程目标默认只允许连接 `remote_control.allowed_targets` 中显式配置的主机名、IP 或 CIDR；设置 `remote_control.allow_arbitrary_target: true` 后才允许任意目标。当前实现不会从 inventory 自动派生远控 allow-list。
+Remote targets may by default only connect to hostnames, IPs, or CIDRs explicitly configured in `remote_control.allowed_targets`; arbitrary targets are allowed only after setting `remote_control.allow_arbitrary_target: true`. The current implementation does not auto-derive the remote-control allow-list from inventory.
 
-RDP/VNC/SSH 桌面走 Guacamole 隧道（`/api/remote/guacamole`）：guacd 终结协议，Agent 只做 `guac:` 前缀的 TCP 中继，无特殊构建要求。
+RDP/VNC/SSH desktops go through the Guacamole tunnel (`/api/remote/guacamole`): guacd terminates the protocol, the Agent only relays TCP with a `guac:` prefix, with no special build requirements.
 
 ## HTTP API
 
-公开接口：
+Public interfaces:
 
 - `GET /health`
 - `POST /api/auth/login`
@@ -225,7 +226,7 @@ RDP/VNC/SSH 桌面走 Guacamole 隧道（`/api/remote/guacamole`）：guacd 终�
 - `POST /api/auth/reset-password`
 - `POST /api/auth/verify-reset-code`
 
-JWT 保护接口：
+JWT-protected interfaces:
 
 - `GET /api/status`
 - `GET /api/me`
@@ -237,12 +238,12 @@ JWT 保护接口：
 - `GET|POST|DELETE /api/agents/{id}/secret`
 - `GET /api/resources/{type}`
 - `GET /api/resources/{type}/{id}`
-- `GET|POST /api/users`（创建限管理员）
+- `GET|POST /api/users` (creation is admin-only)
 - `PUT|DELETE /api/users/{id}`
 - `POST /api/users/{id}/password`
 - `GET /api/alerts`
 - `PUT /api/alerts/read-all`
-- `GET|PUT|DELETE /api/alerts/{id}`（`PUT /api/alerts/{id}/read` 标记已读）
+- `GET|PUT|DELETE /api/alerts/{id}` (`PUT /api/alerts/{id}/read` marks as read)
 - `GET /api/metrics/snapshots`
 - `GET /api/metrics/snapshot?agent_id=...`
 - `GET /api/metrics/history?agent_id=...`
@@ -251,31 +252,33 @@ JWT 保护接口：
 - `POST /api/remote/tickets`
 - `GET|POST /api/remote/sessions`
 - `GET|DELETE /api/remote/sessions/{id}`
-- `POST /api/remote/vault/verify`（密码/TOTP 二次验证，签发 10 分钟 vault token）
-- `GET|PUT /api/remote/vault/credentials`（凭据元数据列表 / 加密落库保存，明文不出库；写操作需 `X-Vault-Token`）
-- `DELETE /api/remote/vault/credentials/{id}`（同上）
-- `GET|POST /api/jobs`（统一 Job 台账（支持 `status/target/type/workflow_run_id` 过滤）/ 创建 Job，仅 `agent.exec`；创建异步：201 返回 pending，后台派发，终态经台账轮询）
+- `POST /api/remote/vault/verify` (password/TOTP second-factor verification; issues a 10-minute vault token)
+- `GET|PUT /api/remote/vault/credentials` (credential metadata list / encrypted persist; plaintext never leaves the store; write operations require `X-Vault-Token`)
+- `DELETE /api/remote/vault/credentials/{id}` (same as above)
+- `GET|POST /api/jobs` (unified Job ledger, filterable by `status/target/type/workflow_run_id` / create a Job, `agent.exec` only; creation is async: 201 returns pending, dispatched in the background, terminal state polled via the ledger)
 - `GET /api/jobs/{id}`
-- `POST /api/jobs/{id}/cancel`（取消 Job：pending 直接条件取消（W3），running 经 `job.cancel` RPC 击杀在途进程后落 `cancelled`（M2c C6）；终态一律 409）
-- `GET|POST /api/workflows`（Workflow 编排定义列表 / 创建，线性步骤链 ≤20 步，每步即一条 Job）
-- `GET|PUT|DELETE /api/workflows/{id}`（定义详情 / 更新 / 删除；active run 在途时变更 409）
-- `POST /api/workflows/{id}/run`（创建 run 并后台推进，201 返回 run 视图；同定义重入 409）
-- `GET /api/workflows/{id}/runs`（该定义的 run 台账）
-- `GET /api/workflow-runs/{rid}`（run 详情，含步骤快照）
-- `POST /api/workflow-runs/{rid}/cancel`（取消 run：置 `cancelled` 并经 `job.cancel` 击杀在途步骤 Job、pending 窗口 DB-only 条件取消（M2c C8），后续步骤不推进；已终态 409）
+- `POST /api/jobs/{id}/cancel` (cancel a Job: pending cancels unconditionally (W3); running kills the in-flight process via the `job.cancel` RPC then lands as `cancelled` (M2c C6); terminal states always return 409)
+- `GET|POST /api/workflows` (workflow definition list / create; linear step chain ≤20 steps, each step is one Job)
+- `GET|PUT|DELETE /api/workflows/{id}` (definition detail / update / delete; 409 while an active run is in flight)
+- `POST /api/workflows/{id}/run` (creates a run and advances it in the background; 201 returns the run view; re-entering the same definition is 409)
+- `GET /api/workflows/{id}/runs` (run ledger for that definition)
+- `GET /api/workflow-runs/{rid}` (run detail, including step snapshots)
+- `POST /api/workflow-runs/{rid}/cancel` (cancel a run: set to `cancelled` and kill in-flight step Jobs via `job.cancel`; the pending window cancels DB-only (M2c C8); later steps do not advance; 409 if already terminal)
 - `GET /api/admin/audit/logs`
 - `GET /api/admin/audit/stats`
 
-> 本节为代表性契约面，非全量端点清单：各功能域（如远控凭据保险箱、服务管理、
-> 备份、日志检索）的端点以对应设计文档的 API 段与 server 路由注册为准。
+> This section is a representative contract surface, not a full endpoint inventory: endpoints of each
+> feature domain (such as the remote-control credential vault, service management, backup, and log
+> search) are governed by the API section of the corresponding design doc and the server's route
+> registration.
 
-TOTP 设置接口（同样需要 JWT，与上面的公开 `totp/verify` 区分）：
+TOTP setup interfaces (also require JWT, distinct from the public `totp/verify` above):
 
 - `POST /api/auth/totp/generate`
 - `POST /api/auth/totp/enable`
 - `POST /api/auth/totp/disable`
 
-资源类型当前支持：
+Currently supported resource types:
 
 - `compute-instances`
 - `domains`
