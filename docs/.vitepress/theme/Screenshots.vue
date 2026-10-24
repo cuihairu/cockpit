@@ -1,23 +1,50 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { withBase } from 'vitepress'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useData, withBase } from 'vitepress'
 
 // 首页 hero 下方「界面预览」走马灯：纯 Vue + CSS 轮播（无第三方依赖）。
 // 图片来自 docs/public/screenshots/（本地起 dashboard 用 chromium 真实截取），
 // 路径须经 withBase 以兼容 GitHub Pages 子路径部署（base: /cockpit/）。
-const shots = [
-  { src: '/screenshots/dashboard.png', alt: '总览：资源统计卡、健康度与 Agent 列表（离线置底弱化并标注离线时长）' },
-  { src: '/screenshots/agents-cleanup.png', alt: 'Agent 管理：清理离线 agent（阈值自由填 30m / 2h / 7d，留空 = 全部离线）' },
-  { src: '/screenshots/dns.png', alt: 'DNS 记录管理：按 zone 增删改查与批量导入 / 导出' },
-  { src: '/screenshots/audit.png', alt: '审计日志：动作 / 资源 / 结果多维检索' },
-  { src: '/screenshots/workbench.png', alt: '工作台：容器编排与快速操作入口' },
+// 文案按官方 locales 的 lang 取：根目录 en-US 用英文，/zh/ zh-CN 用中文。
+const { lang } = useData()
+const zh = computed(() => lang.value === 'zh-CN')
+
+const shotsSrc = [
+  '/screenshots/dashboard.png',
+  '/screenshots/agents-cleanup.png',
+  '/screenshots/dns.png',
+  '/screenshots/audit.png',
+  '/screenshots/workbench.png',
 ]
+const captions = computed(() =>
+  zh.value
+    ? [
+        '总览：资源统计卡、健康度与 Agent 列表（离线置底弱化并标注离线时长）',
+        'Agent 管理：清理离线 agent（阈值自由填 30m / 2h / 7d，留空 = 全部离线）',
+        'DNS 记录管理：按 zone 增删改查与批量导入 / 导出',
+        '审计日志：动作 / 资源 / 结果多维检索',
+        '工作台：容器编排与快速操作入口',
+      ]
+    : [
+        'Overview: resource stat cards, health and agent list (offline sorted last, dimmed with offline duration)',
+        'Agent management: clean up offline agents (threshold 30m / 2h / 7d or custom; empty = all offline)',
+        'DNS record management: create, update and delete per zone with bulk import / export',
+        'Audit log: search by action, resource and result',
+        'Workbench: container orchestration and quick actions',
+      ],
+)
+const shots = computed(() => shotsSrc.map((src, i) => ({ src, alt: captions.value[i] })))
+const title = computed(() => (zh.value ? '界面预览' : 'Screenshots'))
+const prevLabel = computed(() => (zh.value ? '上一张' : 'Previous'))
+const nextLabel = computed(() => (zh.value ? '下一张' : 'Next'))
+const dotsLabel = computed(() => (zh.value ? '界面预览分页' : 'Screenshot pagination'))
+const slideLabel = (i: number) => (zh.value ? `第 ${i + 1} 张` : `Slide ${i + 1}`)
 
 const idx = ref(0)
 let timer: ReturnType<typeof setInterval> | undefined
 
 const go = (i: number) => {
-  idx.value = (i + shots.length) % shots.length
+  idx.value = (i + shots.value.length) % shots.value.length
 }
 const next = () => go(idx.value + 1)
 const prev = () => go(idx.value - 1)
@@ -32,9 +59,9 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="shots">
-    <h2 class="shots-title">界面预览</h2>
+    <h2 class="shots-title">{{ title }}</h2>
     <div class="shots-stage">
-      <button class="shots-nav" aria-label="上一张" @click="prev()">‹</button>
+      <button class="shots-nav" :aria-label="prevLabel" @click="prev()">‹</button>
       <div class="shots-frame">
         <img
           v-for="(s, i) in shots"
@@ -47,15 +74,15 @@ onBeforeUnmount(() => {
         />
         <p class="shots-caption">{{ shots[idx].alt }}</p>
       </div>
-      <button class="shots-nav" aria-label="下一张" @click="next()">›</button>
+      <button class="shots-nav" :aria-label="nextLabel" @click="next()">›</button>
     </div>
-    <div class="shots-dots" role="tablist" aria-label="界面预览分页">
+    <div class="shots-dots" role="tablist" :aria-label="dotsLabel">
       <button
         v-for="(s, i) in shots"
         :key="s.src"
         class="shots-dot"
         :class="{ active: i === idx }"
-        :aria-label="`第 ${i + 1} 张`"
+        :aria-label="slideLabel(i)"
         @click="go(i)"
       />
     </div>
