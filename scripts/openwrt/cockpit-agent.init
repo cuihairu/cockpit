@@ -31,8 +31,13 @@ start_service() {
     [ -n "$zone" ] && procd_append_param command -zone "$zone"
     [ -n "$labels" ] && procd_append_param command -labels "$labels"
 
-    # 崩溃自动拉起（procd 默认策略：3600s 内重启超 5 次退避）
-    procd_set_param respawn
+    # 崩溃自动拉起，显式 respawn 看门狗参数（设计 §5：threshold/retries/cooldown）：
+    #   threshold=3600s 实例存活超 3600s 后崩溃视为正常退出，重置重试计数
+    #   timeout=5s     崩溃后重启前的冷却等待（cooldown）
+    #   retry=5        3600s 窗口内连续崩溃超 5 次则放弃并标记 failed（防疯转）
+    # 显式写死默认值：自举节点须「断电/看门狗超时后自动回到服务」，
+    # 参数随设计成文可验，不被 procd 默认策略漂移影响。
+    procd_set_param respawn 3600 5 5
     # stdout/stderr 进 logd：logread | grep cockpit-agent
     procd_set_param stdout 1
     procd_set_param stderr 1
