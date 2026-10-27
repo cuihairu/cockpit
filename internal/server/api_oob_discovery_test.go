@@ -12,6 +12,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/audit"
 	"github.com/cuihairu/cockpit/internal/oob"
 	"github.com/cuihairu/cockpit/internal/oob/amt"
+	"github.com/cuihairu/cockpit/internal/oob/dash"
 	"github.com/cuihairu/cockpit/internal/oob/redfish"
 	"github.com/cuihairu/cockpit/internal/oob/wsman"
 )
@@ -210,7 +211,7 @@ func TestOobDiscoverDefaults(t *testing.T) {
 	}
 	registry := newOOBRegistry()
 	names := providerNames(registry)
-	if len(names) != 2 || names[0] != amt.Name || names[1] != redfish.Name {
+	if len(names) != 3 || names[0] != amt.Name || names[1] != dash.Name || names[2] != redfish.Name {
 		t.Fatalf("registry names = %v", names)
 	}
 

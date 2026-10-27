@@ -12,6 +12,7 @@ import (
 	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/oob"
 	"github.com/cuihairu/cockpit/internal/oob/amt"
+	"github.com/cuihairu/cockpit/internal/oob/dash"
 	"github.com/cuihairu/cockpit/internal/oob/redfish"
 )
 
@@ -44,6 +45,7 @@ type oobDiscoveryResult struct {
 func newOOBRegistry() *oob.Registry {
 	registry := oob.NewRegistry()
 	registry.MustRegister(amt.New(amt.Options{}))
+	registry.MustRegister(dash.New(dash.Options{}))
 	registry.MustRegister(redfish.New(redfish.Options{}))
 	return registry
 }
