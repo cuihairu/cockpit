@@ -311,6 +311,53 @@ func TestCovRunStatusBadDB(t *testing.T) {
 	}
 }
 
+// --- runOob ---
+
+func TestCovRunOobNoSubcommand(t *testing.T) {
+	code, out := covRun("oob")
+	if code != 1 || !strings.Contains(out, "Usage: cockpit oob discover") {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
+
+func TestCovRunOobDiscoverHelp(t *testing.T) {
+	code, out := covRun("oob", "discover", "-h")
+	if code != 0 || !strings.Contains(out, "Discover out-of-band providers") {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+	if !strings.Contains(out, "NotPresent") || !strings.Contains(out, "Unknown") {
+		t.Fatalf("help must document tri-state: %q", out)
+	}
+}
+
+func TestCovRunOobDiscoverRequiresAddress(t *testing.T) {
+	code, _ := covRun("oob", "discover")
+	if code != 1 {
+		t.Fatalf("expected 1, got %d", code)
+	}
+}
+
+func TestCovRunOobDiscoverInvalidTimeout(t *testing.T) {
+	code, _ := covRun("oob", "discover", "-address", "192.168.1.10", "-timeout", "0")
+	if code != 1 {
+		t.Fatalf("expected 1 for zero timeout, got %d", code)
+	}
+}
+
+// 成功路径：探测目标为本机未听端口（连接拒绝快速失败），三路 Unknown，
+// 命令仍返回 0（发现是协商面，单路失败不是命令失败）。
+func TestCovRunOobDiscoverSuccess(t *testing.T) {
+	code, out := covRun("oob", "discover", "-address", "127.0.0.1:1", "-timeout", "1")
+	if code != 0 {
+		t.Fatalf("expected 0, got %d", code)
+	}
+	if !strings.Contains(out, "Provider amt: Unknown") ||
+		!strings.Contains(out, "Provider dash: Unknown") ||
+		!strings.Contains(out, "Provider redfish: Unknown") {
+		t.Fatalf("expected Unknown states on closed port:\n%s", out)
+	}
+}
+
 // --- printUsage/printVersion 直测 ---
 
 func TestCovPrintHelpers(t *testing.T) {

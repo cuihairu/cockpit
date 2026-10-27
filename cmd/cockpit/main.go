@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"time"
 
 	"github.com/cuihairu/cockpit/internal/agent"
 	"github.com/cuihairu/cockpit/internal/cli"
@@ -68,6 +70,8 @@ func run(args []string, stdout io.Writer) int {
 		return runServer(args[2:], stdout)
 	case "agent":
 		return runAgent(args[2:], stdout)
+	case "oob":
+		return runOob(args[2:], stdout)
 	case "init":
 		return runInit(args[2:], stdout)
 	case "sync":
@@ -128,6 +132,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  init       Initialize configuration and directories")
 	fmt.Fprintln(w, "  server     Start Cockpit Server")
 	fmt.Fprintln(w, "  agent      Start Cockpit Agent")
+	fmt.Fprintln(w, "  oob        Discover out-of-band providers")
 	fmt.Fprintln(w, "  sync       Sync inventory to database")
 	fmt.Fprintln(w, "  status     Show status")
 	fmt.Fprintln(w, "  version    Show version")
@@ -199,6 +204,56 @@ func runAgent(args []string, stdout io.Writer) int {
 
 	if err := startCmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runOob dispatches `cockpit oob discover ...`.
+func runOob(args []string, stdout io.Writer) int {
+	if len(args) == 0 || args[0] != "discover" {
+		fmt.Fprintln(stdout, "Usage: cockpit oob discover -address host")
+		return 1
+	}
+	return runOobDiscover(args[1:], stdout)
+}
+
+// runOobDiscover probes all registered providers without exposing actions.
+func runOobDiscover(args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("oob discover", flag.ExitOnError)
+	address := fs.String("address", "", "OOB management address")
+	timeout := fs.Float64("timeout", 5, "probe timeout in seconds (1-30)")
+	help := fs.Bool("h", false, "Show help")
+
+	fs.Parse(args)
+
+	if *help {
+		fmt.Fprintln(stdout, "Discover out-of-band providers (read-only)")
+		fmt.Fprintln(stdout)
+		fs.PrintDefaults()
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Output states:")
+		fmt.Fprintln(stdout, "  Present    provider returned a discovery response")
+		fmt.Fprintln(stdout, "  NotPresent provider rejected the request as another protocol")
+		fmt.Fprintln(stdout, "  Unknown    no decisive provider evidence was obtained")
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Examples:")
+		fmt.Fprintln(stdout, "  cockpit oob discover -address 192.168.1.10")
+		fmt.Fprintln(stdout, "  cockpit oob discover -address 192.168.1.10 -timeout 10")
+		return 0
+	}
+	if *timeout <= 0 || *timeout > 30 {
+		fmt.Fprintf(os.Stderr, "OOB discovery failed: timeout must be in (0, 30] seconds\n")
+		return 1
+	}
+
+	cmd := &cli.OobDiscoverCmd{
+		Address: *address,
+		Timeout: time.Duration(*timeout * float64(time.Second)),
+		Output:  stdout,
+	}
+	if err := cmd.Run(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "OOB discovery failed: %v\n", err)
 		return 1
 	}
 	return 0
