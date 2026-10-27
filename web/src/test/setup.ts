@@ -8,12 +8,22 @@ import { cleanup, configure } from '@testing-library/react'
 // React 队尾），残留工作漏到 jsdom teardown 之后触发
 // ReferenceError: window is not defined（CI 2026-10-03 实测复现）。
 // 两轮：第一轮执行 cleanup 时已排队的调度，第二轮兜住第一轮回调中新排入的。
+//
+// 2026-10-27 CI 再发同错（react-dom-client 的 commit 末尾会再排一个
+// NormalPriority 的 flushPassiveEffects 任务，schedulerEvent = window.event
+// 在 teardown 后执行即 ReferenceError）：render→commit→passive 每一环都会
+// 新排任务，固定两跳兜不住链式调度。改为循环排干：连续 N 跳，覆盖链式
+// 调度深度（React 渲染链实测不超过 5 跳，N=8 留余量；每跳亚毫秒级）。
+const DRAIN_ROUNDS = 8
 const drainScheduler = () =>
   new Promise<void>((resolve) => {
     const si = (globalThis as { setImmediate?: (cb: () => void) => void }).setImmediate
     if (si) si(() => resolve())
     else setTimeout(() => resolve(), 0)
   })
+const drainSchedulerDeep = async () => {
+  for (let i = 0; i < DRAIN_ROUNDS; i++) await drainScheduler()
+}
 
 // antd 表单校验消息经 async-validator + 过渡动画后才进 DOM，
 // 默认 1s 异步超时在高并发下不够，统一放宽到 15s。
@@ -104,13 +114,11 @@ afterEach(() => {
 afterEach(async () => {
   cleanup()
   document.body.innerHTML = ''
-  await drainScheduler()
-  await drainScheduler()
+  await drainSchedulerDeep()
 })
 
 // 文件收尾（环境 teardown 前最后一站）：per-test 排干之后到 teardown 之间
-// 仍可能有异步回调新排入调度，这里再兜两轮
+// 仍可能有异步回调新排入调度，这里再兜一轮深排干
 afterAll(async () => {
-  await drainScheduler()
-  await drainScheduler()
+  await drainSchedulerDeep()
 })
