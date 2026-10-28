@@ -161,6 +161,106 @@ func TestOobPresenceClassification(t *testing.T) {
 	}
 }
 
+func TestOobDashQueryRunRequiresAddress(t *testing.T) {
+	cmd := &OobDashQueryCmd{Output: &bytes.Buffer{}}
+	err := cmd.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "address required") {
+		t.Fatalf("err = %v, want address required", err)
+	}
+}
+
+func TestOobDashQueryRunReusesPresenceSemantics(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantState  string
+		wantDetail string
+	}{
+		{
+			name:       "present",
+			err:        nil,
+			wantState:  "Present",
+			wantDetail: "Evidence: provider discovery response",
+		},
+		{
+			name:       "not-present",
+			err:        errors.New("dash: wsman endpoint is not DASH (product \"Intel AMT\")"),
+			wantState:  "NotPresent",
+			wantDetail: "Evidence: dash: wsman endpoint is not DASH",
+		},
+		{
+			name:       "unknown",
+			err:        errors.New("dash: dial tcp: i/o timeout"),
+			wantState:  "Unknown",
+			wantDetail: "Evidence: dash: dial tcp: i/o timeout",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := oobRegistry(probeProvider{name: "dash", fn: func(ctx context.Context, target oob.Target) (oob.DeviceInfo, error) {
+				if tc.err != nil {
+					return oob.DeviceInfo{}, tc.err
+				}
+				return oob.DeviceInfo{Provider: "dash", Capabilities: map[oob.Capability]oob.State{}}, nil
+			}})
+			var buf bytes.Buffer
+			cmd := &OobDashQueryCmd{Address: "192.168.1.10", Output: &buf, registry: registry}
+			if err := cmd.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			out := buf.String()
+			for _, want := range []string{
+				"DASH direct query for 192.168.1.10",
+				"Provider dash: " + tc.wantState,
+				tc.wantDetail,
+			} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("output missing %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
+func TestOobDashQueryRunUsesDefaultRegistryAndOutput(t *testing.T) {
+	// 本机未听端口快速失败，生产注册表 + stdout 缺省路径都被覆盖。
+	cmd := &OobDashQueryCmd{Address: "127.0.0.1:1", Timeout: time.Second}
+	oldStdout := os.Stdout
+	outputPath := filepath.Join(t.TempDir(), "stdout")
+	output, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatalf("create stdout: %v", err)
+	}
+	os.Stdout = output
+	err = cmd.Run(context.Background())
+	os.Stdout = oldStdout
+	if closeErr := output.Close(); closeErr != nil {
+		t.Fatalf("close stdout: %v", closeErr)
+	}
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	raw, readErr := os.ReadFile(outputPath)
+	if readErr != nil {
+		t.Fatalf("read stdout: %v", readErr)
+	}
+	out := string(raw)
+	if !strings.Contains(out, "Provider dash: Unknown") {
+		t.Fatalf("expected DASH Unknown on closed port:\n%s", out)
+	}
+}
+
+func TestOobDashQueryRunUnregisteredProvider(t *testing.T) {
+	// 注入的注册表不含 dash（不应发生，但失败要诚实上账，不吞）。
+	var buf bytes.Buffer
+	cmd := &OobDashQueryCmd{Address: "192.168.1.10", Output: &buf, registry: oobRegistry()}
+	err := cmd.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("err = %v, want not registered", err)
+	}
+}
+
 func TestOobDiscoverDefaultTimeoutAndOutput(t *testing.T) {
 	cmd := &OobDiscoverCmd{Address: "192.168.1.10"}
 	if got := cmd.Timeout; got != 0 {

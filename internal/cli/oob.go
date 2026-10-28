@@ -65,8 +65,7 @@ func newOobDiscoverRegistry(timeout time.Duration) *oob.Registry {
 func (c *OobDiscoverCmd) printResults(results []oob.ProbeResult, view oob.DeviceView) {
 	fmt.Fprintf(c.Output, "OOB discovery for %s\n", strings.TrimSpace(c.Address))
 	for _, result := range results {
-		presence, evidence := oobPresence(result)
-		fmt.Fprintf(c.Output, "Provider %s: %s\n  Evidence: %s\n", result.Provider, presence, evidence)
+		printOobResult(c.Output, result)
 	}
 
 	fmt.Fprintln(c.Output, "Capabilities (omitted capabilities remain unknown):")
@@ -80,6 +79,51 @@ func (c *OobDiscoverCmd) printResults(results []oob.ProbeResult, view oob.Device
 		fmt.Fprintf(c.Output, "  %s: supported=%t enabled=%t reachable=%t source=%s\n",
 			capability, state.Supported, state.Enabled, state.Reachable, observed.Source)
 	}
+}
+
+// OobDashQueryCmd 对单台目标做 DASH 直连查询，跳过其它 Provider 的试探。
+// 语义与 oob discover 口径一致：Present/NotPresent/Unknown 只按探测结果归类，
+// 缺证据不猜；输出复用 oobPresence（同文件实现）。
+type OobDashQueryCmd struct {
+	Address string
+	Timeout time.Duration
+	Output  io.Writer
+
+	registry *oob.Registry
+}
+
+func (c *OobDashQueryCmd) Run(ctx context.Context) error {
+	if strings.TrimSpace(c.Address) == "" {
+		return fmt.Errorf("address required")
+	}
+	if c.Timeout <= 0 {
+		c.Timeout = oobDiscoverTimeout
+	}
+	if c.registry == nil {
+		c.registry = newOobDiscoverRegistry(c.Timeout)
+	}
+	if c.Output == nil {
+		c.Output = os.Stdout
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
+	defer cancel()
+	result, err := c.registry.ProbeOne(ctx, dash.Name, oob.Target{Address: strings.TrimSpace(c.Address)})
+	if err != nil {
+		return err
+	}
+	c.printDashResult(result)
+	return nil
+}
+
+func (c *OobDashQueryCmd) printDashResult(result oob.ProbeResult) {
+	fmt.Fprintf(c.Output, "DASH direct query for %s\n", strings.TrimSpace(c.Address))
+	printOobResult(c.Output, result)
+}
+
+func printOobResult(out io.Writer, result oob.ProbeResult) {
+	presence, evidence := oobPresence(result)
+	fmt.Fprintf(out, "Provider %s: %s\n  Evidence: %s\n", result.Provider, presence, evidence)
 }
 
 func oobPresence(result oob.ProbeResult) (string, string) {

@@ -209,13 +209,20 @@ func runAgent(args []string, stdout io.Writer) int {
 	return 0
 }
 
-// runOob dispatches `cockpit oob discover ...`.
+// runOob dispatches `cockpit oob discover ...` / `cockpit oob dash ...`.
 func runOob(args []string, stdout io.Writer) int {
-	if len(args) == 0 || args[0] != "discover" {
-		fmt.Fprintln(stdout, "Usage: cockpit oob discover -address host")
+	if len(args) == 0 {
+		fmt.Fprintln(stdout, "Usage: cockpit oob {discover,dash} -address host")
 		return 1
 	}
-	return runOobDiscover(args[1:], stdout)
+	switch args[0] {
+	case "discover":
+		return runOobDiscover(args[1:], stdout)
+	case "dash":
+		return runOobDash(args[1:], stdout)
+	}
+	fmt.Fprintln(stdout, "Usage: cockpit oob {discover,dash} -address host")
+	return 1
 }
 
 // runOobDiscover probes all registered providers without exposing actions.
@@ -254,6 +261,48 @@ func runOobDiscover(args []string, stdout io.Writer) int {
 	}
 	if err := cmd.Run(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "OOB discovery failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runOobDash does a single-provider DASH direct query, without probing the
+// other providers. Presence semantics match the discover pass (oobPresence).
+func runOobDash(args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("oob dash", flag.ExitOnError)
+	address := fs.String("address", "", "DASH management address")
+	timeout := fs.Float64("timeout", 5, "probe timeout in seconds (1-30)")
+	help := fs.Bool("h", false, "Show help")
+
+	fs.Parse(args)
+
+	if *help {
+		fmt.Fprintln(stdout, "Direct DASH query (single-provider, read-only)")
+		fmt.Fprintln(stdout)
+		fs.PrintDefaults()
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Output states:")
+		fmt.Fprintln(stdout, "  Present    DASH Identify returned a discovery response")
+		fmt.Fprintln(stdout, "  NotPresent wsman endpoint rejected as another protocol")
+		fmt.Fprintln(stdout, "  Unknown    no decisive DASH evidence was obtained")
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, "Examples:")
+		fmt.Fprintln(stdout, "  cockpit oob dash -address 192.168.1.10")
+		fmt.Fprintln(stdout, "  cockpit oob dash -address 192.168.1.10 -timeout 10")
+		return 0
+	}
+	if *timeout <= 0 || *timeout > 30 {
+		fmt.Fprintf(os.Stderr, "OOB dash query failed: timeout must be in (0, 30] seconds\n")
+		return 1
+	}
+
+	cmd := &cli.OobDashQueryCmd{
+		Address: *address,
+		Timeout: time.Duration(*timeout * float64(time.Second)),
+		Output:  stdout,
+	}
+	if err := cmd.Run(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "OOB dash query failed: %v\n", err)
 		return 1
 	}
 	return 0

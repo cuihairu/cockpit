@@ -315,7 +315,7 @@ func TestCovRunStatusBadDB(t *testing.T) {
 
 func TestCovRunOobNoSubcommand(t *testing.T) {
 	code, out := covRun("oob")
-	if code != 1 || !strings.Contains(out, "Usage: cockpit oob discover") {
+	if code != 1 || !strings.Contains(out, "Usage: cockpit oob {discover,dash}") {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
@@ -355,6 +355,49 @@ func TestCovRunOobDiscoverSuccess(t *testing.T) {
 		!strings.Contains(out, "Provider dash: Unknown") ||
 		!strings.Contains(out, "Provider redfish: Unknown") {
 		t.Fatalf("expected Unknown states on closed port:\n%s", out)
+	}
+}
+
+func TestCovRunOobDashHelp(t *testing.T) {
+	code, out := covRun("oob", "dash", "-h")
+	if code != 0 || !strings.Contains(out, "Direct DASH query") {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+	if !strings.Contains(out, "NotPresent") || !strings.Contains(out, "Unknown") {
+		t.Fatalf("help must document tri-state: %q", out)
+	}
+}
+
+func TestCovRunOobDashRequiresAddress(t *testing.T) {
+	code, _ := covRun("oob", "dash")
+	if code != 1 {
+		t.Fatalf("expected 1, got %d", code)
+	}
+}
+
+func TestCovRunOobDashInvalidTimeout(t *testing.T) {
+	code, _ := covRun("oob", "dash", "-address", "192.168.1.10", "-timeout", "0")
+	if code != 1 {
+		t.Fatalf("expected 1 for zero timeout, got %d", code)
+	}
+}
+
+// 直连查询成功路径：本机未听端口快速失败 → DASH Unknown，命令仍返回 0
+// （直连是查询面，单路失败不是命令失败，与 discover 口径一致）。
+func TestCovRunOobDashUnknownClosedPort(t *testing.T) {
+	code, out := covRun("oob", "dash", "-address", "127.0.0.1:1", "-timeout", "1")
+	if code != 0 {
+		t.Fatalf("expected 0, got %d", code)
+	}
+	if !strings.Contains(out, "Provider dash: Unknown") {
+		t.Fatalf("expected DASH Unknown on closed port:\n%s", out)
+	}
+}
+
+func TestCovRunOobUnknownSubcommand(t *testing.T) {
+	code, out := covRun("oob", "frobnicate")
+	if code != 1 || !strings.Contains(out, "Usage: cockpit oob {discover,dash}") {
+		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
 

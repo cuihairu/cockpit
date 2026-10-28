@@ -80,6 +80,19 @@ func (r *Registry) ProbeAll(ctx context.Context, target Target) []ProbeResult {
 	return results
 }
 
+// ProbeOne 直连探测单个已注册 Provider（按名定位，避免逐个 Provider 试探）。
+// 找不到名字返回错误；探测错误原样保留，不吞错（仓内纪律）。
+func (r *Registry) ProbeOne(ctx context.Context, name string, target Target) (ProbeResult, error) {
+	r.mu.RLock()
+	p, ok := r.providers[name]
+	r.mu.RUnlock()
+	if !ok {
+		return ProbeResult{}, fmt.Errorf("oob: provider %q not registered", name)
+	}
+	info, err := p.Probe(ctx, target)
+	return ProbeResult{Provider: p.Name(), Info: info, Err: err}, nil
+}
+
 // DeviceView 是多路线合并后的设备带外总画像。
 type DeviceView struct {
 	Architecture string   `json:"architecture,omitempty"`

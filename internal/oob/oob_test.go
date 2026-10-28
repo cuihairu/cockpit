@@ -108,6 +108,45 @@ func TestProbeAllKeepsErrorsPerPath(t *testing.T) {
 	}
 }
 
+func TestProbeOneDirectProbe(t *testing.T) {
+	r := NewRegistry()
+	boom := errors.New("dash: wsman endpoint is not DASH (product \"amt\")")
+	if err := r.Register(fakeProvider{name: "dash", err: boom}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Register(fakeProvider{
+		name: "amt",
+		info: DeviceInfo{Provider: "amt", Capabilities: map[Capability]State{CapabilityPower: {true, true, true}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := r.ProbeOne(context.Background(), "dash", Target{Address: "192.168.1.10"})
+	if err != nil {
+		t.Fatalf("ProbeOne dash: %v", err)
+	}
+	if res.Provider != "dash" || !errors.Is(res.Err, boom) {
+		t.Fatalf("dash result = %+v, want provider dash with preserved error", res)
+	}
+
+	// 已注册但成功路径：错误原样不吞，成功 Info 原样返回。
+	res, err = r.ProbeOne(context.Background(), "amt", Target{Address: "192.168.1.10"})
+	if err != nil {
+		t.Fatalf("ProbeOne amt: %v", err)
+	}
+	if res.Provider != "amt" || res.Err != nil || !res.Info.Capabilities[CapabilityPower].Usable() {
+		t.Fatalf("amt result = %+v, want usable power capability", res)
+	}
+}
+
+func TestProbeOneUnknownProvider(t *testing.T) {
+	r := NewRegistry()
+	if _, err := r.ProbeOne(context.Background(), "ghost", Target{Address: "192.168.1.10"}); err == nil ||
+		!strings.Contains(err.Error(), `not registered`) {
+		t.Fatalf("unknown provider: %v", err)
+	}
+}
+
 func TestMergeArbitratesByRank(t *testing.T) {
 	results := []ProbeResult{
 		{Provider: "amt", Info: DeviceInfo{
