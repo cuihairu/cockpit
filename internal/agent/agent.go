@@ -566,6 +566,19 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 		Version: "1",
 	})
 
+	// virt-libvirt capability：本地 libvirt 只读面第一片。仅宣称 virsh
+	// 入口存在，不据此猜 daemon/driver；真实 hypervisor/LXC 探测由
+	// virt.capabilities RPC 在 daemon 连接上验证。
+	if rpc.LibvirtAvailable() {
+		capabilities = append(capabilities, protocol.Capability{
+			Type:    "virt-libvirt",
+			Version: "1",
+			Metadata: map[string]interface{}{
+				"read_only": true,
+			},
+		})
+	}
+
 	return capabilities
 }
 

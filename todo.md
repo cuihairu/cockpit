@@ -93,7 +93,7 @@
 > 不让 Server 直连宿主 libvirt；PVE 沿用既有 REST（internal/pve），Windows Hyper-V 备选
 > hcsshim/HCS；Firecracker/cloud-hypervisor 留给弹性池片再议。
 
-- [ ] agent libvirt 集成：能力探测（hypervisor/LXC）、VM 生命周期（列表/启停/快照/克隆只读先行）、经 agent RPC 上报〔待立项=随 Provider Adapter 工作流排单；写操作先行只读验收闭环（同防火墙写口径）〕
+- [ ] agent libvirt 集成：能力探测（hypervisor/LXC）、VM 生命周期（列表/启停/快照/克隆只读先行）、经 agent RPC 上报〔**只读第一片已落**：`internal/agent/rpc/libvirt_provider.go:93`（`Capabilities` 经 `virsh -r version --daemon` 探 URI/driver，`libvirt_provider.go:135` 解析 `<domain type='kvm'/lxc'>` 出 hypervisor/LXC，daemon 不可达返回 available=false 不猜驱动）+ `libvirt_provider.go:161`/`libvirt_provider.go:173`（`vms.list`/`containers.list` 只读，`virsh -r list --all --name`，输出形状对齐 `pve.vms.list`/`pve.containers.list`）+ 注册 `internal/agent/providers.go:145`（`virt-libvirt` capability 且 virsh 在 PATH）+ capability 上报 `internal/agent/agent.go:569`（metadata read_only=true）；无任何写 action（Call 未知 verb 失败关闭）；验证二选一选**单测 mock**（`libvirt_provider_test.go` 与 `libvirt_wiring_test.go` 注入假 runner/PATH 桩，零 virsh 子进程；未用 PVE 192.168.5.10 真机，因本片是驻宿主 agent 经本地 libvirt socket，开发机无 virsh/libvirt socket，真机验收留写片后）；受影响 `internal/agent/...`（含 rpc）短测+块覆盖登记门（99.99%，1 语句既有豁免）+`-race`+`go vet` 全绿；剩余=写操作面（启停/快照/克隆）与真机/API 验收随生命周期片〕
 
 ### 文档
 

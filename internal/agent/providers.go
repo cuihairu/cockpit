@@ -142,6 +142,13 @@ func (a *Agent) setupProviders() {
 		case "nas":
 			// NAS 存储观测（见 docs/guide/nas-design.md）
 			a.rpc.RegisterProvider(rpc.NewNasProvider(nil))
+		case "virt-libvirt":
+			// 本地 libvirt 只读面（H-B7 第一片）：virsh 存在仅是入口条件；
+			// daemon/driver 由 virt.capabilities 实连验证，不猜 hypervisor/LXC。
+			if !rpc.LibvirtAvailable() {
+				continue
+			}
+			a.rpc.RegisterProvider(rpc.NewLibvirtProvider("", nil))
 		}
 	}
 }
