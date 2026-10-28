@@ -109,6 +109,10 @@ import type {
   DomainDriftResponse,
   CloudAccount,
   CloudAccountInput,
+  OobRedirectApplyResult,
+  OobRedirectListResult,
+  OobRedirectSpec,
+  OobRedirectSweepResult,
 } from '@/types'
 import { logger } from '@/utils/logger'
 
@@ -1458,6 +1462,58 @@ class ApiService {
   async deleteCloudAccount(id: string): Promise<void> {
     await this.client.delete(`/cloud/accounts/${encodeURIComponent(id)}`, {
       data: { confirm_id: id },
+    })
+  }
+
+  // ========== 带外兜底转发编排（片C，双确认：确认字段须与目标逐字一致） ==========
+
+  /** 下发兜底转发规则：confirm_label 必须等于 spec.label（后端逐字校验）。 */
+  async oobRedirectApply(input: {
+    agentId: string
+    oob: string
+    spec: OobRedirectSpec
+    confirmLabel: string
+  }): Promise<OobRedirectApplyResult> {
+    return this.client.post<unknown, OobRedirectApplyResult>('/oob/redirect', {
+      agent_id: input.agentId,
+      oob: input.oob,
+      spec: input.spec,
+      confirm_label: input.confirmLabel,
+    })
+  }
+
+  /** 拆除兜底转发规则：confirm_name 必须等于规则名（后端逐字校验）。 */
+  async oobRedirectRemove(input: {
+    agentId: string
+    oob: string
+    name: string
+    confirmName: string
+  }): Promise<{ name: string }> {
+    return this.client.post<unknown, { name: string }>('/oob/redirect/remove', {
+      agent_id: input.agentId,
+      oob: input.oob,
+      name: input.name,
+      confirm_name: input.confirmName,
+    })
+  }
+
+  /** 读设备当前全部转发规则（含用户自建；展示侧按 cockpit_ 前缀区分）。 */
+  async oobRedirectList(agentId: string, oob: string): Promise<OobRedirectListResult> {
+    return this.client.get<unknown, OobRedirectListResult>(
+      `/oob/redirect?agent_id=${encodeURIComponent(agentId)}&oob=${encodeURIComponent(oob)}`,
+    )
+  }
+
+  /** 清扫该设备上全部已过期的 cockpit 规则：confirm_oob 必须等于凭据条目名。 */
+  async oobRedirectSweep(input: {
+    agentId: string
+    oob: string
+    confirmOob: string
+  }): Promise<OobRedirectSweepResult> {
+    return this.client.post<unknown, OobRedirectSweepResult>('/oob/redirect/sweep', {
+      agent_id: input.agentId,
+      oob: input.oob,
+      confirm_oob: input.confirmOob,
     })
   }
 }

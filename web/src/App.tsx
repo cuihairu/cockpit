@@ -73,6 +73,7 @@ const Network = lazy(() => import('./pages/Network'))
 const Disk = lazy(() => import('./pages/Disk'))
 const Firewall = lazy(() => import('./pages/Firewall'))
 const Nas = lazy(() => import('./pages/Nas'))
+const Oob = lazy(() => import('./pages/Oob'))
 const Drift = lazy(() => import('./pages/Drift'))
 const Agents = lazy(() => import('./pages/Agents'))
 const DNS = lazy(() => import('./pages/DNS'))
@@ -264,6 +265,12 @@ const routeConfig: PermRouteItem = {
       name: '存储池',
       icon: <DatabaseOutlined />,
       perm: 'nas:read',
+    },
+    {
+      path: '/oob',
+      name: '带外兜底',
+      icon: <ApiOutlined />,
+      perm: 'inventory:read',
     },
     {
       path: '/drift',
@@ -540,6 +547,7 @@ const MainLayout = () => {
               <Route path="/disk" element={<Disk />} />
               <Route path="/firewall" element={<Firewall />} />
               <Route path="/nas" element={<Nas />} />
+              <Route path="/oob" element={<Oob />} />
               <Route path="/drift" element={<Drift />} />
               <Route path="/dns" element={<DNS />} />
               <Route path="/domains" element={<Domains />} />

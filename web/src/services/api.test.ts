@@ -46,7 +46,7 @@ describe('ApiService 全方法驱动（URL/method/参数序列化不抛错）', 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}')))
   })
 
-  it('174 个端点方法全部可调用', async () => {
+  it('178 个端点方法全部可调用', async () => {
     const ctrl = new AbortController()
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).login('x', 'x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).logout()
@@ -232,10 +232,14 @@ describe('ApiService 全方法驱动（URL/method/参数序列化不抛错）', 
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getAgentHealth('x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).saveAgentHealth('x', {})
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).checkAgentProbe('x', 'x')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).oobRedirectApply({ agentId: 'x', oob: 'o', spec: {} as never, confirmLabel: 'x' })
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).oobRedirectRemove({ agentId: 'x', oob: 'o', name: 'n', confirmName: 'n' })
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).oobRedirectList('x', 'o')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).oobRedirectSweep({ agentId: 'x', oob: 'o', confirmOob: 'o' })
     // 全部方法都被驱动过（每个至少一次 client 调用）
     const total = mockInstance.get.mock.calls.length + mockInstance.post.mock.calls.length
       + mockInstance.put.mock.calls.length + mockInstance.delete.mock.calls.length
-    expect(total).toBeGreaterThanOrEqual(175)
+    expect(total).toBeGreaterThanOrEqual(179)
   })
 })
 
@@ -252,6 +256,28 @@ describe('ApiService 关键路径断言', () => {
   it('login POST /auth/login 且 body 含凭据', async () => {
     await api.login('admin', 'secret')
     expect(mockInstance.post).toHaveBeenCalledWith('/auth/login', { username: 'admin', password: 'secret' })
+  })
+
+  it('oob 兜底转发四方法：双确认字段 snake_case 直传与查询串编码', async () => {
+    const spec = {
+      label: 'ipmi', proto: 'tcp', src_zone: 'wan', dst_zone: 'lan',
+      dst_ip: '192.168.1.10', dst_port: 16992, ttl_seconds: 1800,
+    }
+    await api.oobRedirectApply({ agentId: 'ag 1', oob: 'r2s', spec, confirmLabel: 'ipmi' })
+    expect(mockInstance.post).toHaveBeenCalledWith('/oob/redirect', {
+      agent_id: 'ag 1', oob: 'r2s', spec, confirm_label: 'ipmi',
+    })
+    await api.oobRedirectRemove({ agentId: 'ag 1', oob: 'r2s', name: 'cockpit_ipmi_1790000000', confirmName: 'cockpit_ipmi_1790000000' })
+    expect(mockInstance.post).toHaveBeenCalledWith('/oob/redirect/remove', {
+      agent_id: 'ag 1', oob: 'r2s', name: 'cockpit_ipmi_1790000000', confirm_name: 'cockpit_ipmi_1790000000',
+    })
+    await api.oobRedirectList('ag 1', 'r 2')
+    expect(mockInstance.get).toHaveBeenCalledWith(
+      '/oob/redirect?agent_id=ag%201&oob=r%202')
+    await api.oobRedirectSweep({ agentId: 'ag 1', oob: 'r2s', confirmOob: 'r2s' })
+    expect(mockInstance.post).toHaveBeenCalledWith('/oob/redirect/sweep', {
+      agent_id: 'ag 1', oob: 'r2s', confirm_oob: 'r2s',
+    })
   })
 
   it('cleanupAgents 阈值（分钟粒度）POST /agents/cleanup；缺省空体 = 全清', async () => {

@@ -50,6 +50,7 @@ vi.mock('./pages/Services', () => pageStub('Services'))
 vi.mock('./pages/Network', () => pageStub('Network'))
 vi.mock('./pages/Disk', () => pageStub('Disk'))
 vi.mock('./pages/Nas', () => pageStub('Nas'))
+vi.mock('./pages/Oob', () => pageStub('Oob'))
 vi.mock('./pages/Drift', () => pageStub('Drift'))
 // 主机独立页上线后 /agents 不再重定向 workbench，同款打桩防真实组件加载
 vi.mock('./pages/Agents', () => pageStub('Agents'))
@@ -180,10 +181,11 @@ describe('App', () => {
   it('菜单渲染回归：权限就绪后侧栏导航项存在且数量正确（防「菜单全空也能过」）', async () => {
     // 线上回归自证：负断言（queryByText(...).not.toBe）在菜单全空时同样通过，
     // 必须补正向计数断言。ADMIN_PERMS = inventory:read + docker:read +
-    // users:admin + roles:admin（AND 语义，见 utils/perm.ts）下应剩 8 项：
+    // users:admin + roles:admin（AND 语义，见 utils/perm.ts）下应剩 9 项：
     // 总览（无 perm）、资源管理（compute/domains/certificates 均 inventory:read）、
     // 主机（inventory:read）、工作台（inventory:read）、容器管理（docker:read）、
-    // 系统监控（inventory:read）、设置（无 perm）、访问控制（users:admin+roles:admin）
+    // 系统监控（inventory:read）、带外兜底（inventory:read）、设置（无 perm）、
+    // 访问控制（users:admin+roles:admin）
     await renderAt('/')
     expect(await screen.findByTestId('page-Dashboard')).toBeInTheDocument()
     const labels = Array.from(
@@ -191,8 +193,8 @@ describe('App', () => {
     )
       .map((el) => (el.textContent || '').trim())
       .filter(Boolean)
-    expect(labels.length).toBe(8)
-    for (const name of ['总览', '资源管理', '主机', '工作台', '容器管理', '系统监控', '设置', '访问控制']) {
+    expect(labels.length).toBe(9)
+    for (const name of ['总览', '资源管理', '主机', '工作台', '容器管理', '系统监控', '带外兜底', '设置', '访问控制']) {
       expect(labels).toContain(name)
     }
   })
