@@ -235,3 +235,32 @@
       - 门禁：`npx vitepress build` exit 0（113 页）；未改任何业务代码。
       - 剩余已知：`docs/guide/审计-文档一致性.md`（2026-10-08 审计快照）保留为历史记录，
         其「35 篇」统计已不成立，仅作历史参考。
+
+## 审核发现
+
+- [x] 审核发现：Capabilities 只在默认 libvirt 连接上执行 `virsh -r capabilities`，默认 qemu URI 时无法发现独立的 `lxc:///` 驱动，LXC 会被误报为不支持（internal/agent/rpc/libvirt_provider.go:101）。
+  - 属实，已修：`internal/agent/rpc/libvirt_provider.go:128` 在默认连接之外追加 `virsh -r -c lxc:/// capabilities` 独立探测，LXC 驱动只在 lxc:/// 连接上可见时仍上报 `lxc=true`；`libvirt_provider.go:130` 取并。证据 commit `0cd7232`（test `libvirt_provider_test.go` `TestLibvirtCapabilitiesProbesLXCConnection`）。
+- [x] 审核发现：containers.list 与 vms.list 复用同一条默认连接的 `virsh -r list --all --name`，未切到 `lxc:///`，会把 QEMU 域当作容器返回或漏掉全部 LXC（internal/agent/rpc/libvirt_provider.go:177）。
+  - 属实，已修：`internal/agent/rpc/libvirt_provider.go:193` `Containers` 改走 `listNames(libvirtLXCURI, "--all")` 直连 `lxc:///`；`libvirt_provider.go:180` `VMS` 保持默认 qemu 连接。证据 commit `0cd7232`（test `TestLibvirtContainersUseLXCConnection` 断言 `-c lxc:///`）。
+- [x] 审核发现：vms.list/containers.list 返回 `{vms: []string}`/`{containers: []string}`，而 PVE 既有契约返回 `[]VM`/`[]Container`，注释所称“对齐 PVE 输出形状”不成立（internal/agent/rpc/libvirt_provider.go:169）。
+  - 属实，已修：`internal/agent/rpc/libvirt_provider.go:185,197` 返回扁平 `[]string` 名称列表（本只读片只有名称，与 PVE `[]VM` 对象形状本就不同），并改注释不再声称对齐 PVE。证据 commit `0cd7232`（test `TestLibvirtListVMSAndContainers` 断言 shape 为 `[]string`）。
+- [x] 审核发现：Capabilities 失败时返回 `available=false` 与 error，但 rpc.Handler 在 error 时丢弃 result，远端只能收到错误、拿不到宣称的 `available=false`（internal/agent/rpc/libvirt_provider.go:103）。
+  - 属实，已修：`internal/agent/rpc/libvirt_provider.go:119` daemon 不可达时返回 `{"available": false, "error": detail}` 且 error 为 nil，不再走 rpc.Handler 的 error 丢弃 result 路径（`router.go:96` `err != nil` 分支）。证据 commit `0cd7232`（test `TestLibvirtCapabilitiesDaemonUnavailable` / `TestLibvirtCapabilitiesDaemonErrorNoStderr` 断言 error=nil 且 available=false）。
+- [x] 审核发现：`virt-libvirt` 已注册上报，但 server 没有任何 `virt.*` 转发或 `/api/agents/{id}/virt/*` 路由，与 hypervisor 设计契约不一致且产品侧无法调用（internal/agent/agent.go:574）。
+  - 属实，已修：新增 `internal/server/api_virt.go:21` `handleAgentVirtAPI`（`/agents/{id}/virt/{sub}` 只读白名单 `virt.capabilities`/`virt.vms.list`/`virt.containers.list`，api_virt.go:13-16），`internal/server/api.go:156` 接线路由。证据 commit `0cd7232`（test `api_virt_test.go` `TestVirtCapabilitiesForward`/`TestVirtRouting`）。
+- [x] 审核发现：libvirt 测试用同一份 list 输出同时断言 vms 与 containers，且未断言 `lxc:///` 连接或 PVE 返回形状，固化了上述错误（internal/agent/rpc/libvirt_provider_test.go:136）。
+  - 属实，已修：`libvirt_provider_test.go` 拆分 `TestLibvirtListVMSAndContainers`（断言 vms 走默认连接、shape `[]string`）与新增 `TestLibvirtContainersUseLXCConnection`（断言 `-c lxc:///`）、`TestLibvirtCapabilitiesProbesLXCConnection`。证据 commit `0cd7232`。
+- [x] 审核发现：Present 帮助称 DASH Identify 已返回发现响应，但 401/403 无响应时也会输出 Present 且 Evidence 固定为“provider discovery response”，会误导操作者（cmd/cockpit/main.go:285）。
+  - 属实，已修：`internal/oob/oob.go:65` 新增 `Discovered` 字段（仅识别响应确认后置 true：dash.go:69/redfish.go:113/amt.go:73）；`internal/cli/oob.go:134` `oobPresence` 仅在 `Err==nil && Info.Discovered` 时判 Present，401/403 可达未定判 Unknown（oob.go:141 evidence「endpoint reachable but discovery response not confirmed」）。证据 commit `76f16d8`（test `internal/cli/oob_test.go` `TestOobPresenceClassification` 新增 reachable-undetermined 用例）。
+- [x] 审核发现：`-timeout` 帮助写“1-30”秒，实际校验与错误文案允许 `(0,30]`（例如 0.1 秒），CLI 自述不一致（cmd/cockpit/main.go:274）。
+  - 属实，已修：`cmd/cockpit/main.go:232,274` 帮助文案改 `(0-30]`，与校验 `*timeout <= 0 || *timeout > 30` 一致。证据 commit `76f16d8`。
+- [x] 审核发现：拆除按钮对非 cockpit_ 前缀规则同样渲染，而后端仅允许拆除 cockpit 前缀规则（否则 400），UI 允许用户发起必败动作（web/src/pages/Oob/index.tsx:210）。
+  - 属实，已修：`web/src/pages/Oob/index.tsx:46` 新增 `isOwned`（`name.startsWith('cockpit_')`），`web/src/pages/Oob/index.tsx:219` 仅 `isOwned(r.name)` 时渲染拆除按钮，与后端 `redirect.Owned` 同口径。证据 commit `60fbe06`（test `index.test.tsx:292`「非 cockpit 前缀规则不渲染拆除入口」）。
+- [x] 审核发现：测试夹具含 user_forward/bare_rule 两条非 cockpit 规则，但未断言其不显示拆除入口、也未覆盖后端 400 拒绝路径，该契约不一致无回归保护（web/src/pages/Oob/index.test.tsx:38）。
+  - 属实，已修：`web/src/pages/Oob/index.test.tsx:292` 新增用例断言仅 2 条 cockpit 规则有拆除按钮、user_forward/bare_rule 无。证据 commit `60fbe06`。
+- [x] 审核发现：显式选中主机掉线后 effectiveAgentId 仍指向该机，列表查询继续启用并请求离线 agent（未重置/禁用），无对应测试（web/src/pages/Oob/index.tsx:92,105）。
+  - 属实，已修：`web/src/pages/Oob/index.tsx:100` `effectiveAgentId = oobAgents.some((a) => a.id === agentId) ? agentId : oobAgents[0]?.id`，显式选中主机掉线（不在 oobAgents）时回退首个在线 oob 主机，列表不再请求离线 agent。证据 commit `60fbe06`（test `index.test.tsx:300`「显式选中的主机掉线」）。
+- [x] 审核发现：新建表单强制 label 必填，但后端 Spec.Validate 允许空标签（按 proto/目标自动推导规则名），UI 未暴露后端合法路径（web/src/pages/Oob/index.tsx:324 vs internal/oob/redirect/redirect.go:77）。
+  - 属实，已修：`web/src/pages/Oob/index.tsx:335` label 改为可选（占位「留空 = 按 proto/目标推导」，去 `required` 规则），`index.tsx:404` 确认校验与 `labelValue ?? ''` 对齐，`index.tsx:169` 提交 `label: v.label ?? ''`。证据 commit `60fbe06`（test `index.test.tsx:320`「label 可留空」）。
+- [x] 审核发现：提交信息称 hostname||id 边遗漏已登记，实际该边被用例覆盖且未登记于 known_uncoverable.txt，提交声称与实现不符（web/src/pages/Oob/index.tsx:247）。
+  - 属实（提交信息失实），已更正：`web/tool/known_uncoverable.txt` 补注释说明该边由 `index.test.tsx:84-85`「选择主机+输入条目」用例覆盖（ag-2 hostname 空走 id 回退），b285c8a 提交信息「hostname||id edge misses registered」不准确。证据 commit `b0799f6`。
