@@ -127,16 +127,26 @@ func printOobResult(out io.Writer, result oob.ProbeResult) {
 }
 
 func oobPresence(result oob.ProbeResult) (string, string) {
-	if result.Err == nil {
+	// A discovery response must have been received to call Present. An empty
+	// capability set with nil error (401/403 endpoint reachable but no
+	// credentials) is reachable-undetermined: Unknown, not Present (audit
+	// finding: 401/403 was mislabelled as Present with a fixed evidence).
+	if result.Err == nil && result.Info.Discovered {
 		return "Present", "provider discovery response"
 	}
 	if providerRejectedResult(result.Err) {
 		return "NotPresent", result.Err.Error()
 	}
+	if result.Err == nil {
+		return "Unknown", "endpoint reachable but discovery response not confirmed"
+	}
 	return "Unknown", result.Err.Error()
 }
 
 func providerRejectedResult(err error) bool {
+	if err == nil {
+		return false
+	}
 	text := strings.ToLower(err.Error())
 	return strings.Contains(text, "not amt") ||
 		strings.Contains(text, "not dash") ||

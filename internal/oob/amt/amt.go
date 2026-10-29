@@ -70,6 +70,7 @@ func (p *Provider) Probe(ctx context.Context, target oob.Target) (oob.DeviceInfo
 	if !isAMT(resp) {
 		return oob.DeviceInfo{}, fmt.Errorf("amt: wsman endpoint is not AMT (product %q)", resp.ProductName)
 	}
+	info.Discovered = true
 	return info, nil
 }
 

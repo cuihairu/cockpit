@@ -229,7 +229,7 @@ func runOob(args []string, stdout io.Writer) int {
 func runOobDiscover(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("oob discover", flag.ExitOnError)
 	address := fs.String("address", "", "OOB management address")
-	timeout := fs.Float64("timeout", 5, "probe timeout in seconds (1-30)")
+	timeout := fs.Float64("timeout", 5, "probe timeout in seconds (0-30]")
 	help := fs.Bool("h", false, "Show help")
 
 	fs.Parse(args)
@@ -271,7 +271,7 @@ func runOobDiscover(args []string, stdout io.Writer) int {
 func runOobDash(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("oob dash", flag.ExitOnError)
 	address := fs.String("address", "", "DASH management address")
-	timeout := fs.Float64("timeout", 5, "probe timeout in seconds (1-30)")
+	timeout := fs.Float64("timeout", 5, "probe timeout in seconds (0-30]")
 	help := fs.Bool("h", false, "Show help")
 
 	fs.Parse(args)

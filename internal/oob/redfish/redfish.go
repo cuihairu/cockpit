@@ -110,6 +110,7 @@ func (p *Provider) Probe(ctx context.Context, target oob.Target) (oob.DeviceInfo
 	if root.RedfishVersion == "" {
 		return oob.DeviceInfo{}, fmt.Errorf("redfish: service root lacks RedfishVersion, not a redfish service")
 	}
+	info.Discovered = true
 
 	// Systems → 计算系统：power/bios/boot 的证据面
 	if link := root.Systems.OdataID; link != "" {

@@ -43,7 +43,7 @@ func TestOobDiscoverRunRequiresAddress(t *testing.T) {
 
 func TestOobDiscoverRunPrintsPresentAndEvidence(t *testing.T) {
 	registry := oobRegistry(probeProvider{name: "dash", fn: func(ctx context.Context, target oob.Target) (oob.DeviceInfo, error) {
-		return oob.DeviceInfo{Provider: "dash", Capabilities: map[oob.Capability]oob.State{}}, nil
+		return oob.DeviceInfo{Provider: "dash", Capabilities: map[oob.Capability]oob.State{}, Discovered: true}, nil
 	}})
 	var buf bytes.Buffer
 	cmd := &OobDiscoverCmd{Address: "192.168.1.10", Output: &buf, registry: registry}
@@ -143,7 +143,8 @@ func TestOobPresenceClassification(t *testing.T) {
 		wantState  string
 		wantHasErr bool
 	}{
-		{"ok", oob.ProbeResult{Provider: "dash", Info: oob.DeviceInfo{Provider: "dash"}}, "Present", false},
+		{"ok", oob.ProbeResult{Provider: "dash", Info: oob.DeviceInfo{Provider: "dash", Discovered: true}}, "Present", false},
+		{"reachable-undetermined", oob.ProbeResult{Provider: "dash", Info: oob.DeviceInfo{Provider: "dash"}}, "Unknown", false},
 		{"rejected", oob.ProbeResult{Provider: "dash", Err: errors.New("dash: wsman endpoint is not DASH")}, "NotPresent", true},
 		{"not-redfish", oob.ProbeResult{Provider: "redfish", Err: errors.New("redfish: not a redfish service (root status 404)")}, "NotPresent", true},
 		{"transport", oob.ProbeResult{Provider: "redfish", Err: errors.New("redfish: dial tcp: i/o timeout")}, "Unknown", true},
@@ -183,6 +184,12 @@ func TestOobDashQueryRunReusesPresenceSemantics(t *testing.T) {
 			wantDetail: "Evidence: provider discovery response",
 		},
 		{
+			name:       "reachable-undetermined",
+			err:        nil,
+			wantState:  "Unknown",
+			wantDetail: "Evidence: endpoint reachable but discovery response not confirmed",
+		},
+		{
 			name:       "not-present",
 			err:        errors.New("dash: wsman endpoint is not DASH (product \"Intel AMT\")"),
 			wantState:  "NotPresent",
@@ -202,7 +209,7 @@ func TestOobDashQueryRunReusesPresenceSemantics(t *testing.T) {
 				if tc.err != nil {
 					return oob.DeviceInfo{}, tc.err
 				}
-				return oob.DeviceInfo{Provider: "dash", Capabilities: map[oob.Capability]oob.State{}}, nil
+				return oob.DeviceInfo{Provider: "dash", Capabilities: map[oob.Capability]oob.State{}, Discovered: tc.wantState == "Present"}, nil
 			}})
 			var buf bytes.Buffer
 			cmd := &OobDashQueryCmd{Address: "192.168.1.10", Output: &buf, registry: registry}

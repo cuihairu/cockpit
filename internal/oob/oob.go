@@ -58,6 +58,11 @@ type DeviceInfo struct {
 	Architecture string               `json:"architecture,omitempty"`
 	Provider     string               `json:"provider"`
 	Capabilities map[Capability]State `json:"capabilities"`
+	// Discovered 表示本 Provider 的发现协议返回了一个明确的发现响应
+	// （如 WS-Management Identify 成功且产品匹配）。401/403 端点可达但
+	// 无凭据时为空能力集且 Discovered=false：这是「可达未定」，不是
+	// 已发现——调用方据此区分 Present 与 Unknown，不把 401/403 当 Present。
+	Discovered bool `json:"discovered,omitempty"`
 }
 
 // Target 是探测目标（地址 + 可选按 Provider 的定位信息）。

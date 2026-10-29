@@ -66,6 +66,7 @@ func (p *Provider) Probe(ctx context.Context, target oob.Target) (oob.DeviceInfo
 	if !isDASH(resp) {
 		return oob.DeviceInfo{}, fmt.Errorf("dash: wsman endpoint is not DASH (product %q)", resp.ProductName)
 	}
+	info.Discovered = true
 	return info, nil
 }
 
