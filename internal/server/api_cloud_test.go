@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -86,5 +87,112 @@ func TestCloudAccountsDoubleConfirmation(t *testing.T) {
 	}
 	if accounts, _ := s.db.ListCloudAccounts(); len(accounts) != 1 {
 		t.Fatal("account should survive failed confirmation")
+	}
+}
+
+func TestCloudInstancesReadOnlyLedger(t *testing.T) {
+	s, _ := newCloudAPIServer(t)
+	if code := callCloudAPI(s, http.MethodGet, "/api/cloud/accounts/nope/instances", "").Code; code != http.StatusNotFound {
+		t.Fatalf("missing account status = %d", code)
+	}
+
+	if err := s.db.UpsertCloudAccount(&storage.CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	accounts, err := s.db.ListCloudAccounts()
+	if err != nil || len(accounts) != 1 {
+		t.Fatalf("accounts = %+v, %v", accounts, err)
+	}
+	accountID := accounts[0].ID
+	if err := s.db.UpsertCloudInstance(&storage.CloudInstanceInput{
+		AccountID: accountID, NativeID: "i-1", Name: "web-1", Region: "cn-hangzhou",
+		Status: "running", BillingMode: "prepaid", BillingContinues: true,
+	}); err != nil {
+		t.Fatalf("seed instance: %v", err)
+	}
+
+	rec := callCloudAPI(s, http.MethodGet, "/api/cloud/accounts/"+accountID+"/instances", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Data []storage.CloudInstance `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].NativeID != "i-1" || payload.Data[0].AccountID != accountID {
+		t.Fatalf("instances = %+v", payload.Data)
+	}
+
+	if code := callCloudAPI(s, http.MethodDelete, "/api/cloud/accounts/"+accountID+"/instances", "").Code; code != http.StatusMethodNotAllowed {
+		t.Fatalf("write status = %d", code)
+	}
+}
+
+func TestCloudInstancesEmptyLedger(t *testing.T) {
+	s, _ := newCloudAPIServer(t)
+	if err := s.db.UpsertCloudAccount(&storage.CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	accounts, _ := s.db.ListCloudAccounts()
+	rec := callCloudAPI(s, http.MethodGet, "/api/cloud/accounts/"+accounts[0].ID+"/instances", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"data":[]`) {
+		t.Fatalf("empty ledger response = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCloudInstancesListError(t *testing.T) {
+	s, _ := newCloudAPIServer(t)
+	if err := s.db.UpsertCloudAccount(&storage.CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	accounts, _ := s.db.ListCloudAccounts()
+	// 账号表仍可读（ListCloudAccounts 通过），仅实例表不可查：DROP 表让
+	// ListCloudInstances 报错，精确命中实例查询失败分支。
+	if err := s.db.Session().Exec("DROP TABLE cloud_instances").Error; err != nil {
+		t.Fatalf("drop cloud_instances: %v", err)
+	}
+	if code := callCloudAPI(s, http.MethodGet, "/api/cloud/accounts/"+accounts[0].ID+"/instances", "").Code; code != http.StatusInternalServerError {
+		t.Fatalf("closed DB status = %d", code)
+	}
+}
+
+func TestCloudInstancesAccountsError(t *testing.T) {
+	s, _ := newCloudAPIServer(t)
+	if err := s.db.UpsertCloudAccount(&storage.CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	accounts, _ := s.db.ListCloudAccounts()
+	covCloseDB(t, s)
+	if code := callCloudAPI(s, http.MethodGet, "/api/cloud/accounts/"+accounts[0].ID+"/instances", "").Code; code != http.StatusInternalServerError {
+		t.Fatalf("closed DB status = %d", code)
+	}
+}
+
+func TestCloudInstancesBadPath(t *testing.T) {
+	s, _ := newCloudAPIServer(t)
+	if code := callCloudAPI(s, http.MethodGet, "/api/cloud/accounts//instances", "").Code; code != http.StatusBadRequest {
+		t.Fatalf("empty id status = %d", code)
+	}
+	if code := callCloudAPI(s, http.MethodGet, "/api/cloud/accounts/a/b/instances", "").Code; code != http.StatusBadRequest {
+		t.Fatalf("slash id status = %d", code)
+	}
+	if code := callCloudAPI(s, http.MethodGet, "/api/cloud/accounts", "").Code; code != http.StatusOK {
+		t.Fatalf("plain ledger status = %d", code)
+	}
+}
+
+func TestCloudInstancesRegisterRoute(t *testing.T) {
+	s, _ := newCloudAPIServer(t)
+	mux := http.NewServeMux()
+	s.registerCloudAPI(mux)
+	token, _ := s.auth.GenerateToken("1", "admin", "admin")
+	req := httptest.NewRequest(http.MethodGet, "/api/cloud/accounts", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("registered route status = %d", rec.Code)
 	}
 }

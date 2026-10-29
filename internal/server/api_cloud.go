@@ -78,6 +78,46 @@ func (s *Server) registerCloudAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/cloud/accounts/", s.authService().Middleware(s.handleCloudAccount))
 }
 
+// handleCloudInstances GET /api/cloud/accounts/{id}/instances
+// 只读实例台账（发现接线的最小切片）：按账号回读已落库的云实例，不触
+// 厂商 API、不读 secret。账号不存在回 404；空台账回空数组。
+func (s *Server) handleCloudInstances(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/api/cloud/accounts/")
+	id := strings.Trim(strings.TrimSuffix(rest, "/instances"), "/")
+	if id == "" || strings.Contains(id, "/") {
+		s.handleError(w, r, http.StatusBadRequest, "cloud account id required")
+		return
+	}
+
+	accounts, err := s.db.ListCloudAccounts()
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to load cloud account")
+		return
+	}
+	found := false
+	for i := range accounts {
+		if accounts[i].ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		s.handleError(w, r, http.StatusNotFound, "Cloud account not found")
+		return
+	}
+
+	instances, err := s.db.ListCloudInstances(id)
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to list cloud instances")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"data": instances})
+}
+
 // handleCloudAccounts GET 台账 / PUT 保存账号与 secret 引用。
 func (s *Server) handleCloudAccounts(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -142,6 +182,10 @@ func (s *Server) handleCloudAccounts(w http.ResponseWriter, r *http.Request) {
 
 // handleCloudAccount DELETE /api/cloud/accounts/{id}；confirm_id 必须逐字一致。
 func (s *Server) handleCloudAccount(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(strings.Trim(r.URL.Path, "/"), "/instances") {
+		s.handleCloudInstances(w, r)
+		return
+	}
 	if r.Method != http.MethodDelete {
 		s.handleError(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
