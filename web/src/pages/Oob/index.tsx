@@ -41,6 +41,10 @@ const isExpired = (name: string): boolean => {
   return exp !== null && exp * 1000 < Date.now()
 }
 
+// 后端只允许拆除 cockpit_ 前缀规则（redirect.Owned，否则 400）。UI 必须与
+// 后端同口径：非 cockpit 前缀规则不渲染拆除入口，避免发起必败动作（审计）。
+const isOwned = (name: string): boolean => name.startsWith('cockpit_')
+
 // 原始 ubus 规则字段的摘要展示（字段名与设备同形，防御式取值）。
 const ruleSummary = (r: OobRedirectRule): string => {
   const parts: string[] = []
@@ -59,7 +63,7 @@ const ruleSummary = (r: OobRedirectRule): string => {
 }
 
 interface CreateFormValues {
-  label: string
+  label?: string
   proto: string
   srcZone: string
   dstZone: string
@@ -81,15 +85,19 @@ const OobRedirectManager: React.FC = () => {
   const [createForm] = Form.useForm<CreateFormValues>()
   const [removeForm] = Form.useForm<{ confirmName: string }>()
   const [sweepForm] = Form.useForm<{ confirmOob: string }>()
+  // 响应式读取 label：占位符与确认提示要随输入实时变化，getFieldValue 在
+  // 渲染期读一次不更新，改用 useWatch（审计：占位符误导）。
+  const labelValue = Form.useWatch('label', createForm)
 
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: () => api.getAgents() })
   const oobAgents = useMemo(
     () => agents.filter((a) => a.status !== 'offline' && (a.capabilities ?? []).some((c) => c.type === 'oob')),
     [agents],
   )
-  // 未显式选择时渲染期派生默认选中（避免 effect 内 setState）；agentId 指向的
-  // 主机掉线时 find 落空，与原 effect 行为一致。
-  const effectiveAgentId = agentId ?? oobAgents[0]?.id
+  // 未显式选择时渲染期派生默认选中（避免 effect 内 setState）。显式选中的
+  // 主机掉线（不在 oobAgents）时回退到首个在线 oob 主机：effectiveAgentId
+  // 不再指向离线机，列表查询不会被启用到已离线 agent（审计发现）。
+  const effectiveAgentId = oobAgents.some((a) => a.id === agentId) ? agentId : oobAgents[0]?.id
   const selectedAgent: Agent | undefined = useMemo(
     () => oobAgents.find((a) => a.id === effectiveAgentId),
     [oobAgents, effectiveAgentId],
@@ -148,7 +156,7 @@ const OobRedirectManager: React.FC = () => {
     if (!v) return
     createMutation.mutate({
       spec: {
-        label: v.label,
+        label: v.label ?? '',
         proto: v.proto,
         src_zone: v.srcZone,
         dst_zone: v.dstZone,
@@ -158,7 +166,7 @@ const OobRedirectManager: React.FC = () => {
         ...(v.srcIp ? { src_ip: v.srcIp } : {}),
         ...(v.srcPort ? { src_port: v.srcPort } : {}),
       },
-      confirmLabel: v.confirmLabel,
+      confirmLabel: v.confirmLabel ?? '',
     })
   }
 
@@ -208,9 +216,11 @@ const OobRedirectManager: React.FC = () => {
       width: 100,
       render: (_, r) => (
         <PermGuard perm="inventory:write">
-          <Button size="small" danger onClick={() => { setRemoveTarget(r); removeForm.resetFields() }}>
-            拆除
-          </Button>
+          {isOwned(r.name) && (
+            <Button size="small" danger onClick={() => { setRemoveTarget(r); removeForm.resetFields() }}>
+              拆除
+            </Button>
+          )}
         </PermGuard>
       ),
     },
@@ -321,9 +331,8 @@ const OobRedirectManager: React.FC = () => {
               name="label"
               label="规则标签"
               style={{ width: '50%' }}
-              rules={[{ required: true, message: '请输入规则标签' }]}
             >
-              <Input placeholder="如 ipmi、kvm" />
+              <Input placeholder="留空 = 按 proto/目标推导" />
             </Form.Item>
             <Form.Item name="proto" label="协议" style={{ width: '50%' }} rules={[{ required: true }]}>
               <Select
@@ -390,16 +399,15 @@ const OobRedirectManager: React.FC = () => {
             name="confirmLabel"
             label="确认下发：输入规则标签以确认"
             rules={[
-              { required: true, message: '请输入规则标签确认' },
               {
                 validator: (_, v: string) =>
-                  v === createForm.getFieldValue('label')
+                  (v ?? '') === (labelValue ?? '')
                     ? Promise.resolve()
                     : Promise.reject(new Error('输入与规则标签不一致')),
               },
             ]}
           >
-            <Input placeholder="输入与上方标签相同的内容" allowClear />
+            <Input placeholder={labelValue || '留空（标签为空）'} allowClear />
           </Form.Item>
         </Form>
       </Modal>

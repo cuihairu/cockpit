@@ -45,11 +45,12 @@ const renderPage = (agents?: Agent[], listImpl?: () => Promise<{ redirects: OobR
     listImpl ?? (() => Promise.resolve({ redirects: RULES })),
   )
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const view = render(
     <QueryClientProvider client={qc}>
       <Oob />
     </QueryClientProvider>,
   )
+  return { ...view, qc }
 }
 
 // 输入 vault 条目名触发列表加载（默认选中首个 oob 主机）
@@ -115,13 +116,13 @@ describe('Oob', () => {
     await typeOob()
     await screen.findByText('cockpit_ipmi_1790000000')
     fireEvent.click(screen.getByRole('button', { name: /新建规则/ }))
-    fireEvent.change(screen.getByPlaceholderText('如 ipmi、kvm'), { target: { value: 'ipmi' } })
+    fireEvent.change(screen.getByPlaceholderText('留空 = 按 proto/目标推导'), { target: { value: 'ipmi' } })
     fireEvent.change(screen.getByPlaceholderText('wan'), { target: { value: 'wan' } })
     fireEvent.change(screen.getByPlaceholderText('lan'), { target: { value: 'lan' } })
     fireEvent.change(screen.getByPlaceholderText('192.168.1.10'), { target: { value: '192.168.1.10' } })
     fireEvent.change(screen.getByPlaceholderText('16992'), { target: { value: '16992' } })
     // 确认不一致 → 校验错误、不下发
-    fireEvent.change(screen.getByPlaceholderText('输入与上方标签相同的内容'), { target: { value: 'wrong' } })
+    fireEvent.change(screen.getByPlaceholderText('ipmi'), { target: { value: 'wrong' } })
     fireEvent.click(screen.getByRole('button', { name: /下\s*发/ }))
     expect(await screen.findByText('输入与规则标签不一致')).toBeInTheDocument()
     expect(apiMock.oobRedirectApply).not.toHaveBeenCalled()
@@ -129,7 +130,7 @@ describe('Oob', () => {
     const src = screen.getAllByPlaceholderText('留空 = 任意')
     fireEvent.change(src[0], { target: { value: '10.0.0.2' } })
     fireEvent.change(src[1], { target: { value: '12345' } })
-    fireEvent.change(screen.getByPlaceholderText('输入与上方标签相同的内容'), { target: { value: 'ipmi' } })
+    fireEvent.change(screen.getByPlaceholderText('ipmi'), { target: { value: 'ipmi' } })
     fireEvent.click(screen.getByRole('button', { name: /下\s*发/ }))
     await waitFor(() =>
       expect(apiMock.oobRedirectApply).toHaveBeenCalledWith(expect.objectContaining({
@@ -152,12 +153,12 @@ describe('Oob', () => {
     await typeOob()
     await screen.findByText('cockpit_ipmi_1790000000')
     fireEvent.click(screen.getByRole('button', { name: /新建规则/ }))
-    fireEvent.change(screen.getByPlaceholderText('如 ipmi、kvm'), { target: { value: 'ipmi' } })
+    fireEvent.change(screen.getByPlaceholderText('留空 = 按 proto/目标推导'), { target: { value: 'ipmi' } })
     fireEvent.change(screen.getByPlaceholderText('wan'), { target: { value: 'wan' } })
     fireEvent.change(screen.getByPlaceholderText('lan'), { target: { value: 'lan' } })
     fireEvent.change(screen.getByPlaceholderText('192.168.1.10'), { target: { value: '192.168.1.10' } })
     fireEvent.change(screen.getByPlaceholderText('16992'), { target: { value: '16992' } })
-    fireEvent.change(screen.getByPlaceholderText('输入与上方标签相同的内容'), { target: { value: 'ipmi' } })
+    fireEvent.change(screen.getByPlaceholderText('ipmi'), { target: { value: 'ipmi' } })
     fireEvent.click(screen.getByRole('button', { name: /下\s*发/ }))
     await waitFor(() => expect(apiMock.oobRedirectApply).toHaveBeenCalled())
     const spec = apiMock.oobRedirectApply.mock.calls[0][0].spec
@@ -171,16 +172,16 @@ describe('Oob', () => {
     await typeOob()
     await screen.findByText('cockpit_ipmi_1790000000')
     fireEvent.click(screen.getByRole('button', { name: /新建规则/ }))
-    fireEvent.change(screen.getByPlaceholderText('如 ipmi、kvm'), { target: { value: 'x' } })
+    fireEvent.change(screen.getByPlaceholderText('留空 = 按 proto/目标推导'), { target: { value: 'x' } })
     fireEvent.change(screen.getByPlaceholderText('wan'), { target: { value: 'w' } })
     fireEvent.change(screen.getByPlaceholderText('lan'), { target: { value: 'l' } })
     fireEvent.change(screen.getByPlaceholderText('192.168.1.10'), { target: { value: '1.2.3.4' } })
     fireEvent.change(screen.getByPlaceholderText('16992'), { target: { value: '8080' } })
-    fireEvent.change(screen.getByPlaceholderText('输入与上方标签相同的内容'), { target: { value: 'x' } })
+    fireEvent.change(screen.getByPlaceholderText('x'), { target: { value: 'x' } })
     fireEvent.click(screen.getByRole('button', { name: /下\s*发/ }))
     await waitFor(() => expect(apiMock.oobRedirectApply).toHaveBeenCalled())
     // 失败不关弹窗（onError 不置 createOpen(false)）
-    expect(screen.getByPlaceholderText('如 ipmi、kvm')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('留空 = 按 proto/目标推导')).toBeInTheDocument()
   })
 
   it('拆除：确认不一致拦截，一致调用', async () => {
@@ -286,5 +287,50 @@ describe('Oob', () => {
     expect(screen.queryByRole('button', { name: /新建规则/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /清扫过期/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /拆\s*除/ })).toBeNull()
+  })
+
+  it('非 cockpit 前缀规则不渲染拆除入口（与后端 Owned 同口径）', async () => {
+    renderPage([mkAgent('ag-1')])
+    await typeOob()
+    await screen.findByText('user_forward')
+    // 仅 2 条 cockpit 规则有拆除按钮；user_forward / bare_rule 无。
+    expect(screen.getAllByRole('button', { name: /拆\s*除/ })).toHaveLength(2)
+  })
+
+  it('显式选中的主机掉线：effectiveAgentId 回退到首个在线主机', async () => {
+    const online = mkAgent('ag-1', 'router')
+    const selected = mkAgent('ag-2', 'old')
+    const { qc } = renderPage([online, selected])
+    await typeOob()
+    await screen.findByText('cockpit_ipmi_1790000000')
+    // 显式选择 ag-2（在线）。
+    const select = screen.getByRole('combobox')
+    fireEvent.mouseDown(select)
+    fireEvent.click(await screen.findByText('old'))
+    await waitFor(() => expect(apiMock.oobRedirectList.mock.calls.length).toBeGreaterThanOrEqual(2))
+    // ag-2 掉线：agents 重取后 oobAgents 只剩 ag-1，effectiveAgentId 回退。
+    apiMock.getAgents.mockResolvedValue([online, { ...selected, status: 'offline' } as unknown as Agent])
+    await qc.invalidateQueries({ queryKey: ['agents'] })
+    await waitFor(() => expect(apiMock.oobRedirectList.mock.calls.length).toBeGreaterThanOrEqual(3))
+    const calls = apiMock.oobRedirectList.mock.calls
+    expect(calls.some((c) => c[0] === 'ag-2')).toBe(true) // ag-2 在线时确实被选中过
+    expect(calls.filter((_, i) => i >= 2).every((c) => c[0] === 'ag-1')).toBe(true) // 掉线后回退
+  })
+
+  it('新建：label 可留空，confirm 留空即一致（后端按 proto/目标推导）', async () => {
+    renderPage([mkAgent('ag-1')])
+    await typeOob()
+    await screen.findByText('cockpit_ipmi_1790000000')
+    fireEvent.click(screen.getByRole('button', { name: /新建规则/ }))
+    fireEvent.change(screen.getByPlaceholderText('wan'), { target: { value: 'wan' } })
+    fireEvent.change(screen.getByPlaceholderText('lan'), { target: { value: 'lan' } })
+    fireEvent.change(screen.getByPlaceholderText('192.168.1.10'), { target: { value: '192.168.1.10' } })
+    fireEvent.change(screen.getByPlaceholderText('16992'), { target: { value: '16992' } })
+    fireEvent.click(screen.getByRole('button', { name: /下\s*发/ }))
+    await waitFor(() =>
+      expect(apiMock.oobRedirectApply).toHaveBeenCalledWith(expect.objectContaining({
+        spec: expect.objectContaining({ proto: 'tcp', dst_ip: '192.168.1.10', dst_port: 16992 }),
+      })),
+    )
   })
 })
