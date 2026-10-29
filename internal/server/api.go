@@ -152,6 +152,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			s.handleAgentSmartAPI(w, r, agentID)
 			return
 		}
+		// 本地虚拟化只读面 /agents/{id}/virt/...（见 api_virt.go）
+		if strings.Contains(agentID, "/virt/") {
+			s.handleAgentVirtAPI(w, r, agentID)
+			return
+		}
 		// 防火墙规则集快照 /agents/{id}/firewall/...（见 api_firewall.go）
 		if strings.Contains(agentID, "/firewall/") {
 			s.handleAgentFirewallAPI(w, r, agentID)

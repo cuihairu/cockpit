@@ -15,9 +15,16 @@ import (
 func fakeVirtRun(t *testing.T, script map[string]func(args []string, stderr *strings.Builder) (string, error)) func(context.Context, string, ...string) ([]byte, []byte, error) {
 	t.Helper()
 	return func(ctx context.Context, bin string, args ...string) ([]byte, []byte, error) {
+		// Identify the subcommand: skip global options, and skip the value of
+		// a `-c` connection option so `-r -c lxc:/// capabilities` resolves
+		// the verb to `capabilities`, not `lxc:///`.
 		verb := ""
-		for i := range args {
-			if i > 0 && !strings.HasPrefix(args[i], "-") {
+		for i := 0; i < len(args); i++ {
+			if args[i] == "-c" {
+				i++ // skip connection URI
+				continue
+			}
+			if !strings.HasPrefix(args[i], "-") {
 				verb = args[i]
 				break
 			}
@@ -92,11 +99,14 @@ func TestLibvirtCapabilitiesDaemonUnavailable(t *testing.T) {
 		},
 	})
 	out, err := NewLibvirtProvider("virsh", run).Capabilities(nil)
-	if err == nil || !strings.Contains(err.Error(), "failed to connect to hypervisor") {
-		t.Fatalf("err = %v, want daemon detail preserved", err)
+	if err != nil {
+		t.Fatalf("daemon-down must not be a probe error: %v", err)
 	}
 	if out["available"] != false {
 		t.Fatalf("available = %v, want false", out["available"])
+	}
+	if got := out["error"]; got != "failed to connect to hypervisor" {
+		t.Fatalf("error detail = %v, want preserved stderr", got)
 	}
 }
 
@@ -106,9 +116,15 @@ func TestLibvirtCapabilitiesDaemonErrorNoStderr(t *testing.T) {
 			return "", errors.New("exit status 1")
 		},
 	})
-	_, err := NewLibvirtProvider("virsh", run).Capabilities(nil)
-	if err == nil || strings.Contains(err.Error(), ": :") || !strings.Contains(err.Error(), "libvirt probe:") {
-		t.Fatalf("err = %v, want probe wrap without detail", err)
+	out, err := NewLibvirtProvider("virsh", run).Capabilities(nil)
+	if err != nil {
+		t.Fatalf("no-stderr daemon down must not error: %v", err)
+	}
+	if out["available"] != false {
+		t.Fatalf("available = %v, want false", out["available"])
+	}
+	if got := out["error"]; got != "exit status 1" {
+		t.Fatalf("error = %v, want fallback to exit status 1", got)
 	}
 }
 
@@ -139,6 +155,9 @@ func TestLibvirtListVMSAndContainers(t *testing.T) {
 			if !hasFlag(args, "-r") {
 				t.Errorf("list missing read-only -r: %v", args)
 			}
+			if hasFlag(args, "-c") {
+				t.Errorf("vms.list must not pass -c (default qemu connection): %v", args)
+			}
 			return "web-01\ndb-02\n", nil
 		},
 	})
@@ -147,17 +166,81 @@ func TestLibvirtListVMSAndContainers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("vms.list: %v", err)
 	}
-	vms := out.(map[string]interface{})["vms"].([]string)
+	// Shape is a flat name list, not the PVE {vms: []} object (audit finding).
+	vms, ok := out.([]string)
+	if !ok {
+		t.Fatalf("vms.list shape = %T, want []string", out)
+	}
 	if len(vms) != 2 || vms[0] != "web-01" || vms[1] != "db-02" {
 		t.Fatalf("vms = %v", vms)
 	}
-	out, err = p.Call("containers.list", nil)
+}
+
+func TestLibvirtContainersUseLXCConnection(t *testing.T) {
+	run := fakeVirtRun(t, map[string]func([]string, *strings.Builder) (string, error){
+		"list": func(args []string, _ *strings.Builder) (string, error) {
+			if !hasFlag(args, "-r") {
+				t.Errorf("list missing read-only -r: %v", args)
+			}
+			if !hasFlag(args, "-c") || !hasFlag(args, "lxc:///") {
+				t.Errorf("containers.list must target lxc:/// connection: %v", args)
+			}
+			return "ct-1\n", nil
+		},
+	})
+	out, err := NewLibvirtProvider("virsh", run).Call("containers.list", nil)
 	if err != nil {
 		t.Fatalf("containers.list: %v", err)
 	}
-	cts := out.(map[string]interface{})["containers"].([]string)
-	if len(cts) != 2 {
-		t.Fatalf("containers = %v", cts)
+	cts, ok := out.([]string)
+	if !ok || len(cts) != 1 || cts[0] != "ct-1" {
+		t.Fatalf("containers = %#v, want [ct-1]", out)
+	}
+}
+
+func TestLibvirtCapabilitiesProbesLXCConnection(t *testing.T) {
+	run := fakeVirtRun(t, map[string]func([]string, *strings.Builder) (string, error){
+		"capabilities": func(args []string, _ *strings.Builder) (string, error) {
+			// Default connection: qemu only, no lxc driver advertised.
+			if hasFlag(args, "-c") {
+				return `<capabilities><domain type='lxc'></domain></capabilities>`, nil
+			}
+			return `<capabilities><domain type='qemu'></domain></capabilities>`, nil
+		},
+		"uri": func(args []string, _ *strings.Builder) (string, error) { return "qemu:///system\n", nil },
+	})
+	out, err := NewLibvirtProvider("virsh", run).Capabilities(nil)
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	// lxc must come from the dedicated connection probe, not the default.
+	if out["lxc"] != true {
+		t.Fatalf("lxc = %v, want true from lxc:/// probe", out["lxc"])
+	}
+	if out["hypervisor"] != true {
+		t.Fatalf("hypervisor = %v, want true from default probe", out["hypervisor"])
+	}
+}
+
+func TestLibvirtCapabilitiesLXCProbeFailsHonest(t *testing.T) {
+	run := fakeVirtRun(t, map[string]func([]string, *strings.Builder) (string, error){
+		"capabilities": func(args []string, _ *strings.Builder) (string, error) {
+			if hasFlag(args, "-c") {
+				return "", errors.New("exit status 1")
+			}
+			return `<capabilities><domain type='qemu'></domain></capabilities>`, nil
+		},
+		"uri": func(args []string, _ *strings.Builder) (string, error) { return "qemu:///system\n", nil },
+	})
+	out, err := NewLibvirtProvider("virsh", run).Capabilities(nil)
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	if out["available"] != true {
+		t.Fatalf("available = %v, want true (default probe OK)", out["available"])
+	}
+	if out["lxc"] != false {
+		t.Fatalf("lxc = %v, want false when lxc:/// probe fails", out["lxc"])
 	}
 }
 
@@ -169,7 +252,10 @@ func TestLibvirtListEmptyIsNotNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VMS: %v", err)
 	}
-	vms := out.(map[string]interface{})["vms"].([]string)
+	vms, ok := out.([]string)
+	if !ok {
+		t.Fatalf("VMS shape = %T, want []string", out)
+	}
 	if vms == nil || len(vms) != 0 {
 		t.Fatalf("vms = %#v, want empty non-nil slice", vms)
 	}

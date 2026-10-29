@@ -17,6 +17,12 @@ import (
 const (
 	libvirtProbeTimeout = 5 * time.Second
 	libvirtListTimeout  = 10 * time.Second
+	// libvirtLXCURI is the dedicated LXC connection URI. `virsh capabilities`
+	// on the default qemu:///system connection reports only the qemu/kvm
+	// domain driver; the independent LXC driver is only visible when the
+	// probe targets its own connection (audit finding: default URI misses
+	// the lxc:/// driver and misreports LXC as unsupported).
+	libvirtLXCURI = "lxc:///"
 )
 
 // libvirtRun is the process execution seam. Production runs `virsh -r`
@@ -88,8 +94,11 @@ func (p *LibvirtProvider) Call(action string, params map[string]interface{}) (in
 }
 
 // Capabilities probes the local libvirt daemon and classifies drivers
-// visible in `virsh capabilities`. Only daemon-verified evidence is
-// reported: no driver is inferred from the virsh binary being installed.
+// visible in `virsh capabilities`. The default connection (qemu:///system)
+// is probed first, then the dedicated LXC connection so an independent
+// lxc:/// driver is never misreported as unsupported. Only daemon-verified
+// evidence is reported: no driver is inferred from the virsh binary being
+// installed.
 func (p *LibvirtProvider) Capabilities(params map[string]interface{}) (map[string]interface{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), libvirtProbeTimeout)
 	defer cancel()
@@ -100,11 +109,26 @@ func (p *LibvirtProvider) Capabilities(params map[string]interface{}) (map[strin
 	// available=false with the transport detail preserved.
 	capsXML, stderr, err := p.run(ctx, p.bin, "-r", "capabilities")
 	if err != nil {
-		return map[string]interface{}{"available": false}, p.wrapProbe(err, stderr)
+		// available=false is data, not a transport failure: return it with the
+		// preserved detail so the RPC handler does not drop it on the error
+		// path (audit finding: Handler discards result when err != nil).
+		detail := strings.TrimSpace(string(stderr))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return map[string]interface{}{"available": false, "error": detail}, nil
 	}
 
 	out := map[string]interface{}{"available": true}
 	hypervisor, lxc := libvirtDriversFromCapabilities(string(capsXML))
+	// Probe the dedicated LXC connection: the default qemu URI does not list
+	// the lxc driver, so without this a host with only an lxc:/// driver
+	// would be misreported as no-LXC. A failed lxc probe is honest evidence
+	// that the driver is absent (lxc stays false), not a probe failure.
+	if lxcXML, _, lxcErr := p.run(ctx, p.bin, "-r", "-c", libvirtLXCURI, "capabilities"); lxcErr == nil {
+		_, lxcSeen := libvirtDriversFromCapabilities(string(lxcXML))
+		lxc = lxc || lxcSeen
+	}
 	out["hypervisor"] = hypervisor
 	out["lxc"] = lxc
 
@@ -148,45 +172,44 @@ func libvirtDriversFromCapabilities(xml string) (bool, bool) {
 	return hypervisor, lxc
 }
 
-// wrapProbe preserves transport errors verbatim so callers can tell
-// "daemon present but XML parse/capabilities call failed" apart from
-// "daemon unreachable" — same honesty rule as oobPresence.
-func (p *LibvirtProvider) wrapProbe(err error, stderr []byte) error {
-	detail := strings.TrimSpace(string(stderr))
-	if detail == "" {
-		return fmt.Errorf("libvirt probe: %w", err)
-	}
-	return fmt.Errorf("libvirt probe: %v: %s", err, detail)
-}
-
-// VMS lists libvirt-managed domains (action "vms.list"). Shape follows the
-// PVE list contract ({vms: []}) so server consumers can share rendering.
+// VMS lists libvirt-managed QEMU/KVM domains (action "vms.list"). Uses the
+// default qemu:///system connection; the LXC driver is never mixed in. The
+// shape is a flat name list (the read-only slice only has names), distinct
+// from the PVE []VM object shape — the prior comment falsely claimed PVE
+// alignment (audit finding).
 func (p *LibvirtProvider) VMS(params map[string]interface{}) (interface{}, error) {
-	names, err := p.listNames("--all")
+	names, err := p.listNames("", "--all")
 	if err != nil {
 		return nil, fmt.Errorf("virt.vms.list: %w", err)
 	}
-	return map[string]interface{}{"vms": names}, nil
+	return names, nil
 }
 
 // Containers lists libvirt-managed LXC domains (action "containers.list").
-// `virsh -r list --all` returns both QEMU and LXC domains on the same
-// daemon; the distinction is surfaced via capabilities in this read-only
-// slice rather than guessed per row.
+// Targets the dedicated lxc:/// connection so QEMU domains are never
+// returned as containers (audit finding: reusing the default connection
+// both leaked QEMU domains and dropped all LXC).
 func (p *LibvirtProvider) Containers(params map[string]interface{}) (interface{}, error) {
-	names, err := p.listNames("--all")
+	names, err := p.listNames(libvirtLXCURI, "--all")
 	if err != nil {
 		return nil, fmt.Errorf("virt.containers.list: %w", err)
 	}
-	return map[string]interface{}{"containers": names}, nil
+	return names, nil
 }
 
-// listNames runs `virsh -r list --all --name` and returns one name per
-// line, preserving blank-line honesty (an empty list is empty, not nil).
-func (p *LibvirtProvider) listNames(extra ...string) ([]string, error) {
+// listNames runs `virsh -r [-c uri] list --all --name` and returns one name
+// per line, preserving blank-line honesty (an empty list is empty, not nil).
+// conn empty means the default (qemu) connection; otherwise it is passed via
+// the `-c` global option before the subcommand.
+func (p *LibvirtProvider) listNames(conn string, extra ...string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), libvirtListTimeout)
 	defer cancel()
-	args := append([]string{"-r", "list", "--all", "--name"}, extra...)
+	args := []string{"-r"}
+	if conn != "" {
+		args = append(args, "-c", conn)
+	}
+	args = append(args, "list", "--all", "--name")
+	args = append(args, extra...)
 	stdout, stderr, err := p.run(ctx, p.bin, args...)
 	if err != nil {
 		detail := strings.TrimSpace(string(stderr))
