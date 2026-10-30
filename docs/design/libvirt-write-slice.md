@@ -13,8 +13,8 @@ status: design-draft (2026-10-30, 已代决 docs/review/2026-10-30-decisions.md 
 
 | 维度 | 现有 CLI 适配（`virsh -r`） | Go 绑定（如 libvirt-go） |
 |---|---|---|
-| 依赖 | 宿主有 `virsh` 即可（`internal/agent/rpc/libvirt_provider.go:34` LookPath 检测）；go.mod/go.sum 零新增依赖（核实：`grep -i libvirt`＝0） | 需 cgo＋系统 libvirt-dev 构建依赖，与宿主 libvirt 版本耦合 |
-| 权限边界 | `-r` 只读连接——连接本身不能变更状态（`libvirt_provider.go:12-14` 注释明确）；写片可单独去 `-r` 并显式授权 | 直接持 socket 权限，读写由代码控制，边界靠自觉 |
+| 依赖 | 宿主有 `virsh` 即可（`internal/agent/rpc/libvirt_provider.go:75` LookPath 检测）；go.mod/go.sum 零新增依赖（核实：`grep -i libvirt`＝0） | 需 cgo＋系统 libvirt-dev 构建依赖，与宿主 libvirt 版本耦合 |
+| 权限边界 | `-r` 只读连接——连接本身不能变更状态（`libvirt_provider.go:28-29` 注释明确）；写片可单独去 `-r` 并显式授权 | 直接持 socket 权限，读写由代码控制，边界靠自觉 |
 | 超时/错误语义 | 进程级超时（`libvirtProbeTimeout=5s`/`libvirtListTimeout=10s`）；stderr 原文保留 | API 调用级错误，语义更结构化 |
 | 测试 | 注入假 runner/PATH 桩，零 virsh 子进程（既有单测模式） | 需真实 daemon 或较重 mock |
 | 覆盖 | 只读三动作（capabilities/vms.list/containers.list）足够当前片 | 全 API 面（未来快照/迁移或需） |

@@ -24,7 +24,7 @@ status: design-settled (2026-10-30, 已代决 docs/review/2026-10-30-decisions.m
 | `internal/protocol/message.go:56-63` | `protocol.Capability{Type, Endpoint, Version, Metadata}`——注册负载携带 |
 | `internal/protocol/message.go:84` | `RegisterPayload.Capabilities []Capability` |
 | `internal/agent/agent.go:572` | capability 上报 metadata `read_only=true`（libvirt 只读片例） |
-| `internal/probeagent/upstream.go:247` | 探针 agent 注册 `[]protocol.Capability{{Type:"probe"}}` |
+| `internal/probeagent/upstream.go:247` | 探针 agent 注册 `[]protocol.Capability&#123;&#123;Type:"probe"&#125;&#125;` |
 | `internal/inventory/sync.go:105-111` | inventory 声明能力 → storage.Capability；`detectCapabilities` 从 config 键推断（`pve/docker/openwrt`） |
 | `internal/agent/providers.go:42-105` | rpc Provider 注册（system/backup/file/ssh/job/oob/pve/…），与 capability 检测联动 |
 

@@ -27,7 +27,7 @@
 
 成本以低/中/高作相对比较，指新增工作、设备和维护负担，不是报价或工期承诺。不假设你已经拥有某账号，也不替你批准采购、生产暴露或付费资源。
 
-阅读纠偏：`todo.md:15` 的“19 条、无仓内可开工项”是 10 月 19 日快照，不能覆盖后来新增条目；多云/OOB 章节标题的“未拍板”不能推翻条目内 10 月 20 日已批准的事实。`todo.md:75` 的进度注记仍把腾讯适配器列为后续，但同条主文已记录其完成；当前 `internal/server/api_cloud.go` 的实例接口只读数据库台账，不调用厂商发现 API。libvirt 第 123 行的旧输出描述也已被文末审核修正，当前返回名称列表，VM 与 LXC 分别查询。
+阅读纠偏：`todo.md:15` 的“19 条、无仓内可开工项”是 10 月 19 日快照，不能覆盖后来新增条目；多云/OOB 章节标题的“未拍板”不能推翻条目内 10 月 20 日已批准的事实。`todo.md:77` 的进度注记已记录腾讯适配器完成（片4 已落 df558ff），后续=发现/生命周期接线；当前 `internal/server/api_cloud.go` 的实例接口只读数据库台账，不调用厂商发现 API。libvirt 第 123 行的旧输出描述也已被文末审核修正，当前返回名称列表，VM 与 LXC 分别查询。
 
 ## 一、真机、真实账号和凭据：15 项
 
@@ -706,53 +706,53 @@
 
 | 项 | 待办源行 | 成果 | 状态 |
 |---|---|---|---|
-| 20 P0 云 | todo.md:56 | `docs/design/cloud-lifecycle-wiring.md`（厂商发现/生命周期 API 与界面接线缺口清单） | ✅ 已执行（接线盘点） |
-| 21 P1 资源池 | todo.md:58 | `docs/design/p1-resource-ownership.md`（资源归属/单写入负责人/交接/暂停/冲突拒绝/审计） | ✅ 已执行（设计稿） |
-| 23 P0 Capability 等 | todo.md:70 | `docs/design/agent-capability-contract.md`（能力/版本/权限状态最小契约） | ✅ 已执行（设计稿） |
-| 24 P0 短期凭据等 | todo.md:71 | `docs/design/resource-permission-matrix.md`（角色×资源×动作矩阵、短期凭据、过期/撤销/迁移规则） | ✅ 已执行（设计稿） |
-| 25 P1 离线/会话/电源/深读 | todo.md:72 | `docs/design/offline-buffer-design.md`（缓冲容量/过期/去重/补报顺序＋电源接口盘点§4） | ✅ 已执行（设计稿＋盘点） |
-| 28 libvirt 绑定 | todo.md:96 | `docs/design/libvirt-write-slice.md`（CLI vs Go 绑定比较结论§1、启停设计§2、授权目标§3） | ✅ 已执行（比较结论＋启停设计） |
-| 29 Agent 准入/secret 生命周期 | todo.md:202 | `docs/design/agent-secret-lifecycle.md`（现状盘点§1、生命周期模型§2、迁移路径§3） | ✅ 已执行（盘点＋设计稿） |
-| 30 密码重置及验证码限速 | todo.md:202 | `docs/design/password-reset-protection.md`（入口暴露/邮件链/现有保护盘点§1、限速设计§2） | ✅ 已执行（盘点＋设计稿） |
-| 31 持久化任务恢复/重试 | todo.md:202 | `docs/design/task-recovery-design.md`（任务类型分类§1、任务身份/去重/租约§2、恢复规则§3） | ✅ 已执行（盘点＋设计稿） |
-| 32 Agent/资源范围授权 | todo.md:202 | 并入 24：`docs/design/resource-permission-matrix.md`（跨 API 授权矩阵、资源归属） | ✅ 已执行（设计稿，与 24 合并） |
+| 20 P0 云 | todo.md:75 | `docs/design/cloud-lifecycle-wiring.md`（厂商发现/生命周期 API 与界面接线缺口清单） | ✅ 已执行（接线盘点） |
+| 21 P1 资源池 | todo.md:78 | `docs/design/p1-resource-ownership.md`（资源归属/单写入负责人/交接/暂停/冲突拒绝/审计） | ✅ 已执行（设计稿） |
+| 23 P0 Capability 等 | todo.md:92 | `docs/design/agent-capability-contract.md`（能力/版本/权限状态最小契约） | ✅ 已执行（设计稿） |
+| 24 P0 短期凭据等 | todo.md:94 | `docs/design/resource-permission-matrix.md`（角色×资源×动作矩阵、短期凭据、过期/撤销/迁移规则） | ✅ 已执行（设计稿） |
+| 25 P1 离线/会话/电源/深读 | todo.md:96 | `docs/design/offline-buffer-design.md`（缓冲容量/过期/去重/补报顺序＋电源接口盘点§4） | ✅ 已执行（设计稿＋盘点） |
+| 28 libvirt 绑定 | todo.md:123 | `docs/design/libvirt-write-slice.md`（CLI vs Go 绑定比较结论§1、启停设计§2、授权目标§3） | ✅ 已执行（比较结论＋启停设计） |
+| 29 Agent 准入/secret 生命周期 | todo.md:241 | `docs/design/agent-secret-lifecycle.md`（现状盘点§1、生命周期模型§2、迁移路径§3） | ✅ 已执行（盘点＋设计稿） |
+| 30 密码重置及验证码限速 | todo.md:241 | `docs/design/password-reset-protection.md`（入口暴露/邮件链/现有保护盘点§1、限速设计§2） | ✅ 已执行（盘点＋设计稿） |
+| 31 持久化任务恢复/重试 | todo.md:241 | `docs/design/task-recovery-design.md`（任务类型分类§1、任务身份/去重/租约§2、恢复规则§3） | ✅ 已执行（盘点＋设计稿） |
+| 32 Agent/资源范围授权 | todo.md:241 | 并入 24：`docs/design/resource-permission-matrix.md`（跨 API 授权矩阵、资源归属） | ✅ 已执行（设计稿，与 24 合并） |
 
 ### 待用户（本次跳过，逐项列明缺口）
 
 | 项 | 待办源行 | 缺口（待用户提供） |
 |---|---|---|
 | 01 service-health | todo.md:19 | 生产完整 `wss://…` 地址、认证方式、允许接入 VM；未获授权不改生产监听/不开放 `:9000` |
-| 02 Windows SCM | todo.md:21 | 已提权管理员验收会话、测试服务、初始状态及清理方法；不关 UAC/不索要明文密码 |
-| 03 macOS launchd | todo.md:25 | 可借 Mac 系统版本/窗口/管理员方式；不把 Linux 模拟或 CI 编译当真机通过 |
-| 04 NAS | todo.md:27 | 实际在用 NAS 型号/系统版本/只读账号/测试存储；不在存重要数据的阵列上拔盘 |
-| 05 备份云远端 | todo.md:28 | 真实 S3/B2 凭据、测试桶、费用上限、宿主 rclone（外部软件）；不把本地兼容服务当真 S3/B2 |
-| 06 录制异地 | todo.md:29 | 真实 rclone remote（外部软件）；本次不安装 rclone、不上传真实敏感会话 |
-| 07 ACME | todo.md:30 | 专用测试域名、DNS 区域、可操作凭据；不直接替换主站证书、密钥不进报告/仓库 |
-| 08 Cloudflare DDNS | todo.md:31 | 真实 token、家庭侧出口环境；不改主域名/生产解析、不拿服务器出口冒充家庭出口 |
-| 09 overlay ZT/TS | todo.md:32 | 真实凭据、第二台主机、隔离测试网络；不自研 mesh、不除名现网节点 |
-| 10 SMART | todo.md:33 | 可透传 SMART 实盘、脱敏属性表、权限条件；不人为损坏健康盘 |
-| 11 DNSPod/阿里云 | todo.md:34 | 两家真实 DNS 账号、测试区域；不迁移生产主域名、不动邮件等关键记录 |
-| 12 Guacamole RDP 音频 | todo.md:35 | 可用的 Windows RDP 音频环境；不重写桌面协议、不为「没声音」直接改编码 |
-| 13 Android | todo.md:36 | Android 真机、受控签名材料、ntfy 配置；不生成替代正式密钥冒充升级成功 |
-| 14 web 移动端触屏 | todo.md:37 | 真实触屏设备；不先重构响应式布局、不把桌面设备模式当真机通过 |
-| 15 iOS | todo.md:38 | 明确 iPhone 使用者/分发目标后准备签名+真机；当前不建议专门买 Mac/开通付费服务 |
-| 16 防火墙写 | todo.md:42 | 只读真机目标机与验收条目；不开发通用规则增删、OpenWrt 限时兜底按独立边界 |
-| 17 workflow 并行 | todo.md:43 | 一条实际 workflow 的步骤耗时/依赖/共享资源；不重做 DAG、不新增 workflow SSE |
-| 18 persona vault | todo.md:44 | 隔离 persona 服务地址/凭据；不迁移全部生产凭据、不删 local 存量 |
-| 19 Jenkins 凭据引用 | todo.md:45 | 首个外部系统/具体操作/调用位置/成功标准；不在链接 URL 拼秘密 |
-| 20 P0 云（契约/闭环） | todo.md:56 | 两家测试子账号、区域、规格、费用硬上限、清理负责人、AccessKey 经 vault；Quota 契约真实响应核对 |
-| 21 P1（试点容量/预算） | todo.md:58 | P0 闭环后确认试点期望容量与预算（设计稿已落，试点确认待 P0＋用户拍板） |
-| 22 P2 智能调度等 | todo.md:59 | 真实资源选择耗时/可避免费用/允许停机损失；不训练智能调度、不为名义高可用改数据库 |
-| 23（契约之外三片） | todo.md:70 | 并发/超时隔离、幂等与执行窗口、升级回滚——实现待用户拍板（决策「不表示本次授权了实现」） |
-| 24（矩阵之外） | todo.md:71 | 个人/团队使用方式、OpenWrt 资源预算基线（需设备实测）；轻量模式最小构建据测量结果 |
-| 25（数据/场景） | todo.md:72 | 断线时长及数据缺口、双人协作场景（只看/可操作边界） |
-| 26 P0 OOB/OpenWrt | todo.md:83 | 可恢复 OpenWrt 真机型号/固件/架构/配置备份/独立管理入口/断电测试窗口；不给整个现网网关随意断电 |
-| 27 P1 机型矩阵等 | todo.md:87 | 实际验收设备（矩阵随 P0 验收同步记录）；Guardian 仅保留研究、IP-KVM 待真实缺口 |
-| 28（真机验收） | todo.md:96 | 带本地 libvirt socket 的隔离宿主＋测试 VM；启停白名单与写授权拍板；PVE REST 不代本地 libvirt |
-| 29（试点/预置） | todo.md:202 | 管理员预置需求、选一个可本地恢复的节点先验轮换/吊销；吊销后连接处理策略 |
-| 30（触发/验证） | todo.md:202 | 确认入口是否对公网开放/邮件可用（当前默认 `127.0.0.1`，触发未明）；验证正常找回/限流/不泄露账号存在性 |
-| 31（故障注入） | todo.md:202 | 故障注入验收（回复丢失/租约过期/重启遗留）待实现后；人工重试场景 |
-| 33 Job 实时输出/进度 | todo.md:202 | 一条真实长任务、等待时长、所需中途信息；不新增第二套任意命令执行通道 |
+| 02 Windows SCM | todo.md:22 | 已提权管理员验收会话、测试服务、初始状态及清理方法；不关 UAC/不索要明文密码 |
+| 03 macOS launchd | todo.md:27 | 可借 Mac 系统版本/窗口/管理员方式；不把 Linux 模拟或 CI 编译当真机通过 |
+| 04 NAS | todo.md:30 | 实际在用 NAS 型号/系统版本/只读账号/测试存储；不在存重要数据的阵列上拔盘 |
+| 05 备份云远端 | todo.md:32 | 真实 S3/B2 凭据、测试桶、费用上限、宿主 rclone（外部软件）；不把本地兼容服务当真 S3/B2 |
+| 06 录制异地 | todo.md:34 | 真实 rclone remote（外部软件）；本次不安装 rclone、不上传真实敏感会话 |
+| 07 ACME | todo.md:36 | 专用测试域名、DNS 区域、可操作凭据；不直接替换主站证书、密钥不进报告/仓库 |
+| 08 Cloudflare DDNS | todo.md:38 | 真实 token、家庭侧出口环境；不改主域名/生产解析、不拿服务器出口冒充家庭出口 |
+| 09 overlay ZT/TS | todo.md:40 | 真实凭据、第二台主机、隔离测试网络；不自研 mesh、不除名现网节点 |
+| 10 SMART | todo.md:42 | 可透传 SMART 实盘、脱敏属性表、权限条件；不人为损坏健康盘 |
+| 11 DNSPod/阿里云 | todo.md:44 | 两家真实 DNS 账号、测试区域；不迁移生产主域名、不动邮件等关键记录 |
+| 12 Guacamole RDP 音频 | todo.md:46 | 可用的 Windows RDP 音频环境；不重写桌面协议、不为「没声音」直接改编码 |
+| 13 Android | todo.md:48 | Android 真机、受控签名材料、ntfy 配置；不生成替代正式密钥冒充升级成功 |
+| 14 web 移动端触屏 | todo.md:50 | 真实触屏设备；不先重构响应式布局、不把桌面设备模式当真机通过 |
+| 15 iOS | todo.md:52 | 明确 iPhone 使用者/分发目标后准备签名+真机；当前不建议专门买 Mac/开通付费服务 |
+| 16 防火墙写 | todo.md:57 | 只读真机目标机与验收条目；不开发通用规则增删、OpenWrt 限时兜底按独立边界 |
+| 17 workflow 并行 | todo.md:59 | 一条实际 workflow 的步骤耗时/依赖/共享资源；不重做 DAG、不新增 workflow SSE |
+| 18 persona vault | todo.md:61 | 隔离 persona 服务地址/凭据；不迁移全部生产凭据、不删 local 存量 |
+| 19 Jenkins 凭据引用 | todo.md:63 | 首个外部系统/具体操作/调用位置/成功标准；不在链接 URL 拼秘密 |
+| 20 P0 云（契约/闭环） | todo.md:75 | 两家测试子账号、区域、规格、费用硬上限、清理负责人、AccessKey 经 vault；Quota 契约真实响应核对 |
+| 21 P1（试点容量/预算） | todo.md:78 | P0 闭环后确认试点期望容量与预算（设计稿已落，试点确认待 P0＋用户拍板） |
+| 22 P2 智能调度等 | todo.md:80 | 真实资源选择耗时/可避免费用/允许停机损失；不训练智能调度、不为名义高可用改数据库 |
+| 23（契约之外三片） | todo.md:92 | 并发/超时隔离、幂等与执行窗口、升级回滚——实现待用户拍板（决策「不表示本次授权了实现」） |
+| 24（矩阵之外） | todo.md:94 | 个人/团队使用方式、OpenWrt 资源预算基线（需设备实测）；轻量模式最小构建据测量结果 |
+| 25（数据/场景） | todo.md:96 | 断线时长及数据缺口、双人协作场景（只看/可操作边界） |
+| 26 P0 OOB/OpenWrt | todo.md:108 | 可恢复 OpenWrt 真机型号/固件/架构/配置备份/独立管理入口/断电测试窗口；不给整个现网网关随意断电 |
+| 27 P1 机型矩阵等 | todo.md:113 | 实际验收设备（矩阵随 P0 验收同步记录）；Guardian 仅保留研究、IP-KVM 待真实缺口 |
+| 28（真机验收） | todo.md:123 | 带本地 libvirt socket 的隔离宿主＋测试 VM；启停白名单与写授权拍板；PVE REST 不代本地 libvirt |
+| 29（试点/预置） | todo.md:241 | 管理员预置需求、选一个可本地恢复的节点先验轮换/吊销；吊销后连接处理策略 |
+| 30（触发/验证） | todo.md:241 | 确认入口是否对公网开放/邮件可用（当前默认 `127.0.0.1`，触发未明）；验证正常找回/限流/不泄露账号存在性 |
+| 31（故障注入） | todo.md:241 | 故障注入验收（回复丢失/租约过期/重启遗留）待实现后；人工重试场景 |
+| 33 Job 实时输出/进度 | todo.md:241 | 一条真实长任务、等待时长、所需中途信息；不新增第二套任意命令执行通道 |
 
 ### 说明
 
