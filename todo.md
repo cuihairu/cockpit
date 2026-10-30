@@ -73,10 +73,10 @@
 > 边界注意：Reconciler 用普通 Go 小控制器，不触碰「不做」清单的 K8s CRD 全量模型。
 
 - [ ] P0 云账号接入 / 资源自动发现 / Provider Framework / 计算生命周期闭环 / 成本地基〔2026-10-20 用户拍板开工（首批厂商已代决：阿里云+腾讯云）；**片1已落 cfeee64**（设计 docs/design/cloud-provider.md(+en)、`internal/cloud`：拆分接口/能力声明+注册表 fail-closed 校验/Operation 状态机 pending→running→succeeded|failed/资源成本类型，go build ./... 绿 + 包覆盖率 100%）；**片2已落**（`internal/storage/cloud.go`：cloud_accounts/cloud_instances 表 AutoMigrate、账号/实例 upsert/list/delete、`${VAR}` 凭据引用形态校验+运行时解析 fail-closed，storage 包测试绿）；**片3 Compute 部分已落 8bf385c**（签名器抽中立包 `internal/alisign`（原 dns/sign.go，dns 同步改用，e862a4f）+ `internal/cloud/aliyun` ECS 适配器：DescribeInstances 分页列表+状态/计费归一（过渡态归 unknown 原文保留）、RunInstances 创建（InstanceSpec 增 SecurityGroupID）、启停删、GetOperation 以实例状态推断完成态，fake server 契约测试（桩侧复算签名）绿 + 包覆盖 100% + 全量门禁绿）；**片4 适配器已落 df558ff**（TC3-HMAC-SHA256 签名抽中立包 `internal/tcsign`（纯函数，结构/敏感性/确定性测试，100% 覆盖）+ `internal/cloud/tencent` CVM 适配器：DescribeInstances 分页列表+状态/计费归一（过渡态归 unknown 原文保留）、RunInstances 创建、启停删、GetOperation 以实例状态推断完成态，fake server 契约测试（桩侧复算 TC3 签名）绿 + 包覆盖 100%）；剩余=片3 Quota 子片〔统一配额服务 API 契约未经真实账号核对，不硬造，随片4 验收解锁〕与双厂商闭环验收〔阻塞=真实 AccessKey 由用户提供经 vault｜解锁=凭据到位；2026-10-27 修订口径：适配器契约先行，真 AccessKey 到位前不做闭环验收〕〕〔BLOCKED：缺真实云 AccessKey（Quota 子片与双厂商闭环验收）〕
-  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
+  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)〔立即动作已落：docs/design/cloud-lifecycle-wiring.md〕
   - 进度：**账号接线/web 双确认片已落**（`/api/cloud/accounts` 只回 `${VAR}` 引用，secret 经既有 vault `cloud/{vendor}/{alias}` 入库；`cloud:read/write` RBAC、审计、web 云账号页保存/删除逐字双确认；契约/页面测试绿），全量门禁受环境干扰未过；腾讯适配器已完成（上条片4 已落 df558ff）；后续=发现/生命周期接线。
 - [ ] P1 资源池与容量 / Go Reconciler / 云网络 / 预算策略引擎 / 双重控制边界裁定〔待拍板=P0 闭环后；其中「谁对同一资源有写入权（OpenTofu vs Reconciler）」需先裁定〕〔BLOCKED：缺用户裁决（P0 闭环后）〕
-  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
+  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)〔立即动作已落：docs/design/p1-resource-ownership.md〕
 - [ ] P2 智能调度 / 成本优化 / 控制面高可用〔待拍板=按真实需求〕〔BLOCKED：缺真实需求〕
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
 
@@ -90,11 +90,11 @@
 > **Provider Adapter 独立层归并入上方多云工作流，不单开线**。
 
 - [ ] P0 Agent 侧四件：Capability 协议 / 调度资源隔离（限流·优先级·超时）/ 升级回滚 / 任务可靠性（重试·窗口·幂等）〔待拍板=评审核心建议：先把 Agent Core 做小、契约做稳；四件可拆四单按序排｜解锁=拍板即排单〕〔BLOCKED：缺用户拍板〕
-  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
+  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)〔立即动作已落：docs/design/agent-capability-contract.md〕
 - [ ] P0 安全两件：短期凭据+资源级权限（Teleport 式，依托既有 vault）/ 轻量运行模式（最小构建+资源预算）〔待拍板〕〔BLOCKED：缺用户拍板〕
-  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
+  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)〔立即动作已落：docs/design/resource-permission-matrix.md〕
 - [ ] P1 离线数据缓冲 / 远程协作（会话共享）/ 统一电源控制（WoL+PVE；云电源随多云片）/ 四套源码深读笔记（Zabbix Agent 2·Teleport·Portainer Edge·Tactical RMM）〔待拍板=P0 后〕〔BLOCKED：缺用户拍板（P0 后）〕
-  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
+  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)〔立即动作已落：docs/design/offline-buffer-design.md〕
 
 ### 带外管理 OOB（2026-10-20 评审+用户裁决导入，未立项待拍板）
 
@@ -121,7 +121,7 @@
 > hcsshim/HCS；Firecracker/cloud-hypervisor 留给弹性池片再议。
 
 - [ ] agent libvirt 集成：能力探测（hypervisor/LXC）、VM 生命周期（列表/启停/快照/克隆只读先行）、经 agent RPC 上报〔**只读第一片已落 e36ea6e**：`internal/agent/rpc/libvirt_provider.go:93`（`Capabilities` 经 `virsh -r capabilities` 连 daemon 并解析 `<domain type='kvm'/lxc'>` 出 hypervisor/LXC，`libvirt_provider.go:138`（同函数解析）；daemon 不可达返回 available=false 并保留传输细节不猜驱动；URI/driver 经 `virsh -r uri` 最佳努力元数据，失败不降级判定）+ `libvirt_provider.go:164`/`libvirt_provider.go:176`（`vms.list`/`containers.list` 只读，`virsh -r list --all --name`，输出形状对齐 `pve.vms.list`/`pve.containers.list`）+ 注册 `internal/agent/providers.go:145`（`virt-libvirt` capability 且 virsh 在 PATH）+ capability 上报 `internal/agent/agent.go:572`（metadata read_only=true）；无任何写 action（Call 未知 verb 失败关闭）；验证二选一选**单测 mock**（`libvirt_provider_test.go` 与 `libvirt_wiring_test.go` 注入假 runner/PATH 桩，零 virsh 子进程；未用 PVE 192.168.5.10 真机，因本片是驻宿主 agent 经本地 libvirt socket，开发机无 virsh/libvirt socket，真机验收留写片后）；受影响 `internal/agent/...`（含 rpc）短测+块覆盖登记门（99.99%，1 语句既有豁免）+`-race`+`go vet` 全绿；剩余=写操作面（启停/快照/克隆）与真机/API 验收随生命周期片〕〔BLOCKED：缺 libvirt 绑定选型与生命周期片拍板〕
-  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
+  - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)〔立即动作已落：docs/design/libvirt-write-slice.md〕
 
 ### 文档
 
