@@ -74,7 +74,7 @@
 
 - [ ] P0 云账号接入 / 资源自动发现 / Provider Framework / 计算生命周期闭环 / 成本地基〔2026-10-20 用户拍板开工（首批厂商已代决：阿里云+腾讯云）；**片1已落 cfeee64**（设计 docs/design/cloud-provider.md(+en)、`internal/cloud`：拆分接口/能力声明+注册表 fail-closed 校验/Operation 状态机 pending→running→succeeded|failed/资源成本类型，go build ./... 绿 + 包覆盖率 100%）；**片2已落**（`internal/storage/cloud.go`：cloud_accounts/cloud_instances 表 AutoMigrate、账号/实例 upsert/list/delete、`${VAR}` 凭据引用形态校验+运行时解析 fail-closed，storage 包测试绿）；**片3 Compute 部分已落 8bf385c**（签名器抽中立包 `internal/alisign`（原 dns/sign.go，dns 同步改用，e862a4f）+ `internal/cloud/aliyun` ECS 适配器：DescribeInstances 分页列表+状态/计费归一（过渡态归 unknown 原文保留）、RunInstances 创建（InstanceSpec 增 SecurityGroupID）、启停删、GetOperation 以实例状态推断完成态，fake server 契约测试（桩侧复算签名）绿 + 包覆盖 100% + 全量门禁绿）；**片4 适配器已落 df558ff**（TC3-HMAC-SHA256 签名抽中立包 `internal/tcsign`（纯函数，结构/敏感性/确定性测试，100% 覆盖）+ `internal/cloud/tencent` CVM 适配器：DescribeInstances 分页列表+状态/计费归一（过渡态归 unknown 原文保留）、RunInstances 创建、启停删、GetOperation 以实例状态推断完成态，fake server 契约测试（桩侧复算 TC3 签名）绿 + 包覆盖 100%）；剩余=片3 Quota 子片〔统一配额服务 API 契约未经真实账号核对，不硬造，随片4 验收解锁〕与双厂商闭环验收〔阻塞=真实 AccessKey 由用户提供经 vault｜解锁=凭据到位；2026-10-27 修订口径：适配器契约先行，真 AccessKey 到位前不做闭环验收〕〕〔BLOCKED：缺真实云 AccessKey（Quota 子片与双厂商闭环验收）〕
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
-  - 进度：**账号接线/web 双确认片已落**（`/api/cloud/accounts` 只回 `${VAR}` 引用，secret 经既有 vault `cloud/{vendor}/{alias}` 入库；`cloud:read/write` RBAC、审计、web 云账号页保存/删除逐字双确认；契约/页面测试绿），全量门禁受环境干扰未过；后续=发现/生命周期接线与腾讯云适配器。
+  - 进度：**账号接线/web 双确认片已落**（`/api/cloud/accounts` 只回 `${VAR}` 引用，secret 经既有 vault `cloud/{vendor}/{alias}` 入库；`cloud:read/write` RBAC、审计、web 云账号页保存/删除逐字双确认；契约/页面测试绿），全量门禁受环境干扰未过；腾讯适配器已完成（上条片4 已落 df558ff）；后续=发现/生命周期接线。
 - [ ] P1 资源池与容量 / Go Reconciler / 云网络 / 预算策略引擎 / 双重控制边界裁定〔待拍板=P0 闭环后；其中「谁对同一资源有写入权（OpenTofu vs Reconciler）」需先裁定〕〔BLOCKED：缺用户裁决（P0 闭环后）〕
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
 - [ ] P2 智能调度 / 成本优化 / 控制面高可用〔待拍板=按真实需求〕〔BLOCKED：缺真实需求〕
@@ -302,4 +302,15 @@
   - 属实，已修：`internal/storage/cloud.go:140` `DeleteCloudAccount` 改事务内先删 `cloud_instances` 再删账号行，杜绝孤儿实例；不存在账号仍 `ErrNotFound`。证据：本 commit `cloud.go:140`（test `internal/storage/cloud_test.go` `TestDeleteCloudAccountCascadesInstances`）。
 - [x] 审核发现：本轮 diff 未见问题（c25f6b2e95434be0ac90f50e638f24c13bf230d3..HEAD）。
   - 属实，已复核：diff 即 commit a58ecb7，逐文件审毕——`api_cloud.go` 尾斜杠归一化（/instances 与 /instances/ 等价）、`cloudInstanceView` 时间戳口径与 accounts 端点一致、`DeleteCloudAccount` 事务内级联删 `cloud_instances`、`cov_agent_test.go` 注入本地不可达 publicIP 端点（不依赖真网）均无问题；受影响 `internal/server`+`internal/storage` 云测试与 `internal/agent` 重连测试全绿（含 -race），`go vet` 绿；`internal/server` 全量短测 600s 超时系既有环境红口径（ticket.go:104 cleanupLoop goroutine 泄漏，非本 diff 引入）。证据：本 commit `a58ecb7`。
-- [ ] 审核发现：本轮 diff 未见问题（a58ecb77..HEAD）。
+- 已删除原「审核发现：本轮 diff 未见问题（a58ecb77..HEAD）」行。不属实：`git log --oneline a58ecb7..HEAD` 实测返回 `4aa14c1`+`73c0a0b` 两个提交，且 `73c0a0b` 存在行号漂移，不能宣称该范围无问题。
+
+- [x] 审核发现：本 diff 同 commit 向 todo.md 插入 29 行「已代决」注释使既有条目行号整体下移，但新增 docs/review/2026-10-30-decisions.md 仍按插入前的旧行号引用 todo.md（如 01→19 正确，02→21 已漂移，实际在 22；覆盖与证据说明的 02→21/03→25/…/28→96 全部落后实际行），读者按引用定位将落到错误条目（docs/review/2026-10-30-decisions.md:609）。
+  - 属实，已修：`docs/review/2026-10-30-decisions.md` 逐项改为 01→19、02→22、03→27、04→30、05→32、06→34、07→36、08→38、09→40、10→42、11→44、12→46、13→48、14→50、15→52、16→57、17→59、18→61、19→63、20→75、21→78、22→80、23→92、24→94、25→96、26→108、27→113、28→123，并把 29—33 源改为 `todo.md:241`。证据：本 commit `docs/review/2026-10-30-decisions.md:609`（核对命令 `grep -n 'todo.md:[0-9]' docs/review/2026-10-30-decisions.md`，来源/覆盖表与实际待办行一致）。
+- [x] 审核发现：docs/review/2026-10-30-decisions.md:30 阅读纠偏称「todo.md:57 仍把腾讯适配器列为后续，但第 56 行已记录其完成」，但当前 todo.md:57 是防火墙写操作条目，todo.md:56 为腾讯适配器完成说明的 P0 云条目且未把腾讯列后续；该行号定位在插入后已错位（docs/review/2026-10-30-decisions.md:30）。
+  - 属实，已修：阅读纠偏改为引用 `todo.md:75`，并澄清“进度注记仍列为后续”；同时删除该过时说法，改为“腾讯适配器已完成（片4 df558ff），后续=发现/生命周期接线”。证据：本 commit `docs/review/2026-10-30-decisions.md:30`、`todo.md:75,77`。
+- [x] 审核发现：docs/review/2026-10-30-decisions.md:520/609/673-677 以 todo.md:202 指「表三 5 项能力仅评估」，但当前 todo.md:202 位于「已完成」区且为文档一致性审计行，实际「表三 5 项能力仅评估与 P0/P1/P2 建议」在 todo.md:241（插入后下移 28 行），引用失效（docs/review/2026-10-30-decisions.md:520）。
+  - 属实，已修：520/609/673-677 全部改为 `todo.md:241`。证据：本 commit `grep -n 'todo.md:241' docs/review/2026-10-30-decisions.md` 命中 `520`、`609`、`673-677`。
+- [x] 审核发现：docs/review/2026-10-30-decisions.md 覆盖表将 20→56/21→58/22→59/23→70/24→71/25→72/26→83/27→87/28→96，但插入后这些 BLOCKED 条目实际位于 75/78/80/92/94/96/108/113/123，全部漂移（docs/review/2026-10-30-decisions.md:669）。
+  - 属实，已修：覆盖表 20→75、21→78、22→80、23→92、24→94、25→96、26→108、27→113、28→123，并同步修正 01—19 的漂移源行。证据：本 commit `docs/review/2026-10-30-decisions.md:609,625-667`。
+- [x] 审核发现：todo.md:305 新加行「审核发现：本轮 diff 未见问题（a58ecb77..HEAD）」基线错误——a58ecb77..HEAD 实含两个 commit（4aa14c1+73c0a0b），非本轮审查范围（4aa14c14..HEAD 仅 73c0a0b），且同一 diff 已存在上述行号漂移问题，「未见问题」结论不成立（todo.md:305）。
+  - 属实，已修：删除该错误结论并改为不属实记录，防止“无问题”误导。证据：本 commit `todo.md:305`；`git log --oneline a58ecb7..HEAD` 结果为 `73c0a0b`、`4aa14c1`（2 commits），`git rev-list --count` 分别为 2/1。
