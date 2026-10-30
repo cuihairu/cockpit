@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cuihairu/cockpit/internal/config"
 	"github.com/cuihairu/cockpit/internal/storage"
@@ -194,5 +195,97 @@ func TestCloudInstancesRegisterRoute(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("registered route status = %d", rec.Code)
+	}
+}
+
+// TestCloudInstancesServeMuxRouting 经真实 ServeMux 验证 instances 端点
+// 的路由分发：/instances 与 /instances/ 均可达且等价，转发判定在 mux 层生效。
+func TestCloudInstancesServeMuxRouting(t *testing.T) {
+	s, _ := newCloudAPIServer(t)
+	if err := s.db.UpsertCloudAccount(&storage.CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	accounts, _ := s.db.ListCloudAccounts()
+	accountID := accounts[0].ID
+	if err := s.db.UpsertCloudInstance(&storage.CloudInstanceInput{
+		AccountID: accountID, NativeID: "i-1", Name: "web-1", Region: "cn-hangzhou",
+		Status: "running", BillingMode: "prepaid",
+	}); err != nil {
+		t.Fatalf("seed instance: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	s.registerCloudAPI(mux)
+	token, _ := s.auth.GenerateToken("1", "admin", "admin")
+
+	for _, path := range []string{"/api/cloud/accounts/" + accountID + "/instances", "/api/cloud/accounts/" + accountID + "/instances/"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("mux %s status = %d, body %s", path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"nativeId":"i-1"`) {
+			t.Fatalf("mux %s missing instance: %s", path, rec.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cloud/accounts/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("root accounts status = %d, want 405", rec.Code)
+	}
+}
+
+// TestCloudInstancesTimestampFormat 断言 instances 端点的时间戳序列化口径
+// 与 accounts 端点一致：RFC3339 无亚秒（"2006-01-02T15:04:05Z07:00"），
+// 而非原始 storage.CloudInstance 的 time.Time（JSON 含亚秒）。
+func TestCloudInstancesTimestampFormat(t *testing.T) {
+	s, _ := newCloudAPIServer(t)
+	if err := s.db.UpsertCloudAccount(&storage.CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	accounts, _ := s.db.ListCloudAccounts()
+	accountID := accounts[0].ID
+	if err := s.db.UpsertCloudInstance(&storage.CloudInstanceInput{
+		AccountID: accountID, NativeID: "i-1", Name: "web-1", Region: "cn-hangzhou",
+		Status: "running", BillingMode: "prepaid",
+	}); err != nil {
+		t.Fatalf("seed instance: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	s.registerCloudAPI(mux)
+	token, _ := s.auth.GenerateToken("1", "admin", "admin")
+	req := httptest.NewRequest(http.MethodGet, "/api/cloud/accounts/"+accountID+"/instances", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			CreatedAt string `json:"createdAt"`
+			UpdatedAt string `json:"updatedAt"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Data) != 1 {
+		t.Fatalf("instances = %d, want 1", len(payload.Data))
+	}
+	for _, field := range []string{payload.Data[0].CreatedAt, payload.Data[0].UpdatedAt} {
+		if strings.Contains(field, ".") {
+			t.Fatalf("timestamp contains sub-second: %q", field)
+		}
+		if _, err := time.Parse("2006-01-02T15:04:05Z07:00", field); err != nil {
+			t.Fatalf("timestamp not RFC3339-no-subsecond: %q (%v)", field, err)
+		}
 	}
 }

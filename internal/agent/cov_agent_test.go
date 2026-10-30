@@ -182,6 +182,9 @@ func TestCovReconnectConnectFailureRetries(t *testing.T) {
 }
 
 func TestCovReconnectRegisterFailureRetries(t *testing.T) {
+	// register 前 publicIP 探测会打公网端点，无外网环境挂满超时拖垮
+	// 5s 轮询；注入本地不可达地址使探测立即失败（register 仍继续）。
+	setPublicIPEndpoints(t, []string{"http://127.0.0.1:1/"})
 	// 收到注册消息后不回复并断开：register 在 ReadMessage 处失败
 	srv, connCh := covWSServer(t, func(conn *websocket.Conn) {
 		codec := protocol.NewCodec()
@@ -203,6 +206,8 @@ func TestCovReconnectRegisterFailureRetries(t *testing.T) {
 }
 
 func TestCovReconnectSuccess(t *testing.T) {
+	// 同上：publicIP 探测不依赖真实公网，注入本地不可达地址快速失败。
+	setPublicIPEndpoints(t, []string{"http://127.0.0.1:1/"})
 	// 每条连接都接受注册并回复 ok：reconnect 走完 connect+register 成功路径
 	srv, _ := covWSServer(t, func(conn *websocket.Conn) {
 		codec := protocol.NewCodec()

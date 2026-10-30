@@ -177,6 +177,35 @@ func TestCloudInstanceCRUD(t *testing.T) {
 	}
 }
 
+// TestDeleteCloudAccountCascadesInstances 验证删除账号会级联删除其实例，
+// 且在同一事务内：不留孤儿实例行。
+func TestDeleteCloudAccountCascadesInstances(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+
+	if err := db.UpsertCloudAccount(&CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("UpsertCloudAccount() error = %v", err)
+	}
+	accounts, _ := db.ListCloudAccounts()
+	accID := accounts[0].ID
+	if err := db.UpsertCloudInstance(&CloudInstanceInput{
+		AccountID: accID, NativeID: "i-1", Name: "web-1", Region: "cn-hangzhou",
+		Status: "running", BillingMode: "prepaid",
+	}); err != nil {
+		t.Fatalf("UpsertCloudInstance() error = %v", err)
+	}
+
+	if err := db.DeleteCloudAccount(accID); err != nil {
+		t.Fatalf("DeleteCloudAccount() error = %v", err)
+	}
+	if insts, _ := db.ListCloudInstances(accID); len(insts) != 0 {
+		t.Fatalf("orphan instances remain: %+v", insts)
+	}
+	if accts, _ := db.ListCloudAccounts(); len(accts) != 0 {
+		t.Fatalf("account not deleted: %+v", accts)
+	}
+}
+
 func TestResolveCloudCredentialRef(t *testing.T) {
 	t.Setenv("CLOUD_TEST_AK", "resolved-value")
 

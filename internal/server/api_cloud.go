@@ -37,6 +37,25 @@ type cloudAccountView struct {
 	UpdatedAt     string   `json:"updatedAt"`
 }
 
+// cloudInstanceView 是 instances 端点对外视图，与 accounts 端点同口径：
+// 时间戳统一序列化为 "2006-01-02T15:04:05Z07:00"（无亚秒），避免与
+// storage.CloudInstance 的 time.Time（含亚秒）格式不一致。
+type cloudInstanceView struct {
+	ID               string `json:"id"`
+	AccountID        string `json:"accountId"`
+	NativeID         string `json:"nativeId"`
+	Name             string `json:"name"`
+	Region           string `json:"region"`
+	Zone             string `json:"zone,omitempty"`
+	Spec             string `json:"spec,omitempty"`
+	Status           string `json:"status"`
+	BillingMode      string `json:"billingMode"`
+	BillingContinues bool   `json:"billingContinues"`
+	RawVendorStatus  string `json:"rawVendorStatus,omitempty"`
+	CreatedAt        string `json:"createdAt"`
+	UpdatedAt        string `json:"updatedAt"`
+}
+
 var cloudAccountKeyRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`)
 
 func cloudVaultPath(vendor, alias string) string {
@@ -73,6 +92,24 @@ func cloudAccountToView(account *storage.CloudAccount) cloudAccountView {
 	}
 }
 
+func cloudInstanceToView(inst *storage.CloudInstance) cloudInstanceView {
+	return cloudInstanceView{
+		ID:               inst.ID,
+		AccountID:        inst.AccountID,
+		NativeID:         inst.NativeID,
+		Name:             inst.Name,
+		Region:           inst.Region,
+		Zone:             inst.Zone,
+		Spec:             inst.Spec,
+		Status:           inst.Status,
+		BillingMode:      inst.BillingMode,
+		BillingContinues: inst.BillingContinues,
+		RawVendorStatus:  inst.RawVendorStatus,
+		CreatedAt:        inst.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:        inst.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+}
+
 func (s *Server) registerCloudAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/cloud/accounts", s.authService().Middleware(s.handleCloudAccounts))
 	mux.HandleFunc("/api/cloud/accounts/", s.authService().Middleware(s.handleCloudAccount))
@@ -87,7 +124,9 @@ func (s *Server) handleCloudInstances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rest := strings.TrimPrefix(r.URL.Path, "/api/cloud/accounts/")
-	id := strings.Trim(strings.TrimSuffix(rest, "/instances"), "/")
+	// 统一归一化：去 "/instances" 后缀与首尾 "/"，使尾斜杠路径
+	// /api/cloud/accounts/{id}/instances/ 与无尾斜杠等价。
+	id := strings.Trim(strings.TrimSuffix(strings.TrimSuffix(rest, "/"), "/instances"), "/")
 	if id == "" || strings.Contains(id, "/") {
 		s.handleError(w, r, http.StatusBadRequest, "cloud account id required")
 		return
@@ -115,7 +154,11 @@ func (s *Server) handleCloudInstances(w http.ResponseWriter, r *http.Request) {
 		s.handleError(w, r, http.StatusInternalServerError, "Failed to list cloud instances")
 		return
 	}
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{"data": instances})
+	views := make([]cloudInstanceView, 0, len(instances))
+	for i := range instances {
+		views = append(views, cloudInstanceToView(&instances[i]))
+	}
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{"data": views})
 }
 
 // handleCloudAccounts GET 台账 / PUT 保存账号与 secret 引用。

@@ -138,14 +138,19 @@ func (d *DB) ListCloudAccounts() ([]CloudAccount, error) {
 
 // DeleteCloudAccount 删除云账号；不存在时返回 ErrNotFound。
 func (d *DB) DeleteCloudAccount(id string) error {
-	res := d.db.Delete(&CloudAccount{}, "id = ?", id)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return d.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("account_id = ?", id).Delete(&CloudInstance{}).Error; err != nil {
+			return err
+		}
+		res := tx.Delete(&CloudAccount{}, "id = ?", id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 // UpsertCloudInstance 保存/更新云实例（同账号+原生 ID 视为更新）。
