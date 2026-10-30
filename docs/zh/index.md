@@ -39,3 +39,5 @@ features:
     title: Agent 出口
     details: 明确 Agent 作为内网访问出口的能力边界，以及与完整 SD-WAN 的差距
 ---
+
+![Cockpit 运行时架构](/images/architecture-zh.svg)

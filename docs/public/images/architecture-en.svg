@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1500" viewBox="0 0 1280 1500" role="img" aria-labelledby="title desc" xml:lang="en">
+<title id="title">Cockpit · Runtime Architecture</title>
+<desc id="desc">Three runtime planes. The browser Web UI (React 19 + Ant Design + xterm.js + guacamole-common-js), mobile app and CLI talk only to the Cockpit Server. The Server (cmd/cockpit) is the central control plane: HTTP JSON API / WebSocket, static assets, SQLite (GORM) persistence, in-memory Agent registry, authentication/auditing/alerting/reverse proxy/remote session orchestration; modules include auth, audit, alert (Herald/ntfy/webhook/Telegram), proxy, storage, inventory/sync, jobs/stacks/cron. The Cockpit Agent (cmd/cockpit-agent) is the node execution plane: capability detection, 30s heartbeat and system metrics, RPC/proxy/remote desktop, dials out over WSS (NAT-friendly) to register, and connects to local or reachable targets (host/systemd, Docker, PVE, OpenWrt, SSH/RDP/VNC). The Web UI never connects directly to Agents or intranet targets.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="context-stroke"/></marker></defs>
+<style>text{font-family:Arial,'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#172b4d}.title{font-size:30px;font-weight:700}.name{font-size:22px;font-weight:700}.body{font-size:16px;fill:#435570}.small{font-size:14px;fill:#52647b}.plane{font-size:19px;font-weight:700;fill:#334155}.label{font-size:15px;fill:#435570;paint-order:stroke;stroke:#f8fafc;stroke-width:5px;stroke-linejoin:round}.edge{fill:none;stroke-linejoin:round}.control{stroke-dasharray:7 5}</style>
+<rect width="1280" height="1500" rx="20" fill="#f8fafc"/>
+<text x="40" y="48" class="title" text-anchor="start">Cockpit · Runtime Architecture</text>
+<text x="40" y="80" class="body" text-anchor="start">Three runtime planes: Web UI talks only to the Server · Server is the central control plane · Agent is the node execution plane · managed targets live node-locally / reachably</text>
+
+<path d="M340 250 V360" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="web-server" data-from="web-ui" data-to="server" d="M340 250 V360" class="edge" style="stroke:#2563eb;stroke-width:3" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M940 250 V360" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="cli-server" data-from="cli" data-to="server" d="M940 250 V360" class="edge" style="stroke:#2563eb;stroke-width:3" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M640 770 V880" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="server-agent-mid" data-from="server" data-to="agent-mid" d="M640 770 V880" class="edge" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M640 770 V825 H245 V880" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="server-agent-left" data-from="server" data-to="agent-left" d="M640 770 V825 H245 V880" class="edge" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M640 770 V825 H985 V880" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="server-agent-right" data-from="server" data-to="agent-right" d="M640 770 V825 H985 V880" class="edge" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M245 1030 V1180" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="agent-target-left" data-from="agent-left" data-to="targets" d="M245 1030 V1180" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)"/>
+<path d="M615 1030 V1180" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="agent-target-mid" data-from="agent-mid" data-to="targets" d="M615 1030 V1180" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)"/>
+<path d="M985 1030 V1180" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="agent-target-right" data-from="agent-right" data-to="targets" d="M985 1030 V1180" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)"/>
+
+<g id="web-ui" data-node="web-ui"><rect x="80" y="130" width="520" height="120" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="102" y="164" class="name" text-anchor="start">Browser Web UI · web/</text>
+<text x="102" y="193" class="body" text-anchor="start">React 19 + Ant Design · xterm.js · guacamole-common-js 1.5</text>
+<text x="102" y="220" class="small" text-anchor="start">login · resource views · workbench · monitoring · settings · remote connections · talks to the Server only via /api</text></g>
+<g id="cli" data-node="cli"><rect x="680" y="130" width="520" height="120" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="702" y="164" class="name" text-anchor="start">CLI · mobile (Flutter)</text>
+<text x="702" y="193" class="body" text-anchor="start">cockpit init / sync / status / server / agent</text>
+<text x="702" y="220" class="small" text-anchor="start">local initialization · inventory sync · status queries · start the Server · mobile uses the same API</text></g>
+
+<g id="server" data-node="server"><rect x="80" y="360" width="1120" height="410" rx="14" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="105" y="396" class="name" text-anchor="start">Cockpit Server · cmd/cockpit · central control plane</text>
+<text x="105" y="422" class="body" text-anchor="start">HTTP JSON API / WebSocket · static assets · SQLite (GORM) persistence · in-memory Agent registry · auth / audit / alert / reverse proxy / remote session orchestration</text></g>
+<g id="srv-auth" data-node="srv-auth"><rect x="105" y="445" width="250" height="135" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="125" y="476" class="name" text-anchor="start">auth / audit</text>
+<text x="125" y="500" class="small" text-anchor="start">internal/auth · internal/audit</text>
+<text x="125" y="524" class="body" text-anchor="start">login · JWT · TOTP · password reset</text>
+<text x="125" y="548" class="body" text-anchor="start">audit log · admin bootstrap</text></g>
+<g id="srv-alert" data-node="srv-alert"><rect x="380" y="445" width="250" height="135" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="400" y="476" class="name" text-anchor="start">alert / notification</text>
+<text x="400" y="500" class="small" text-anchor="start">internal/alert · internal/notification</text>
+<text x="400" y="524" class="body" text-anchor="start">expiration alerts · config drift · probe</text>
+<text x="400" y="548" class="body" text-anchor="start">Herald / ntfy / webhook / Telegram</text></g>
+<g id="srv-proxy" data-node="srv-proxy"><rect x="655" y="445" width="250" height="135" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="675" y="476" class="name" text-anchor="start">proxy / remote sessions</text>
+<text x="675" y="500" class="small" text-anchor="start">internal/proxy · session manager</text>
+<text x="675" y="524" class="body" text-anchor="start">short-lived tickets · 5-min single-use</text>
+<text x="675" y="548" class="body" text-anchor="start">terminal · VNC · desktop (guacd)</text></g>
+<g id="srv-storage" data-node="srv-storage"><rect x="930" y="445" width="250" height="135" rx="12" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="950" y="476" class="name" text-anchor="start">storage / registry</text>
+<text x="950" y="500" class="small" text-anchor="start">internal/storage (GORM/SQLite)</text>
+<text x="950" y="524" class="body" text-anchor="start">models · migrations · CRUD</text>
+<text x="950" y="548" class="body" text-anchor="start">in-memory Agent registry (lost on restart)</text></g>
+<g id="srv-inventory" data-node="srv-inventory"><rect x="105" y="610" width="525" height="115" rx="12" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="125" y="641" class="name" text-anchor="start">inventory / sync</text>
+<text x="125" y="665" class="small" text-anchor="start">internal/inventory · internal/sync · config/cockpit.yaml</text>
+<text x="125" y="689" class="body" text-anchor="start">declarative Inventory YAML v1: Region/Zone/Agent/domain/cert/compute-instance/service/gateway/storage · cockpit sync and inventory.watch hot-reload</text></g>
+<g id="srv-jobs" data-node="srv-jobs"><rect x="655" y="610" width="525" height="115" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="675" y="641" class="name" text-anchor="start">jobs / stacks / cron</text>
+<text x="675" y="665" class="small" text-anchor="start">unified Job ledger · container lifecycle · deployment</text>
+<text x="675" y="689" class="body" text-anchor="start">dispatch commands to any online Agent · status/exit code/output written back · Docker stack deploy · scheduled jobs</text></g>
+
+<g id="agent-left" data-node="agent-left"><rect x="80" y="880" width="330" height="150" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="102" y="914" class="name" text-anchor="start">Cockpit Agent · cmd/cockpit-agent</text>
+<text x="102" y="942" class="body" text-anchor="start">capability detection · 30s heartbeat · system metrics</text>
+<text x="102" y="968" class="body" text-anchor="start">RPC / proxy / remote desktop · target connection</text>
+<text x="102" y="994" class="small" text-anchor="start">dials out over WSS · nodes behind NAT need no inbound port</text></g>
+<g id="agent-mid" data-node="agent-mid"><rect x="450" y="880" width="330" height="150" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="472" y="914" class="name" text-anchor="start">Cockpit Agent · cmd/cockpit-agent</text>
+<text x="472" y="942" class="body" text-anchor="start">capability detection · 30s heartbeat · system metrics</text>
+<text x="472" y="968" class="body" text-anchor="start">RPC / proxy / remote desktop · target connection</text>
+<text x="472" y="994" class="small" text-anchor="start">first message is register · duplicate connection check · secret check</text></g>
+<g id="agent-right" data-node="agent-right"><rect x="820" y="880" width="330" height="150" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="842" y="914" class="name" text-anchor="start">Cockpit Agent · cmd/cockpit-agent</text>
+<text x="842" y="942" class="body" text-anchor="start">capability detection · 30s heartbeat · system metrics</text>
+<text x="842" y="968" class="body" text-anchor="start">RPC / proxy / remote desktop · target connection</text>
+<text x="842" y="994" class="small" text-anchor="start">Providers registered conditionally by capability / env vars</text></g>
+
+<g id="targets" data-node="targets"><rect x="80" y="1130" width="1120" height="160" rx="14" fill="none" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="8 6"/>
+<text x="105" y="1163" class="plane" text-anchor="start">Managed targets (node-local / reachable)</text></g>
+<g id="t-host" data-node="t-host"><rect x="105" y="1190" width="200" height="90" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="125" y="1222" class="name" text-anchor="start">Host / systemd</text>
+<text x="125" y="1246" class="body" text-anchor="start">processes · services · files</text>
+<text x="125" y="1268" class="small" text-anchor="start">exec · metric collection</text></g>
+<g id="t-docker" data-node="t-docker"><rect x="325" y="1190" width="200" height="90" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="345" y="1222" class="name" text-anchor="start">Docker</text>
+<text x="345" y="1246" class="body" text-anchor="start">full container lifecycle</text>
+<text x="345" y="1268" class="small" text-anchor="start">compose stack deploy</text></g>
+<g id="t-pve" data-node="t-pve"><rect x="545" y="1190" width="200" height="90" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="565" y="1222" class="name" text-anchor="start">PVE</text>
+<text x="565" y="1246" class="body" text-anchor="start">VMs · storage</text>
+<text x="565" y="1268" class="small" text-anchor="start">write-slice permissions</text></g>
+<g id="t-openwrt" data-node="t-openwrt"><rect x="765" y="1190" width="200" height="90" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="785" y="1222" class="name" text-anchor="start">OpenWrt</text>
+<text x="785" y="1246" class="body" text-anchor="start">routers · egress</text>
+<text x="785" y="1268" class="small" text-anchor="start">ipk package · OOB bootstrap</text></g>
+<g id="t-remote" data-node="t-remote"><rect x="985" y="1190" width="200" height="90" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="1005" y="1222" class="name" text-anchor="start">SSH / RDP / VNC</text>
+<text x="1005" y="1246" class="body" text-anchor="start">terminal · desktop</text>
+<text x="1005" y="1268" class="small" text-anchor="start">guacd relay · session recording</text></g>
+
+<text x="355" y="300" class="label" text-anchor="start" style="fill:#2563eb">HTTP JSON API / WebSocket (/api)</text>
+<text x="955" y="300" class="label" text-anchor="start" style="fill:#2563eb">same API (CLI / mobile)</text>
+<text x="650" y="845" class="label" text-anchor="start" style="fill:#c2410c">WSS /ws bidirectional: register · heartbeat · rpc_request/response · proxy_* · probe_report · exec_log</text>
+<text x="70" y="1080" class="label" text-anchor="start">local API / socket / TCP → target</text>
+<text x="40" y="1340" class="small" text-anchor="start">Protocol boundary: Server–Agent unified message {id, type, timestamp, payload}; register must be the first message, RPC correlates by message ID, proxy correlates by proxyId/connId.</text>
+<text x="40" y="1365" class="small" text-anchor="start">Data boundary: Inventory YAML is declarative asset input · SQLite is the API/UI runtime query plane · heartbeats update online status and metrics · Agents never write the Server database directly.</text>
+<text x="40" y="1390" class="small" text-anchor="start">Security boundary: registration is fail-closed by default (enrollment_secret) · ADMIN_PASSWORD ≥ 8 chars · production needs PRODUCTION=true + TOTP_ENCRYPTION_KEY · remote tickets 5-min single-use · allowed_targets allowlist.</text>
+<text x="40" y="1415" class="small" text-anchor="start">Foundations: Go + GORM/SQLite · gorilla/websocket · React 19 + Ant Design · Apache Guacamole (guacd + guacamole-common-js 1.5) · go-acme/lego DNS-01 · Flutter mobile · Inno Setup installer.</text>
+<text x="40" y="1440" class="small" text-anchor="start">Notes: the Web UI never connects directly to Agents or intranet targets · Agents do not handle user auth or global state · cross-module calls respect boundaries (API handlers query through storage, not parse inventory directly).</text>
+</svg>

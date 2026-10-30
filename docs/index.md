@@ -41,6 +41,8 @@ features:
 ---
 
 
+![Cockpit runtime architecture](/images/architecture-en.svg)
+
 Every page outside `docs/archive/` has an English twin; each Chinese page carries a language switcher. The
 historical plans and specs under `docs/archive/` remain Chinese-only.
 

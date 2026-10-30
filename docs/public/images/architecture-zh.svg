@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1500" viewBox="0 0 1280 1500" role="img" aria-labelledby="title desc" xml:lang="zh-CN">
+<title id="title">Cockpit · 运行时架构</title>
+<desc id="desc">三个运行时平面。浏览器 Web UI（React 19 + Ant Design + xterm.js + guacamole-common-js）与移动端、CLI 只与 Cockpit Server 通信。Server（cmd/cockpit）是中央控制平面：HTTP JSON API / WebSocket、静态资源、SQLite（GORM）持久化、内存 Agent 注册表、认证/审计/告警/反代/远程会话编排，模块含 auth、audit、alert（Herald/ntfy/webhook/Telegram）、proxy、storage、inventory/sync、jobs/stacks/cron。Cockpit Agent（cmd/cockpit-agent）是节点执行平面：能力检测、30 秒心跳与系统指标、RPC/代理/远程桌面，主动拨出 WSS（NAT 友好）注册，连接本地或可达目标（主机/systemd、Docker、PVE、OpenWrt、SSH/RDP/VNC）。Web UI 从不直连 Agent 或内网目标。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="context-stroke"/></marker></defs>
+<style>text{font-family:Arial,'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#172b4d}.title{font-size:30px;font-weight:700}.name{font-size:22px;font-weight:700}.body{font-size:16px;fill:#435570}.small{font-size:14px;fill:#52647b}.plane{font-size:19px;font-weight:700;fill:#334155}.label{font-size:15px;fill:#435570;paint-order:stroke;stroke:#f8fafc;stroke-width:5px;stroke-linejoin:round}.edge{fill:none;stroke-linejoin:round}.control{stroke-dasharray:7 5}</style>
+<rect width="1280" height="1500" rx="20" fill="#f8fafc"/>
+<text x="40" y="48" class="title" text-anchor="start">Cockpit · 运行时架构</text>
+<text x="40" y="80" class="body" text-anchor="start">三个运行时平面：Web UI 只与 Server 通信 · Server 为中央控制平面 · Agent 节点执行平面 · 受管目标在节点本地/可达侧</text>
+
+<path d="M340 250 V360" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="web-server" data-from="web-ui" data-to="server" d="M340 250 V360" class="edge" style="stroke:#2563eb;stroke-width:3" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M940 250 V360" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="cli-server" data-from="cli" data-to="server" d="M940 250 V360" class="edge" style="stroke:#2563eb;stroke-width:3" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M640 770 V880" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="server-agent-mid" data-from="server" data-to="agent-mid" d="M640 770 V880" class="edge" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M640 770 V825 H245 V880" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="server-agent-left" data-from="server" data-to="agent-left" d="M640 770 V825 H245 V880" class="edge" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M640 770 V825 H985 V880" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="server-agent-right" data-from="server" data-to="agent-right" d="M640 770 V825 H985 V880" class="edge" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M245 1030 V1180" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="agent-target-left" data-from="agent-left" data-to="targets" d="M245 1030 V1180" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)"/>
+<path d="M615 1030 V1180" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="agent-target-mid" data-from="agent-mid" data-to="targets" d="M615 1030 V1180" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)"/>
+<path d="M985 1030 V1180" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="agent-target-right" data-from="agent-right" data-to="targets" d="M985 1030 V1180" class="edge" style="stroke:#475569;stroke-width:2" marker-end="url(#arrow)"/>
+
+<g id="web-ui" data-node="web-ui"><rect x="80" y="130" width="520" height="120" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="102" y="164" class="name" text-anchor="start">浏览器 Web UI · web/</text>
+<text x="102" y="193" class="body" text-anchor="start">React 19 + Ant Design · xterm.js · guacamole-common-js 1.5</text>
+<text x="102" y="220" class="small" text-anchor="start">登录 · 资源视图 · 工作台 · 监控 · 设置 · 远程连接 · 只经 /api 与 Server 通信</text></g>
+<g id="cli" data-node="cli"><rect x="680" y="130" width="520" height="120" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="702" y="164" class="name" text-anchor="start">CLI · mobile（Flutter）</text>
+<text x="702" y="193" class="body" text-anchor="start">cockpit init / sync / status / server / agent</text>
+<text x="702" y="220" class="small" text-anchor="start">本地初始化 · 清单同步 · 状态查询 · 启动 Server · 移动端走同一 API</text></g>
+
+<g id="server" data-node="server"><rect x="80" y="360" width="1120" height="410" rx="14" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="105" y="396" class="name" text-anchor="start">Cockpit Server · cmd/cockpit · 中央控制平面</text>
+<text x="105" y="422" class="body" text-anchor="start">HTTP JSON API / WebSocket · 静态资源 · SQLite（GORM）持久化 · 内存 Agent 注册表 · 认证/审计/告警/反代/远程会话编排</text></g>
+<g id="srv-auth" data-node="srv-auth"><rect x="105" y="445" width="250" height="135" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="125" y="476" class="name" text-anchor="start">auth / audit</text>
+<text x="125" y="500" class="small" text-anchor="start">internal/auth · internal/audit</text>
+<text x="125" y="524" class="body" text-anchor="start">登录 · JWT · TOTP · 密码重置</text>
+<text x="125" y="548" class="body" text-anchor="start">审计日志 · 管理员引导</text></g>
+<g id="srv-alert" data-node="srv-alert"><rect x="380" y="445" width="250" height="135" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="400" y="476" class="name" text-anchor="start">alert / notification</text>
+<text x="400" y="500" class="small" text-anchor="start">internal/alert · internal/notification</text>
+<text x="400" y="524" class="body" text-anchor="start">过期告警 · 配置漂移 · 探活</text>
+<text x="400" y="548" class="body" text-anchor="start">Herald / ntfy / webhook / Telegram</text></g>
+<g id="srv-proxy" data-node="srv-proxy"><rect x="655" y="445" width="250" height="135" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="675" y="476" class="name" text-anchor="start">proxy / 远程会话</text>
+<text x="675" y="500" class="small" text-anchor="start">internal/proxy · 会话管理器</text>
+<text x="675" y="524" class="body" text-anchor="start">短时票据 · 5 分钟单次</text>
+<text x="675" y="548" class="body" text-anchor="start">terminal · VNC · desktop（guacd）</text></g>
+<g id="srv-storage" data-node="srv-storage"><rect x="930" y="445" width="250" height="135" rx="12" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="950" y="476" class="name" text-anchor="start">storage / 注册表</text>
+<text x="950" y="500" class="small" text-anchor="start">internal/storage（GORM/SQLite）</text>
+<text x="950" y="524" class="body" text-anchor="start">模型 · 迁移 · CRUD</text>
+<text x="950" y="548" class="body" text-anchor="start">内存 Agent 注册表（重启即失）</text></g>
+<g id="srv-inventory" data-node="srv-inventory"><rect x="105" y="610" width="525" height="115" rx="12" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="125" y="641" class="name" text-anchor="start">inventory / sync</text>
+<text x="125" y="665" class="small" text-anchor="start">internal/inventory · internal/sync · config/cockpit.yaml</text>
+<text x="125" y="689" class="body" text-anchor="start">声明式清单 YAML v1：Region/Zone/Agent/域/证书/计算实例/服务/网关/存储 · cockpit sync 与 inventory.watch 热载</text></g>
+<g id="srv-jobs" data-node="srv-jobs"><rect x="655" y="610" width="525" height="115" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="675" y="641" class="name" text-anchor="start">jobs / stacks / cron</text>
+<text x="675" y="665" class="small" text-anchor="start">统一 Job 账本 · 容器生命周期 · 部署</text>
+<text x="675" y="689" class="body" text-anchor="start">对任意在线 Agent 下发命令 · 状态/退出码/输出回写 · Docker 栈部署 · 定时任务</text></g>
+
+<g id="agent-left" data-node="agent-left"><rect x="80" y="880" width="330" height="150" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="102" y="914" class="name" text-anchor="start">Cockpit Agent · cmd/cockpit-agent</text>
+<text x="102" y="942" class="body" text-anchor="start">能力检测 · 30s 心跳 · 系统指标</text>
+<text x="102" y="968" class="body" text-anchor="start">RPC / 代理 / 远程桌面 · 目标连接</text>
+<text x="102" y="994" class="small" text-anchor="start">主动拨出 WSS · 节点在 NAT 后无需开入站端口</text></g>
+<g id="agent-mid" data-node="agent-mid"><rect x="450" y="880" width="330" height="150" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="472" y="914" class="name" text-anchor="start">Cockpit Agent · cmd/cockpit-agent</text>
+<text x="472" y="942" class="body" text-anchor="start">能力检测 · 30s 心跳 · 系统指标</text>
+<text x="472" y="968" class="body" text-anchor="start">RPC / 代理 / 远程桌面 · 目标连接</text>
+<text x="472" y="994" class="small" text-anchor="start">首消息 register · 重复连接校验 · 密钥校验</text></g>
+<g id="agent-right" data-node="agent-right"><rect x="820" y="880" width="330" height="150" rx="14" fill="#eef8f5" stroke="#86c9b3" stroke-width="1.5"/>
+<text x="842" y="914" class="name" text-anchor="start">Cockpit Agent · cmd/cockpit-agent</text>
+<text x="842" y="942" class="body" text-anchor="start">能力检测 · 30s 心跳 · 系统指标</text>
+<text x="842" y="968" class="body" text-anchor="start">RPC / 代理 / 远程桌面 · 目标连接</text>
+<text x="842" y="994" class="small" text-anchor="start">Provider 按能力/环境变量条件注册</text></g>
+
+<g id="targets" data-node="targets"><rect x="80" y="1130" width="1120" height="160" rx="14" fill="none" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="8 6"/>
+<text x="105" y="1163" class="plane" text-anchor="start">受管目标（节点本地 / 可达）</text></g>
+<g id="t-host" data-node="t-host"><rect x="105" y="1190" width="200" height="90" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="125" y="1222" class="name" text-anchor="start">Host / systemd</text>
+<text x="125" y="1246" class="body" text-anchor="start">进程 · 服务 · 文件</text>
+<text x="125" y="1268" class="small" text-anchor="start">exec · 指标采集</text></g>
+<g id="t-docker" data-node="t-docker"><rect x="325" y="1190" width="200" height="90" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="345" y="1222" class="name" text-anchor="start">Docker</text>
+<text x="345" y="1246" class="body" text-anchor="start">容器全生命周期</text>
+<text x="345" y="1268" class="small" text-anchor="start">compose 栈部署</text></g>
+<g id="t-pve" data-node="t-pve"><rect x="545" y="1190" width="200" height="90" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="565" y="1222" class="name" text-anchor="start">PVE</text>
+<text x="565" y="1246" class="body" text-anchor="start">虚拟机 · 存储</text>
+<text x="565" y="1268" class="small" text-anchor="start">写权限切片</text></g>
+<g id="t-openwrt" data-node="t-openwrt"><rect x="765" y="1190" width="200" height="90" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="785" y="1222" class="name" text-anchor="start">OpenWrt</text>
+<text x="785" y="1246" class="body" text-anchor="start">路由器 · 出网</text>
+<text x="785" y="1268" class="small" text-anchor="start">ipk 包 · OOB 引导</text></g>
+<g id="t-remote" data-node="t-remote"><rect x="985" y="1190" width="200" height="90" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="1005" y="1222" class="name" text-anchor="start">SSH / RDP / VNC</text>
+<text x="1005" y="1246" class="body" text-anchor="start">终端 · 桌面</text>
+<text x="1005" y="1268" class="small" text-anchor="start">guacd 中继 · 会话录制</text></g>
+
+<text x="355" y="300" class="label" text-anchor="start" style="fill:#2563eb">HTTP JSON API / WebSocket（/api）</text>
+<text x="955" y="300" class="label" text-anchor="start" style="fill:#2563eb">同 API（CLI / 移动端）</text>
+<text x="650" y="845" class="label" text-anchor="start" style="fill:#c2410c">WSS /ws 双向：register · heartbeat · rpc_request/response · proxy_* · probe_report · exec_log</text>
+<text x="70" y="1080" class="label" text-anchor="start">本地 API / socket / TCP → 目标</text>
+<text x="40" y="1340" class="small" text-anchor="start">协议边界：Server–Agent 统一消息 {id, type, timestamp, payload}；register 必须是首消息，RPC 以消息 ID 关联响应，proxy 以 proxyId/connId 关联。</text>
+<text x="40" y="1365" class="small" text-anchor="start">数据边界：Inventory YAML 为声明式资产输入 · SQLite 为 API/UI 运行时查询平面 · 心跳更新在线状态与指标 · Agent 不直写 Server 数据库。</text>
+<text x="40" y="1390" class="small" text-anchor="start">安全边界：注册默认 fail-closed（enrollment_secret）· ADMIN_PASSWORD ≥8 位 · 生产需 PRODUCTION=true + TOTP_ENCRYPTION_KEY · 远程票据 5 分钟单次 · allowed_targets 白名单。</text>
+<text x="40" y="1415" class="small" text-anchor="start">技术底座：Go + GORM/SQLite · gorilla/websocket · React 19 + Ant Design · Apache Guacamole（guacd + guacamole-common-js 1.5）· go-acme/lego DNS-01 · Flutter 移动端 · Inno Setup 安装器。</text>
+<text x="40" y="1440" class="small" text-anchor="start">说明：Web UI 从不直连 Agent 或内网目标 · Agent 不负责用户认证与全局状态 · 跨模块调用遵守边界（API 处理器经 storage 查询，不直接解析清单）。</text>
+</svg>
