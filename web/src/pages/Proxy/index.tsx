@@ -246,7 +246,7 @@ const Proxy = () => {
       <Card
         title="反向代理"
         extra={
-          <Space>
+          <Space wrap>
             <Select
               style={{ minWidth: 260 }}
               options={agentOptions}
@@ -314,6 +314,7 @@ const Proxy = () => {
               columns={columns}
               dataSource={sites}
               loading={sitesLoading}
+              scroll={{ x: 'max-content' }}
               pagination={false}
               locale={{ emptyText: '暂无站点，点击「新建站点」下发第一个配置' }}
             />

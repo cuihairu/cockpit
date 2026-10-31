@@ -364,7 +364,7 @@ const Services = () => {
       <Card
         title="服务管理"
         extra={
-          <Space>
+          <Space wrap>
             <Input.Search
               allowClear
               placeholder="搜索服务名或描述"
@@ -464,6 +464,7 @@ const Services = () => {
               columns={columns}
               dataSource={sorted}
               loading={isLoading}
+              scroll={{ x: 'max-content' }}
               pagination={{ pageSize: 20, showSizeChanger: false, showTotal: (n) => `共 ${n} 个服务` }}
               locale={{ emptyText: search ? '无匹配服务' : '未发现服务' }}
             />

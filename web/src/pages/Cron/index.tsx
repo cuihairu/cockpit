@@ -351,7 +351,7 @@ const Cron = () => {
       <Card
         title="定时任务"
         extra={
-          <Space>
+          <Space wrap>
             <Select
               style={{ minWidth: 260 }}
               options={agentOptions}
@@ -420,6 +420,7 @@ const Cron = () => {
               columns={columns}
               dataSource={jobs}
               loading={jobsLoading}
+              scroll={{ x: 'max-content' }}
               pagination={false}
               locale={{ emptyText: '暂无任务，点击「新建任务」添加第一个定时任务' }}
             />
@@ -471,6 +472,7 @@ const Cron = () => {
                           size="small"
                           columns={timerColumns}
                           dataSource={timers}
+                          scroll={{ x: 'max-content' }}
                           pagination={false}
                         />
                       </>
