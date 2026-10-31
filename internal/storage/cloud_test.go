@@ -224,3 +224,36 @@ func TestResolveCloudCredentialRef(t *testing.T) {
 		t.Error("non-reference should be rejected")
 	}
 }
+
+// TestDeleteCloudAccountInstanceDeleteError 覆盖事务内 CloudInstance 删除
+// 失败的上抛分支：表不存在时首个 Delete 即报错，事务整体回滚。
+func TestDeleteCloudAccountInstanceDeleteError(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+
+	if err := db.UpsertCloudAccount(&CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("UpsertCloudAccount() error = %v", err)
+	}
+	if err := db.Gorm().Migrator().DropTable(&CloudInstance{}); err != nil {
+		t.Fatalf("DropTable(CloudInstance) error = %v", err)
+	}
+
+	if err := db.DeleteCloudAccount("whatever"); err == nil {
+		t.Error("missing cloud_instances table should propagate an error")
+	}
+}
+
+// TestDeleteCloudAccountAccountDeleteError 覆盖事务内 CloudAccount 删除
+// 失败的上抛分支（res.Error，先于 RowsAffected 判定）：仅删账号表。
+func TestDeleteCloudAccountAccountDeleteError(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+
+	if err := db.Gorm().Migrator().DropTable(&CloudAccount{}); err != nil {
+		t.Fatalf("DropTable(CloudAccount) error = %v", err)
+	}
+
+	if err := db.DeleteCloudAccount("whatever"); err == nil {
+		t.Error("missing cloud_accounts table should propagate an error")
+	}
+}
