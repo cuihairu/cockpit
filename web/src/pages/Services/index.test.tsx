@@ -127,6 +127,17 @@ describe('Services', () => {
     expect(apiMock.getAgentServices).not.toHaveBeenCalled()
   })
 
+  it('选中无服务能力主机：不发查询（T4，避免后端 404 噪声）', async () => {
+    renderPage()
+    await screen.findByText('选择主机')
+    // 无 service capability 的 agent 在选项里带「未检测到服务管理」后缀，
+    // value 仍可被选中（直连/残留）；capability 守卫应阻止 status/list 查询，
+    // 避免后端 404 噪声
+    await selectAgent('none-01（未检测到服务管理）')
+    expect(apiMock.getAgentServices).not.toHaveBeenCalled()
+    expect(apiMock.getServiceStatus).not.toHaveBeenCalled()
+  })
+
   it('选中 systemd 主机：系统状态条、Alert 文案、failed 置顶排序', async () => {
     renderPage()
     await screen.findByText('选择主机')

@@ -86,6 +86,14 @@ const Services = () => {
   const selectedBackend = agentOptions.find((o) => o.value === selectedAgent)?.backend
   const isSystemd = selectedBackend === 'systemd'
   const isWindows = selectedBackend === 'windows-scm'
+  // 选中 agent 是否真正具备 service 能力（report T4）：agentOptions 已把
+  // 无 service capability 的 agent 标 disabled，但 selectedAgent 可能残留
+  // 无能力值（页面直连 / 切换），此时后端 404 会刷控制台。按 capability 守卫，
+  // 无能力则不发起查询——界面空态兜底仍显示。
+  const selectedHasService = agentOptions.some(
+    (o) => o.value === selectedAgent && o.backend !== undefined,
+  )
+  const serviceEnabled = !!selectedAgent && selectedHasService
 
   const statusKey = ['service-status', selectedAgent]
   const listKey = ['service-list', selectedAgent]
@@ -93,12 +101,12 @@ const Services = () => {
   const { data: status } = useQuery({
     queryKey: statusKey,
     queryFn: () => api.getServiceStatus(selectedAgent!),
-    enabled: !!selectedAgent,
+    enabled: serviceEnabled,
   })
   const { data: listData, isLoading } = useQuery({
     queryKey: listKey,
     queryFn: () => api.getAgentServices(selectedAgent!),
-    enabled: !!selectedAgent,
+    enabled: serviceEnabled,
     refetchInterval: 30_000,
   })
 
