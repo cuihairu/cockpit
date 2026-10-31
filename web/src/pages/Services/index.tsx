@@ -78,6 +78,9 @@ const Services = () => {
           label: `${a.hostname || a.id}${
             a.status === 'offline' ? '（离线）' : !cap ? '（未检测到服务管理）' : ''
           }`,
+          // capability 事实独立于 backend 兜底值：backend 用 ?? 'systemd'
+          // 仅为后端判型，不代表具备能力；守卫须以 hasService 为准
+          hasService: !!cap,
           backend: (cap?.metadata?.backend as string | undefined) ?? 'systemd',
         }
       }),
@@ -91,7 +94,7 @@ const Services = () => {
   // 无能力值（页面直连 / 切换），此时后端 404 会刷控制台。按 capability 守卫，
   // 无能力则不发起查询——界面空态兜底仍显示。
   const selectedHasService = agentOptions.some(
-    (o) => o.value === selectedAgent && o.backend !== undefined,
+    (o) => o.value === selectedAgent && o.hasService,
   )
   const serviceEnabled = !!selectedAgent && selectedHasService
 

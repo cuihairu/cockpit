@@ -135,3 +135,47 @@ describe('resolveSkinTokens', () => {
     expect(resolveSkinTokens(undefined, 'light', '#e11d8f').surface).toBe(resolveThemeSkin(DEFAULT_THEME_SKIN).light.surface)
   })
 })
+
+// WCAG 2.x 相对亮度（sRGB 线性化），用于校验皮肤色板本身满足对比度目标。
+const srgb = (c: number) => {
+  const s = c / 255
+  return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+}
+const luminance = (hex: string) => {
+  const [r, g, b] = parseHexColor(hex)!
+  return 0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b)
+}
+const contrast = (a: string, b: string) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+describe('皮肤色板对比度（WCAG AA）', () => {
+  // 2026-10-31 审核发现：次要文字硬编码 #667085 在四个皮肤暗色 surface 上仅
+  // 3.28-3.62:1，跌破 AA 4.5:1；主题 token（skin.textMuted）暗色下为浅色可过 AA。
+  // 回归守卫：任一皮肤任一档位的 textMuted 必须在其 surface 上 ≥ 4.5:1，防再次
+  // 引入只过亮色、暗色回退的色号。
+  it('textMuted 在每个皮肤的 surface 上均 ≥ 4.5:1（亮色与暗色）', () => {
+    for (const skin of THEME_SKINS) {
+      for (const [mode, palette] of [
+        ['light', skin.light],
+        ['dark', skin.dark],
+      ] as const) {
+        const ratio = contrast(palette.textMuted, palette.surface)
+        expect(ratio, `${skin.key}/${mode}: ${palette.textMuted} on ${palette.surface}`).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+  })
+
+  it('主文字 text 在每个皮肤的 surface 上均 ≥ 4.5:1', () => {
+    for (const skin of THEME_SKINS) {
+      for (const [mode, palette] of [
+        ['light', skin.light],
+        ['dark', skin.dark],
+      ] as const) {
+        expect(contrast(palette.text, palette.surface),
+          `${skin.key}/${mode}`).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+  })
+})

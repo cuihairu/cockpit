@@ -3,7 +3,11 @@ import type { Agent } from '@/types'
 
 const OverviewPanel = ({ agent }: { agent: Agent | null }) => {
   if (!agent) {
-    return <div style={{ padding: 24, color: '#667085' }}>请选择左侧服务器</div>
+    return (
+      <div style={{ padding: 24, color: 'var(--cockpit-text-muted, #667085)' }}>
+        请选择左侧服务器
+      </div>
+    )
   }
 
   return (

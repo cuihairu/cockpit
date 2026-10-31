@@ -92,6 +92,23 @@ const selectAgent = async (label: string) => {
   fireEvent.click(opt)
 }
 
+// 直接触发 antd Select 的 onChange，绕过 rc-select 对 disabled 选项的点击
+// 守卫（OptionList.js onClick 有 `if (!mergedDisabled) onSelectValue(value)`，
+// 点击 disabled 选项不会触发 onChange）。选中值经 onChange 写入 state，测试
+// 才能真正走到 Services 的 capability 守卫路径，而非「未选中任何主机」。
+const setAgentValue = (value: string) => {
+  const select = document.querySelector('.ant-select') as HTMLElement | null
+  expect(select).toBeTruthy()
+  const key = Object.keys(select!).find((k) =>
+    k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'))
+  expect(key).toBeTruthy()
+  type Fiber = { memoizedProps?: { onChange?: (v: unknown) => void }; return?: Fiber | null }
+  let fiber = (select! as unknown as Record<string, unknown>)[key!] as Fiber | null | undefined
+  while (fiber && !fiber.memoizedProps?.onChange) fiber = fiber.return
+  expect(typeof fiber?.memoizedProps?.onChange).toBe('function')
+  fiber!.memoizedProps!.onChange!(value)
+}
+
 const rowOf = (cell: string) =>
   Array.from(document.querySelectorAll<HTMLTableRowElement>('tr.ant-table-row')).find((tr) =>
     tr.textContent?.includes(cell)) as HTMLTableRowElement
@@ -130,10 +147,13 @@ describe('Services', () => {
   it('选中无服务能力主机：不发查询（T4，避免后端 404 噪声）', async () => {
     renderPage()
     await screen.findByText('选择主机')
-    // 无 service capability 的 agent 在选项里带「未检测到服务管理」后缀，
-    // value 仍可被选中（直连/残留）；capability 守卫应阻止 status/list 查询，
-    // 避免后端 404 噪声
-    await selectAgent('none-01（未检测到服务管理）')
+    // 直接设置选中一个无 service capability 的 agent 值（而非点击 disabled
+    // 选项——rc-select 会吞掉点击，测试将永远停在「未选中」，与守卫无关）。
+    // 这模拟页面直连/残留的无能力选中值，capability 守卫应阻止 status/list
+    // 查询，避免后端 404 噪声。
+    await act(async () => {
+      setAgentValue('ag-none')
+    })
     expect(apiMock.getAgentServices).not.toHaveBeenCalled()
     expect(apiMock.getServiceStatus).not.toHaveBeenCalled()
   })

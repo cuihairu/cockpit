@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, Table, Tag, Button, Space, Input, Select, DatePicker, Statistic, Row, Col, message } from 'antd'
+import { Card, Table, Tag, Button, Space, Input, Select, DatePicker, Statistic, Row, Col, Typography, message } from 'antd'
 import {
   ReloadOutlined,
   SearchOutlined,
@@ -262,7 +262,9 @@ const AuditLogs = () => {
         return (
           <Space direction="vertical" size="small">
             <span>{dayjs(d).format('YYYY-MM-DD')}</span>
-            <span style={{ color: '#667085', fontSize: 12 }}>{dayjs(d).format('HH:mm:ss')}</span>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {dayjs(d).format('HH:mm:ss')}
+            </Typography.Text>
           </Space>
         )
       },

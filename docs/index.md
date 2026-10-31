@@ -91,4 +91,5 @@ historical plans and specs under `docs/archive/` remain Chinese-only.
 - [Remote desktop design: Apache Guacamole integration](/remote-desktop-guacamole-design)
 - [Remote access integration design: unified VNC / SSH / RDP stack](/remote-access-integration-design)
 - [UI theme and skin system](/ui-theme-design)
+- [UI design baseline (audit standard)](/DESIGN)
 - [Documentation–source consistency audit (2026-10-08)](/audit-doc-consistency)

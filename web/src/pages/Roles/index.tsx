@@ -12,6 +12,7 @@ import {
   Space,
   Table,
   Tag,
+  Typography,
   message,
 } from 'antd'
 import { EditOutlined, PlusOutlined, ReloadOutlined, SafetyOutlined } from '@ant-design/icons'
@@ -156,7 +157,7 @@ const RolesPage = () => {
       width: 160,
       render: (_v, r) =>
         r.builtin ? (
-          <span style={{ color: '#667085' }}>内置角色不可修改</span>
+          <Typography.Text type="secondary">内置角色不可修改</Typography.Text>
         ) : (
           <Space>
             <Button size="small" icon={<EditOutlined />} onClick={() => openEditor(r)}>
