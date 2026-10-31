@@ -43,7 +43,7 @@
 - 登录页：`login-before.png`（灰字难辨）→ `login-after.png`（文案清晰）
 - 仪表盘：`dashboard-before.png`（统计标签 3.24:1）→ `dashboard-after.png`（标签加深）
 - 角色页：`roles-before.png`（「内置角色不可修改」浅灰）
-- 头部搜索：`header-search-after.png`（搜索按钮已带 `aria-label`，外观不变）
+- 头部搜索：`header-search-after.png`（搜索按钮已带 `aria-label`，外观变为带边框 Button）
 
 ---
 

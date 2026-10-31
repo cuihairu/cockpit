@@ -4,7 +4,7 @@ import type { Agent } from '@/types'
 const OverviewPanel = ({ agent }: { agent: Agent | null }) => {
   if (!agent) {
     return (
-      <div style={{ padding: 24, color: 'var(--cockpit-text-muted, #667085)' }}>
+      <div style={{ padding: 24, color: 'var(--cockpit-text-muted, #64748b)' }}>
         请选择左侧服务器
       </div>
     )

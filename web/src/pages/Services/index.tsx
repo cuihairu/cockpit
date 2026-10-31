@@ -87,8 +87,6 @@ const Services = () => {
     [agents],
   )
   const selectedBackend = agentOptions.find((o) => o.value === selectedAgent)?.backend
-  const isSystemd = selectedBackend === 'systemd'
-  const isWindows = selectedBackend === 'windows-scm'
   // 选中 agent 是否真正具备 service 能力（report T4）：agentOptions 已把
   // 无 service capability 的 agent 标 disabled，但 selectedAgent 可能残留
   // 无能力值（页面直连 / 切换），此时后端 404 会刷控制台。按 capability 守卫，
@@ -96,6 +94,13 @@ const Services = () => {
   const selectedHasService = agentOptions.some(
     (o) => o.value === selectedAgent && o.hasService,
   )
+  // backend 型判（systemd/windows-scm/launchd）仅对真正具备 service 能力者
+  // 生效：无能力残留值下 backend 由 `?? 'systemd'` 兜底派生恒为 systemd，
+  // 若不同步 hasService 守卫会误渲染 systemd 专属 UI（重载/健康面板/unit
+  // 编辑）并触发 getAgentHealth 查询（report T4'）。故 isSystemd/isWindows
+  // 均须再 AND selectedHasService。
+  const isSystemd = selectedHasService && selectedBackend === 'systemd'
+  const isWindows = selectedHasService && selectedBackend === 'windows-scm'
   const serviceEnabled = !!selectedAgent && selectedHasService
 
   const statusKey = ['service-status', selectedAgent]

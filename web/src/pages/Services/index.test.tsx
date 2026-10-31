@@ -70,15 +70,21 @@ const renderPage = (over?: {
   apiMock.getAgents.mockResolvedValue(over?.agents ?? agents)
   apiMock.getServiceStatus.mockResolvedValue(over?.status ?? { systemState: 'degraded', total: 5, active: 1, failed: 1 })
   apiMock.getAgentServices.mockResolvedValue(over?.services ?? { services: units })
+  apiMock.getAgentHealth.mockResolvedValue({
+    state: 'ok',
+    probes: [],
+    lastHeal: undefined,
+  })
   // 目标探活面板（B6）全局渲染，默认空数据不干扰既有断言
   apiMock.getProbeTargets.mockResolvedValue({ targets: [] })
   apiMock.getProbeWindows.mockResolvedValue({ windows: [] })
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const view = render(
     <QueryClientProvider client={qc}>
       <Services />
     </QueryClientProvider>,
   )
+  return { ...view, qc }
 }
 
 const selectAgent = async (label: string) => {
@@ -90,23 +96,6 @@ const selectAgent = async (label: string) => {
     return el as HTMLElement
   })
   fireEvent.click(opt)
-}
-
-// 直接触发 antd Select 的 onChange，绕过 rc-select 对 disabled 选项的点击
-// 守卫（OptionList.js onClick 有 `if (!mergedDisabled) onSelectValue(value)`，
-// 点击 disabled 选项不会触发 onChange）。选中值经 onChange 写入 state，测试
-// 才能真正走到 Services 的 capability 守卫路径，而非「未选中任何主机」。
-const setAgentValue = (value: string) => {
-  const select = document.querySelector('.ant-select') as HTMLElement | null
-  expect(select).toBeTruthy()
-  const key = Object.keys(select!).find((k) =>
-    k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'))
-  expect(key).toBeTruthy()
-  type Fiber = { memoizedProps?: { onChange?: (v: unknown) => void }; return?: Fiber | null }
-  let fiber = (select! as unknown as Record<string, unknown>)[key!] as Fiber | null | undefined
-  while (fiber && !fiber.memoizedProps?.onChange) fiber = fiber.return
-  expect(typeof fiber?.memoizedProps?.onChange).toBe('function')
-  fiber!.memoizedProps!.onChange!(value)
 }
 
 const rowOf = (cell: string) =>
@@ -144,18 +133,37 @@ describe('Services', () => {
     expect(apiMock.getAgentServices).not.toHaveBeenCalled()
   })
 
-  it('选中无服务能力主机：不发查询（T4，避免后端 404 噪声）', async () => {
-    renderPage()
-    await screen.findByText('选择主机')
-    // 直接设置选中一个无 service capability 的 agent 值（而非点击 disabled
-    // 选项——rc-select 会吞掉点击，测试将永远停在「未选中」，与守卫无关）。
-    // 这模拟页面直连/残留的无能力选中值，capability 守卫应阻止 status/list
-    // 查询，避免后端 404 噪声。
+  it('选中主机后失去服务能力：不发任何查询（T4，避免后端 404 噪声）', async () => {
+    const { qc } = renderPage()
+    await selectAgent('linux-01')
+    // 有服务能力时：systemd 专属 UI（健康探针/重载配置/系统状态）应渲染。
+    expect(await screen.findByText('健康探针')).toBeInTheDocument()
+    expect(screen.getByText('重载配置')).toBeInTheDocument()
+    expect(screen.getByText('系统状态')).toBeInTheDocument()
+    const statusCalls = apiMock.getServiceStatus.mock.calls.length
+    const healthCalls = apiMock.getAgentHealth.mock.calls.length
+    const listCalls = apiMock.getAgentServices.mock.calls.length
+    // 残留选中值失去 service capability（页面直连/切换/能力撤销）：守卫应
+    // 阻止 status/list/health 查询并收起 systemd 专属 UI，避免后端 404 噪声
+    // 与误触发（report T4）。isSystemd 由 backend ?? 'systemd' 兜底派生，若不
+    // 同步 hasService 守卫，无能力时恒为 systemd → 健康面板/重载仍渲染。
+    apiMock.getAgents.mockResolvedValue([
+      mkSvcAgent('ag-linux', 'linux-01', null),
+      mkSvcAgent('ag-win', 'win-01', 'windows-scm'),
+      mkSvcAgent('ag-none', 'none-01', null),
+      mkSvcAgent('ag-off', 'off-01', 'systemd', 'offline'),
+    ])
     await act(async () => {
-      setAgentValue('ag-none')
+      await qc.invalidateQueries({ queryKey: ['agents'] })
     })
-    expect(apiMock.getAgentServices).not.toHaveBeenCalled()
-    expect(apiMock.getServiceStatus).not.toHaveBeenCalled()
+    // 能力丢失后 systemd 专属 UI 全部收起（健康面板/重载配置/系统状态行）。
+    await waitFor(() => expect(screen.queryByText('健康探针')).not.toBeInTheDocument())
+    expect(screen.queryByText('重载配置')).not.toBeInTheDocument()
+    expect(screen.queryByText('系统状态')).not.toBeInTheDocument()
+    // 能力丢失后不再新增任何 service/status/health 查询。
+    expect(apiMock.getServiceStatus.mock.calls.length).toBe(statusCalls)
+    expect(apiMock.getAgentHealth.mock.calls.length).toBe(healthCalls)
+    expect(apiMock.getAgentServices.mock.calls.length).toBe(listCalls)
   })
 
   it('选中 systemd 主机：系统状态条、Alert 文案、failed 置顶排序', async () => {

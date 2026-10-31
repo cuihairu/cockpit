@@ -40,7 +40,7 @@ const ConnectionPanel = ({
           </PermGuard>
         </Space>
       ) : (
-        <div style={{ padding: 24, color: 'var(--cockpit-text-muted, #667085)' }}>
+        <div style={{ padding: 24, color: 'var(--cockpit-text-muted, #64748b)' }}>
           当前服务器未检测到 {protocol.toUpperCase()} 服务
         </div>
       )}
