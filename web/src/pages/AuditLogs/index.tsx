@@ -262,7 +262,7 @@ const AuditLogs = () => {
         return (
           <Space direction="vertical" size="small">
             <span>{dayjs(d).format('YYYY-MM-DD')}</span>
-            <span style={{ color: '#86909C', fontSize: 12 }}>{dayjs(d).format('HH:mm:ss')}</span>
+            <span style={{ color: '#667085', fontSize: 12 }}>{dayjs(d).format('HH:mm:ss')}</span>
           </Space>
         )
       },
