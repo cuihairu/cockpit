@@ -196,6 +196,7 @@ const Agents = () => {
           dataSource={filteredAgents}
           rowKey="id"
           loading={loading}
+          scroll={{ x: 'max-content' }}
           pagination={{ pageSize: PAGE_SIZE }}
         />
       </Card>
