@@ -156,7 +156,7 @@ const RolesPage = () => {
       width: 160,
       render: (_v, r) =>
         r.builtin ? (
-          <span style={{ color: '#999' }}>内置角色不可修改</span>
+          <span style={{ color: '#667085' }}>内置角色不可修改</span>
         ) : (
           <Space>
             <Button size="small" icon={<EditOutlined />} onClick={() => openEditor(r)}>
