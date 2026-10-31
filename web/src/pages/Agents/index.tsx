@@ -145,7 +145,7 @@ const Agents = () => {
             }
           />
         )}
-        <Space style={{ marginBottom: 16 }} size="middle">
+        <Space style={{ marginBottom: 16 }} size="middle" wrap>
           <Input
             placeholder="搜索主机名、IP 或 Agent ID"
             prefix={<SearchOutlined />}
