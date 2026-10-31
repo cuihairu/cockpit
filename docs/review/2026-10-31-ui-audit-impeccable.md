@@ -36,6 +36,8 @@
 
 **修复后复测（1440×900，22 路由）：** 横向溢出 0 路由（修复前 1 路由）；对比度失败从 **55 处 → 20 处**，且剩余 20 处全部为「AntD 默认占位/禁用色（10 处）」或「品牌/语义色（10 处）」，见待办 T1/T3。**测试门禁：** 受影响测试全绿（Agents 43、App 22、Roles/Login/Dashboard/AuditLogs/Workbench 等 12 文件 118 项通过）；构建成功；dist 为 `.gitignore` 排除，未提交。
 
+**追加修复（本批，非 13 项内，顺带）：** 暗色模式次要文字/状态对比度硬化（`a5b33e6`、`f16407b`：Dashboard/AuditLogs/Roles/ConnectionPanel/OverviewPanel 暗色 secondary 文字与 textMuted 回退统一）；头部搜索证据截图替换为独立采集（`f16407b`，md5 与 `dashboard-after.png` 不再相同，报告措辞同步「外观变为带边框 Button」）。
+
 ### 修复前后截图（`docs/review/2026-10-31-ui-audit-shots/`）
 
 - AGENT 表：`agents-desktop-before.png`（页面横向溢出）→ `agents-desktop-after.png`（表体内横滚，无页面溢出）
@@ -55,13 +57,14 @@
 - 位置：`/agents` 筛选地域/状态/类型、`/proxy` 选择网关所在主机、`/cron` 选择主机/当前用户、`/services` 选择主机/暂无故障窗口记录、`/recordings` 暂无录制、`/access/users` admin 行/删除。
 - 说明：AntD 默认 `colorTextPlaceholder`，多数是「暂无/空态/禁用」，其中空态文案（暂无故障窗口记录、暂无录制）与「作为字段标识的占位符」（筛选地域、选择主机）不豁免。
 - 建议：ConfigProvider `theme.token.colorTextPlaceholder` 提到 ≥4.5:1（如 `rgba(0,0,0,0.45)`）或给字段加可见 label；一处 token 改动覆盖全部，比逐页改更稳。
-- 状态：**待办**（全局 token 改动，影响面大，单独提变更）。
+- 状态：**已修**（`4ae3f71`：`theme.token.colorTextPlaceholder` = `skin.textMuted`——默认皮肤浅色 `#64748b` 对 `#fff` 4.76:1、暗色 7.03:1，均 ≥4.5:1；AntD 默认 `rgba(0,0,0,0.25)` 仅 1.84:1。占位符作字段唯一标识不豁免，故不再沿用默认值。注：报告建议示例 `rgba(0,0,0,0.45)` 实测仅 3.36:1，未达 ≥4.5:1，故未采用）。
 
 **T2. 工作台「概览/文件/日志」按钮与 Tabs 重复（P2 混淆）**
 - 位置：`web/src/pages/Workbench/index.tsx:165-178`（`<Space>` 内 3 个 Button，`type={tab===key?'primary':'default'}`，点击 `openConnection`）叠放在 `:180` `<Tabs>`（同 3 个 item，切换面板）之上。
 - 说明：两行同名控件功能不同（按钮=发起连接，Tab=切换面板），但视觉上像重复导航，且当前激活项在按钮行与 Tab 行都高亮，指向不一。
 - 建议：二选一——(a) 按钮行改为明确的连接语义（如按协议加「连接」后缀或仅显示有能力的协议），(b) 去掉按钮行、由 Tabs 面板内提供连接入口。倾向 (a)，保留快速连接能力。
 - 状态：**待办**（需产品确认连接交互保留方式）。
+- 未修原因：标「待拍板」项——需产品确认工作台连接交互保留方式（按钮行=发起连接 vs Tabs 行=切换面板，二选一），本批按纪律不动，留待拍板后再定。
 
 ### P3
 
@@ -73,28 +76,30 @@
 - 说明：**本次按边界「不动 logo/品牌色/视觉方向」未改**——这些是 AntD 语义/品牌色板，改动即动视觉方向。
 - 建议：为「文字用色」引入同一色相的深色变体（如绿用 `colorSuccess` 的深一档、蓝用 `#0958d9`），仅作用于 on-white 文字，不改变图标/填充色；作为独立设计系统变更评审。
 - 状态：**待办**（品牌边界，需设计决策）。
+- 未修原因：标「待拍板」项——品牌/语义色改动用视觉方向，本批按边界「不动 logo/品牌色/视觉方向」未改；深色文字变体须作为独立设计系统变更评审（规则见 `docs/DESIGN.md` §4）。
 
 **T4. `/services` 页加载即 4 次 404 控制台错误**
 - 位置：`web/src/pages/Services/index.tsx:95,100`（`api.getServiceStatus` / `api.getAgentServices`）。
 - 说明：选中 agent 无服务管理能力或未选中时，后端 404，控制台有 AxiosError 噪声；界面本身有空态兜底，不影响使用。
 - 建议：请求前判空 / 按 capability 守卫，或后端返回 200 空列表。
-- 状态：**待办**（低优先级噪声）。
+- 状态：**已修**（`f16407b`：capability 守卫以真实 `hasService` 判定——`selectedHasService = agentOptions.some(o => o.value === selectedAgent && o.hasService)`，`hasService: !!cap` 独立于 `backend ?? 'systemd'` 兜底；`isSystemd`/`isWindows` 亦 AND `selectedHasService`，堵住 `getAgentHealth` 泄漏；测试改为「选中后失去服务能力」场景断言三查询不新增。注：初版 `20ccb9f` 以 `backend !== undefined` 判能力，因 `?? 'systemd'` 恒真而失效，已被取代）。
 
 **T5. 窄屏加载期瞬时横向溢出（/proxy、/cron、/services）**
 - 说明：窄屏扫描在数据加载瞬间捕捉到 `scrollWidth` 最高 700px（390 视口）；页面稳定后不可复现，判断为加载期布局抖动（长占位符 Select / 表格 `width:auto` 中途撑宽）。
 - 建议：各页顶部过滤 `<Space>` 统一加 `wrap`（同 F2），并给表格容器设 `min-width:0` 兜底。
-- 状态：**待办**（瞬态，加固项）。
+- 状态：**已修**（`579dd9f`：/proxy、/cron、/services 顶部过滤 `<Space>` 加 `wrap`（同 F2），各 `<Table>` 加 `scroll.x = 'max-content'`（同 F1，表体内部横滚兜底），加载期长占位符/表格不再撑宽页面）。
 
 **T6. 小触控目标 <24px（WCAG 2.5.8）**
 - 位置：多处 AntD 小尺寸按钮 42×21、`Space` 1×15 分隔、Tab 项 26×21、数字输入 21px 高。
 - 说明：多为 AntD 默认小控件/装饰性分隔，非交互主体；按信息性记录。
 - 建议：若面向触屏，将主操作按钮提到 ≥24px 高（`size` 或 `padding`）。
 - 状态：**待办**（信息性）。
+- 未修原因：信息性项——多为 AntD 默认小控件/装饰性分隔（42×21 按钮、1×15 分隔、26×21 Tab、21px 数字输入），非交互主体；是否提到 ≥24px 取决于「触屏是否主要目标」，需产品确认，本批不批量改控件尺寸。
 
 **T7. 无 DESIGN.md / PRODUCT.md**
 - 说明：仓内无 `DESIGN.md`、`PRODUCT.md`，本次审核无设计基准可比对，仅按 WCAG/可用性/布局通用标准评判；品牌/视觉方向无法对照，故 T3 从保守角度处理。
 - 建议：补一份 DESIGN.md（色板、次要文字色、占位色、语义色规范），后续审核有基准。
-- 状态：**记录缺失**。
+- 状态：**已修**（`a5b33e6`：新增 `docs/DESIGN.md`——UI 设计基准（色板/次要文字色/占位色/语义色规范 + WCAG 与布局不变量），并在 `docs/index.md` 收编链接；权威色板清单见 `docs/ui-theme-design.md`）。
 
 ---
 
@@ -108,6 +113,6 @@
 ## 五、总结
 
 - 问题数：**13**（P1 5 + P2 3 + P3 4 + 记录缺失 1）
-- 已修复：**6**（F1–F6，各一 commit，见上表）
-- 待办：**7**（T1–T7）
+- 已修复：**10**（F1–F6 各一 commit，见上表；T1 `4ae3f71`、T4 `f16407b`、T5 `579dd9f`、T7 `a5b33e6`）
+- 待办：**3**（T2、T3、T6，均待拍板/信息性，未修原因见 §3）
 - 测试门禁：受影响测试全绿；构建通过；dist 未入库。
