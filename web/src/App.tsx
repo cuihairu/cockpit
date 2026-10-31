@@ -32,6 +32,7 @@ import {
   FileSearchOutlined,
   TeamOutlined,
   AuditOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import Login from './pages/Login'
 import NotificationDropdown from './components/Notifications'
@@ -457,6 +458,7 @@ const MainLayout = () => {
         placeholder="搜索产品、文档、资源..."
         style={{ maxWidth: 500, width: '100%' }}
         size="middle"
+        enterButton={<Button aria-label="搜索" icon={<SearchOutlined />} />}
         onSearch={(value) => logger.debug('Search:', value)}
       />
     </div>
