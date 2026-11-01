@@ -301,6 +301,12 @@ body {
   .ant-table-cell {
     font-size: 13px;
   }
+
+  // 空态单元格走 colorTextDisabled（默认 rgba(0,0,0,0.25)，仅 1.83:1），
+  // 压到皮肤语义色以过 AA。用变量而非固定值，深浅皮肤一并生效。
+  .ant-table-placeholder .ant-table-cell {
+    color: @text-secondary;
+  }
 }
 
 // ─── 标签 ─────────────────────────────────────────
