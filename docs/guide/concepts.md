@@ -131,7 +131,7 @@ At startup the Agent runs capability detectors and reports the capabilities in t
 }
 ```
 
-There are currently 17 capabilities in total, from two classes of origins.
+There are currently 19 capabilities in total (18 always reported, plus the conditional `virt-libvirt`), from two classes of origins.
 
 Probed (`internal/agent/detector/`, reported only when conditions are met):
 
@@ -159,6 +159,8 @@ Directly reported in code (`agent.go` `detectCapabilities`, reported when platfo
 | `ddns` | Always reported (standard library outbound HTTP to probe the public IP) |
 | `service` | One of Windows (SCM) / macOS (launchd) / systemd |
 | `nas` | Software RAID (`/proc/mdstat`) or any storage tool present |
+| `oob` | Always reported (out-of-band fallback action surface, WOL magic packet, `agent.go` `detectCapabilities`) |
+| `virt-libvirt` | Local `virsh` entry present (`rpc.LibvirtAvailable()`), read-only; real driver probe deferred to the `virt.capabilities` RPC |
 
 > Historical note: the old `network-monitor` capability (WireGuard peer counts and cloudflared
 > process-level probing) was removed when overlay M1 landed (overlay-design.md D18); the server/web

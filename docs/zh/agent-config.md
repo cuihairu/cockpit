@@ -13,6 +13,9 @@
 | `-labels` | 标签，格式 `key1=v1,key2=v2` | — |
 | `-bias` | 同机器多 Agent 偏移量 | `0` |
 | `-ssh-keys` | SSH 私钥目录 | `~/.ssh/` |
+| `-liveness-targets` | 存活探测目标（逗号分隔 `host:port`） | — |
+| `-liveness-ports` | 存活探测端口 | — |
+| `-liveness-interval` | 存活探测间隔 | `0` |
 
 示例：
 

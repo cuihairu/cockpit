@@ -89,7 +89,7 @@ exit_code/输出」，编排器和单步 dispatcher 都只是 server 侧的 goro
 | W1 | POST /api/jobs 语义 | **全异步**：创建后立即 201 返回 pending Job 视图，后台 dispatch；原同步等待删除 | 消费者仅 web 一处（mobile 未接 jobs API），无兼容负担；「创建即返回 id」是台账模型的本义，P1 的同步返回是权宜 |
 | W2 | 状态机 | `pending → running → success \| failed \| cancelled`；**timeout 不设独立态**（保持 `failed` + error=`timed out after Ns`） | error 字段已可判定超时，独立态只增加过滤面；cancelled 是异步化后才有的真实能力，必须独立（running 被取消的 Job 不该计作 failed） |
 | W3 | 取消语义 | 只允许取消 **pending**（未派发）Job；running 拒绝（409，说明 job.exec 上限 300s 会自然结束）。Workflow run 取消 = 停止推进后续步骤 + 当前步骤同规则 | RPC 协议无取消帧，假装能取消 running 是撒谎；诚实边界是「派发前可撤，派发后等它回来」。agent 侧信号注入取消留 M2 |
-| W4 | 编排形态 | **线性步骤链**（steps 有序数组，逐步执行），非 DAG；步骤级 `continue_on_error` 与 `retry`（0-3 次，固定间隔 5s） | 个人基础设施最高频就是串行链（停机→备份→升级→起机→检查）；DAG 的 edges 表达在 UI 和存储里成本翻倍，等真实并行需求出现再扩。重试覆盖最常见韧性需求 |
+| W4 | 编排形态 | **线性步骤链**（steps 有序数组，逐步执行），非 DAG；步骤级 `continue_on_error` 与 `retry`（0-3 次，固定间隔 5s；**0-3 上界为设计意图但尚未强制**——当前实现接受任意非负整数并产生 `retry+1` 次尝试，见 2026-11-01 代码深审） | 个人基础设施最高频就是串行链（停机→备份→升级→起机→检查）；DAG 的 edges 表达在 UI 和存储里成本翻倍，等真实并行需求出现再扩。重试覆盖最常见韧性需求 |
 | W5 | 步骤与 Job 的关系 | 每步创建**真实 Job**（`jobs` 表加可空列 `workflow_run_id`），run 台账里每步可点开看输出/退出码 | 步骤不是影子记录——它就是一次执行，进统一台账、进既有审计 `job_run`；不新造「步骤日志」平行体系 |
 | W6 | 存储 | `workflows`（定义）+ `workflow_runs`（实例）两表；run 内嵌 steps 运行态 JSON 快照（含每步状态/尝试次数/关联 Job id）；AutoMigrate | 个人规模读多写少，步骤子表是过度设计；快照即事实（当时怎么跑的、每步结果） |
 | W7 | run 状态机 | `running → success \| failed \| cancelled`（无 pending——建 run 即开始推进）；部分失败 = failed，details 记明断点 | run 是进程性实体，建了就跑；「排队中」的 run 没有消费者 |
@@ -121,7 +121,7 @@ exit_code/输出」，编排器和单步 dispatcher 都只是 server 侧的 goro
 | `POST /api/approvals/{id}/reject`（M2d） | — | 驳回（终态，不建 Job） |
 
 校验：name 非空 ≤64 字符；steps 非空 ≤20；step.name 同一 workflow 内唯一
-≤64；`timeout_s`/`command` 等沿用 P1 各限；`retry` 0-3。M2d：`approval`
+≤64；`timeout_s`/`command` 等沿用 P1 各限；`retry` 0-3（**设计意图；代码尚未强制**——实现读取无范围校验、无 clamp）。M2d：`approval`
 只收 `required`；进审批的 payload 必须先过 validateJobPayload（批准后原样
 派发，校验不可后置）。
 

@@ -146,6 +146,17 @@ RPC payload 使用 `method` 和 `params`。方法名按 `<provider>.<action>` �
 
 注意：SystemProvider 在 Agent 启动时始终注册；PVE、Docker、OpenWrt Provider 由 `Agent.setupProviders` 按检测到的 capability 和环境变量（如 `PVE_URL`/`PVE_TOKEN_ID`/`PVE_TOKEN_SECRET`、`DOCKER_HOST`、`OPENWRT_HOST`/`OPENWRT_USER`/`OPENWRT_PASS`）条件注册。凭据缺失时该 Provider 仅记录日志跳过，不影响其他 Provider 和基础心跳。
 
+### Agent 观测与保活消息
+
+除 `register` / `heartbeat` / `rpc_*` 外，控制通道还承载以下 Agent 侧消息（见 `internal/protocol/message.go`）：
+
+| 类型 | 方向 | 用途 |
+| --- | --- | --- |
+| `probe_report` | Agent → Server | 服务检测探针 agent 观测上报（探针 agent B5） |
+| `liveness_report` | Agent → Server | 带外探活上报（OpenWrt 自举，网络层 ARP/ICMP/TCP 三源判定；语义独立于 `probe_report`） |
+| `exec_log` | Agent → Server | 执行留痕流（agent-core P5） |
+| `ping` | Server → Agent | 保活 |
+
 ## 代理消息
 
 代理消息用于 Server 通过在线 Agent 访问 Agent 本机或其网络可达的 TCP 目标。

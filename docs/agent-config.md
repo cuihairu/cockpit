@@ -13,6 +13,9 @@
 | `-labels` | Labels, format `key1=v1,key2=v2` | — |
 | `-bias` | Offset for multiple Agents on the same machine | `0` |
 | `-ssh-keys` | SSH private key directory | `~/.ssh/` |
+| `-liveness-targets` | Liveness probe targets (comma-separated `host:port`) | — |
+| `-liveness-ports` | Liveness probe ports | — |
+| `-liveness-interval` | Liveness probe interval | `0` |
 
 Example:
 

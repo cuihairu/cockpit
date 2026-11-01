@@ -147,6 +147,17 @@ The response must reuse the request ID:
 
 Note: SystemProvider is always registered at Agent startup; the PVE, Docker, and OpenWrt providers are conditionally registered by `Agent.setupProviders` based on detected capabilities and environment variables (such as `PVE_URL`/`PVE_TOKEN_ID`/`PVE_TOKEN_SECRET`, `DOCKER_HOST`, `OPENWRT_HOST`/`OPENWRT_USER`/`OPENWRT_PASS`). When credentials are missing, that provider is skipped with a log only, without affecting the other providers or the basic heartbeat.
 
+### Agent observation and keepalive messages
+
+Beyond `register` / `heartbeat` / `rpc_*`, the control channel also carries these Agent-side messages (see `internal/protocol/message.go`):
+
+| Type | Direction | Purpose |
+| --- | --- | --- |
+| `probe_report` | Agent -> Server | Service-detection probe Agent observation (probe agent B5) |
+| `liveness_report` | Agent -> Server | Out-of-band liveness probe push (OpenWrt bootstrap, network-layer ARP/ICMP/TCP three-source verdict; distinct from `probe_report` semantics) |
+| `exec_log` | Agent -> Server | Execution ledger stream (agent-core P5) |
+| `ping` | Server -> Agent | Keepalive |
+
 ## Proxy Messages
 
 Proxy messages let the Server reach the Agent itself or TCP targets reachable from its network through an online Agent.

@@ -131,7 +131,7 @@ Agent 启动时会运行能力检测器，并在注册消息中上报 capability
 }
 ```
 
-当前 capability 共 17 个，分两类来源。
+当前 capability 共 19 个（恒上报 18 个 + 条件上报 `virt-libvirt`），分两类来源。
 
 探测式（`internal/agent/detector/`，满足条件才上报）：
 
@@ -159,6 +159,8 @@ Agent 启动时会运行能力检测器，并在注册消息中上报 capability
 | `ddns` | 恒上报（标准库出站 HTTP 探公网 IP） |
 | `service` | Windows（SCM）/ macOS（launchd）/ systemd 之一 |
 | `nas` | 软件 RAID（`/proc/mdstat`）或任一存储工具存在 |
+| `oob` | 恒上报（带外兜底动作面，WOL 魔术包，`agent.go` `detectCapabilities`） |
+| `virt-libvirt` | 本地 `virsh` 入口存在（`rpc.LibvirtAvailable()`），只读；真实驱动探测由 `virt.capabilities` RPC 验证 |
 
 > 历史注记：旧 `network-monitor` capability（WireGuard peer 数与 cloudflared
 > 进程级探测）已在 overlay M1 落地时删除（overlay-design.md D18），server/web
