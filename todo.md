@@ -43,7 +43,7 @@
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
 - [ ] DNS 真账号：DNSPod/阿里云 SRV 与 TTL 下限、台账联动全链、M4 跨 provider 迁移演练〔阻塞=缺真实 DNSPod/阿里云账号｜解锁=账号到位按 checklist:133-135 验收〕〔BLOCKED：缺真实 DNSPod/阿里云账号｜2026-11-01〕
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
-- [ ] Guacamole 音频真机：RDP 音频 mimetype 与 L8/L16 编解码确认（D4，静音按钮已实现）〔阻塞=缺 Windows RDP 主机｜解锁=真机确认编解码〕〔BLOCKED：缺 Windows RDP 主机｜2026-11-01〕
+- [ ] Guacamole 音频真机：RDP 音频 mimetype 与 L8/L16 编解码确认（D4，静音按钮已实现）〔2026-11-01 解锁:Windows 真机已具备(openclaw,win-worker 通道),以 openclaw 为 RDP 目标执行验收;原「缺 Windows RDP 主机」已过时〕〔阻塞=缺 Windows RDP 主机｜解锁=真机确认编解码〕〔BLOCKED：缺 Windows RDP 主机｜2026-11-01〕
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
 - [ ] 移动端：Android release 安装/splash/R8/签名升级、生物识别、ntfy 送达、SSH 终端〔阻塞=缺 Android 真机与签名/ntfy 凭据｜解锁=真机+凭据到位按 checklist 移动端一节（:355 起）验收〕〔BLOCKED：缺 Android 真机与签名/ntfy 凭据｜2026-11-01〕
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
@@ -343,4 +343,4 @@
   - 依据：本次 diff 把 `isSystemd`/`isWindows` 改为 `selectedHasService && …`，但 `Alert` 的 `isWindows ? … : isSystemd ? … : launchd` 三态未同步无能力分支；`selectedHasService=false` 时误显示 launchd 文案。建议为无能力残留值单独分支或复用空态文案（同文件 :404-412 的「仅列出检测到服务管理 capability 的主机…」）。测试 T4（index.test.tsx:136-167）只断言 systemd 专属 UI 收起与三查询不新增，未断言该 Alert 文案，故未覆盖。
   - 属实，已修：`Alert` 增加 `!selectedHasService` 前置分支，无能力残留选中值时显示「未检测到服务管理能力：仅列出检测到 service capability 的主机，请重新选择。」，不再误落 launchd 文案。T4 用例补充断言：该空态文案出现且 launchd 文案不出现。证据：本 commit（web 100 文件/1148 测试绿，tsc/build 绿）。
 - [x] 审核发现：本轮 diff 未见问题（01a412d6..HEAD）。证据：commit 0702cb7 已推送；`web/src/App.tsx` 新增 `colorTextDescription: skin.textMuted`；`tsc --noEmit` 与 `npm run build` 均通过。
-- [ ] 审核发现：本轮 diff 未见问题（2152b362..HEAD）。证据：commit 0702cb7 仅向 `web/src/App.tsx:595` 新增 antd 合法 token `colorTextDescription: skin.textMuted`，与相邻 `colorTextSecondary/Tertiary/Placeholder` 同源一致；token 已在 antd 5.29 alias 接口定义（web/node_modules/antd/es/theme/interface/alias.d.ts:94），无类型/样式风险。
+- [x] 审核发现：本轮 diff 未见问题（2152b362..HEAD）。证据：commit 0702cb7 仅向 `web/src/App.tsx:595` 新增 antd 合法 token `colorTextDescription: skin.textMuted`，与相邻 `colorTextSecondary/Tertiary/Placeholder` 同源一致；token 已在 antd 5.29 alias 接口定义（web/node_modules/antd/es/theme/interface/alias.d.ts:94），无类型/样式风险。；验证：`git diff --name-status 2152b362..HEAD` 仅涉 App 主题样式/审查报告/截图/todo；`App.tsx` ESLint 0 error、`App.test.tsx` 22/22、`Services/index.test.tsx` 19/19、`npm run build` 绿（全量 lint 的 5 个既有 error 均在未改动的 GuacamoleModal/TagManageModal/TerminalModal）。
