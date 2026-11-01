@@ -1,21 +1,24 @@
 [English](README.md) | [中文](README.zh.md)
 
 <p align="center">
-  <img src="web/public/logo.svg" alt="Cockpit Logo" width="64" height="64"> <a href="https://cuihairu.github.io/cockpit/zh//"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue" alt="docs"></a>
+  <img src="web/public/logo.svg" alt="Cockpit Logo" width="64" height="64">
 </p>
 
 <h1 align="center">Cockpit</h1>
 
 个人混合基础设施控制台，用于把分散在本地机房、云 VPS、NAT 后节点上的资源收敛到一个轻量 Server + Agent 控制面。
 
+<p align="center">
+[![docs](https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue)](https://cuihairu.github.io/cockpit/zh/)
 [![Test](https://img.shields.io/github/actions/workflow/status/cuihairu/cockpit/test.yml?branch=main&logo=github&label=Test)](https://github.com/cuihairu/cockpit/actions/workflows/test.yml)
 [![Docs](https://img.shields.io/github/actions/workflow/status/cuihairu/cockpit/docs.yml?branch=main&logo=github&label=Docs)](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml)
 [![codecov](https://codecov.io/gh/cuihairu/cockpit/branch/main/graph/badge.svg)](https://codecov.io/gh/cuihairu/cockpit)
-[![Agent: Windows](https://img.shields.io/badge/platform-Windows-0078D4?logo=windows&logoColor=white)](https://cuihairu.github.io/cockpit/zh//guide/getting-started)
-[![Agent: Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](https://cuihairu.github.io/cockpit/zh//guide/getting-started)
-[![Agent: macOS](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white)](https://cuihairu.github.io/cockpit/zh//guide/getting-started)
-[![Agent: x86_64](https://img.shields.io/badge/arch-x86__64-5B5B5B)](https://cuihairu.github.io/cockpit/zh//guide/getting-started)
-[![Agent: aarch64](https://img.shields.io/badge/arch-aarch64-5B5B5B)](https://cuihairu.github.io/cockpit/zh//guide/getting-started)
+[![Agent: Windows](https://img.shields.io/badge/platform-Windows-0078D4?logo=windows&logoColor=white)](https://cuihairu.github.io/cockpit/zh/guide/getting-started)
+[![Agent: Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](https://cuihairu.github.io/cockpit/zh/guide/getting-started)
+[![Agent: macOS](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white)](https://cuihairu.github.io/cockpit/zh/guide/getting-started)
+[![Agent: x86_64](https://img.shields.io/badge/arch-x86__64-5B5B5B)](https://cuihairu.github.io/cockpit/zh/guide/getting-started)
+[![Agent: aarch64](https://img.shields.io/badge/arch-aarch64-5B5B5B)](https://cuihairu.github.io/cockpit/zh/guide/getting-started)
+</p>
 
 ## 核心特性
 
@@ -146,11 +149,12 @@ CI 与本地开发按改动面三路分流——改一行文档不该全量编�
 
 完整安装（一键安装细节 / 平台矩阵 / 源码构建 / OpenWrt ipk）、配置说明、架构与各功能设计文档均在文档站：
 
-- [介绍](https://cuihairu.github.io/cockpit/guide/introduction)
-- [快速开始](https://cuihairu.github.io/cockpit/guide/getting-started)
-- [架构与边界](https://cuihairu.github.io/cockpit/guide/architecture)
-- [协议与 API 边界](https://cuihairu.github.io/cockpit/guide/protocol)
-- [Docker 部署](https://cuihairu.github.io/cockpit/operations/deploy-docker)
+- [介绍](https://cuihairu.github.io/cockpit/zh/guide/introduction)
+- [快速开始](https://cuihairu.github.io/cockpit/zh/guide/getting-started)
+- [架构与边界](https://cuihairu.github.io/cockpit/zh/guide/architecture)
+- [协议与 API 边界](https://cuihairu.github.io/cockpit/zh/guide/protocol)
+- [Docker 部署](https://cuihairu.github.io/cockpit/zh/operations/deploy-docker)
+- [运维开源方案调研](https://cuihairu.github.io/cockpit/zh/research/ops-oss-survey)
 - Agent 手工部署与服务单元样例：[deployments/README.md](deployments/README.md)
 
 ## 底座

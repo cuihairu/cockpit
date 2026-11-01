@@ -1,21 +1,24 @@
 [English](README.md) | [中文](README.zh.md)
 
 <p align="center">
-  <img src="web/public/logo.svg" alt="Cockpit Logo" width="64" height="64"> <a href="https://cuihairu.github.io/cockpit//"><img src="https://img.shields.io/badge/docs-blue" alt="docs"></a>
+  <img src="web/public/logo.svg" alt="Cockpit Logo" width="64" height="64">
 </p>
 
 <h1 align="center">Cockpit</h1>
 
 A personal hybrid infrastructure console that consolidates resources scattered across local machine rooms, cloud VPS instances, and nodes behind NAT into a single lightweight Server + Agent control plane.
 
+<p align="center">
+[![docs](https://img.shields.io/badge/docs-blue)](https://cuihairu.github.io/cockpit/)
 [![Test](https://img.shields.io/github/actions/workflow/status/cuihairu/cockpit/test.yml?branch=main&logo=github&label=Test)](https://github.com/cuihairu/cockpit/actions/workflows/test.yml)
 [![Docs](https://img.shields.io/github/actions/workflow/status/cuihairu/cockpit/docs.yml?branch=main&logo=github&label=Docs)](https://github.com/cuihairu/cockpit/actions/workflows/docs.yml)
 [![codecov](https://codecov.io/gh/cuihairu/cockpit/branch/main/graph/badge.svg)](https://codecov.io/gh/cuihairu/cockpit)
-[![Agent: Windows](https://img.shields.io/badge/platform-Windows-0078D4?logo=windows&logoColor=white)](https://cuihairu.github.io/cockpit//guide/getting-started)
-[![Agent: Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](https://cuihairu.github.io/cockpit//guide/getting-started)
-[![Agent: macOS](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white)](https://cuihairu.github.io/cockpit//guide/getting-started)
-[![Agent: x86_64](https://img.shields.io/badge/arch-x86__64-5B5B5B)](https://cuihairu.github.io/cockpit//guide/getting-started)
-[![Agent: aarch64](https://img.shields.io/badge/arch-aarch64-5B5B5B)](https://cuihairu.github.io/cockpit//guide/getting-started)
+[![Agent: Windows](https://img.shields.io/badge/platform-Windows-0078D4?logo=windows&logoColor=white)](https://cuihairu.github.io/cockpit/guide/getting-started)
+[![Agent: Linux](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)](https://cuihairu.github.io/cockpit/guide/getting-started)
+[![Agent: macOS](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white)](https://cuihairu.github.io/cockpit/guide/getting-started)
+[![Agent: x86_64](https://img.shields.io/badge/arch-x86__64-5B5B5B)](https://cuihairu.github.io/cockpit/guide/getting-started)
+[![Agent: aarch64](https://img.shields.io/badge/arch-aarch64-5B5B5B)](https://cuihairu.github.io/cockpit/guide/getting-started)
+</p>
 
 ## Features
 
