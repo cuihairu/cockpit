@@ -47,9 +47,29 @@
 - 角色页：`roles-before.png`（「内置角色不可修改」浅灰）
 - 头部搜索：`header-search-after.png`（搜索按钮已带 `aria-label`，外观变为带边框 Button）
 
+### 修复波结果（待办→已修，四联格式：问题 / before / after / commit）
+
+修复波执行报告 §3 的「待修/pending」项，一问题一 commit，全部带同视图 before/after 截图成对（`docs/review/shots-after/`）。
+
+| # | 问题 | before | after | commit |
+|---|------|--------|-------|--------|
+| T1a | 字段占位符沿用 AntD 默认 `rgba(0,0,0,0.25)`（1.83:1）——作字段唯一标识不豁免 | `shots-after/T1-placeholder-before.png` | `shots-after/T1-placeholder-after.png` | `4ae3f71` |
+| T1b | 表格空态字 `.ant-table-placeholder .ant-table-cell` 仍落 `colorTextDisabled`（1.83:1，`colorTextDescription` 不覆盖） | `shots-after/T1-emptytable-before.png` | `shots-after/T1-emptytable-after.png` | `8e58b13` |
+| T4 | `/services` 加载即 4 次 404（无能力选中值泄漏到三查询） | `shots-after/T4-probe-before.png` | `shots-after/T4-probe-after.png` | `f16407b` |
+| T5 | 窄屏加载期瞬时横向溢出（占位符/`width:auto` 中途撑宽） | 加载期抖动，稳定后不可复现（复测 overflow=None） | — | `579dd9f` |
+| T7 | 无 DESIGN.md / PRODUCT.md 基准 | — | — | `a5b33e6` |
+
+待用户（需拍板/设计决策，修复波跳过并在报告标注）：
+
+| # | 问题 | 原因 | 后续 |
+|---|------|------|------|
+| T2 | 工作台「概览/文件/日志」按钮与 Tabs 重复（P2） | 需产品确认连接交互保留方式（按钮行 vs Tabs 行，二选一） | 待拍板 |
+| T3 | 品牌/语义色文字对白底对比度不足（10 处） | 改动用视觉方向，边界「不动 logo/品牌色/视觉方向」；深色文字变体须独立设计变更评审 | 待设计决策 |
+| T6 | 小触控目标 <24px（WCAG 2.5.8） | 信息性项，多为 AntD 默认小控件/装饰性分隔；是否提 ≥24px 取决于触屏是否主要目标 | 待产品确认 |
+
 ---
 
-## 三、待办问题（未修，按严重度排序）
+## 三、待办问题（修复波处置：T1/T4/T5/T7 已修，T2/T3/T6 待用户）
 
 ### P2
 
@@ -58,6 +78,7 @@
 - 说明：AntD 默认 `colorTextPlaceholder`，多数是「暂无/空态/禁用」，其中空态文案（暂无故障窗口记录、暂无录制）与「作为字段标识的占位符」（筛选地域、选择主机）不豁免。
 - 建议：ConfigProvider `theme.token.colorTextPlaceholder` 提到 ≥4.5:1（如 `rgba(0,0,0,0.45)`）或给字段加可见 label；一处 token 改动覆盖全部，比逐页改更稳。
 - 状态：**已修**（`4ae3f71`：`theme.token.colorTextPlaceholder` = `skin.textMuted`——默认皮肤浅色 `#64748b` 对 `#fff` 4.76:1、暗色 7.03:1，均 ≥4.5:1；AntD 默认 `rgba(0,0,0,0.25)` 仅 1.84:1。占位符作字段唯一标识不豁免，故不再沿用默认值。注：报告建议示例 `rgba(0,0,0,0.45)` 实测仅 3.36:1，未达 ≥4.5:1，故未采用）。
+- 追加（修复波复扫发现）：表格空态字（`暂无故障窗口记录`/`暂无录制`/`暂无探针目标`）走 `.ant-table-placeholder .ant-table-cell`，颜色源是 `colorTextDisabled`（`rgba(0,0,0,0.25)`，1.83:1），`colorTextPlaceholder`/`colorTextDescription` 两个 token 均不覆盖；改 `colorTextDisabled` 会连带提亮真禁用控件，故改为 App.less 内 scoped 覆盖到 `@text-secondary`（`--cockpit-text-muted`，浅 4.76:1/暗 7.03:1），深浅皮肤一并生效。commit `8e58b13`，复测 `/services`、`/recordings` contrastFails=0。截图：`shots-after/T1-emptytable-before.png` → `T1-emptytable-after.png`。
 
 **T2. 工作台「概览/文件/日志」按钮与 Tabs 重复（P2 混淆）**
 - 位置：`web/src/pages/Workbench/index.tsx:165-178`（`<Space>` 内 3 个 Button，`type={tab===key?'primary':'default'}`，点击 `openConnection`）叠放在 `:180` `<Tabs>`（同 3 个 item，切换面板）之上。
@@ -113,6 +134,7 @@
 ## 五、总结
 
 - 问题数：**13**（P1 5 + P2 3 + P3 4 + 记录缺失 1）
-- 已修复：**10**（F1–F6 各一 commit，见上表；T1 `4ae3f71`、T4 `f16407b`、T5 `579dd9f`、T7 `a5b33e6`）
-- 待办：**3**（T2、T3、T6，均待拍板/信息性，未修原因见 §3）
+- 已修复：**10**（F1–F6 各一 commit，见上表；T1 `4ae3f71` + 表格空态 `8e58b13`、T4 `f16407b`、T5 `579dd9f`、T7 `a5b33e6`）
+- 待用户：**3**（T2、T3、T6，均待拍板/信息性，未修原因见 §3）
+- 截图对：`docs/review/shots-after/` 内 T1-placeholder、T1-emptytable、T4-probe 三组成对（修复波硬性要求）
 - 测试门禁：受影响测试全绿；构建通过；dist 未入库。
