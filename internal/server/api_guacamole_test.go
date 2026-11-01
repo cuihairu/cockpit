@@ -446,11 +446,16 @@ func TestGuacamoleTunnelFullFlow(t *testing.T) {
 	if _, err := strconv.Atoi(m["port"]); err != nil {
 		t.Errorf("handshake connect[port] = %q, want numeric relay port", m["port"])
 	}
-	// 媒体能力声明：audio/video 空声明（阶段二不启用），image 必须声明 png
+	// 媒体能力声明：audio 必须声明 RawAudioPlayer 支持的 audio/L8+audio/L16
+	//（空声明 → guacd 不推 audio 流，桌面无音频、静音按钮失效；真机 A/B
+	// 2026-11-01 定位），video 空声明（阶段二不启用），image 必须声明 png
 	//（缺声明 → guacd user->info.image_mimetypes=NULL，supports_webp 空指针
 	// 解引用 → guacd 子进程 segfault，真机验收 2026-09-30 定位）
-	if !strings.Contains(hs, "5.audio;") || !strings.Contains(hs, "5.video;") {
-		t.Errorf("audio/video should be empty declarations: %q", hs)
+	if !strings.Contains(hs, "5.audio,8.audio/L8,9.audio/L16;") {
+		t.Errorf("handshake must declare audio/L8+audio/L16: %q", hs)
+	}
+	if !strings.Contains(hs, "5.video;") {
+		t.Errorf("video should be empty declaration: %q", hs)
 	}
 	if !strings.Contains(hs, "5.image,9.image/png;") {
 		t.Errorf("handshake must declare image/png: %q", hs)

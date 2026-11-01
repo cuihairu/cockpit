@@ -524,7 +524,13 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	connectArgs := guacConnectArgs(argNames, protocolStr, relayHost, relayPort, ticket.Params, width, height,
 		recording, sessionID+".guac")
 	handshake := guacEncode("size", strconv.Itoa(width), strconv.Itoa(height), "96") +
-		guacEncode("audio") + // 空 = 不启用音频（阶段二）
+		// 音频声明必须与浏览器端 RawAudioPlayer.getSupportedTypes() 一致
+		//（audio/L8 + audio/L16 原始 PCM）：guacd 只向声明了支持的客户端推
+		// audio 指令+blob 流（真机 A/B 实测 2026-11-01：空声明 → guacd 一条
+		// audio 都不发；声明 L16 → audio,<idx>,audio/L16 立即到达）。网关是
+		// 字节管道不解析浏览器侧握手，浏览器的能力声明到不了 guacd，只能由
+		// 此处代声明。桌面无音频流的「静音按钮无效」根因即此行空声明。
+		guacEncode("audio", "audio/L8", "audio/L16") +
 		guacEncode("video") + // 空 = 不启用视频
 		guacEncode("image", "image/png") + // 必须声明，见上方 5b 注释（guacd segfault 根因）
 		guacEncode("connect", connectArgs...)

@@ -43,7 +43,7 @@
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
 - [ ] DNS 真账号：DNSPod/阿里云 SRV 与 TTL 下限、台账联动全链、M4 跨 provider 迁移演练〔阻塞=缺真实 DNSPod/阿里云账号｜解锁=账号到位按 checklist:133-135 验收〕〔BLOCKED：缺真实 DNSPod/阿里云账号｜2026-11-01〕
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
-- [ ] Guacamole 音频真机：RDP 音频 mimetype 与 L8/L16 编解码确认（D4，静音按钮已实现）〔2026-11-01 解锁:Windows 真机已具备(openclaw,win-worker 通道),以 openclaw 为 RDP 目标执行验收;原「缺 Windows RDP 主机」已过时〕〔阻塞=缺 Windows RDP 主机｜解锁=真机确认编解码〕〔BLOCKED：缺 Windows RDP 主机｜2026-11-01〕
+- [x] Guacamole 音频真机：RDP 音频 mimetype 与 L8/L16 编解码确认（D4，静音按钮已实现）〔2026-11-01 openclaw 真机验收完成：协商 mimetype=audio/L16（16-bit PCM 44100Hz 2ch），L8 仅浏览器 RawAudioPlayer 支持/guacd 1.5.5 对 16-bit 源不产 L8；5,013,504 字节 PCM 经网关到达；发现并修复网关空 audio 声明（api_guacamole.go:533），单测同步；静音按钮 suspend/resume 由单测覆盖；详见 docs/review/2026-11-01-guacamole-audio-acceptance.md〕
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
 - [ ] 移动端：Android release 安装/splash/R8/签名升级、生物识别、ntfy 送达、SSH 终端〔阻塞=缺 Android 真机与签名/ntfy 凭据｜解锁=真机+凭据到位按 checklist 移动端一节（:355 起）验收〕〔BLOCKED：缺 Android 真机与签名/ntfy 凭据｜2026-11-01〕
   - 已代决:按 docs/review/2026-10-30-decisions.md 执行(2026-10-30)
