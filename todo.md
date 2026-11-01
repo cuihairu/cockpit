@@ -339,3 +339,6 @@
   - 属实，已修：删除 `setAgentValue` 及 fiber 内部属性遍历；测试改为正常选中有能力主机后模拟 agent 数据能力撤销并 invalidate `agents` 查询，不再触碰 React 内部实现。证据：`rg '__reactFiber|__reactInternalInstance' web/src/pages/Services` 返回空（其余测试文件不受影响）。
 - [x] 审核发现：同一 CSS 变量 `--cockpit-text-muted` 的 fallback 值不一致——本次改动用 `#667085`，而 App.less:23 与 MobileTabBar 用 `#64748b`，同变量两套兜底（web/src/pages/Dashboard/index.less:44,60 vs web/src/App.less:23）。
   - 属实，已修：`Dashboard/index.less:44,60`、`ConnectionPanel.tsx:43`、`OverviewPanel.tsx:6` 的 fallback 统一为 `#64748b`，与 `App.less:23`/`MobileTabBar` 一致。证据：`rg '#667085' web/src/pages/Dashboard web/src/workbench` 返回空（Login 页仍用 `#667085`，非本次改动范围）。
+- [x] 审核发现：无能力残留选中值下 `isSystemd`/`isWindows` 均被守卫为 false，导致 Alert 走 `else` 分支渲染「所有启停/自启操作直接作用于 launchd…」误导文案（用户并未选择 macOS/launchd 主机），而该状态实际应展示「未检测到服务管理能力」之类的空态说明（web/src/pages/Services/index.tsx:453-456）。
+  - 依据：本次 diff 把 `isSystemd`/`isWindows` 改为 `selectedHasService && …`，但 `Alert` 的 `isWindows ? … : isSystemd ? … : launchd` 三态未同步无能力分支；`selectedHasService=false` 时误显示 launchd 文案。建议为无能力残留值单独分支或复用空态文案（同文件 :404-412 的「仅列出检测到服务管理 capability 的主机…」）。测试 T4（index.test.tsx:136-167）只断言 systemd 专属 UI 收起与三查询不新增，未断言该 Alert 文案，故未覆盖。
+  - 属实，已修：`Alert` 增加 `!selectedHasService` 前置分支，无能力残留选中值时显示「未检测到服务管理能力：仅列出检测到 service capability 的主机，请重新选择。」，不再误落 launchd 文案。T4 用例补充断言：该空态文案出现且 launchd 文案不出现。证据：本 commit（web 100 文件/1148 测试绿，tsc/build 绿）。

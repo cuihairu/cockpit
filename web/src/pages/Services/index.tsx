@@ -449,11 +449,13 @@ const Services = () => {
               showIcon
               style={{ marginBottom: 0 }}
               message={
-                isWindows
-                  ? '所有启停/自启操作直接作用于 Windows 服务控制管理器并记入审计日志；不支持重载操作。'
-                  : isSystemd
-                    ? '所有启停/自启操作直接作用于 systemd 并记入审计日志；failed 服务失败状态会在系统状态中体现（degraded）。'
-                    : '所有启停/自启操作直接作用于 launchd 并记入审计日志；停止为卸载服务（plist 保留，可再次启动），不支持重载操作。'
+                !selectedHasService
+                  ? '未检测到服务管理能力：仅列出检测到 service capability 的主机，请重新选择。'
+                  : isWindows
+                    ? '所有启停/自启操作直接作用于 Windows 服务控制管理器并记入审计日志；不支持重载操作。'
+                    : isSystemd
+                      ? '所有启停/自启操作直接作用于 systemd 并记入审计日志；failed 服务失败状态会在系统状态中体现（degraded）。'
+                      : '所有启停/自启操作直接作用于 launchd 并记入审计日志；停止为卸载服务（plist 保留，可再次启动），不支持重载操作。'
               }
             />
             {actionError && (

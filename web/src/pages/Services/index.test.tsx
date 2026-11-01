@@ -158,6 +158,8 @@ describe('Services', () => {
     })
     // 能力丢失后 systemd 专属 UI 全部收起（健康面板/重载配置/系统状态行）。
     await waitFor(() => expect(screen.queryByText('健康探针')).not.toBeInTheDocument())
+    expect(screen.getByText('未检测到服务管理能力：仅列出检测到 service capability 的主机，请重新选择。')).toBeInTheDocument()
+    expect(screen.queryByText(/直接作用于 launchd/)).not.toBeInTheDocument()
     expect(screen.queryByText('重载配置')).not.toBeInTheDocument()
     expect(screen.queryByText('系统状态')).not.toBeInTheDocument()
     // 能力丢失后不再新增任何 service/status/health 查询。
