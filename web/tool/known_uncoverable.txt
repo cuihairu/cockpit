@@ -8,10 +8,10 @@
 pages/Proxy/index.tsx:131 selectedAgent 防御早退：操作入口仅在选中 agent 后渲染，空 agent 不可达
 pages/Proxy/index.tsx:167 同上（applyProxySite 前置防御）
 pages/Proxy/index.tsx:178 同上（删除前防御）
-pages/Services/index.tsx:127 同上（保存 unit 前防御；原 126 漂移）
-pages/Services/index.tsx:135 同上（daemon-reload 前防御；原 134 漂移）
-pages/Services/index.tsx:151 同上（打开 unit 文件前防御；原 150 漂移）
-pages/Services/index.tsx:167 同上（保存 unit 文件前防御，!editUnit 复合防御；原 166 漂移）
+pages/Services/index.tsx:143 同上（保存 unit 前防御；原 127，代码插入后 +16 漂移）
+pages/Services/index.tsx:151 同上（daemon-reload 前防御；原 135，同上 +16）
+pages/Services/index.tsx:167 同上（打开 unit 文件前防御；原 151，同上 +16）
+pages/Services/index.tsx:183 同上（保存 unit 文件前防御，!editUnit 复合防御；原 167，同上 +16）
 pages/Cron/index.tsx:172 selectedAgent 防御早退（saveJob）
 pages/Cron/index.tsx:199 同上（toggleEnabled）
 pages/Cron/index.tsx:210 同上（deleteJob）
@@ -35,7 +35,7 @@ pages/Network/index.tsx:791 DaemonCard data.tools ?? [] 兜底边与 792 空数�
 pages/Network/index.tsx:792 同上（tools.length === 0 的 return null 边已被 ag-3 用例执行并断言）
 pages/Network/index.tsx:736 join Modal okButtonProps 表达式行：用例已断言空输入禁用态并成功提交，v8 对 Modal JSX prop 行计数漏计
 pages/Jobs/index.tsx:166 结果列 pending || running 取消入口的 pending true 边：M2c 后两条 pending 行用例已执行该路径（取消按钮渲染并点击断言 15/15 绿），v8 对 || 首条款 true 边计数恒 0（单文件定向跑亦复现；同 791/792 漏计口径）
-pages/Oob/index.tsx:87 oobAgents 过滤的 capabilities ?? [] 兜底边：无 capabilities 的 agent 用例已执行并断言空态（a3 走 ?? 右支被过滤），v8 对 ?? 默认支计数恒 0（同 791 漏计口径）
+pages/Oob/index.tsx:94 oobAgents 过滤的 capabilities ?? [] 兜底边：无 capabilities 的 agent 用例已执行并断言空态（a3 走 ?? 右支被过滤），v8 对 ?? 默认支计数恒 0（同 791 漏计口径；原 87，路由插入后 +7 漂移）
 # 2026-10-29 审计更正：b285c8a 提交信息称 hostname||id 边遗漏已登记不准确；
 # 该边由 pages/Oob/index.test.tsx「选择主机+输入条目」用例覆盖（ag-2 hostname
 # 为空走 id 回退），并非未覆盖，因此不登记为本表 uncovered 项。
@@ -102,12 +102,12 @@ pages/Services/HealthPanel.tsx:357 取消按钮内联 onClick（setEditing(false
 # 2026-10-21 412816e 云账号菜单项/路由插入（import +1、子路由 +5，455 段
 # 起之前），整体 +6 第四次重登记；2026-10-28 Oob 路由/菜单项插入（lazy import
 # +1、routeConfig 子项 +6，均于 455 段之前），整体 +7 第五次重登记）
-App.tsx:352 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 345，累计漂移 +29）
-App.tsx:378 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 371）
-App.tsx:494 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 487）
-App.tsx:511 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 504）
-App.tsx:512 同上（return first 三元；原 505）
-App.tsx:513 同上（首项 link 内联 onClick navigate('/')；原 506）
+App.tsx:353 flattenPermRoutes(routeConfig.routes ?? []) 兜底：静态路由树 routes 恒存在，数据演进防御（原 352，2026-11-02 首页路由项插入 +1 漂移）
+App.tsx:379 filterMenuRoutes(routeConfig.routes ?? [], granted) 兜底：同上（原 378）
+App.tsx:496 menuItemRender navigate(menuItemProps.path || '/') 兜底：菜单项 path 恒存在，防御（原 494，同上累计 +2）
+App.tsx:513 面包屑 itemRender 函数体（first 判读行）：jsdom 下 ProLayout 面包屑不渲染，itemRender 从未被调用，用例保留双态断言（原 511）
+App.tsx:514 同上（return first 三元；原 512）
+App.tsx:515 同上（首项 link 内联 onClick navigate('/')；原 513）
 
 # components/GuacPlayer/index.tsx（解析器/连接体已由 duck tunnel 用例覆盖，剩两点）
 components/GuacPlayer/index.tsx:39 parseGuacInstructions elements.length > 0 假侧：内层循环进入时至少 push 一个元素或抛错，恒真死侧
@@ -138,7 +138,7 @@ components/TerminalModal/index.tsx:371 受限认证面板 authMethods?.join || '
 # pages/Cron/index.tsx - 防御性/内联分支
 pages/Cron/index.tsx:372 用户筛选 onChange v ?? '' 兜底：选择不可清空，null 分支防御
 pages/Cron/index.tsx:376 filterOption 内联 option?.value 兜底：下拉过滤已实证，防御侧漏计
-pages/Cron/index.tsx:543 cron 校验 validator 内联：表达式校验主路径已实证
+pages/Cron/index.tsx:545 cron 校验 validator 内联：表达式校验主路径已实证（原 543，+2 漂移）
 
 # pages/Drift/DiffModal.tsx - JSX 内联三元
 pages/Drift/DiffModal.tsx:188 基线时间 JSX 内联三元：data null 侧在弹窗打开后不可达，渲染断言已有
@@ -365,6 +365,8 @@ pages/Acme/index.tsx:178 部署响应 deployTargets ?? [] 防空：server acmeCe
 pages/Acme/index.tsx:179 同上第二处 ??（total 计数），与 178 同根因
 pages/Acme/index.tsx:193 下载文件名三元 issuer 分支：download() 仅被 cert/key 两个按钮调用，issuer 无 UI 入口（预留）
 pages/Acme/index.tsx:569 按主域名填默认路径 domains ?? [] 防空：openCreate/openEdit 均先 setFieldsValue({domains})，字段恒已设，?? 兜 Form 未挂载时域值缺失，无 UI 可触发
+pages/Acme/index.tsx:331 到期列 color 阈值分支（left<15 / left<30）：用例到期天数均 ≥30，红/橙阈值侧无数据覆盖（展示样式分支）
+pages/Acme/index.tsx:335 到期列 type={color ? undefined : 'secondary'} 的 color 真支：随 331 阈值分支同源，测试数据不触发有色态
 
 # ---- 2026-10-12 P2 ① Git-to-deploy GitBar（v8 漏计/防御分支） ----
 pages/Stacks/GitBar.tsx:77 submitAttach 校验通过后 if (attachAgent) 的 false 边：校验 await 期间弹窗被取消（attachAgent 置 null）才可达，竞态防御侧无 UI 入口
