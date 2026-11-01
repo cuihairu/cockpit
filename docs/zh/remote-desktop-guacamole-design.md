@@ -417,14 +417,17 @@ guacd 的 `disable-audio`/`color-depth`/`resize-method` 参数，再考虑
 （RemoteFX/GFX 或 AVC444），guacd 会自动协商。我们不强制开启也不禁止
 ——协商结果即事实。
 
-### 音频放阶段二
+### 音频（2026-11-01 已实现）
 
-**（实现期源码核实修正）** 音频流走 Guacamole 协议的 `audio,<streamIndex>,<mimetype>;`
+**（D4，e3023c2 已落地）** 音频流走 Guacamole 协议的 `audio,<streamIndex>,<mimetype>;`
 流创建指令 + `blob` 数据流，由**服务端主动推**（非 connect 参数），自动经 Go
-网关的字节管道透传——网关零改动；客户端用 `onaudio` 或
+网关的字节管道透传——网关在 guacd 握手声明 `audio/L8`+`audio/L16`
+（`api_guacamole.go:533`）使 guacd 发出音频指令；客户端用 `onaudio` 或
 `Guacamole.AudioPlayer.getInstance(stream, mimetype)` 播放，内置 `RawAudioPlayer`
-支持 `audio/L8`/`audio/L16`（raw PCM）。设计骨架里「connect 指令的 audio 参数」
-表述已按源码核实修正。
+支持 `audio/L8`/`audio/L16`（raw PCM）。真机验收 2026-11-01：协商
+`audio/L16`（16-bit PCM 44100Hz 2ch），5,013,504 字节 PCM 到达客户端，静音按钮
+suspend/resume 由单测覆盖（`index.test.tsx:332`）；详见
+`docs/review/2026-11-01-guacamole-audio-acceptance.md`。
 
 Guacamole 支持音频（RDP 的 `rdpsnd`、VNC 无音频），但：
 

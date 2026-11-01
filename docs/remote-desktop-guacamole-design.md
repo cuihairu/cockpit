@@ -281,9 +281,9 @@ Rationale: Cockpit's remote-access scenario is "remote ops/incident response" (e
 
 **Whether H.264 is enabled is not configured by us**: FreeRDP's AVC/H.264 requires target-Windows support (RemoteFX/GFX or AVC444), and guacd negotiates it automatically. We neither force it on nor forbid it — the negotiation result is the fact.
 
-### Audio deferred to Phase 2
+### Audio (implemented 2026-11-01)
 
-**(Corrected against source during implementation)** Audio streams use the Guacamole protocol's `audio,<streamIndex>,<mimetype>;` stream-creation instruction + the `blob` data stream, pushed **proactively by the server** (not a connect parameter), and pass automatically through the Go gateway's byte pipe — zero gateway changes; the client plays with `onaudio` or `Guacamole.AudioPlayer.getInstance(stream, mimetype)`, and the built-in `RawAudioPlayer` supports `audio/L8`/`audio/L16` (raw PCM). The design skeleton's phrasing of "the connect instruction's audio parameter" has been corrected per source verification.
+**Implemented (D4, e3023c2)** Audio streams use the Guacamole protocol's `audio,<streamIndex>,<mimetype>;` stream-creation instruction + the `blob` data stream, pushed **proactively by the server** (not a connect parameter), and pass automatically through the Go gateway's byte pipe — the gateway declares `audio/L8`+`audio/L16` in the guacd handshake (`api_guacamole.go:533`) so guacd emits audio instructions; the client plays with `onaudio` or `Guacamole.AudioPlayer.getInstance(stream, mimetype)`, and the built-in `RawAudioPlayer` supports `audio/L8`/`audio/L16` (raw PCM). Real-machine acceptance 2026-11-01: negotiated `audio/L16` (16-bit PCM 44100Hz 2ch), 5,013,504 bytes PCM reached the client, mute button suspend/resume covered by unit test (`index.test.tsx:332`); see `docs/review/2026-11-01-guacamole-audio-acceptance.md`.
 
 Guacamole supports audio (RDP's `rdpsnd`; VNC has no audio), but:
 
