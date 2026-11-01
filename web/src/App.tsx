@@ -592,6 +592,7 @@ const AppShell = () => {
           colorTextSecondary: skin.textMuted,
           colorTextTertiary: skin.textMuted,
           colorTextPlaceholder: skin.textMuted,
+          colorTextDescription: skin.textMuted,
           colorBorder: skin.border,
           colorBorderSecondary: skin.borderSoft,
           colorBgLayout: skin.bg,
