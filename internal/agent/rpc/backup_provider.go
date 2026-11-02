@@ -549,7 +549,7 @@ func (p *BackupProvider) unpack(task *backupTask, dir, name, destDir string) err
 			fmt.Fprintf(task.Log, "[warn] skip unsafe entry %q (outside destDir)\n", hdr.Name)
 			continue
 		}
-		if err := p.unpackEntry(tr, hdr, target); err != nil {
+		if err := p.unpackEntry(tr, hdr, target, destClean); err != nil {
 			fmt.Fprintf(task.Log, "[warn] entry %q: %v\n", hdr.Name, err)
 			continue
 		}
@@ -560,7 +560,7 @@ func (p *BackupProvider) unpack(task *backupTask, dir, name, destDir string) err
 }
 
 // unpackEntry 写入单个 tar 条目
-func (p *BackupProvider) unpackEntry(tr *tar.Reader, hdr *tar.Header, target string) error {
+func (p *BackupProvider) unpackEntry(tr *tar.Reader, hdr *tar.Header, target, destClean string) error {
 	switch hdr.Typeflag {
 	case tar.TypeDir:
 		return os.MkdirAll(target, os.FileMode(hdr.Mode)&0o777)
@@ -578,6 +578,15 @@ func (p *BackupProvider) unpackEntry(tr *tar.Reader, hdr *tar.Header, target str
 		}
 		return out.Close()
 	case tar.TypeSymlink:
+		// 符号链接目标必须解析回 destDir 内（拒绝绝对路径与 .. 逃逸），
+		// 否则后续条目以该链接为父路径写入时会把文件写到恢复目录之外（CWE-59）。
+		if filepath.IsAbs(hdr.Linkname) {
+			return fmt.Errorf("refuse absolute symlink %q", hdr.Linkname)
+		}
+		resolved := filepath.Clean(filepath.Join(filepath.Dir(target), hdr.Linkname))
+		if resolved != destClean && !strings.HasPrefix(resolved, destClean+string(filepath.Separator)) {
+			return fmt.Errorf("refuse symlink %q escaping destDir", hdr.Linkname)
+		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return err
 		}

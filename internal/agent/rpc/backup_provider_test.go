@@ -527,6 +527,90 @@ func TestBackupRestoreZipSlipSkipped(t *testing.T) {
 	}
 }
 
+// TestBackupRestoreSymlinkEscapeRefused 手工构造带逃逸符号链接的恶意包：
+// 先放一个指向恢复目录之外的符号链接，再借同名路径写入，验证链接被拒绝、写入未逃逸
+func TestBackupRestoreSymlinkEscapeRefused(t *testing.T) {
+	p := newBackupTestProvider(t)
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	// 绝对路径符号链接
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "abs", Typeflag: tar.TypeSymlink, Mode: 0o777, Linkname: "/etc/passwd",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 相对路径 .. 逃逸符号链接
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "esc", Typeflag: tar.TypeSymlink, Mode: 0o777, Linkname: "../../../outside.txt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 借同名路径写入：若链接未被拒绝，OpenFile 会跟随链接把文件写到恢复目录之外
+	mal := []byte("pwned")
+	for _, name := range []string{"abs", "esc"} {
+		if err := tw.WriteHeader(&tar.Header{
+			Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(mal)),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(mal); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 目录内合法符号链接应被保留
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "app/link", Typeflag: tar.TypeSymlink, Mode: 0o777, Linkname: "ok.txt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ok := []byte("fine")
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "app/ok.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(ok)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(ok); err != nil {
+		t.Fatal(err)
+	}
+	tw.Close()
+	gw.Close()
+	archive := "evil-symlink-20260101-000000.tar.gz"
+	if err := os.WriteFile(filepath.Join(dir, archive), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	restoreRoot := t.TempDir()
+	destDir := filepath.Join(restoreRoot, "dest")
+	task := runRestoreAndWait(t, p, dir, archive, destDir)
+	if task["status"] != backupTaskSuccess {
+		t.Fatalf("restore failed: %v", task["error"])
+	}
+	// 逃逸文件不存在（esc 链接解析后在 restoreRoot 之外两级）
+	if _, err := os.Stat(filepath.Join(restoreRoot, "..", "..", "outside.txt")); err == nil {
+		t.Fatal("symlink escape: file written outside destDir")
+	}
+	// destDir/abs、destDir/esc 不是符号链接（写入只落在恢复目录内的普通文件）
+	for _, name := range []string{"abs", "esc"} {
+		if _, err := os.Readlink(filepath.Join(destDir, name)); err == nil {
+			t.Fatalf("escaping symlink %q was created", name)
+		}
+	}
+	// 目录内合法符号链接保留且指向目录内
+	if link, err := os.Readlink(filepath.Join(destDir, "app", "link")); err != nil || link != "ok.txt" {
+		t.Fatalf("in-tree symlink should be kept: link=%q err=%v", link, err)
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "app", "ok.txt")); err != nil {
+		t.Fatalf("legitimate entry missing: %v", err)
+	}
+	// 日志记录了拒绝
+	res, _ := p.GetTask(task["taskId"].(string))
+	if log, _ := res["log"].(string); !strings.Contains(log, "refuse symlink") {
+		t.Fatalf("log should mention refused symlinks: %q", log)
+	}
+}
+
 func TestBackupReadChunk(t *testing.T) {
 	p := newBackupTestProvider(t)
 	dir := t.TempDir()
