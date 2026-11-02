@@ -139,6 +139,79 @@ describe('GuacamoleModal', () => {
     expect(createRemoteTicket).not.toHaveBeenCalled()
   })
 
+  it('票据未返回即关闭：不建隧道、不 connect（孤儿隧道回归）', async () => {
+    let resolveTicket!: (v: { ticket: string; expiresAt: string }) => void
+    const pending = new Promise<{ ticket: string; expiresAt: string }>((res) => {
+      resolveTicket = res
+    })
+    createRemoteTicket.mockReturnValue(pending)
+
+    const { rerender } = render(<GuacamoleModal {...props} />)
+    fireEvent.change(screen.getByPlaceholderText('administrator'), { target: { value: 'ops' } })
+    fireEvent.change(screen.getByPlaceholderText('password'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(createRemoteTicket).toHaveBeenCalled())
+
+    // 关闭：父组件直接置 visible=false（不经 handleClose），在途票据返回后须作废
+    rerender(<GuacamoleModal {...props} visible={false} />)
+    await act(async () => {
+      resolveTicket({ ticket: 'tk-x', expiresAt: '' })
+    })
+
+    expect(clientMock.connect).not.toHaveBeenCalled()
+    expect(created.some((c) => c.url)).toBe(false) // 未创建 WebSocketTunnel
+  })
+
+  it('保存到保险箱在途即关闭：作废连接不建隧道', async () => {
+    vaultMocks.hasVaultToken.mockReturnValue(false)
+    let resolveSave!: () => void
+    const pendingSave = new Promise<void>((res) => {
+      resolveSave = res
+    })
+    // mockReturnValueOnce：仅本次生效，避免 clearAllMocks 不清实现而泄漏到后续用例
+    vaultMocks.saveVaultCredential.mockReturnValueOnce(pendingSave)
+
+    const { rerender } = render(<GuacamoleModal {...props} protocol="ssh" port={22} />)
+    fireEvent.change(screen.getByPlaceholderText('root'), { target: { value: 'ops' } })
+    fireEvent.change(screen.getByPlaceholderText('(可选) 口令认证'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByText(/保存凭据到服务器/))
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    // 二次验证 → handleVaultVerified 续做 save-connect，保存仍在途
+    expect(await screen.findByText('验证以保存凭据')).toBeInTheDocument()
+    fireEvent.change(await screen.findByPlaceholderText('登录密码'), { target: { value: 'admin-pw' } })
+    fireEvent.click(screen.getByRole('button', { name: /验\s*证/ }))
+    await waitFor(() => expect(vaultMocks.saveVaultCredential).toHaveBeenCalled())
+
+    rerender(<GuacamoleModal {...props} visible={false} />)
+    await act(async () => {
+      resolveSave()
+    })
+
+    expect(clientMock.connect).not.toHaveBeenCalled()
+    expect(created.some((c) => c.url)).toBe(false)
+  })
+
+  it('票据失败但已关闭：catch 早退不弹错误', async () => {
+    let rejectTicket!: (e: Error) => void
+    const pending = new Promise<{ ticket: string; expiresAt: string }>((_, rej) => {
+      rejectTicket = rej
+    })
+    createRemoteTicket.mockReturnValue(pending)
+
+    const { rerender } = render(<GuacamoleModal {...props} />)
+    fireEvent.change(screen.getByPlaceholderText('administrator'), { target: { value: 'ops' } })
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(createRemoteTicket).toHaveBeenCalled())
+
+    rerender(<GuacamoleModal {...props} visible={false} />)
+    await act(async () => {
+      rejectTicket(new Error('net down'))
+    })
+
+    expect(clientMock.connect).not.toHaveBeenCalled()
+    expect(msgMessageError).not.toHaveBeenCalledWith('net down')
+  })
+
   it('VNC 只出密码框', () => {
     render(<GuacamoleModal {...props} protocol="vnc" port={5900} />)
     expect(screen.getByText('VNC 密码')).toBeInTheDocument()

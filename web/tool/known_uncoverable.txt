@@ -18,9 +18,9 @@ pages/Cron/index.tsx:210 同上（deleteJob）
 pages/Docker/index.tsx:44 cleanDockerLog 空串早退：调用侧对空日志已短路，防御分支不可达
 components/GuacPlayer/index.tsx:77 displayRef null 早退：弹窗未挂载不触发 effect，防御（原 26，duck tunnel 接入后漂移）
 components/MetricsChart/index.tsx:50 containerRef null 早退：echarts init 前置防御，React 保证挂载后 effect 才跑
-components/GuacamoleModal/index.tsx:407 displayRef null 早退（SSH 尺寸同步/粘贴 effect）：display 容器与 state==='connected' 同渲染，effect 跑时 ref 必已赋值（原 274 漂移）
-components/GuacamoleModal/index.tsx:359 sendClipboardToRemote clientRef null 早退：两个粘贴入口（终端 paste / 工具栏按钮）都只在 state==='connected' 时存在，cleanup 先于断开移除 client，恒有值（原 226 漂移）
-components/GuacamoleModal/index.tsx:271 doDeleteSaved savedCred 判空早退：删除入口仅在已存凭据面板渲染，savedCred 恒非空，防御
+components/GuacamoleModal/index.tsx:423 displayRef null 早退（SSH 尺寸同步/粘贴 effect）：display 容器与 state==='connected' 同渲染，effect 跑时 ref 必已赋值（原 274 漂移）
+components/GuacamoleModal/index.tsx:375 sendClipboardToRemote clientRef null 早退：两个粘贴入口（终端 paste / 工具栏按钮）都只在 state==='connected' 时存在，cleanup 先于断开移除 client，恒有值（原 226 漂移）
+components/GuacamoleModal/index.tsx:287 doDeleteSaved savedCred 判空早退：删除入口仅在已存凭据面板渲染，savedCred 恒非空，防御
 pages/Workbench/index.tsx:103 openAgentTerminal selectedAgent 防御早退：兜底按钮在 SSH Tab 内，Tab 仅在选中 agent 后可切
 pages/Recordings/index.tsx:83 recording null 早退：回放入口由行内按钮发起，recording 必已选中
 pages/Recordings/index.tsx:166 recording/termDivRef null 早退：弹窗内容未挂载时不建终端，防御
@@ -114,13 +114,13 @@ components/GuacPlayer/index.tsx:39 parseGuacInstructions elements.length > 0 假
 components/GuacPlayer/index.tsx:135 Slider tooltip formatter (v ?? 0)：悬停才触发的内联纯函数，jsdom 不可悬停；格式化逻辑已由等价断言覆盖（原 82 漂移）
 
 # components/GuacamoleModal/index.tsx（保险箱/剪贴板主路径已由新用例覆盖，剩死侧与漏计）
-components/GuacamoleModal/index.tsx:151 ticket width Number(...) || 1280 兜底：分辨率经下拉白名单（恒 WxH 格式），split 后必为数字（原 115 漂移）
-components/GuacamoleModal/index.tsx:152 同上（height || 800；原 116）
-components/GuacamoleModal/index.tsx:185 saveDesktopConfig width || 1280 兜底：同 151（原 125 漂移）
-components/GuacamoleModal/index.tsx:186 同上（height || 800；原 126）
-components/GuacamoleModal/index.tsx:322 handleVaultVerified else-if action==='delete' 假侧：pendingVaultAction 取值封闭（save-connect/delete），之外不可达
-components/GuacamoleModal/index.tsx:610 工具栏错误文案 JSX 短路（error && ...）：错误态已由状态机用例覆盖，JSX 短路 v8 漏计（原 446 漂移）
-components/GuacamoleModal/index.tsx:634 disconnected && !showCredentials 复合条件：各单态渲染断言均有，复合分支 v8 漏计（原 470 漂移）
+components/GuacamoleModal/index.tsx:156 ticket width Number(...) || 1280 兜底：分辨率经下拉白名单（恒 WxH 格式），split 后必为数字（原 115 漂移）
+components/GuacamoleModal/index.tsx:157 同上（height || 800；原 116）
+components/GuacamoleModal/index.tsx:194 saveDesktopConfig width || 1280 兜底：同 151（原 125 漂移）
+components/GuacamoleModal/index.tsx:195 同上（height || 800；原 126）
+components/GuacamoleModal/index.tsx:338 handleVaultVerified else-if action==='delete' 假侧：pendingVaultAction 取值封闭（save-connect/delete），之外不可达
+components/GuacamoleModal/index.tsx:637 工具栏错误文案 JSX 短路（error && ...）：错误态已由状态机用例覆盖，JSX 短路 v8 漏计（原 446 漂移）
+components/GuacamoleModal/index.tsx:661 disconnected && !showCredentials 复合条件：各单态渲染断言均有，复合分支 v8 漏计（原 470 漂移）
 
 # components/TerminalModal/index.tsx（!visible 清理家族 + 判空防御 + 封闭取值死侧）
 components/TerminalModal/index.tsx:132 ws.onmessage resize 分支 fitAddonRef 判空 null 侧：WS 消息仅在终端建成后到达，ref 必已赋值，防御

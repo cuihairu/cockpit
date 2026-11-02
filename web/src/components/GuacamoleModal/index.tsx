@@ -66,6 +66,9 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
   const containerRef = useRef<HTMLDivElement>(null)
   const displayRef = useRef<HTMLDivElement>(null)
   const clientRef = useRef<InstanceType<typeof Guacamole.Client> | null>(null)
+  // 连接代数：close / unmount / 超时 / 二次连接都会使旧代数失效，
+  // connect 的 await 返回后据此放弃过期连接（防孤儿隧道与关闭后回设状态）
+  const connectGenRef = useRef(0)
   const [form] = Form.useForm()
 
   const cleanup = useCallback(() => {
@@ -86,6 +89,7 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
   const { start: startTimeout, clear: clearConnTimeout } = useConnectionTimeout({
     timeout: CONNECTION_TIMEOUT,
     onTimeout: () => {
+      connectGenRef.current++
       cleanup()
       setState('disconnected')
       setShowCredentials(true)
@@ -136,6 +140,7 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
       setState('connecting')
       setShowCredentials(false)
       startTimeout()
+      const gen = ++connectGenRef.current
       try {
         // 凭据只进 ticket（服务端随后放进 guacd 的 connect 指令），不进 URL；
         // useSaved 时浏览器零凭据——服务端从保险箱注入
@@ -152,6 +157,10 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
           height: Number(resolution.split('x')[1]) || 800,
           useSaved: values.useSaved,
         })
+        if (gen !== connectGenRef.current) {
+          clearConnTimeout()
+          return
+        }
         // 连接发起成功后按需入保险箱（保存失败不阻断连接，只提示）
         if (opts?.saveToVault) {
           try {
@@ -185,6 +194,10 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
           width: Number(resolution.split('x')[0]) || 1280,
           height: Number(resolution.split('x')[1]) || 800,
         })
+        if (gen !== connectGenRef.current) {
+          clearConnTimeout()
+          return
+        }
 
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
         // 票据走 URL query：common-js 的 WebSocketTunnel 硬编码 subprotocol
@@ -232,6 +245,7 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
         setState('connected')
       } catch (err) {
         clearConnTimeout()
+        if (gen !== connectGenRef.current) return
         setState('disconnected')
         setShowCredentials(true)
         const msg = err instanceof Error ? err.message : '连接失败'
@@ -243,6 +257,7 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
   )
 
   const handleDisconnect = useCallback(() => {
+    connectGenRef.current++
     cleanup()
     setState('disconnected')
     setShowCredentials(true)
@@ -253,6 +268,7 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
   }, [cleanup, isFullscreen])
 
   const handleClose = useCallback(() => {
+    connectGenRef.current++
     cleanup()
     setState('disconnected')
     setShowCredentials(true)
@@ -453,7 +469,18 @@ const GuacamoleModal: React.FC<GuacamoleModalProps> = ({
     }
   }, [protocol, state, sendClipboardToRemote])
 
-  useEffect(() => () => cleanup(), [cleanup])
+  useEffect(
+    () => () => {
+      connectGenRef.current++
+      cleanup()
+    },
+    [cleanup],
+  )
+
+  // visible 翻 false 也作废在途连接（父组件可能不经 handleClose 直接置 visible=false）
+  useEffect(() => {
+    if (!visible) connectGenRef.current++
+  }, [visible])
 
   if (showCredentials && state === 'disconnected') {
     return (
