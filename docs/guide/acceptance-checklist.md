@@ -367,7 +367,7 @@ Design: [mobile-design](/guide/mobile-design). Prerequisite: a real Android mach
 - [ ] Container operations: a docker host enters the container list, restart really takes effect (the state flips), failures present a SnackBar, and the operation leaves a trace in the web audit
 - [ ] Alerts: the list is consistent with the server, unread entries bold with a dot, and after "Mark All Read" the web side is synced as read
 - [ ] Audit: paginated first-screen loading, auto-prefetch when the data does not fill a screen, failed rows marked red
-- [ ] Session restore: killing the process and reopening goes straight to the main screen (local token); after shortening the JWT expiration the token auto-renews seamlessly on expiry; a failed refresh returns to the login page
+- [ ] Session restore: killing the process and reopening goes straight to the main screen (local token); after shortening the JWT expiration the token auto-renews on expiry; a failed refresh returns to the login page
 - [ ] Security: with the self-signed toggle off a self-signed server connection is refused; with it on it works (the red-ink risk warning is present)
 - [ ] Push: the server configured with an ntfy channel, trigger one alert, and the official ntfy app receives it on the phone (the D3 path)
 - [ ] Dark mode follows the system switch correctly
