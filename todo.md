@@ -128,6 +128,37 @@
 - [x] archive 5 篇是否双语：历史归档（plans 2 / specs 2 / 归档说明 1）当前仅中文〔已定 2026-10-16（R1025PATROL 代拍板，用户事后可推翻）：归档是历史记录，英文版无读者价值，只保留中文不补英文版；决策记录 docs/guide/decision-log.md D-2026-10-16-1〕
 - [x] docs 双语配对第二批：子目录 guide 37、design 5、operations 1、research 1 篇 + 首页英文版精修（d2bc3cd；guide 37/37、design 5/5、operations 1/1、research 1/1 全配对；英文页跨页链接全量对账补齐残留 36 处 / 12 文件——此前声称「43 处、残留中文清零」只覆盖部分页面，含无扩展名相对链接在 VitePress 下解析回中文页；现存 zh 指向仅 2 处预期项（index.en 语言切换、architecture.en→archive 无英文孪生）、死链 0、vitepress build 113 页 exit 0；archive 部分拆出为上方待办条目）
 
+### 代码深审 P2/P3（2026-11-01 深审导入，逐条待修；明细见 docs/review/2026-11-01-code-review.md）
+
+- [ ] G1 agent messageLoop 连接代数竞态：陈旧循环在 reconnect 后误拆新连接/并发双 websocket 读协程（internal/agent/agent.go:635）〔修复=连接代数计数器，messageLoop 代数失配即退出〕
+- [ ] G2 proxy LastRead 竞态：conn.mu 写 / proxy.mu 读同一字段，time.Time 撕裂读误关活跃代理（internal/proxy/mgr/manager.go:460）〔修复=读持 conn.mu 或 atomic.Int64〕
+- [ ] G3 proxy conns 泄漏：目标侧关闭与写错路径不 delete(h.conns)，长跑 agent 会话泄漏 AgentTargetConn（internal/proxy/handler.go:275）〔修复=deferred 清理与写错路径 delete〕
+- [ ] G4 taskFollows 覆盖泄漏：followId 复用不停旧 pumpTaskLog 协程，无界重复泵与 proxy_data 流（internal/agent/rpc/stack_task_follow.go:88）〔修复=覆盖前关旧 stop channel 并等待〕
+- [ ] G5 guacd 握手无读期限：guacd 停滞则 handler 协程永久阻塞，泄漏协程/连接/监听器/注册条目（internal/server/api_guacamole.go:476）〔修复=握手与泵设读期限〕
+- [ ] G6 GetLogs 单次读截断：日志流超首 Read 交付量即静默截断无标记（internal/docker/client.go:268）〔修复=循环读到 EOF/1MB 上限并附标记〕
+- [ ] S1 requireAgentRclone nil 解引用：无 backup 能力 agent 的 cap.Metadata 访问 panic 成 500 而非 400（internal/server/api_backups.go:187）〔修复=cap==nil 守卫或 HasCapability〕
+- [ ] S2 NextBackupRunAt 索引越界：daily@ 无冒号历史行 parts[1] 越界 panic，startBackupLoop 协程无 recover 崩进程（internal/server/backup_loop.go:105）〔修复=len(parts)!=2 返回 0〕
+- [ ] S3 proxy LastRead 零值误关：新连接未发首字节即 now.Sub(zero) 超 5 分钟，首 tick 强关握手连接（internal/proxy/mgr/manager.go:460）〔修复=创建时置 time.Now() 或 IsZero 跳过〕
+- [ ] S4 workflow 并发双跑：check-then-act 无 running 唯一约束，并发 POST /run 双编排重复执行步骤（internal/server/api_workflow.go:490）〔修复=条件创建或 partial unique index〕
+- [ ] S5 guacSessions 握手失败泄漏：五条失败路径从不 delete，泄漏 GuacamoleSession 并可误关未连会话（internal/server/api_guacamole.go:447）〔修复=各失败路径 closeGuacamoleSession/delete〕
+- [ ] S6 guacRelay.Close 竞态：快照后 acceptLoop 插入新 conn 永不关闭，泄漏 guacd fd/目标连接/泵协程（internal/server/guac_relay.go:138）〔修复=持 r.mu 关全部或快照后复查〕
+- [ ] W1 TerminalModal 孤儿 WebSocket：票据在途关闭后无条件建 ws，向已 dispose xterm 写并泄漏 PTY（web/src/components/TerminalModal/index.tsx:106）〔修复=代数/closed ref，失配关闭退出〕
+- [ ] W2 播放倍速竞态：setTimeout 无代数守卫，慢速先到清掉快速 timers 停错倍速（web/src/pages/Recordings/index.tsx:151）〔修复=倍速变更 bump 代数，非当代跳过/清理〕
+- [ ] W3 ForgotPassword 计时器泄漏：setInterval 卸载不清，最多 60s 对卸载组件 setState（web/src/pages/ForgotPassword/index.tsx:49）〔修复=timer ref + 卸载清理〕
+- [ ] W4 BackupCodes 剪贴板无 catch：http 下 clipboard undefined 同步 TypeError，拒绝成未处理 promise（web/src/components/BackupCodesDisplay/index.tsx:21）〔修复=try/catch 或 .catch + 卸载清理〕
+- [ ] W5 Domains 剪贴板无 catch：拒绝未处理且 message.success 先报成功（web/src/pages/Domains/index.tsx:435）〔修复=then/catch 链 + 守 undefined〕
+- [ ] G7 job Exec 超时泄漏：CombinedOutput 后不 cancel，计时器挂满 per-job 超时（internal/agent/rpc/job_provider.go:99）〔修复=WithTimeout 后 defer cancel〕
+- [ ] G8 GetContainerStats 读错忽略：部分/失败读产出空 stats 无错误，docker 方法无 per-op 期限（internal/docker/client.go:293）〔修复=查 Read 错误 + per-call 超时〕
+- [ ] G9 FollowStart 容量误拒：16 活跃时重启既有 follow 被误拒，替换逻辑本支持同 ID（internal/agent/rpc/logs_follow.go:115）〔修复=先查既有 ID 再测容量〕
+- [ ] G10 probe-agent transitions 竞态：close 后写 nil 与 alerter 并发读指针竞态（cmd/cockpit-probe-agent/main.go:116）〔修复=mutex 守护或属主协程置 nil〕
+- [ ] S7 proxy conns 覆盖泄漏：同 connID 重发 proxy_new 覆盖旧条目不关旧连接/协程（internal/proxy/handler.go:133）〔修复=覆盖前关闭删除既有条目〕
+- [ ] S8 通知 goroutine 无追踪：context.Background 派生无 WaitGroup 协程，关停中可跑过 DB 关闭（internal/notification/service.go:149）〔修复=生命周期 context 或 WaitGroup〕
+- [ ] S9 密码重置邮件吞错：printf 空操作吞 SendPasswordResetEmail 错误，API 假报成功（internal/server/password_reset_handlers.go:62）〔修复=log.Printf + 追踪〕
+- [ ] S10 ParseBackupSources 忽略错误：sources JSON 损坏产出空清单照发 run 假完成（internal/server/backup_loop.go:93）〔修复=返回错误，startBackupRun 拒绝〕
+- [ ] W6 GuacPlayer canvas 残留：effect 重跑旧 canvas 同留 DOM（web/src/components/GuacPlayer/index.tsx:100）〔修复=cleanup 先移除旧显示元素〕
+- [ ] W7 dashboard 下拉刷新空操作：onRefresh 空 async 即收不重取，Future.wait 在 build 重建重启（mobile/lib/pages/dashboard_page.dart:19）〔修复=future 缓存字段 + onRefresh 重赋值 setState〕
+- [ ] W8 终端重连订阅泄漏：旧流订阅不取消，onDone/onError 在新连接后假报错横幅（mobile/lib/pages/terminal_page.dart:136）〔修复=重连先取消 _sub 并关旧 channel〕
+
 ## 已完成
 
 ### 架构与 agent
@@ -352,3 +383,5 @@
   - 属实，已修：`2026-11-01-guacamole-audio-acceptance.md` 两处与中英文设计文档各一处统一改为 `:405`；报告第 122 行下一行同步改为 `:547`。证据：本 commit（`docs/review/2026-11-01-guacamole-audio-acceptance.md:21`、`:122-123`；`web/src/components/GuacamoleModal/index.test.tsx:405`、`:547`；另修正英文设计文档同源 `:332` → `:405` 于 `docs/remote-desktop-guacamole-design.md:286`；docs VitePress build 绿，build complete in 56.15s）。
 - [x] 审核发现：本轮 diff 未见问题（7da10b1f1c66..HEAD）。证据：该区间仅含 commit 1bdf57b「docs: restore readme platform badges」（父提交已确认 = 7da10b1f1c66），纯文档变更。HEAD 的 README.md:12 与 README.zh.md:12 徽章行为单层 `<p align="center">…</p>`（每文件 open_p=close_p=2，含 logo 行，无嵌套），平台/架构徽章（Windows/Linux/macOS/x86_64/aarch64 共 5 枚）已逐字节恢复为与基线 0702cb7e 完全一致，并保留 1 枚 docs 徽章、删除 5 枚重复 docs 徽章；`arch-x86__64` URL 与基线相同，非本区间引入。无代码改动，无注入/越界/泄漏/竞态/反序列化风险面，无测试缺口（docs-only）。区间内 todo.md 仅追加前轮已复核的审计记录。
   - 属实（复核结论成立，无需改动）：`git rev-parse 1bdf57b^`=`7da10b1f1c665f8ef17cf2039f34b2272e6b3358`；区间仅 1 commit，`git diff --name-status` 仅 README.md/README.zh.md/todo.md；两 README `open_p=close_p=2`，平台/架构 5 枚徽章 URL 与基线 `0702cb7e` 逐字节一致，docs 徽章各 1 枚。证据：本 commit（`README.md:12`、`README.zh.md:12`）。
+- [x] 审核发现：本轮 diff 未见问题（1bdf57be..HEAD）。
+  - 覆盖范围与证据：区间 4 commits（4422537/186a249/eb56b3d/094c31d），`git diff --stat` 全量 9 文件均逐文件复核（docs/audit-doc-consistency.md、docs/guide/acceptance-checklist.md、docs/guide/concepts.md、docs/remote-desktop-guacamole-design.md、docs/review/2026-11-01-guacamole-audio-acceptance.md、docs/zh/guide/concepts.md、docs/zh/remote-desktop-guacamole-design.md、docs/zh/审计-文档一致性.md、todo.md），纯文档无代码改动，无注入/反序列化/越界/泄漏/竞态风险面。修正后的文档↔代码映射逐项核验属实：`guacEncode("audio","audio/L8","audio/L16")` 确在 `internal/server/api_guacamole.go:533`；静音 suspend/resume 单测确在 `web/src/components/GuacamoleModal/index.test.tsx:405`、AudioContext 不可用单测确在 `:547`；capability 口径「共 19 个、仅 file/ddns/oob 恒上报、余 16 条件上报」与 `internal/agent/agent.go` 一致（无条件 append 仅 :459 file/:519 ddns/:565 oob；7 个 detector 均有条件返回 nil 路径 + agent.go 内 9 个条件 capability，7+12=19）；增量文档引用的 8 个 commit 锚（b1410c7/24e0e2e/094c31d/eb56b3d/186a249/dc81806/717ac3b/e3023c2）全部存在且主题相符；acceptance-checklist.md:370、concepts.md:134、design.md:286 行号锚点与改动后位置一致。docs-only 变更无测试缺口。
