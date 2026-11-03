@@ -304,6 +304,80 @@ func TestServiceSendAlertNonBlocking(t *testing.T) {
 	}
 }
 
+// TestServiceCloseWaitsInflight 验证 S8：Close 等待在途异步投递退出，
+// 且关闭后新投递被拒绝（不 panic、不启动新 goroutine）。
+func TestServiceCloseWaitsInflight(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	// 自定义阻塞渠道：Send 阻塞直至 release 关闭。
+	s := &Service{cfg: &config.NotificationConfig{Enabled: true, Events: map[string]*config.EventConfig{
+		ServiceDown: {Type: ServiceDown, Enabled: true},
+	}}}
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.channels = []Channel{blockChannel{started: started, release: release}}
+
+	done := make(chan struct{})
+	go func() {
+		s.SendNonBlocking(&Notification{EventType: ServiceDown, Title: "t", Message: "m"})
+		close(done)
+	}()
+	<-started
+
+	closed := make(chan struct{})
+	go func() {
+		s.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+		t.Fatal("Close must wait for in-flight async send (S8)")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close did not return after in-flight send finished")
+	}
+
+	// 关闭后新投递立即拒绝，不 panic
+	s.SendNonBlocking(&Notification{EventType: ServiceDown, Title: "x", Message: "y"})
+	select {
+	case <-started:
+		t.Fatal("SendNonBlocking after Close must not start new send (S8)")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// blockChannel 阻塞直到 release 关闭的测试渠道。
+type blockChannel struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b blockChannel) Name() string { return "block" }
+func (b blockChannel) Target() string { return "block" }
+func (b blockChannel) Send(_ context.Context, _ *Notification) error {
+	select {
+	case b.started <- struct{}{}:
+	default:
+	}
+	<-b.release
+	return nil
+}
+
+// TestServiceCloseIdempotent 验证 Close 可多次调用且 nil 安全。
+func TestServiceCloseIdempotent(t *testing.T) {
+	var nilS *Service
+	nilS.Close()
+
+	s := NewService(testServiceConfig("http://127.0.0.1:1"))
+	s.Close()
+	s.Close()
+}
+
 func TestTargetHost(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"https://ntfy.example.com", "ntfy.example.com"},

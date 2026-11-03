@@ -228,3 +228,21 @@ The remaining ~150 endpoint claims in protocol.md, the jobs-design.md decision t
 
 **Totals**: P0 = 0; P1 = 18 (D5/D9/D28/D29/D32/D37/D40/D41/D47/D57-D63/D67/D72/D73/D77-D80); P2 = 72.
 Three-bucket distribution: doc-ahead-of-code 8 (D21/D57/D61/D62/D67/D74 + part of D77-D80); code-ahead-of-doc ~45; description mismatch ~35.
+
+## Increment (2026-11-02, batch G5 spot-check round)
+
+Scope: re-verify the doc surface against the code deltas landed since the 2026-10-08
+round (guacamole audio, cloud/provider work, UI audit fix waves), plus a copy-style
+sweep. No new difference rows — all sampled claims check out:
+
+- Guacamole audio: `audio/L8`+`audio/L16` handshake declaration (`internal/server/api_guacamole.go:533`), negotiated L16 PCM 44.1kHz/2ch, 5MB end-to-end — documented with commit anchor at `docs/zh/remote-desktop-guacamole-design.md:420-428` (D4, `e3023c2`). Consistent.
+- Recent drift-fix commits (b1410c7 four items, 24e0e2e archive path + audio phase, 094c31d capability count, eb56b3d audio line refs, 186a249 README finding) verified present and correctly anchored; the 2026-11-01 guacamole audio acceptance report exists at `docs/review/2026-11-01-guacamole-audio-acceptance.md` as cited.
+- Two recent security/robustness fixes (dc81806 tar symlink escape, 717ac3b orphan-tunnel invalidation) are code fixes with no doc-facing capability claim — no doc surface owed.
+
+Copy-style fix (same round): `docs/guide/acceptance-checklist.md:370` "token auto-renews
+seamlessly on expiry" → "auto-renews on expiry" (decorative adverb removed, meaning
+unchanged). "Unlock" vocabulary in persona-vault-mapping / vault-design kept — it is the
+domain term for vault unlocking, not filler; "paradigm" in reference-projects /
+file-manager-design kept (technical term); "harness" kept (test harness).
+
+Three-bucket count for this increment: **0 / 0 / 0**. P0: none.

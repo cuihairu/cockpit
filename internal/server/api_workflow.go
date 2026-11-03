@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -539,6 +540,12 @@ func (s *Server) handleWorkflowRun(w http.ResponseWriter, r *http.Request, id st
 		CreatedAt:    time.Now(),
 	}
 	if err := s.db.CreateWorkflowRun(run); err != nil {
+		// 并发 POST /run 的 check-then-act 竞态由存储层原子条件插入兜底
+		// （S4）：落入冲突分支返回 409，不再双跑。
+		if errors.Is(err, storage.ErrWorkflowRunConflict) {
+			s.handleError(w, r, http.StatusConflict, "workflow is already running")
+			return
+		}
 		s.handleError(w, r, http.StatusInternalServerError, "failed to create run")
 		return
 	}

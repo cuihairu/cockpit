@@ -78,6 +78,32 @@ func (h *Handler) AttachConn(wsConn *websocket.Conn) {
 	h.mu.Unlock()
 }
 
+// removeConn 从活动连接表删除指定条目。删除前校验指针一致：
+// 同 connID 复用（覆盖重建）时旧协程的 defer 不得删除新条目（G3）。
+// 返回 true 表示实际删除成功。
+func (h *Handler) removeConn(connID string, conn *AgentTargetConn) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	cur, ok := h.conns[connID]
+	if !ok || cur != conn {
+		return false
+	}
+	delete(h.conns, connID)
+	return true
+}
+
+// replaceConn 注册新连接并关闭同 connID 的旧条目（S7）。覆盖重建场景下
+// 旧连接及其读协程必须先关闭，否则旧协程会继续转发并长期占用资源。
+func (h *Handler) replaceConn(connID string, agentConn *AgentTargetConn) {
+	h.mu.Lock()
+	old, ok := h.conns[connID]
+	h.conns[connID] = agentConn
+	h.mu.Unlock()
+	if ok {
+		old.Close()
+	}
+}
+
 // Stop 停止处理器
 func (h *Handler) Stop() {
 	if !h.running.CompareAndSwap(true, false) {
@@ -129,9 +155,7 @@ func (h *Handler) HandleProxyNew(msg *protocol.Message) error {
 		Created: time.Now(),
 	}
 
-	h.mu.Lock()
-	h.conns[p.ConnID] = agentConn
-	h.mu.Unlock()
+	h.replaceConn(p.ConnID, agentConn)
 
 	log.Printf("Agent: New proxy connection %s -> %s", p.ConnID, p.Target)
 
@@ -161,9 +185,7 @@ func (h *Handler) openSSHProxy(p protocol.ProxyNewPayload) error {
 		sshSess: sshSess,
 	}
 
-	h.mu.Lock()
-	h.conns[p.ConnID] = agentConn
-	h.mu.Unlock()
+	h.replaceConn(p.ConnID, agentConn)
 
 	log.Printf("Agent: New SSH proxy session %s -> %s", p.ConnID, p.Target)
 	go h.readFromTarget(agentConn)
@@ -211,6 +233,7 @@ func (h *Handler) HandleProxyData(msg *protocol.Message) error {
 	if _, err := conn.Conn.Write(p.Data); err != nil {
 		log.Printf("Write error to target %s: %v", p.ConnID, err)
 		conn.Close()
+		h.removeConn(conn.ID, conn)
 		h.SendClose(conn.ProxyID, conn.ID, "write error")
 		return err
 	}
@@ -243,6 +266,10 @@ func (h *Handler) HandleProxyClose(msg *protocol.Message) error {
 // readFromTarget 从目标读取数据并发送给 Server
 func (h *Handler) readFromTarget(conn *AgentTargetConn) {
 	defer conn.Close()
+	// 目标关闭或写错退出后必须从活动连接表摘除，否则长跑 agent 会话
+	// 泄漏 AgentTargetConn（G3）。defer 删除仅摘除自身条目（同 ID 覆盖
+	// 重建时不误删新条目）。
+	defer h.removeConn(conn.ID, conn)
 
 	buf := make([]byte, 32*1024) // 32KB buffer
 

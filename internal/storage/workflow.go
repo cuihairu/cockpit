@@ -15,6 +15,10 @@ import (
 //	running → success | failed | cancelled
 //
 // 步骤运行态以 JSON 快照存 run.Steps，历史 run 在定义删除后仍可读。
+// ErrWorkflowRunConflict 该 workflow 已有 running 实例（S4 并发双跑防护）。
+// CreateWorkflowRun 在事务内原子检查并返回，调用方据此映射 409。
+var ErrWorkflowRunConflict = errors.New("workflow has an active run")
+
 const (
 	WorkflowRunStatusRunning   = "running"
 	WorkflowRunStatusSuccess   = "success"
@@ -81,9 +85,22 @@ func (d *DB) DeleteWorkflow(id string) error {
 	return d.db.Delete(&Workflow{}, "id = ?", id).Error
 }
 
-// CreateWorkflowRun 新建运行实例
+// CreateWorkflowRun 新建运行实例。事务内原子校验该 workflow 无 running
+// 实例（并发 POST /run 的 check-then-act 竞态 S4）：若已有进行中 run，
+// 返回 ErrWorkflowRunConflict，不插入第二份。
 func (d *DB) CreateWorkflowRun(run *WorkflowRun) error {
-	return d.db.Create(run).Error
+	return d.db.Transaction(func(tx *gorm.DB) error {
+		var cnt int64
+		if err := tx.Model(&WorkflowRun{}).
+			Where("workflow_id = ? AND status = ?", run.WorkflowID, WorkflowRunStatusRunning).
+			Count(&cnt).Error; err != nil {
+			return err
+		}
+		if cnt > 0 {
+			return ErrWorkflowRunConflict
+		}
+		return tx.Create(run).Error
+	})
 }
 
 // GetWorkflowRun 按 ID 取运行实例

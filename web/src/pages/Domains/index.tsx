@@ -432,8 +432,16 @@ const DomainsPage = () => {
             key="copy"
             icon={<CopyOutlined />}
             onClick={() => {
-              navigator.clipboard.writeText(snippet ?? '')
-              message.success('已复制')
+              // 先写再提示：写失败/剪贴板不可用时不假报成功（W5）。
+              const clipboard = navigator.clipboard
+              if (!clipboard || typeof clipboard.writeText !== 'function') {
+                message.warning('当前环境不支持剪贴板')
+                return
+              }
+              clipboard.writeText(snippet ?? '').then(
+                () => message.success('已复制'),
+                () => message.warning('复制失败，请手动复制'),
+              )
             }}
           >
             复制

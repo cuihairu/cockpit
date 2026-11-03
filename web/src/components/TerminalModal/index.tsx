@@ -50,6 +50,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  // 连接代数：每次发起/清理连接流程递增。票据在途返回时若代数已变
+  // （组件卸载、重连、关闭），放弃建 WS——避免向已 dispose 的 xterm 写
+  // 并泄漏 PTY（W1）。
+  const sessionGenRef = useRef(0);
 
   // SSH 认证方式判断
   const passwordSupported = !authMethods || authMethods.includes('password');
@@ -76,6 +80,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   }, [agentId, host, port, protocol, credentials.username, credentials.password]);
 
   const connectWebSocket = useCallback(async (terminal: Terminal) => {
+    const gen = ++sessionGenRef.current;
     const params = paramsRef.current;
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     let ticket: string;
@@ -102,6 +107,10 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       return;
     }
 
+    // 票据在途期间组件可能已卸载/重连：代数失配则放弃，不建孤儿 WS。
+    if (gen !== sessionGenRef.current) {
+      return;
+    }
     const wsUrl = `${wsProtocol}//${window.location.host}/api/remote/terminal`;
     const ws = new WebSocket(wsUrl, [ticket]);
     wsRef.current = ws;
@@ -116,11 +125,18 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
 
     ws.onopen = () => {
       clearTimeout(timeoutTimer);
+      if (gen !== sessionGenRef.current) {
+        ws.close();
+        return;
+      }
       setConnected(true);
       terminal.writeln('\x1b[1;32m连接成功！\x1b[0m\r\n');
     };
 
     ws.onmessage = (event) => {
+      if (gen !== sessionGenRef.current) {
+        return;
+      }
       try {
         const msg = JSON.parse(event.data);
 
@@ -148,12 +164,18 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
 
     ws.onerror = () => {
       clearTimeout(timeoutTimer);
+      if (gen !== sessionGenRef.current) {
+        return;
+      }
       terminal.writeln('\r\n\x1b[1;31m连接错误\x1b[0m\r\n');
       setConnected(false);
     };
 
     ws.onclose = () => {
       clearTimeout(timeoutTimer);
+      if (gen !== sessionGenRef.current) {
+        return;
+      }
       setConnected(false);
     };
   }, []);
@@ -225,6 +247,8 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
       resizeObserver.observe(terminalRef.current);
 
       return () => {
+        // 使在途票据/旧连接回调失效，防止向已 dispose 终端写。
+        sessionGenRef.current++;
         resizeObserver.disconnect();
         if (wsRef.current) {
           wsRef.current.close();
@@ -238,6 +262,7 @@ const TerminalModal: React.FC<TerminalModalProps> = ({
   useEffect(() => {
     if (!visible && terminalInstanceRef.current) {
       // 关闭时清理
+      sessionGenRef.current++;
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;

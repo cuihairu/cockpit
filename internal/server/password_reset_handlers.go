@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/cuihairu/cockpit/internal/auth"
@@ -162,7 +163,7 @@ func (s *Server) handleVerifyResetCode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// printf 打印日志（替代 log.Printf）
+// printf 记录日志（S9：此前为空操作吞掉邮件发送错误，改为真实日志）
 func printf(format string, args ...interface{}) {
-	// 在实际实现中应该使用日志系统
+	log.Printf(format, args...)
 }

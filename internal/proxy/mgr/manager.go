@@ -224,6 +224,10 @@ func (m *Manager) handleConnection(proxy *Proxy, clientConn net.Conn) {
 		Conn:    clientConn,
 		AgentID: proxy.config.AgentID,
 		Created: time.Now(),
+		// LastRead 创建即置当前时刻：新连接未发首字节时零值会让
+		// now.Sub(zero) 远超 5 分钟，首个 cleanup tick 强关握手中的
+		// 活动连接（S3）。
+		LastRead: time.Now(),
 	}
 
 	proxy.mu.Lock()
@@ -282,9 +286,7 @@ func (m *Manager) readFromClient(proxy *Proxy, proxyConn *ProxyConn) {
 			break
 		}
 
-		proxyConn.mu.Lock()
-		proxyConn.LastRead = time.Now()
-		proxyConn.mu.Unlock()
+		proxyConn.markRead()
 
 		// 转发数据给 Agent。必须拷贝：SendToAgent 入队后由写泵异步序列化，
 		// buf 下一轮 Read 即被覆写（同 proxy/handler.go readFromTarget 的
@@ -385,7 +387,7 @@ func (m *Manager) GetProxyStatus(proxyID string) (map[string]interface{}, error)
 			"id":       conn.ID,
 			"remote":   conn.Conn.RemoteAddr().String(),
 			"created":  conn.Created,
-			"lastRead": conn.LastRead,
+			"lastRead": conn.lastReadAt(),
 			"closed":   conn.closed.Load(),
 		})
 	}
@@ -413,7 +415,7 @@ func (m *Manager) GetAllStatus() []map[string]interface{} {
 				"id":       conn.ID,
 				"remote":   conn.Conn.RemoteAddr().String(),
 				"created":  conn.Created,
-				"lastRead": conn.LastRead,
+				"lastRead": conn.lastReadAt(),
 			})
 		}
 
@@ -457,7 +459,7 @@ func (m *Manager) cleanupIdleConnections() {
 		proxy.mu.Lock()
 		for connID, conn := range proxy.conns {
 			// 清理超过 5 分钟没有读活动的连接
-			if now.Sub(conn.LastRead) > 5*time.Minute {
+			if now.Sub(conn.lastReadAt()) > 5*time.Minute {
 				log.Printf("Closing idle connection %s", connID)
 				conn.Close()
 				delete(proxy.conns, connID)
@@ -490,6 +492,22 @@ func (pc *ProxyConn) Close() error {
 		return nil // 已经关闭
 	}
 	return pc.Conn.Close()
+}
+
+// markRead 记录一次读活动。读协程写 LastRead 必须经本方法持 conn.mu，
+// 与清理/状态导出（经 lastReadAt）互斥，避免 time.Time 撕裂读（G2）。
+func (pc *ProxyConn) markRead() {
+	pc.mu.Lock()
+	pc.LastRead = time.Now()
+	pc.mu.Unlock()
+}
+
+// lastReadAt 读取最后读活动时刻。调用方（cleanup/状态导出）持有 proxy.mu
+// 但必须再经本方法持 conn.mu，与 markRead 写互斥（G2）。
+func (pc *ProxyConn) lastReadAt() time.Time {
+	pc.mu.RLock()
+	defer pc.mu.RUnlock()
+	return pc.LastRead
 }
 
 // SendToAgent 实现 ServerInterface

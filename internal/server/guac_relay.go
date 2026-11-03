@@ -39,9 +39,10 @@ type guacRelay struct {
 
 	ln net.Listener
 
-	mu    sync.Mutex
-	conns map[string]net.Conn // connID → guacd 侧连接
-	seq   atomic.Uint64
+	mu     sync.Mutex
+	conns  map[string]net.Conn // connID → guacd 侧连接
+	closed bool                // 受 mu 保护：Close 已触发，拒绝新连接（S6）
+	seq    atomic.Uint64
 
 	closeOnce sync.Once
 }
@@ -134,15 +135,21 @@ func (r *guacRelay) Close() {
 		delete(guacRelayReg, r.proxyID)
 		guacRelayRegMu.Unlock()
 		_ = r.ln.Close()
+		// 单锁内关全部并清空：acceptLoop 在 listener 关闭前可能已 accept
+		// 到新连接，快照后逐个 removeConn 会让该窗口插入的 conn 逃逸
+		// （S6）。持锁置 closed 并关闭全部，拒绝后续插入。
 		r.mu.Lock()
-		connIDs := make([]string, 0, len(r.conns))
-		for id := range r.conns {
-			connIDs = append(connIDs, id)
+		r.closed = true
+		for id, conn := range r.conns {
+			_ = conn.Close()
+			_ = r.send(r.agentID, protocol.NewMessage(protocol.MessageTypeProxyClose, map[string]interface{}{
+				"proxyId": r.proxyID,
+				"connId":  id,
+				"reason":  "session closed",
+			}))
 		}
+		r.conns = make(map[string]net.Conn)
 		r.mu.Unlock()
-		for _, id := range connIDs {
-			r.removeConn(id, "session closed")
-		}
 	})
 }
 
@@ -162,6 +169,12 @@ func (r *guacRelay) acceptLoop() {
 func (r *guacRelay) handleConn(conn net.Conn) {
 	connID := fmt.Sprintf("%s-%d", r.proxyID, r.seq.Add(1))
 	r.mu.Lock()
+	if r.closed {
+		// Close 已触发：拒绝此连接，不得再插入（S6）。
+		r.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
 	r.conns[connID] = conn
 	r.mu.Unlock()
 

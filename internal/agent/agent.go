@@ -55,9 +55,13 @@ type Agent struct {
 	servicesOnce sync.Once
 
 	// 状态
-	mu           sync.RWMutex
-	writeMu      sync.Mutex
-	connected    bool
+	mu        sync.RWMutex
+	writeMu   sync.Mutex
+	connected bool
+	// connGen 连接代数：connect 成功时递增。messageLoop 启动时快照，
+	// 陈旧循环（代数失配）在继续读或触发重连前退出，避免重连后
+	// 误拆新连接或并发双读（G1）。
+	connGen      uint64
 	registered   atomic.Bool
 	reconnecting atomic.Bool // 防止并发重连
 	ctx          context.Context
@@ -370,6 +374,7 @@ func (a *Agent) connect() error {
 	a.mu.Lock()
 	a.conn = conn
 	a.connected = true
+	a.connGen++
 	a.registered.Store(false)
 	a.mu.Unlock()
 
@@ -613,6 +618,10 @@ func (a *Agent) sendHeartbeat() {
 
 // messageLoop 消息循环
 func (a *Agent) messageLoop() {
+	a.mu.RLock()
+	gen := a.connGen
+	a.mu.RUnlock()
+
 	for {
 		select {
 		case <-a.ctx.Done():
@@ -622,6 +631,7 @@ func (a *Agent) messageLoop() {
 
 		a.mu.RLock()
 		conn := a.conn
+		curGen := a.connGen
 		a.mu.RUnlock()
 
 		if conn == nil {
@@ -629,10 +639,34 @@ func (a *Agent) messageLoop() {
 			continue
 		}
 
+		// 连接代数失配：reconnect 已建立新连接（或本循环尚未启动时
+		// 已换代），此循环是陈旧代，必须退出，不得再读新连接（否则
+		// 与新代 messageLoop 并发双读），也不得触发重连。
+		if gen != curGen {
+			return
+		}
+
 		msg, err := a.codec.ReadMessage(conn)
 		if err != nil {
+			a.mu.RLock()
+			curGen = a.connGen
+			a.mu.RUnlock()
+			if gen != curGen {
+				// 读失败源于被替换的旧连接；新连接由新代循环管理。
+				return
+			}
 			log.Printf("Read message failed: %v", err)
 			go a.reconnect()
+			return
+		}
+
+		// 读成功后再查一次代数：读期间 reconnect 可能已换代
+		//（closeCurrentConn→connect），此时不得把本帧交给可能已
+		// 失效的 handler 状态，且避免双读。
+		a.mu.RLock()
+		curGen = a.connGen
+		a.mu.RUnlock()
+		if gen != curGen {
 			return
 		}
 
