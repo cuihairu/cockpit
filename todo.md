@@ -160,9 +160,9 @@
   - 证据：`dfd13d9`（`web/src/pages/Recordings/index.tsx` 加 playGenRef 代数；play 内 await cast 后校验代数（旧代迟到不得清新代 timers）+ 每个 timer 回调校验代数跳过；`index.test.tsx` 加「倍速切换旧代迟到 cast 不清新代」回归。Recordings 20 测试绿）
 - [x] W3 ForgotPassword 计时器泄漏：setInterval 卸载不清，最多 60s 对卸载组件 setState（web/src/pages/ForgotPassword/index.tsx:49）〔修复=timer ref + 卸载清理〕
   - 证据：`fe7a404`（`web/src/pages/ForgotPassword/index.tsx` 加 countdownTimerRef；startCountdown 先清旧 interval，useEffect 卸载时 clearInterval；`index.test.tsx` 加「卸载清理倒计时」回归。ForgotPassword 6 测试绿）
-- [ ] W4 BackupCodes 剪贴板无 catch：http 下 clipboard undefined 同步 TypeError，拒绝成未处理 promise（web/src/components/BackupCodesDisplay/index.tsx:21）〔修复=try/catch 或 .catch + 卸载清理〕
-- [ ] W5 Domains 剪贴板无 catch：拒绝未处理且 message.success 先报成功（web/src/pages/Domains/index.tsx:435）〔修复=then/catch 链 + 守 undefined〕
-- [ ] G7 job Exec 超时泄漏：CombinedOutput 后不 cancel，计时器挂满 per-job 超时（internal/agent/rpc/job_provider.go:99）〔修复=WithTimeout 后 defer cancel〕
+- [x] W4 BackupCodes 剪贴板无 catch：http 下 clipboard undefined 同步 TypeError，拒绝成未处理 promise（web/src/components/BackupCodesDisplay/index.tsx:21）〔修复=try/catch 或 .catch + 卸载清理〕〔commit 9b00c9d6：web vitest 备份码用例绿；go 包不受影响〕
+- [x] W5 Domains 剪贴板无 catch：拒绝未处理且 message.success 先报成功（web/src/pages/Domains/index.tsx:435）〔修复=then/catch 链 + 守 undefined〕〔commit b40d682d：web vitest Domains 用例绿；go 包不受影响〕
+- [x] G7 job Exec 超时泄漏：CombinedOutput 后不 cancel，计时器挂满 per-job 超时（internal/agent/rpc/job_provider.go:99）〔修复=WithTimeout 后 defer cancel〕〔commit ea4c5c55：internal/agent/rpc 全包 + -race 绿，含 TestJobExecReleasesSessionAndTimer〕
 - [ ] G8 GetContainerStats 读错忽略：部分/失败读产出空 stats 无错误，docker 方法无 per-op 期限（internal/docker/client.go:293）〔修复=查 Read 错误 + per-call 超时〕
 - [ ] G9 FollowStart 容量误拒：16 活跃时重启既有 follow 被误拒，替换逻辑本支持同 ID（internal/agent/rpc/logs_follow.go:115）〔修复=先查既有 ID 再测容量〕
 - [ ] G10 probe-agent transitions 竞态：close 后写 nil 与 alerter 并发读指针竞态（cmd/cockpit-probe-agent/main.go:116）〔修复=mutex 守护或属主协程置 nil〕
