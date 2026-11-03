@@ -171,7 +171,8 @@
   - 证据：本 commit（`internal/proxy/handler.go` 加 `replaceConn`：锁内放新条目后锁外 `Close` 旧条目，`HandleProxyNew` 与 `openSSHProxy` 复用；`g3_conns_leak_test.go` 加 `TestS7ReplaceConnClosesOldSameID` 回归。`go test -race ./internal/proxy/...` 全绿含新回归，`go vet` 绿，`go build ./...` 绿）
 - [x] S8 通知 goroutine 无追踪：context.Background 派生无 WaitGroup 协程，关停中可跑过 DB 关闭（internal/notification/service.go:149）〔修复=生命周期 context 或 WaitGroup〕
   - 证据：本 commit（`internal/notification/service.go` 加生命周期 ctx/cancel + WaitGroup + closed 标志，`SendNonBlocking` 从 s.ctx 派生并计数，`Close` 幂等取消并 Wait 在途投递，`Shutdown` 在 db.Close 前调用 `notifier.Close()`；`service_test.go` 加 `TestServiceCloseWaitsInflight`/`TestServiceCloseIdempotent` 回归。`go test -race ./internal/notification/...` 全绿含新回归，`go vet` 绿，`go build ./...` 绿）
-- [ ] S9 密码重置邮件吞错：printf 空操作吞 SendPasswordResetEmail 错误，API 假报成功（internal/server/password_reset_handlers.go:62）〔修复=log.Printf + 追踪〕
+- [x] S9 密码重置邮件吞错：printf 空操作吞 SendPasswordResetEmail 错误，API 假报成功（internal/server/password_reset_handlers.go:62）〔修复=log.Printf + 追踪〕
+  - 证据：本 commit（`internal/server/password_reset_handlers.go` 将 `printf` 空实现改为 `log.Printf`，邮件发送失败真实落日志；`password_reset_handlers_test.go` 覆盖回归。`go test ./internal/server -run ForgotPassword -count=1` 绿，`go vet` 绿，`go build ./...` 绿）
 - [ ] S10 ParseBackupSources 忽略错误：sources JSON 损坏产出空清单照发 run 假完成（internal/server/backup_loop.go:93）〔修复=返回错误，startBackupRun 拒绝〕
 - [ ] W6 GuacPlayer canvas 残留：effect 重跑旧 canvas 同留 DOM（web/src/components/GuacPlayer/index.tsx:100）〔修复=cleanup 先移除旧显示元素〕
 - [ ] W7 dashboard 下拉刷新空操作：onRefresh 空 async 即收不重取，Future.wait 在 build 重建重启（mobile/lib/pages/dashboard_page.dart:19）〔修复=future 缓存字段 + onRefresh 重赋值 setState〕
