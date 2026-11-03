@@ -187,3 +187,67 @@ func TestCovPullImageInspectError(t *testing.T) {
 		t.Errorf("error = %v, want inspect image failure", err)
 	}
 }
+
+// TestCovGetContainerStatsReadError：stats body 读失败（RST）应报错，
+// 不得静默返回空 stats（G8）。
+func TestCovGetContainerStatsReadError(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("server does not support hijacking")
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		if tcp, ok := conn.(*net.TCPConn); ok {
+			tcp.SetLinger(0)
+		}
+		conn.Close()
+	})
+
+	_, err := c.GetContainerStats("cov-c")
+	if err == nil {
+		t.Fatal("GetContainerStats() should fail when stats body read errors")
+	}
+	if !strings.Contains(err.Error(), "read container stats") {
+		t.Errorf("error = %v, want read container stats failure", err)
+	}
+}
+
+// TestCovGetContainerStatsBadJSON：合法 200 但 body 非 stats JSON → 报错。
+func TestCovGetContainerStatsBadJSON(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"cpu_stats":`))
+	})
+
+	_, err := c.GetContainerStats("cov-c")
+	if err == nil {
+		t.Fatal("GetContainerStats() should fail on malformed stats JSON")
+	}
+	if !strings.Contains(err.Error(), "decode container stats") {
+		t.Errorf("error = %v, want decode container stats failure", err)
+	}
+}
+
+// TestCovGetContainerStatsEmptyPayload：合法 JSON 但缺 id → 报错。
+func TestCovGetContainerStatsEmptyPayload(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"cpu_stats":{},"memory_stats":{}}`))
+	})
+
+	_, err := c.GetContainerStats("cov-c")
+	if err == nil {
+		t.Fatal("GetContainerStats() should fail when payload lacks id")
+	}
+	if !strings.Contains(err.Error(), "empty container stats") {
+		t.Errorf("error = %v, want empty container stats failure", err)
+	}
+}

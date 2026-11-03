@@ -2,10 +2,12 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
 
@@ -295,7 +297,10 @@ func (c *Client) GetLogs(id string, tail, since string, follow, timestamps, stdo
 
 // GetContainerStats gets container stats
 func (c *Client) GetContainerStats(id string) (map[string]interface{}, error) {
-	ctx := context.Background()
+	// Docker stats can block while the daemon collects a one-shot sample;
+	// keep a bounded per-operation deadline instead of relying on the caller.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	stats, err := c.cli.ContainerStats(ctx, id, client.ContainerStatsOptions{})
 	if err != nil {
@@ -303,16 +308,29 @@ func (c *Client) GetContainerStats(id string) (map[string]interface{}, error) {
 	}
 	defer stats.Body.Close()
 
-	// Return basic stats info
-	result := map[string]interface{}{
-		"id": id,
+	// Read the full one-shot stats payload; a partial or failed read must not
+	// be silently ignored (G8).
+	data, err := io.ReadAll(stats.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read container stats: %w", err)
+	}
+	var payload container.StatsResponse
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, fmt.Errorf("decode container stats: %w", err)
+	}
+	if payload.ID == "" {
+		return nil, fmt.Errorf("empty container stats")
 	}
 
-	// Read stats body to ensure connection is complete
-	buf := make([]byte, 1024)
-	stats.Body.Read(buf)
-
-	return result, nil
+	return map[string]interface{}{
+		"id":           id,
+		"container_id": payload.ID,
+		"name":         payload.Name,
+		"cpu_stats":    payload.CPUStats,
+		"memory_stats": payload.MemoryStats,
+		"pids_stats":   payload.PidsStats,
+		"read":         payload.Read,
+	}, nil
 }
 
 // ============ Images ============
