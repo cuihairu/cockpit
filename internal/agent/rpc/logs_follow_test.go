@@ -3,6 +3,7 @@ package rpc
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
@@ -279,5 +280,43 @@ func TestLogsFollowTimeoutKillsIdleSession(t *testing.T) {
 	}
 	if n := len(c.gotCloses()); n != 1 {
 		t.Fatalf("expected exactly one close, got %v", c.gotCloses())
+	}
+}
+
+// TestLogsFollowCapacityReplaceAtMax：活跃会话已满时，替换既有 ID 不应被
+// 容量判断误拒（G9）——替换不新增会话数，旧进程被杀、新会话接管。
+func TestLogsFollowCapacityReplaceAtMax(t *testing.T) {
+	p := newFollowTestProvider()
+	c := &followCollector{}
+	p.SetSender(c.sender)
+	p.SetCloser(c.closer)
+	p.followCmdFn = fakeFollowCmd(`exec sleep 30`)
+
+	for i := 0; i < logsFollowMaxActive; i++ {
+		id := fmt.Sprintf("cap-%d", i)
+		if _, err := p.FollowStart(followParams(id, "")); err != nil {
+			t.Fatalf("FillFollowStart %s: %v", id, err)
+		}
+	}
+
+	// 替换最后一个 ID（会话数不变，不应 too-many）
+	if _, err := p.FollowStart(followParams("cap-15", "")); err != nil {
+		t.Fatalf("ReplaceFollowStart at capacity: %v", err)
+	}
+	waitClose(t, c, "replaced")
+
+	p.fs.mu.Lock()
+	n := len(p.fs.follows)
+	p.fs.mu.Unlock()
+	if n != logsFollowMaxActive {
+		t.Fatalf("active follows after replace = %d, want %d", n, logsFollowMaxActive)
+	}
+
+	// 清理：全部 stop
+	for i := 0; i < logsFollowMaxActive; i++ {
+		id := fmt.Sprintf("cap-%d", i)
+		if _, err := p.FollowStop(map[string]interface{}{"followId": id}); err != nil {
+			t.Fatalf("FollowStop %s: %v", id, err)
+		}
 	}
 }
