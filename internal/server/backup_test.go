@@ -607,3 +607,19 @@ func TestBackupFileDownloadRejectsUnsafeName(t *testing.T) {
 		}
 	}
 }
+
+func TestNextBackupRunAtMalformedDailyNoColon(t *testing.T) {
+	// S2 回归：daily@ 无冒号的历史脏行必须返回 0（manual 语义），
+	// 不得对 parts[1] 越界 panic。
+	now := time.Date(2026, 9, 14, 15, 0, 0, 0, time.Local)
+	if got := NextBackupRunAt("daily@03", now); got != 0 {
+		t.Errorf("malformed daily@03 next = %d, want 0", got)
+	}
+	// 空冒号段（daily@:00）同样返回 0
+	// 空冒号段（daily@:00）解析为 h=0,m=0 是合法形态，仅确保不 panic
+	// 且落在今日 00:00（已过 → 明天 00:00）。
+	got := time.Unix(NextBackupRunAt("daily@:00", now), 0)
+	if got.Hour() != 0 || got.Minute() != 0 {
+		t.Errorf("daily@:00 next = %v, want today 00:00 (or tomorrow)", got)
+	}
+}
