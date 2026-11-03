@@ -20,6 +20,7 @@ pages/dashboard_page.dart:19 const 构造行，loading 分支运行时已被用�
 # 若该分支未走，后续 setState(connected) 会因 defunct state 报错使测试失败
 # （用例通过即证明命中）。await 在未就绪 channel 上挂起，行计数不被记录。
 pages/terminal_page.dart:56 await 挂起行，!mounted 分支已被用例验证，lcov 漏计
+pages/terminal_page.dart:63 await 挂起行，guard 分支（!mounted 或代际过期）已被用例验证，lcov 漏计
 
 # 注：channel.stream.listen 的 onError 回调（terminal_page.dart:73）曾登记
 # 为环境不可达；web_socket_channel 3.x 的 adapter 把连接期异常（如握手

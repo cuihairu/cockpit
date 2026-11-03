@@ -30,6 +30,7 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
   final _terminal = Terminal(maxLines: 5000);
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _sub;
+  int _connectGeneration = 0;
   _ConnState _state = _ConnState.connecting;
   String _error = '';
 
@@ -40,6 +41,12 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
   }
 
   Future<void> _connect() async {
+    // 重连先取消旧订阅：旧连接的 onDone/onError 不再触发 _fail（W8）。
+    // 旧 channel 稍后在替代连接就绪后关闭，避免未完成握手的 close 阻塞
+    // 新 WebSocket 建连。
+    final generation = ++_connectGeneration;
+    unawaited(_sub?.cancel());
+    _sub = null;
     setState(() {
       _state = _ConnState.connecting;
       _error = '';
@@ -52,29 +59,33 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
         port: widget.ssh.port,
       );
       final channel = await _openChannel(ticket.ticket);
-      if (!mounted) {
+      if (!mounted || generation != _connectGeneration) {
         await channel.sink.close();
         return;
       }
       setState(() => _state = _ConnState.connected);
-      _terminal.write('连接成功：${widget.ssh.host}:${widget.ssh.port}\r\n');
+      final oldChannel = _channel;
       _channel = channel;
+      unawaited(oldChannel?.sink.close());
+      _terminal.write('连接成功：${widget.ssh.host}:${widget.ssh.port}\r\n');
       _terminal.onOutput = (data) {
         channel.sink.add(jsonEncode({'type': 'input', 'data': data}));
       };
       // PTY 尺寸同步：xterm 回调 (cols, rows) → resize 消息 → agent WindowChange
       _terminal.onResize = (width, height, pixelWidth, pixelHeight) {
-        channel.sink.add(jsonEncode({'type': 'resize', 'rows': height, 'cols': width}));
+        channel.sink.add(
+          jsonEncode({'type': 'resize', 'rows': height, 'cols': width}),
+        );
       };
       // 保存 subscription 以便 dispose 时取消：WS 回调落在真 async 区，
       // 测试/页面销毁后仍会触发 _fail → setState(defunct)。
       _sub = channel.stream.listen(
-        (msg) => _onServerMessage(msg as String),
-        onError: (Object e) => _fail('连接错误：$e'),
-        onDone: () => _fail('连接已关闭'),
+        (msg) => _onServerMessage(msg as String, generation: generation),
+        onError: (Object e) => _fail('连接错误：$e', generation: generation),
+        onDone: () => _fail('连接已关闭', generation: generation),
       );
     } catch (e) {
-      _fail('$e');
+      _fail('$e', generation: generation);
     }
   }
 
@@ -82,10 +93,7 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
   Future<WebSocketChannel> _openChannel(String ticket) async {
     final server = Uri.parse(ref.read(settingsProvider).serverUrl);
     final wsScheme = server.scheme == 'https' ? 'wss' : 'ws';
-    final uri = server.replace(
-      scheme: wsScheme,
-      path: '/api/remote/terminal',
-    );
+    final uri = server.replace(scheme: wsScheme, path: '/api/remote/terminal');
     WebSocketChannel channel;
     if (server.scheme != 'https') {
       channel = IOWebSocketChannel.connect(uri, protocols: [ticket]);
@@ -105,7 +113,8 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
     return channel;
   }
 
-  void _onServerMessage(String raw) {
+  void _onServerMessage(String raw, {int? generation}) {
+    if (generation != null && generation != _connectGeneration) return;
     Object? parsed;
     try {
       parsed = jsonDecode(raw);
@@ -119,11 +128,12 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
       case 'error':
         _terminal.write('\r\n错误: ${parsed['message']}\r\n');
       case 'close':
-        _fail('连接已关闭');
+        _fail('连接已关闭', generation: generation);
     }
   }
 
-  void _fail(String msg) {
+  void _fail(String msg, {int? generation}) {
+    if (generation != null && generation != _connectGeneration) return;
     if (!mounted) return;
     setState(() {
       // 兜底的「连接已关闭」在两种情况下抑制：connected 态的正常关闭
@@ -131,7 +141,7 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
       // 紧随其后的 onDone 把可诊断文案冲成无信息量的通用提示
       final suppressClose =
           msg == '连接已关闭' &&
-              (_state == _ConnState.connected || _error.isNotEmpty);
+          (_state == _ConnState.connected || _error.isNotEmpty);
       if (!suppressClose) _error = msg;
       _state = _ConnState.error;
     });
@@ -154,35 +164,30 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
             IconButton(
               icon: const Icon(Icons.refresh),
               tooltip: '重连',
-              onPressed: () {
-                _channel?.sink.close();
-                _connect();
-              },
+              onPressed: _connect,
             ),
         ],
       ),
       body: Column(
         children: [
-          if (_state == _ConnState.connecting)
-            const LinearProgressIndicator(),
+          if (_state == _ConnState.connecting) const LinearProgressIndicator(),
           if (_state == _ConnState.error)
             Padding(
               padding: const EdgeInsets.all(8),
-              child: Row(children: [
-                const Icon(Icons.error_outline, color: Colors.red, size: 18),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(_error,
-                      style:
-                          const TextStyle(color: Colors.red, fontSize: 12)),
-                ),
-              ]),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _error,
+                      style: const TextStyle(color: Colors.red, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          Expanded(
-            child: SafeArea(
-              child: TerminalView(_terminal),
-            ),
-          ),
+          Expanded(child: SafeArea(child: TerminalView(_terminal))),
         ],
       ),
     );

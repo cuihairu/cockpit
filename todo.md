@@ -179,7 +179,8 @@
   - 证据：本 commit（`web/src/components/GuacPlayer/index.tsx:101` 挂载时记录 `displayElement`，`:108` cleanup 在 pause/disconnect 后 `displayElement.remove()` 移除旧 Display；`web/src/components/GuacPlayer/index.test.tsx:96` 新增 `effect 重跑时移除旧 Display` 回归——rerender 新 blob 后旧 `guac-display` 脱离 DOM 且仅剩 1 个。web vitest 全量 100 文件/1159 用例绿 + `npm run build` 绿；另注 `npx tsc --noEmit` 的 Recordings 未用变量报错为既有缺陷（dfd13d92b 引入，`git stash` 验证与本改动无关），按仓库 build 脚本口径不改）
 - [x] W7 dashboard 下拉刷新空操作：onRefresh 空 async 即收不重取，Future.wait 在 build 重建重启（mobile/lib/pages/dashboard_page.dart:19）〔修复=future 缓存字段 + onRefresh 重赋值 setState〕
   - 证据：本 commit（`mobile/lib/pages/dashboard_page.dart:14` 改为 `ConsumerStatefulWidget`，`:22` `_load` 构建 `Future.wait` 并在 `_DashboardPageState` 缓存为 `_future` 字段（`:29` `_refresh` 重赋值 setState 触发重取，`:43` build 仅在 `_future == null || !identical(_futureApi, api)` 时重建，避免 build 重跑重启加载）；`mobile/test/dashboard_page_test.dart:135` 新增「下拉刷新真实重取并更新卡片」回归——fling 下拉后 adapter 第二轮返回 1 台并断言 `/ 2` → `/ 1`。`flutter analyze` 0 问题 + 全量 `flutter test --coverage` 187 用例全绿 + `tool/coverage_check.sh` 门禁通过（未覆盖行全登记））
-- [ ] W8 终端重连订阅泄漏：旧流订阅不取消，onDone/onError 在新连接后假报错横幅（mobile/lib/pages/terminal_page.dart:136）〔修复=重连先取消 _sub 并关旧 channel〕
+- [x] W8 终端重连订阅泄漏：旧流订阅不取消，onDone/onError 在新连接后假报错横幅（mobile/lib/pages/terminal_page.dart:136）〔修复=重连先取消 _sub 并关旧 channel〕
+  - 证据：本 commit（`mobile/lib/pages/terminal_page.dart:43` `_connect` 增 `_connectGeneration` 代际计数，`:48` 重连时 `unawaited(_sub?.cancel())` 取消旧订阅、`:62` 新通道就绪后关闭旧 channel，`:75` listen 的 onError/onDone 与 `_onServerMessage` 均带 generation 守卫，过期订阅回调被拦截不再 `_fail`；重连按钮 `:172` 直接 `onPressed: _connect` 不再同步关旧 channel；`mobile/test/terminal_page_test.dart:275` 新增「重连后旧连接 close 不触发错误横幅（W8 回归）」——两次真 zone refresh 建立两条真实 WS 会话后关闭 `sessions[0]`，断言旧订阅回调被代际守卫拦截、无错误横幅。`flutter analyze` 0 问题 + 全量 `flutter test --coverage` 188 用例全绿 + coverage 门禁通过（新 guard 行 63 已登记 KNOWN_UNCOVERABLE））
 
 ## 已完成
 
