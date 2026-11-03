@@ -165,7 +165,8 @@
 - [x] G7 job Exec 超时泄漏：CombinedOutput 后不 cancel，计时器挂满 per-job 超时（internal/agent/rpc/job_provider.go:99）〔修复=WithTimeout 后 defer cancel〕〔commit ea4c5c55：internal/agent/rpc 全包 + -race 绿，含 TestJobExecReleasesSessionAndTimer〕
 - [x] G8 GetContainerStats 读错忽略：部分/失败读产出空 stats 无错误，docker 方法无 per-op 期限（internal/docker/client.go:293）〔修复=查 Read 错误 + per-call 超时〕〔commit 0994fbf4：internal/docker 全包 + -race 绿，含 stats 读错/坏 JSON/空 payload 回归〕
 - [x] G9 FollowStart 容量误拒：16 活跃时重启既有 follow 被误拒，替换逻辑本支持同 ID（internal/agent/rpc/logs_follow.go:115）〔修复=先查既有 ID 再测容量〕〔commit fcd2b16d：internal/agent/rpc 全包 + -race 绿（跳过 2 个既有基线 flaky：TestStackGitDeployBusySkipped、TestCovPctFileSearchScannedLimit），含 TestLogsFollowCapacityReplaceAtMax〕
-- [ ] G10 probe-agent transitions 竞态：close 后写 nil 与 alerter 并发读指针竞态（cmd/cockpit-probe-agent/main.go:116）〔修复=mutex 守护或属主协程置 nil〕
+- [x] G10 probe-agent transitions 竞态：close 后写 nil 与 alerter 并发读指针竞态（cmd/cockpit-probe-agent/main.go:116）〔修复=mutex 守护或属主协程置 nil〕
+  - 证据：本 commit（`cmd/cockpit-probe-agent/main.go` 加 `stateMu` 守护 `transitions`/`written`；aleniter 回调锁内检查非阻塞发送，flushStatus 锁内捕获副本后置 nil 再锁外 close，幂等收尾；`go test ./cmd/cockpit-probe-agent/...` 全绿含 `-race`，`go vet` 绿，`go build ./...` 绿）
 - [ ] S7 proxy conns 覆盖泄漏：同 connID 重发 proxy_new 覆盖旧条目不关旧连接/协程（internal/proxy/handler.go:133）〔修复=覆盖前关闭删除既有条目〕
 - [ ] S8 通知 goroutine 无追踪：context.Background 派生无 WaitGroup 协程，关停中可跑过 DB 关闭（internal/notification/service.go:149）〔修复=生命周期 context 或 WaitGroup〕
 - [ ] S9 密码重置邮件吞错：printf 空操作吞 SendPasswordResetEmail 错误，API 假报成功（internal/server/password_reset_handlers.go:62）〔修复=log.Printf + 追踪〕
