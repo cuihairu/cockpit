@@ -154,9 +154,17 @@ func parseDockerContainerRoute(r *http.Request, segments []string, params map[st
 		}
 	case "logs":
 		if r.Method == http.MethodGet {
+			// 同步 logs 端点不支持 follow：容器日志经 GetLogs 循环读至
+			// EOF/1MB，follow=true 会在活动容器上阻塞到 1MB 累积或容器
+			// 停止（G6 循环读改动后尤其显著）。前端只用 tail/timestamps，
+			// 这里显式拒绝 follow，避免暴露挂起接口。
+			if raw := r.URL.Query().Get("follow"); raw != "" {
+				if v, err := strconv.ParseBool(raw); err == nil && v {
+					return "", fmt.Errorf("follow not supported on container logs endpoint")
+				}
+			}
 			setQueryString(params, r, "tail")
 			setQueryString(params, r, "since")
-			setQueryBool(params, r, "follow")
 			setQueryBool(params, r, "timestamps")
 			setQueryBoolDefault(params, r, "stdout", true)
 			setQueryBoolDefault(params, r, "stderr", true)

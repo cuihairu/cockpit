@@ -1,6 +1,8 @@
 package rpc
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -112,6 +114,44 @@ func TestG4FollowOverwriteImmediately(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("FollowTask overwrite deadlocked")
+	}
+
+	waitForTask(t, p, taskID)
+}
+
+// TestG4FollowReplaceAtCapacity 验证 G4 修复后的容量语义：taskFollows 满
+// 8 个时，同 followId 覆盖（不新增活跃计数）仍被允许——与 logs_follow.go
+// G9「替换不计容量」一致；不同 followId 依旧被拒绝。
+func TestG4FollowReplaceAtCapacity(t *testing.T) {
+	dir := t.TempDir()
+	seedStackDir(t, dir, "web")
+	p := gitDeployProvider(t, dir, true)
+	p.SetSender(func(string, []byte) {})
+	closed := make(chan string, 16)
+	p.SetCloser(func(_ string, reason string) { closed <- reason })
+
+	res, err := p.UpStack("web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := res["taskId"].(string)
+
+	// 填满 8 个不同 followId。
+	for i := 0; i < stackTaskFollowMaxActive; i++ {
+		if _, err := p.FollowTask(map[string]interface{}{"taskId": taskID, "followId": fmt.Sprintf("f%d", i)}); err != nil {
+			t.Fatalf("follow %d: %v", i, err)
+		}
+	}
+
+	// 满员时替换既有 followId 必须成功（旧 pump 被停）。
+	if _, err := p.FollowTask(map[string]interface{}{"taskId": taskID, "followId": "f0"}); err != nil {
+		t.Fatalf("replace at capacity should succeed, got: %v", err)
+	}
+
+	// 满员时新增不同 followId 仍被拒。
+	if _, err := p.FollowTask(map[string]interface{}{"taskId": taskID, "followId": "over"}); err == nil ||
+		!strings.Contains(err.Error(), "too many") {
+		t.Fatalf("over-limit err = %v", err)
 	}
 
 	waitForTask(t, p, taskID)

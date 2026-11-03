@@ -61,12 +61,20 @@ func TestNextBackupRunAt(t *testing.T) {
 }
 
 func TestParseBackupSources(t *testing.T) {
-	if got := ParseBackupSources(""); len(got) != 0 {
+	got, err := ParseBackupSources("")
+	if err != nil || len(got) != 0 {
 		t.Errorf("empty = %v, want empty", got)
 	}
-	got := ParseBackupSources(`["/etc/nginx","/var/lib/db"]`)
+	got, err = ParseBackupSources(`["/etc/nginx","/var/lib/db"]`)
+	if err != nil {
+		t.Fatalf("parse valid: %v", err)
+	}
 	if len(got) != 2 || got[0] != "/etc/nginx" {
 		t.Errorf("got = %v", got)
+	}
+	// S10：损坏 JSON 必须返回错误，调用方据此拒绝运行而非照发空清单
+	if _, err := ParseBackupSources(`{`); err == nil {
+		t.Error("malformed sources should error")
 	}
 }
 
@@ -615,7 +623,6 @@ func TestNextBackupRunAtMalformedDailyNoColon(t *testing.T) {
 	if got := NextBackupRunAt("daily@03", now); got != 0 {
 		t.Errorf("malformed daily@03 next = %d, want 0", got)
 	}
-	// 空冒号段（daily@:00）同样返回 0
 	// 空冒号段（daily@:00）解析为 h=0,m=0 是合法形态，仅确保不 panic
 	// 且落在今日 00:00（已过 → 明天 00:00）。
 	got := time.Unix(NextBackupRunAt("daily@:00", now), 0)

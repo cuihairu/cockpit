@@ -119,11 +119,12 @@ type backupConfigView struct {
 }
 
 func backupConfigToView(cfg *storage.BackupConfig) backupConfigView {
+	sources, _ := ParseBackupSources(cfg.Sources)
 	return backupConfigView{
 		ID:         cfg.ID,
 		AgentID:    cfg.AgentID,
 		Name:       cfg.Name,
-		Sources:    ParseBackupSources(cfg.Sources),
+		Sources:    sources,
 		DestDir:    cfg.DestDir,
 		Schedule:   cfg.Schedule,
 		Retention:  cfg.Retention,

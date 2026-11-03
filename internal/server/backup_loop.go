@@ -84,14 +84,17 @@ func ValidBackupSources(sources []string) bool {
 	return true
 }
 
-// ParseBackupSources 解析配置里的 sources JSON
-func ParseBackupSources(raw string) []string {
+// ParseBackupSources 解析配置里的 sources JSON。损坏 JSON（S10）返回错误，
+// 调用方必须拒绝而非照发空清单假完成。
+func ParseBackupSources(raw string) ([]string, error) {
 	var out []string
 	if raw == "" {
-		return out
+		return out, nil
 	}
-	json.Unmarshal([]byte(raw), &out)
-	return out
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, fmt.Errorf("parse backup sources: %w", err)
+	}
+	return out, nil
 }
 
 // NextBackupRunAt 计算下次运行时间（server 本地时区）；manual 返回 0
@@ -198,7 +201,10 @@ func (s *Server) startBackupRun(cfg *storage.BackupConfig, trigger string) (uint
 	if destDir == "" {
 		return 0, fmt.Errorf("destDir required")
 	}
-	sources := ParseBackupSources(cfg.Sources)
+	sources, err := ParseBackupSources(cfg.Sources)
+	if err != nil {
+		return 0, fmt.Errorf("invalid sources for backup %s: %w", cfg.Name, err)
+	}
 
 	now := time.Now()
 	run := &storage.BackupRun{

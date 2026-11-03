@@ -161,3 +161,22 @@ func TestHandleDockerForwardsRPC(t *testing.T) {
 		t.Fatalf("unexpected response: %v", data)
 	}
 }
+
+// TestParseDockerContainerLogsRejectsFollow 同步容器 logs 端点是 JSON 返回，
+// 不提供流式 follow 契约；G6 循环读改后 follow=true 会在活动容器上阻塞至
+// 1MB/EOF。route 层必须拒绝，不把 follow 透传给 GetLogs。
+func TestParseDockerContainerLogsRejectsFollow(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/docker/agents/a1/containers/abc/logs?follow=true&tail=100", nil)
+	if _, _, _, err := parseDockerRequest(req); err == nil ||
+		!strings.Contains(err.Error(), "follow not supported") {
+		t.Fatalf("err = %v, want follow rejected", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/docker/agents/a1/containers/abc/logs?follow=1&tail=100", nil)
+	if _, _, _, err := parseDockerRequest(req); err == nil ||
+		!strings.Contains(err.Error(), "follow not supported") {
+		t.Fatalf("err = %v, want numeric follow rejected", err)
+	}
+}

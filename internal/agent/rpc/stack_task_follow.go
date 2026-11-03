@@ -70,15 +70,17 @@ func (p *StackProvider) FollowTask(params map[string]interface{}) (interface{}, 
 		p.mu.Unlock()
 		return nil, fmt.Errorf("task not found: %s", taskID)
 	}
-	if len(p.taskFollows) >= stackTaskFollowMaxActive {
-		p.mu.Unlock()
-		return nil, fmt.Errorf("too many active task follows (max %d)", stackTaskFollowMaxActive)
-	}
 	// 同 followId 覆盖：旧会话仍可能被 pump 持有。先摘表并停旧 stop，
 	// 再在锁外等待 pump 退出（done 关闭）——closeFn 需 p.mu，锁内等待
 	// 会死锁。完成后新建会话，避免两个 pump 并发向同一 proxyId 推流
 	// （无界重复泵与重复 proxy_data，G4）。
+	// 容量判断放在替换判断之后：同 followId 覆盖不新增活跃计数，满员时
+	// 仍允许替换（与 logs_follow.go G9「替换不计容量」一致）。
 	old := p.taskFollows[followID]
+	if old == nil && len(p.taskFollows) >= stackTaskFollowMaxActive {
+		p.mu.Unlock()
+		return nil, fmt.Errorf("too many active task follows (max %d)", stackTaskFollowMaxActive)
+	}
 	if old != nil {
 		delete(p.taskFollows, followID)
 	}

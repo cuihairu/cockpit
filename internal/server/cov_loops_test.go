@@ -193,6 +193,15 @@ func TestCovStartBackupRunGuards(t *testing.T) {
 	if _, err := s.startBackupRun(noDest, "manual"); err == nil || !strings.Contains(err.Error(), "destDir required") {
 		t.Fatalf("err = %v, want destDir required", err)
 	}
+
+	// S10：sources JSON 损坏 → startBackupRun 在创建 run 前拒绝，
+	// 不得照发空清单让 agent 空跑后标记假完成。
+	malformed := newBackupCfg("agent-guard", "malformed-sources", "manual", true)
+	malformed.Sources = "{"
+	if _, err := s.startBackupRun(malformed, "manual"); err == nil ||
+		!strings.Contains(err.Error(), "invalid sources") {
+		t.Fatalf("err = %v, want invalid sources", err)
+	}
 }
 
 func TestCovStartBackupRunDispatchFailureAndSuccess(t *testing.T) {

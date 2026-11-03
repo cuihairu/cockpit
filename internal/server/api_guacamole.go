@@ -724,7 +724,6 @@ func indexByte(b []byte, c byte) int {
 	return -1
 }
 
-// closeGuacamoleSession 幂等关闭：WS + guacd TCP + 审计结束
 // failGuacamoleSession 握手失败收尾（S5）：只关闭连接并从活会话索引摘除，
 // 不改台账状态（failed 已由调用方 UpdateStatus 落账），也不触发录制收集/
 // 审计结束。与 closeGuacamoleSession 共用 once，避免握手失败后正常关闭
@@ -743,6 +742,7 @@ func (s *Server) failGuacamoleSession(gs *GuacamoleSession) {
 	})
 }
 
+// closeGuacamoleSession 幂等关闭：WS + guacd TCP + 审计结束
 func (s *Server) closeGuacamoleSession(gs *GuacamoleSession) {
 	gs.once.Do(func() {
 		gs.ClientWS.Close()
