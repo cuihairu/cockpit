@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, message } from 'antd'
 import { CopyOutlined, CheckOutlined, EyeInvisibleOutlined, EyeTwoTone } from '@ant-design/icons'
 import './index.less'
@@ -16,28 +16,59 @@ const BackupCodesDisplay: React.FC<BackupCodesDisplayProps> = ({
 }) => {
   const [copied, setCopied] = useState<Set<number>>(new Set())
   const [blurred, setBlurred] = useState(true)
+  // 单码 copied 重置定时器句柄：卸载时清理（W4 配套）。
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 剪贴板可用且写入成功才提示成功；http/不支持时 clipboard 为 undefined，
+  // 同步 TypeError 会留下未处理 promise（W4）。
+  const copyText = (text: string, successMsg: string, onDone?: () => void) => {
+    const clipboard = navigator.clipboard
+    if (!clipboard || typeof clipboard.writeText !== 'function') {
+      message.warning('当前环境不支持剪贴板')
+      return
+    }
+    clipboard.writeText(text).then(
+      () => {
+        message.success(successMsg)
+        onDone?.()
+      },
+      () => {
+        message.warning('复制失败，请手动复制')
+      },
+    )
+  }
 
   const copyCode = (code: string, index: number) => {
-    navigator.clipboard.writeText(code).then(() => {
+    copyText(code, '已复制到剪贴板', () => {
       const newCopied = new Set(copied)
       newCopied.add(index)
       setCopied(newCopied)
-      message.success('已复制到剪贴板')
 
-      setTimeout(() => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current)
+      }
+      resetTimerRef.current = setTimeout(() => {
         const reset = new Set(newCopied)
         reset.delete(index)
         setCopied(reset)
+        resetTimerRef.current = null
       }, 2000)
     })
   }
 
   const copyAllCodes = () => {
-    const allCodes = codes.join('\n')
-    navigator.clipboard.writeText(allCodes).then(() => {
-      message.success('所有备份码已复制到剪贴板')
-    })
+    copyText(codes.join('\n'), '所有备份码已复制到剪贴板')
   }
+
+  useEffect(() => {
+    return () => {
+      // 卸载清理 copied 重置定时器（W4 配套）。
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current)
+        resetTimerRef.current = null
+      }
+    }
+  }, [])
 
   return (
     <div className="backup-codes-display">

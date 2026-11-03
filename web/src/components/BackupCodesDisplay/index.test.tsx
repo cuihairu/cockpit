@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { message } from 'antd'
 import BackupCodesDisplay from './index'
 
 // BackupCodesDisplay：恢复码展示——默认模糊/显隐切换/单码复制状态/全部复制
@@ -11,6 +12,8 @@ describe('BackupCodesDisplay', () => {
   beforeEach(() => {
     writeText.mockClear()
     vi.useFakeTimers()
+    // 恢复全局 clipboard mock（若前例覆盖，防跨用例污染）。
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -47,6 +50,32 @@ describe('BackupCodesDisplay', () => {
       vi.advanceTimersByTime(2100)
     })
     expect(btn.className).not.toContain('copied')
+  })
+
+  it('clipboard 不存在：不抛 TypeError、提示不支持（W4 回归）', () => {
+    const orig = navigator.clipboard
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    try {
+      const warnSpy = vi.spyOn(message, 'warning')
+      render(<BackupCodesDisplay codes={['a1', 'b2']} />)
+      fireEvent.click(screen.getByText('全部复制'))
+      expect(warnSpy).toHaveBeenCalledWith('当前环境不支持剪贴板')
+      expect(writeText).not.toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', { value: orig, configurable: true })
+    }
+  })
+
+  it('writeText 拒绝：提示复制失败不报成功（W4 回归）', async () => {
+    writeText.mockRejectedValueOnce(new Error('denied'))
+    const warnSpy = vi.spyOn(message, 'warning')
+    render(<BackupCodesDisplay codes={['a1', 'b2']} />)
+    await act(async () => {
+      fireEvent.click(screen.getByText('全部复制'))
+    })
+    expect(warnSpy).toHaveBeenCalledWith('复制失败，请手动复制')
+    const successSpy = vi.spyOn(message, 'success')
+    expect(successSpy).not.toHaveBeenCalledWith('所有备份码已复制到剪贴板')
   })
 
   it('全部复制以换行拼接', () => {
