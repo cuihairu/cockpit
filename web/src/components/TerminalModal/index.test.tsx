@@ -204,6 +204,23 @@ describe('TerminalModal', () => {
     expect(terminalMock.dispose).toHaveBeenCalled()
   })
 
+  it('票据在途时卸载：不建孤儿 WebSocket（W1 回归）', async () => {
+    let resolveTicket: (v: { ticket: string; expiresAt: string }) => void
+    createRemoteTicket.mockReturnValue(
+      new Promise((resolve) => { resolveTicket = resolve }),
+    )
+    const { unmount } = render(<TerminalModal {...props} />)
+    await flush()
+    // 卸载发生在票据 resolve 之前：建终端后立即清理（sessionGen++）。
+    unmount()
+    await act(async () => {
+      resolveTicket!({ ticket: 'tk-late', expiresAt: '' })
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    // 票据迟到返回：不得再 new WebSocket（W1 孤儿 WS / PTY 泄漏）。
+    expect(FakeWebSocket.instances).toHaveLength(0)
+  })
+
   it('「重连」重置终端并再次取票据', async () => {
     createRemoteTicket.mockRejectedValueOnce(new Error('first fails'))
     render(<TerminalModal {...props} />)
