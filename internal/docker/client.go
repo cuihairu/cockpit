@@ -263,14 +263,34 @@ func (c *Client) GetLogs(id string, tail, since string, follow, timestamps, stdo
 	}
 	defer reader.Close()
 
-	// Read logs (max 1MB)
-	buf := make([]byte, 1024*1024)
-	n, err := reader.Read(buf)
-	if err != nil && err != io.EOF {
-		return "", fmt.Errorf("read logs: %w", err)
+	// Read logs until EOF, capped at 1MB. A single Read can return fewer
+	// bytes than available; reading once silently truncated long streams
+	// (G6). The cap avoids unbounded memory for a hostile/large log.
+	const maxLogBytes = 1024 * 1024
+	buf := make([]byte, maxLogBytes)
+	n := 0
+	truncated := false
+	for {
+		// Leave room for a marker when the cap is reached.
+		limit := len(buf) - n
+		if limit <= 0 {
+			truncated = true
+			break
+		}
+		m, err := reader.Read(buf[n:])
+		n += m
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("read logs: %w", err)
+		}
 	}
-
-	return string(buf[:n]), nil
+	out := string(buf[:n])
+	if truncated {
+		out += "\n[logs truncated at 1MB]"
+	}
+	return out, nil
 }
 
 // GetContainerStats gets container stats
