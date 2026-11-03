@@ -52,6 +52,34 @@ describe('BackupCodesDisplay', () => {
     expect(btn.className).not.toContain('copied')
   })
 
+  it('2 秒内复制两个码时两个高亮分别重置', async () => {
+    const { container } = render(<BackupCodesDisplay codes={['a1', 'b2']} />)
+    const first = container.querySelectorAll('.backup-code-item')[0].querySelector('button')!
+    const second = container.querySelectorAll('.backup-code-item')[1].querySelector('button')!
+
+    await act(async () => {
+      fireEvent.click(first)
+    })
+    act(() => {
+      vi.advanceTimersByTime(1900)
+    })
+    await act(async () => {
+      fireEvent.click(second)
+    })
+
+    expect(first.className).toContain('copied')
+    expect(second.className).toContain('copied')
+    act(() => {
+      vi.advanceTimersByTime(120)
+    })
+    expect(first.className).not.toContain('copied')
+    expect(second.className).toContain('copied')
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(second.className).not.toContain('copied')
+  })
+
   it('clipboard 不存在：不抛 TypeError、提示不支持（W4 回归）', () => {
     const orig = navigator.clipboard
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })

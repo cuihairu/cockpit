@@ -16,8 +16,9 @@ const BackupCodesDisplay: React.FC<BackupCodesDisplayProps> = ({
 }) => {
   const [copied, setCopied] = useState<Set<number>>(new Set())
   const [blurred, setBlurred] = useState(true)
-  // 单码 copied 重置定时器句柄：卸载时清理（W4 配套）。
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 单码 copied 重置定时器表：每码独立定时器，避免共享单一句柄导致
+  // 2s 内复制第二个码时 clearTimeout 掉第一个码的复位（高亮残留）；卸载时清理（W4 配套）。
+  const resetTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
 
   // 剪贴板可用且写入成功才提示成功；http/不支持时 clipboard 为 undefined，
   // 同步 TypeError 会留下未处理 promise（W4）。
@@ -44,15 +45,19 @@ const BackupCodesDisplay: React.FC<BackupCodesDisplayProps> = ({
       newCopied.add(index)
       setCopied(newCopied)
 
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current)
+      const prev = resetTimersRef.current.get(index)
+      if (prev) {
+        clearTimeout(prev)
       }
-      resetTimerRef.current = setTimeout(() => {
-        const reset = new Set(newCopied)
-        reset.delete(index)
-        setCopied(reset)
-        resetTimerRef.current = null
-      }, 2000)
+      resetTimersRef.current.set(index, setTimeout(() => {
+        // 函数式更新只摘除本码：不复用复制时的过期快照，避免误清其它码高亮。
+        setCopied(prev => {
+          const next = new Set(prev)
+          next.delete(index)
+          return next
+        })
+        resetTimersRef.current.delete(index)
+      }, 2000))
     })
   }
 
@@ -63,10 +68,10 @@ const BackupCodesDisplay: React.FC<BackupCodesDisplayProps> = ({
   useEffect(() => {
     return () => {
       // 卸载清理 copied 重置定时器（W4 配套）。
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current)
-        resetTimerRef.current = null
+      for (const timer of resetTimersRef.current.values()) {
+        clearTimeout(timer)
       }
+      resetTimersRef.current.clear()
     }
   }, [])
 
