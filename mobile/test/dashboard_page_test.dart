@@ -16,26 +16,35 @@ class MockAdapter implements HttpClientAdapter {
   final responses = <String, List<ResponseBody>>{};
 
   void on(String method, String path, int status, Object? body) {
-    responses.putIfAbsent('$method $path', () => []).add(
-          ResponseBody.fromString(jsonEncode(body), status, headers: {
-            Headers.contentTypeHeader: [Headers.jsonContentType],
-          }),
+    responses
+        .putIfAbsent('$method $path', () => [])
+        .add(
+          ResponseBody.fromString(
+            jsonEncode(body),
+            status,
+            headers: {
+              Headers.contentTypeHeader: [Headers.jsonContentType],
+            },
+          ),
         );
   }
 
   @override
   Future<ResponseBody> fetch(
-      RequestOptions options,
-      Stream<Uint8List>? requestStream,
-      Future<void>? cancelFuture) async {
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
     final key = '${options.method} ${options.path}';
     final queue = responses[key];
     if (queue == null || queue.isEmpty) {
       return ResponseBody.fromString(
-          jsonEncode({'error': 'no route: $key'}), 404,
-          headers: {
-            Headers.contentTypeHeader: [Headers.jsonContentType],
-          });
+        jsonEncode({'error': 'no route: $key'}),
+        404,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      );
     }
     return queue.removeAt(0);
   }
@@ -44,8 +53,11 @@ class MockAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
-CockpitApi _api(MockAdapter a) => CockpitApi(ApiClient.forTest(
-    Dio(BaseOptions(baseUrl: 'http://test'))..httpClientAdapter = a));
+CockpitApi _api(MockAdapter a) => CockpitApi(
+  ApiClient.forTest(
+    Dio(BaseOptions(baseUrl: 'http://test'))..httpClientAdapter = a,
+  ),
+);
 
 /// 三接口齐全的一轮仪表盘数据。
 MockAdapter _fullData() => MockAdapter()
@@ -56,11 +68,21 @@ MockAdapter _fullData() => MockAdapter()
   ..on('GET', '/api/alerts', 200, {
     'data': [
       {'id': '1', 'type': 'error', 'title': 'e', 'message': 'm', 'read': false},
-      {'id': '2', 'type': 'warning', 'title': 'w', 'message': 'm',
-       'read': false},
-      {'id': '3', 'type': 'success', 'title': 's', 'message': 'm',
-       'read': true},
-    ]
+      {
+        'id': '2',
+        'type': 'warning',
+        'title': 'w',
+        'message': 'm',
+        'read': false,
+      },
+      {
+        'id': '3',
+        'type': 'success',
+        'title': 's',
+        'message': 'm',
+        'read': true,
+      },
+    ],
   })
   ..on('GET', '/api/status', 200, {
     'infrastructure': {'total': 2, 'online': 1},
@@ -70,13 +92,15 @@ MockAdapter _fullData() => MockAdapter()
   });
 
 Future<void> _pump(WidgetTester tester, CockpitApi api) async {
-  await tester.pumpWidget(ProviderScope(
-    overrides: [
-      settingsProvider.overrideWith(() => _FakeSettings()),
-      apiProvider.overrideWith((ref) async => api),
-    ],
-    child: const MaterialApp(home: Scaffold(body: DashboardPage())),
-  ));
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(() => _FakeSettings()),
+        apiProvider.overrideWith((ref) async => api),
+      ],
+      child: const MaterialApp(home: Scaffold(body: DashboardPage())),
+    ),
+  );
 }
 
 void main() {
@@ -118,13 +142,15 @@ void main() {
   testWidgets('仪表盘：apiProvider 未就绪 → loading 占位', (tester) async {
     // override 返回永不完成的 future：任何帧都是 loading 分支
     // （async 闭包会在微任务内完成，捕捉不到 loading 帧）
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        settingsProvider.overrideWith(() => _FakeSettings()),
-        apiProvider.overrideWith((ref) => Completer<CockpitApi>().future),
-      ],
-      child: const MaterialApp(home: Scaffold(body: DashboardPage())),
-    ));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          settingsProvider.overrideWith(() => _FakeSettings()),
+          apiProvider.overrideWith((ref) => Completer<CockpitApi>().future),
+        ],
+        child: const MaterialApp(home: Scaffold(body: DashboardPage())),
+      ),
+    );
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     // data 分支的卡片文案未出现 → 页面确实停在 apiProvider loading
@@ -139,14 +165,44 @@ void main() {
     expect(find.textContaining('加载失败'), findsOneWidget);
   });
 
+  testWidgets('仪表盘：下拉刷新真实重取并更新卡片', (tester) async {
+    // 两轮数据：首轮 a1 online，下拉后改为 a2 online
+    final a = _fullData()
+      ..on('GET', '/api/agents', 200, [
+        {'id': 'a2', 'hostname': 'on2', 'ip': '2.2.2.2', 'status': 'online'},
+      ])
+      ..on('GET', '/api/alerts', 200, {'data': <Object?>[]})
+      ..on('GET', '/api/status', 200, {
+        'infrastructure': {'total': 1, 'online': 1},
+        'domains': {'valid': 0, 'expiring': 0},
+        'certificates': {'valid': 0, 'expiring': 0},
+        'services': {'down': 0},
+      });
+    await _pump(tester, _api(a));
+    await tester.pumpAndSettle();
+    expect(find.text('/ 2'), findsOneWidget); // 首轮 2 台
+
+    await tester.fling(
+      find.byType(Scrollable).first,
+      const Offset(0, 400),
+      1200,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('/ 1'), findsOneWidget); // 刷新后 1 台
+    expect(find.text('/ 2'), findsNothing);
+  });
+
   testWidgets('仪表盘：apiProvider 错误 → 重试按钮触发 invalidate', (tester) async {
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        settingsProvider.overrideWith(() => _FakeSettings()),
-        apiProvider.overrideWith((ref) async => throw StateError('boom')),
-      ],
-      child: const MaterialApp(home: Scaffold(body: DashboardPage())),
-    ));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          settingsProvider.overrideWith(() => _FakeSettings()),
+          apiProvider.overrideWith((ref) async => throw StateError('boom')),
+        ],
+        child: const MaterialApp(home: Scaffold(body: DashboardPage())),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.textContaining('boom'), findsOneWidget);
