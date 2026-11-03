@@ -163,7 +163,7 @@
 - [x] W4 BackupCodes 剪贴板无 catch：http 下 clipboard undefined 同步 TypeError，拒绝成未处理 promise（web/src/components/BackupCodesDisplay/index.tsx:21）〔修复=try/catch 或 .catch + 卸载清理〕〔commit 9b00c9d6：web vitest 备份码用例绿；go 包不受影响〕
 - [x] W5 Domains 剪贴板无 catch：拒绝未处理且 message.success 先报成功（web/src/pages/Domains/index.tsx:435）〔修复=then/catch 链 + 守 undefined〕〔commit b40d682d：web vitest Domains 用例绿；go 包不受影响〕
 - [x] G7 job Exec 超时泄漏：CombinedOutput 后不 cancel，计时器挂满 per-job 超时（internal/agent/rpc/job_provider.go:99）〔修复=WithTimeout 后 defer cancel〕〔commit ea4c5c55：internal/agent/rpc 全包 + -race 绿，含 TestJobExecReleasesSessionAndTimer〕
-- [ ] G8 GetContainerStats 读错忽略：部分/失败读产出空 stats 无错误，docker 方法无 per-op 期限（internal/docker/client.go:293）〔修复=查 Read 错误 + per-call 超时〕
+- [x] G8 GetContainerStats 读错忽略：部分/失败读产出空 stats 无错误，docker 方法无 per-op 期限（internal/docker/client.go:293）〔修复=查 Read 错误 + per-call 超时〕〔commit 0994fbf4：internal/docker 全包 + -race 绿，含 stats 读错/坏 JSON/空 payload 回归〕
 - [ ] G9 FollowStart 容量误拒：16 活跃时重启既有 follow 被误拒，替换逻辑本支持同 ID（internal/agent/rpc/logs_follow.go:115）〔修复=先查既有 ID 再测容量〕
 - [ ] G10 probe-agent transitions 竞态：close 后写 nil 与 alerter 并发读指针竞态（cmd/cockpit-probe-agent/main.go:116）〔修复=mutex 守护或属主协程置 nil〕
 - [ ] S7 proxy conns 覆盖泄漏：同 connID 重发 proxy_new 覆盖旧条目不关旧连接/协程（internal/proxy/handler.go:133）〔修复=覆盖前关闭删除既有条目〕
