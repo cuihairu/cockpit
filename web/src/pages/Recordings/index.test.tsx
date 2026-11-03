@@ -201,6 +201,47 @@ describe('Recordings', () => {
       expect(apiMock.getRecordingCast.mock.calls.length).toBeGreaterThan(calls))
   })
 
+  it('倍速切换：旧代迟到 cast 不得清掉新代 timers（W2 回归）', async () => {
+    // 第一次播放（speed=1）的 cast 延迟返回；切 2x 触发第二次（快速返回）。
+    let resolveSlow: (v: string) => void
+    const slowCast = new Promise<string>((resolve) => { resolveSlow = resolve })
+    let slowUsed = false
+    apiMock.getRecordingCast.mockImplementation((id: string) => {
+      if (!slowUsed) {
+        slowUsed = true
+        return slowCast
+      }
+      return Promise.resolve(castText)
+    })
+
+    renderPage()
+    await screen.findByText('35s')
+    const playBtn = () => rowOf('35s').querySelectorAll('button')[0] as HTMLButtonElement
+    // 先关再开建立终端（与现有用例同构）
+    await act(async () => {
+      fireEvent.click(playBtn())
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('.ant-modal-close')!)
+    })
+    await act(async () => {
+      fireEvent.click(playBtn())
+    })
+    // 切 2x：触发第二次 getRecordingCast（快速返回并排新代 timers）。
+    await act(async () => {
+      fireEvent.click(screen.getByText('2x'))
+    })
+    // 切 2x 已触发重放（第二次 getRecordingCast）。旧代迟到不得清掉新代。
+    await waitFor(() => expect(apiMock.getRecordingCast.mock.calls.length).toBeGreaterThan(1))
+    // 慢速旧代 cast 迟到返回：不得清掉新代 timers / 写入旧代乱序。
+    await act(async () => {
+      resolveSlow!(castText)
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    // 新代 2x 播放正常写入。
+    await waitFor(() => expect(terminalMock.write).toHaveBeenCalledWith('hello'))
+  })
+
   it('下载与删除：blob 下载、Popconfirm 确认后删并失效列表', async () => {
     apiMock.downloadRecording.mockResolvedValue(new Blob(['x']))
     renderPage()
