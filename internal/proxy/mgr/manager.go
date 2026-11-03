@@ -224,6 +224,10 @@ func (m *Manager) handleConnection(proxy *Proxy, clientConn net.Conn) {
 		Conn:    clientConn,
 		AgentID: proxy.config.AgentID,
 		Created: time.Now(),
+		// LastRead 创建即置当前时刻：新连接未发首字节时零值会让
+		// now.Sub(zero) 远超 5 分钟，首个 cleanup tick 强关握手中的
+		// 活动连接（S3）。
+		LastRead: time.Now(),
 	}
 
 	proxy.mu.Lock()
