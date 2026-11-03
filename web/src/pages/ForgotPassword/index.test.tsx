@@ -70,6 +70,20 @@ describe('ForgotPassword', () => {
     expect((screen.getByRole('button', { name: /60秒后可重发/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('卸载清理倒计时（W3 回归）', async () => {
+    const { unmount } = render(wrap(<ForgotPassword />))
+    await submitUsername('admin')
+    // 倒计时运行中记录 timer 数（含 antd 内部 timer）。
+    const before = vi.getTimerCount()
+    expect(before).toBeGreaterThan(0)
+    unmount()
+    // 卸载后至少清掉本组件的倒计时 interval。
+    const after = vi.getTimerCount()
+    expect(after).toBeLessThan(before)
+    // 推进 60s：不应触发任何 setState（若泄漏，advanceTimers 会因已卸载组件报错）。
+    act(() => { vi.advanceTimersByTime(60_000) })
+  })
+
   it('接口失败：安全措辞提示并停留步骤 1', async () => {
     apiMock.forgotPassword.mockRejectedValue(new Error('no user'))
     render(wrap(<ForgotPassword />))

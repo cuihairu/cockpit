@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Form, Input, Button, message, Card, Typography, Space, Alert, Steps } from 'antd'
 import { MailOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { useNavigate, Link } from 'react-router-dom'
@@ -14,6 +14,8 @@ const ForgotPassword = () => {
   const [username, setUsername] = useState('')
   const [countdown, setCountdown] = useState(0)
   const [resendLoading, setResendLoading] = useState(false)
+  // 倒计时 interval 句柄：卸载时清理，避免对已卸载组件 setState（W3）。
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const handleSubmitUsername = async (values: { username: string }) => {
     setLoading(true)
@@ -45,17 +47,35 @@ const ForgotPassword = () => {
   }
 
   const startCountdown = () => {
+    // 重复触发（如重发）先清旧 interval，避免多个计时器并跑。
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current)
+    }
     setCountdown(60)
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(timer)
+          if (countdownTimerRef.current === timer) {
+            countdownTimerRef.current = null
+          }
           return 0
         }
         return prev - 1
       })
     }, 1000)
+    countdownTimerRef.current = timer
   }
+
+  useEffect(() => {
+    return () => {
+      // 卸载清理：清掉倒计时，避免对已卸载组件 setState（W3）。
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current)
+        countdownTimerRef.current = null
+      }
+    }
+  }, [])
 
   return (
     <div className="forgot-password-page">
