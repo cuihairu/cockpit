@@ -100,7 +100,12 @@ func NextBackupRunAt(schedule string, now time.Time) int64 {
 	case schedule == "manual":
 		return 0
 	case strings.HasPrefix(schedule, "daily@"):
+		// 入参来自 DB 历史行，可能是不完整 "daily@HH" 形态；长度校验
+		// 防止 parts[1] 越界 panic（S2）。异常格式按 manual 处理返回 0。
 		parts := strings.SplitN(strings.TrimPrefix(schedule, "daily@"), ":", 2)
+		if len(parts) != 2 {
+			return 0
+		}
 		h, _ := strconv.Atoi(parts[0])
 		m, _ := strconv.Atoi(parts[1])
 		next := time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location())

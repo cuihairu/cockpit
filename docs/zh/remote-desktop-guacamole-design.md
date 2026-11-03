@@ -426,7 +426,7 @@ guacd 的 `disable-audio`/`color-depth`/`resize-method` 参数，再考虑
 `Guacamole.AudioPlayer.getInstance(stream, mimetype)` 播放，内置 `RawAudioPlayer`
 支持 `audio/L8`/`audio/L16`（raw PCM）。真机验收 2026-11-01：协商
 `audio/L16`（16-bit PCM 44100Hz 2ch），5,013,504 字节 PCM 到达客户端，静音按钮
-suspend/resume 由单测覆盖（`index.test.tsx:332`）；详见
+suspend/resume 由单测覆盖（`index.test.tsx:405`）；详见
 `docs/review/2026-11-01-guacamole-audio-acceptance.md`。
 
 Guacamole 支持音频（RDP 的 `rdpsnd`、VNC 无音频），但：

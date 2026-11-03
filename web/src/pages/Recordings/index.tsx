@@ -117,6 +117,9 @@ const PlaybackModal = ({ recording, onClose }: PlayerProps) => {
   const termDivRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const timersRef = useRef<number[]>([])
+  // 播放代数：每次 play（含倍速变更）递增。旧代 timer 回调失配即跳过，
+  // 避免慢速先到清掉快速 timers 停错倍速（W2）。
+  const playGenRef = useRef(0)
   const [speed, setSpeed] = useState(1)
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -129,12 +132,19 @@ const PlaybackModal = ({ recording, onClose }: PlayerProps) => {
 
   const play = useCallback(
     async (rec: TerminalRecording, playSpeed: number) => {
+      const gen = ++playGenRef.current
       setLoading(true)
       let cast: CastFile
       try {
         cast = parseCast(await api.getRecordingCast(rec.sessionId))
       } catch (err) {
         message.error(getApiErrorMessage(err, '加载录制内容失败'))
+        setLoading(false)
+        return
+      }
+      // await cast 期间倍速已切换（代数递增）：旧代迟到的 cast 不得清掉
+      // 新代已排的 timers（W2 停错倍速根因）。
+      if (gen !== playGenRef.current) {
         setLoading(false)
         return
       }
@@ -152,6 +162,10 @@ const PlaybackModal = ({ recording, onClose }: PlayerProps) => {
         const [dt, , data] = ev
         const at = (dt * 1000) / playSpeed
         const timer = window.setTimeout(() => {
+          // 倍速已切换：此 timer 属旧代，跳过（W2）。
+          if (gen !== playGenRef.current) {
+            return
+          }
           term.write(data)
           setProgress(total > 0 ? dt : 0)
         }, at)

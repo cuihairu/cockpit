@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 
 	"github.com/cuihairu/cockpit/core/healthprobe"
@@ -81,25 +82,32 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// 出口同步回读 Agent 状态会自死锁，故迁移事件经 channel 交写盘 goroutine。
 	// 双出口（写盘+上行）合入同一 Alerter：迁移事件均非阻塞分发，写盘
 	// 终态与上行兜底各自兜底丢失窗口。
+	var stateMu sync.Mutex // guards transitions/written across probe goroutine and main
 	var transitions chan healthprobe.Transition
 	var written chan struct{}
 	a.SetAlerter(alerterFunc(func(tr healthprobe.Transition) {
+		stateMu.Lock()
 		if transitions != nil {
 			select {
 			case transitions <- tr:
 			default:
 			}
 		}
+		stateMu.Unlock()
 		if upstream != nil {
 			upstream.Notify()
 		}
 	}))
 	if *statusFile != "" {
+		stateMu.Lock()
 		transitions = make(chan healthprobe.Transition, 8)
 		written = make(chan struct{})
+		stateMu.Unlock()
+		trCh := transitions
+		wrCh := written
 		go func() {
-			defer close(written)
-			for range transitions {
+			defer close(wrCh)
+			for range trCh {
 				_ = probeagent.WriteStatusFile(*statusFile, a.Snapshots())
 			}
 		}()
@@ -108,12 +116,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	// flushStatus 停写盘 goroutine 并落终态（收尾幂等）。
 	flushStatus := func() {
+		stateMu.Lock()
 		if transitions == nil {
+			stateMu.Unlock()
 			return
 		}
-		close(transitions)
-		<-written
+		tr, wr := transitions, written
 		transitions = nil
+		written = nil
+		stateMu.Unlock()
+		close(tr)
+		<-wr
 		_ = probeagent.WriteStatusFile(*statusFile, a.Snapshots())
 	}
 

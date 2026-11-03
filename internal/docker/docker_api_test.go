@@ -360,7 +360,7 @@ func TestClientGetLogs(t *testing.T) {
 
 func TestClientGetContainerStats(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"cpu_stats":{},"memory_stats":{}}`))
+		w.Write([]byte(`{"id":"abc","name":"/abc","cpu_stats":{},"memory_stats":{}}`))
 	})
 
 	stats, err := c.GetContainerStats("abc")
@@ -369,6 +369,9 @@ func TestClientGetContainerStats(t *testing.T) {
 	}
 	if stats["id"] != "abc" {
 		t.Errorf("stats[id] = %v, want abc", stats["id"])
+	}
+	if stats["container_id"] != "abc" {
+		t.Errorf("stats[container_id] = %v, want abc", stats["container_id"])
 	}
 }
 

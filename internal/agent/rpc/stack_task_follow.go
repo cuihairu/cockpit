@@ -28,6 +28,7 @@ type taskFollowSession struct {
 	id       string
 	taskID   string
 	stop     chan struct{}
+	done     chan struct{}
 	stopOnce sync.Once
 	once     sync.Once
 	// closeFn 幂等收尾：注销会话 + proxy_close（reason）
@@ -73,7 +74,15 @@ func (p *StackProvider) FollowTask(params map[string]interface{}) (interface{}, 
 		p.mu.Unlock()
 		return nil, fmt.Errorf("too many active task follows (max %d)", stackTaskFollowMaxActive)
 	}
-	sess := &taskFollowSession{id: followID, taskID: taskID, stop: make(chan struct{})}
+	// 同 followId 覆盖：旧会话仍可能被 pump 持有。先摘表并停旧 stop，
+	// 再在锁外等待 pump 退出（done 关闭）——closeFn 需 p.mu，锁内等待
+	// 会死锁。完成后新建会话，避免两个 pump 并发向同一 proxyId 推流
+	// （无界重复泵与重复 proxy_data，G4）。
+	old := p.taskFollows[followID]
+	if old != nil {
+		delete(p.taskFollows, followID)
+	}
+	sess := &taskFollowSession{id: followID, taskID: taskID, stop: make(chan struct{}), done: make(chan struct{})}
 	sess.closeFn = func(reason string) {
 		sess.once.Do(func() {
 			p.mu.Lock()
@@ -87,6 +96,14 @@ func (p *StackProvider) FollowTask(params map[string]interface{}) (interface{}, 
 	}
 	p.taskFollows[followID] = sess
 	p.mu.Unlock()
+
+	// 锁外停旧 pump 并等待其退出。若旧会话正持 p.mu 推流/收尾，等待
+	// 不占用锁；done 在 pump 退出（终态或 stop）时关闭。
+	if old != nil {
+		old.stopOnce.Do(func() { close(old.stop) })
+		<-old.done
+	}
+
 	go p.pumpTaskLog(sess, task, sender)
 	return map[string]interface{}{"followId": followID}, nil
 }
@@ -111,11 +128,13 @@ func (p *StackProvider) pumpTaskLog(sess *taskFollowSession, task *stackTask, se
 		}
 		if status != stackTaskRunning {
 			sess.closeFn(status)
+			close(sess.done)
 			return
 		}
 		select {
 		case <-sess.stop:
 			sess.closeFn("stopped")
+			close(sess.done)
 			return
 		case <-time.After(stackTaskFollowTick):
 		}

@@ -131,7 +131,7 @@ Agent 启动时会运行能力检测器，并在注册消息中上报 capability
 }
 ```
 
-当前 capability 共 19 个（恒上报 18 个 + 条件上报 `virt-libvirt`），分两类来源。
+当前 capability 共 19 个，分两类来源。其中仅 `file`、`ddns`、`oob` 恒上报，其余 16 个按平台/环境条件满足才上报。
 
 探测式（`internal/agent/detector/`，满足条件才上报）：
 

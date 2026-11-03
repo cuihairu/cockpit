@@ -184,7 +184,13 @@ func (s *Server) requireAgentRclone(w http.ResponseWriter, r *http.Request, agen
 		return true // agent 不存在的报错由调用方处理
 	}
 	cap := agent.GetCapability("backup")
-	enabled, _ := cap.Metadata["rclone"].(bool)
+	// cap 可能为 nil：agent 在线但不具备 backup 能力（如未启用该
+	// capability）。按 rclone 未启用同判 400，避免 nil 解引用 panic
+	// 成 500（S1）。
+	enabled := false
+	if cap != nil {
+		enabled, _ = cap.Metadata["rclone"].(bool)
+	}
 	if !enabled {
 		s.handleError(w, r, http.StatusBadRequest,
 			"remote_dest requires rclone installed on the agent host (rclone not found)")

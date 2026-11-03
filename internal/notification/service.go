@@ -52,11 +52,22 @@ type SendResult struct {
 type Service struct {
 	cfg      *config.NotificationConfig
 	channels []Channel
+	// ctx/cancel 生命周期 context：后台异步投递 goroutine 由它派生，Close
+	// 取消并等待全部在途投递退出（S8），避免关停中 goroutine 跑过
+	// 依赖资源（如 DB/服务关闭）。
+	ctx    context.Context
+	cancel context.CancelFunc
+	// mu 保护 wg.Add 与 closed：Close 开始后不再接受新投递，且 Add 与
+	// Wait 不同时并发（WaitGroup 契约）。
+	mu     sync.Mutex
+	wg     sync.WaitGroup
+	closed bool
 }
 
 // NewService 按配置构建通知服务；cfg 为空或未启用时返回不投递的空服务。
 func NewService(cfg *config.NotificationConfig) *Service {
-	s := &Service{cfg: cfg}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Service{cfg: cfg, ctx: ctx, cancel: cancel}
 	if cfg == nil || !cfg.Enabled {
 		return s
 	}
@@ -146,8 +157,16 @@ func (s *Service) SendNonBlocking(n *Notification) {
 	if !s.IsEventEnabled(n.EventType) {
 		return
 	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.wg.Add(1)
+	s.mu.Unlock()
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer s.wg.Done()
+		ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
 		defer cancel()
 		for _, r := range s.dispatch(ctx, n) {
 			if !r.OK {
@@ -155,6 +174,23 @@ func (s *Service) SendNonBlocking(n *Notification) {
 			}
 		}
 	}()
+}
+
+// Close 取消生命周期 context 并等待全部在途异步投递退出（S8）。
+// 幂等；nil 接收者安全。
+func (s *Service) Close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.closed = true
+	s.mu.Unlock()
+	s.cancel()
+	s.wg.Wait()
 }
 
 // SendAlertNonBlocking 将存储层 Alert 转为 Notification 后异步投递。
