@@ -404,3 +404,16 @@
   - 属实（复核结论成立，无需改动）：`git rev-parse 1bdf57b^`=`7da10b1f1c665f8ef17cf2039f34b2272e6b3358`；区间仅 1 commit，`git diff --name-status` 仅 README.md/README.zh.md/todo.md；两 README `open_p=close_p=2`，平台/架构 5 枚徽章 URL 与基线 `0702cb7e` 逐字节一致，docs 徽章各 1 枚。证据：本 commit（`README.md:12`、`README.zh.md:12`）。
 - [x] 审核发现：本轮 diff 未见问题（1bdf57be..HEAD）。
   - 覆盖范围与证据：区间 4 commits（4422537/186a249/eb56b3d/094c31d），`git diff --stat` 全量 9 文件均逐文件复核（docs/audit-doc-consistency.md、docs/guide/acceptance-checklist.md、docs/guide/concepts.md、docs/remote-desktop-guacamole-design.md、docs/review/2026-11-01-guacamole-audio-acceptance.md、docs/zh/guide/concepts.md、docs/zh/remote-desktop-guacamole-design.md、docs/zh/审计-文档一致性.md、todo.md），纯文档无代码改动，无注入/反序列化/越界/泄漏/竞态风险面。修正后的文档↔代码映射逐项核验属实：`guacEncode("audio","audio/L8","audio/L16")` 确在 `internal/server/api_guacamole.go:533`；静音 suspend/resume 单测确在 `web/src/components/GuacamoleModal/index.test.tsx:405`、AudioContext 不可用单测确在 `:547`；capability 口径「共 19 个、仅 file/ddns/oob 恒上报、余 16 条件上报」与 `internal/agent/agent.go` 一致（无条件 append 仅 :459 file/:519 ddns/:565 oob；7 个 detector 均有条件返回 nil 路径 + agent.go 内 9 个条件 capability，7+12=19）；增量文档引用的 8 个 commit 锚（b1410c7/24e0e2e/094c31d/eb56b3d/186a249/dc81806/717ac3b/e3023c2）全部存在且主题相符；acceptance-checklist.md:370、concepts.md:134、design.md:286 行号锚点与改动后位置一致。docs-only 变更无测试缺口。
+
+## 漏洞扫描遗留（2026-11-03 全舰队扫描，源 scratch/vuln-scan-*.md）
+
+- [ ] VULN-COCKPIT-001 [非安全·过时依赖] go get -u ./... 因 proxy EOF 部分失败（仅安全项保留）：补跑非安全升级；验收：go list -m -u all 无网络错误 + go build ./... && go test ./... 绿（另：govulncheck ./... 已于 2026-11-03 晚实测 No vulnerabilities found，原 ./internal/rpc/... setup failed 系仓内无此路径——实际为 internal/agent/rpc 等，已闭合）
+
+## 审核发现
+
+- [x] 审核发现：BackupCodesDisplay 复制单个恢复码改用共享单一 resetTimerRef，2s 内再复制第二个码会 clearTimeout 掉第一个码的重置定时器，使第一个码的「已复制」高亮永久残留（原实现每码独立 setTimeout 各自复位）（web/src/components/BackupCodesDisplay/index.tsx:47-55）
+  - 属实，已修：`web/src/components/BackupCodesDisplay/index.tsx:20` 改为 `resetTimersRef` 每码独立 `setTimeout`，`:50` 仅清同 index 旧定时器；`:56` 复位用函数式更新只删本码，避免过期快照误清其它码；`:72` 卸载统一清理。证据 commit `2e6557d1`（`web/src/components/BackupCodesDisplay/index.test.tsx:55` 新增 1.9s 后复制第二码、两个高亮分别重置回归；web vitest 全绿 100 files/1158 tests + build 绿）。
+- [ ] 审核发现：G4 的 FollowTask 覆盖停旧泵逻辑被容量检查先行拒绝——taskFollows 满 8 个时 :73 容量判断先于 :81 的 followID 替换判断返回 too-many，覆盖能力在满员时不可达，与 G9 在 logs_follow.go 的「替换不计容量」修复不一致（internal/agent/rpc/stack_task_follow.go:73-76）
+- [ ] 审核发现：新增 failGuacamoleSession 后原「closeGuacamoleSession 幂等关闭：WS + guacd TCP + 审计结束」doc 注释被留在其上方误挂到 failGuacamoleSession，而真正的 closeGuacamoleSession（:746）反而无注释（internal/server/api_guacamole.go:727-731）
+- [ ] 审核发现：TestNextBackupRunAtMalformedDailyNoColon 内「空冒号段（daily@:00）同样返回 0」注释与下方断言矛盾（断言期望今日/明日 00:00 而非 0/epoch），且与下一行注释重复（internal/server/backup_test.go:618）
+- [ ] 审核发现：GetLogs 改为循环读到 EOF/1MB 后，follow=true 路径由「返回首个数据块」变为「阻塞至 EOF 或 1MB」，而 GET /docker/agents/{a}/containers/{c}/logs 仍暴露 ?follow=true（api_docker.go:159），活动容器上该请求将挂起到 1MB 累积或容器停止；前端未使用 follow，影响有限（internal/docker/client.go:275-293）
