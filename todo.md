@@ -130,21 +130,36 @@
 
 ### 代码深审 P2/P3（2026-11-01 深审导入，逐条待修；明细见 docs/review/2026-11-01-code-review.md）
 
-- [ ] G1 agent messageLoop 连接代数竞态：陈旧循环在 reconnect 后误拆新连接/并发双 websocket 读协程（internal/agent/agent.go:635）〔修复=连接代数计数器，messageLoop 代数失配即退出〕
-- [ ] G2 proxy LastRead 竞态：conn.mu 写 / proxy.mu 读同一字段，time.Time 撕裂读误关活跃代理（internal/proxy/mgr/manager.go:460）〔修复=读持 conn.mu 或 atomic.Int64〕
-- [ ] G3 proxy conns 泄漏：目标侧关闭与写错路径不 delete(h.conns)，长跑 agent 会话泄漏 AgentTargetConn（internal/proxy/handler.go:275）〔修复=deferred 清理与写错路径 delete〕
-- [ ] G4 taskFollows 覆盖泄漏：followId 复用不停旧 pumpTaskLog 协程，无界重复泵与 proxy_data 流（internal/agent/rpc/stack_task_follow.go:88）〔修复=覆盖前关旧 stop channel 并等待〕
-- [ ] G5 guacd 握手无读期限：guacd 停滞则 handler 协程永久阻塞，泄漏协程/连接/监听器/注册条目（internal/server/api_guacamole.go:476）〔修复=握手与泵设读期限〕
-- [ ] G6 GetLogs 单次读截断：日志流超首 Read 交付量即静默截断无标记（internal/docker/client.go:268）〔修复=循环读到 EOF/1MB 上限并附标记〕
-- [ ] S1 requireAgentRclone nil 解引用：无 backup 能力 agent 的 cap.Metadata 访问 panic 成 500 而非 400（internal/server/api_backups.go:187）〔修复=cap==nil 守卫或 HasCapability〕
-- [ ] S2 NextBackupRunAt 索引越界：daily@ 无冒号历史行 parts[1] 越界 panic，startBackupLoop 协程无 recover 崩进程（internal/server/backup_loop.go:105）〔修复=len(parts)!=2 返回 0〕
-- [ ] S3 proxy LastRead 零值误关：新连接未发首字节即 now.Sub(zero) 超 5 分钟，首 tick 强关握手连接（internal/proxy/mgr/manager.go:460）〔修复=创建时置 time.Now() 或 IsZero 跳过〕
-- [ ] S4 workflow 并发双跑：check-then-act 无 running 唯一约束，并发 POST /run 双编排重复执行步骤（internal/server/api_workflow.go:490）〔修复=条件创建或 partial unique index〕
-- [ ] S5 guacSessions 握手失败泄漏：五条失败路径从不 delete，泄漏 GuacamoleSession 并可误关未连会话（internal/server/api_guacamole.go:447）〔修复=各失败路径 closeGuacamoleSession/delete〕
-- [ ] S6 guacRelay.Close 竞态：快照后 acceptLoop 插入新 conn 永不关闭，泄漏 guacd fd/目标连接/泵协程（internal/server/guac_relay.go:138）〔修复=持 r.mu 关全部或快照后复查〕
-- [ ] W1 TerminalModal 孤儿 WebSocket：票据在途关闭后无条件建 ws，向已 dispose xterm 写并泄漏 PTY（web/src/components/TerminalModal/index.tsx:106）〔修复=代数/closed ref，失配关闭退出〕
-- [ ] W2 播放倍速竞态：setTimeout 无代数守卫，慢速先到清掉快速 timers 停错倍速（web/src/pages/Recordings/index.tsx:151）〔修复=倍速变更 bump 代数，非当代跳过/清理〕
-- [ ] W3 ForgotPassword 计时器泄漏：setInterval 卸载不清，最多 60s 对卸载组件 setState（web/src/pages/ForgotPassword/index.tsx:49）〔修复=timer ref + 卸载清理〕
+- [x] G1 agent messageLoop 连接代数竞态：陈旧循环在 reconnect 后误拆新连接/并发双 websocket 读协程（internal/agent/agent.go:635）〔修复=连接代数计数器，messageLoop 代数失配即退出〕
+  - 证据：`9f77bdd`（`internal/agent/agent.go` 加 connGen 连接代数，connect 时递增；messageLoop 启动快照代数，读前/读错后/读成后校验，失配即退出不触发重连；`internal/agent/g1_message_loop_test.go` 回归：连接换代后陈旧循环退出、不误触发 reconnect、不在新连接上双读。`go test ./internal/agent/` 100s 绿 + `-race` 104s 绿 + `go vet` 绿）
+- [x] G2 proxy LastRead 竞态：conn.mu 写 / proxy.mu 读同一字段，time.Time 撕裂读误关活跃代理（internal/proxy/mgr/manager.go:460）〔修复=读持 conn.mu 或 atomic.Int64〕
+  - 证据：`8af9c67`（`internal/proxy/mgr/manager.go` 新增 markRead/lastReadAt 方法统一经 conn.mu 读写 LastRead；读协程 markRead、cleanup/状态导出 lastReadAt；`g2_lastread_test.go` 并发读写 race 回归。`go test ./internal/proxy/mgr/` 39s 绿 + `-race` 83s 绿）
+- [x] G3 proxy conns 泄漏：目标侧关闭与写错路径不 delete(h.conns)，长跑 agent 会话泄漏 AgentTargetConn（internal/proxy/handler.go:275）〔修复=deferred 清理与写错路径 delete〕
+  - 证据：`c7307ab`（`internal/proxy/handler.go` 新增 removeConn（指针校验防同 ID 覆盖误删）；readFromTarget defer 摘表、HandleProxyData 写错路径摘表；`g3_conns_leak_test.go` 三回归。`go test ./internal/proxy/` 0.14s 绿 + `-race` 1.8s 绿）
+- [x] G4 taskFollows 覆盖泄漏：followId 复用不停旧 pumpTaskLog 协程，无界重复泵与 proxy_data 流（internal/agent/rpc/stack_task_follow.go:88）〔修复=覆盖前关旧 stop channel 并等待〕
+  - 证据：`148fadc`（`internal/agent/rpc/stack_task_follow.go`：taskFollowSession 加 done 通道；FollowTask 覆盖同 followId 时先摘表，锁外关旧 stop 并等待 done 再启新 pump；pump 终态/stop 均关 done；`g4_follow_overwrite_test.go` 两回归（覆盖停旧泵、无死锁）。`go test ./internal/agent/rpc/` 70s 绿 + `-race` 85s 绿）
+- [x] G5 guacd 握手无读期限：guacd 停滞则 handler 协程永久阻塞，泄漏协程/连接/监听器/注册条目（internal/server/api_guacamole.go:476）〔修复=握手与泵设读期限〕
+  - 证据：`efa11d8`（`internal/server/api_guacamole.go` 新增 guacdHandshakeTimeout（15s，var 可注入）；select 响应 ReadString 前设读期限，成功后清除（泵不设静默超时防误断）；`g5_guacd_handshake_timeout_test.go` 回归用不响应 guacd mock 验证超时收尾。`go test ./internal/server -run "Guacamole|Guac"` 相关子集绿，G5 测试 3/3 稳定绿）
+- [x] G6 GetLogs 单次读截断：日志流超首 Read 交付量即静默截断无标记（internal/docker/client.go:268）〔修复=循环读到 EOF/1MB 上限并附标记〕
+  - 证据：`3534731`（`internal/docker/client.go` GetLogs 循环读到 EOF，1MB 上限截断并附 `[logs truncated at 1MB]` 标记；`g6_getlogs_test.go` 两回归（多块读全、超限截断）。`go test ./internal/docker/` 0.15s 绿 + `-race` 2s 绿）
+- [x] S1 requireAgentRclone nil 解引用：无 backup 能力 agent 的 cap.Metadata 访问 panic 成 500 而非 400（internal/server/api_backups.go:187）〔修复=cap==nil 守卫或 HasCapability〕
+  - 证据：`a1f1c33`（`internal/server/api_backups.go` requireAgentRclone 加 cap==nil 守卫，按 rclone 未启用同判 400；`s1_require_rclone_nil_test.go` 回归。`go test ./internal/server -run "RequireAgentRclone|Backup"` 226s 绿）
+- [x] S2 NextBackupRunAt 索引越界：daily@ 无冒号历史行 parts[1] 越界 panic，startBackupLoop 协程无 recover 崩进程（internal/server/backup_loop.go:105）〔修复=len(parts)!=2 返回 0〕
+  - 证据：`d477687`（`internal/server/backup_loop.go` NextBackupRunAt 对 daily@ 校验 len(parts)==2，异常返回 0（manual 语义）；`backup_test.go` 加 TestNextBackupRunAtMalformedDailyNoColon。`go test ./internal/server -run "Backup|NextBackupRunAt"` 215s 绿）
+- [x] S3 proxy LastRead 零值误关：新连接未发首字节即 now.Sub(zero) 超 5 分钟，首 tick 强关握手连接（internal/proxy/mgr/manager.go:460）〔修复=创建时置 time.Now() 或 IsZero 跳过〕
+  - 证据：`2d2fd2d`（`internal/proxy/mgr/manager.go` handleConnection 创建 ProxyConn 时 LastRead 置 time.Now()；`s3_lastread_init_test.go` 回归走 handleConnection + cleanup 不误删。`go test ./internal/proxy/mgr/` 63s 绿 + `-race` 92s 绿）
+- [x] S4 workflow 并发双跑：check-then-act 无 running 唯一约束，并发 POST /run 双编排重复执行步骤（internal/server/api_workflow.go:490）〔修复=条件创建或 partial unique index〕
+  - 证据：`bcfb9d2`（`internal/storage/workflow.go` CreateWorkflowRun 事务内原子检查无 running 实例，冲突返回 ErrWorkflowRunConflict；`internal/server/api_workflow.go` 映射 409；storage 并发 8 路仅 1 成功回归 `s4_workflow_conflict_test.go` + handler 409 回归 `s4_workflow_run_test.go`；既有 orphan_sweep 适配新约束。storage 全包 450s 绿 + 相关 race 子集 17s 绿 + server Workflow 64s 绿）
+- [x] S5 guacSessions 握手失败泄漏：五条失败路径从不 delete，泄漏 GuacamoleSession 并可误关未连会话（internal/server/api_guacamole.go:447）〔修复=各失败路径 closeGuacamoleSession/delete〕
+  - 证据：`8844f2d`（`internal/server/api_guacamole.go` 新增 failGuacamoleSession（幂等关连接+摘 guacSessions，不改 failed 状态）；六条握手失败路径统一走它；`s5_guac_handshake_fail_test.go` 回归。既有 select-write/read-fail/malformed-args 注入测试绿）
+- [x] S6 guacRelay.Close 竞态：快照后 acceptLoop 插入新 conn 永不关闭，泄漏 guacd fd/目标连接/泵协程（internal/server/guac_relay.go:138）〔修复=持 r.mu 关全部或快照后复查〕
+  - 证据：`c6b8f96`（`internal/server/guac_relay.go` Close 持 r.mu 置 closed 并关全部+清 map；handleConn 在 closed 时拒绝新连接；`s6_guac_relay_close_test.go` 回归。`go test ./internal/server -run "GuacRelay|S6"` + `-race` 绿）
+- [x] W1 TerminalModal 孤儿 WebSocket：票据在途关闭后无条件建 ws，向已 dispose xterm 写并泄漏 PTY（web/src/components/TerminalModal/index.tsx:106）〔修复=代数/closed ref，失配关闭退出〕
+  - 证据：`bfced32`（`web/src/components/TerminalModal/index.tsx` 加 sessionGenRef 代数；票据在途返回时/回调/清理时校验代数，失配放弃建 WS 并忽略回调；`index.test.tsx` 加「票据在途卸载不建孤儿 WS」回归。TerminalModal 29 测试绿，web 全量 1152 测试绿）
+- [x] W2 播放倍速竞态：setTimeout 无代数守卫，慢速先到清掉快速 timers 停错倍速（web/src/pages/Recordings/index.tsx:151）〔修复=倍速变更 bump 代数，非当代跳过/清理〕
+  - 证据：`dfd13d9`（`web/src/pages/Recordings/index.tsx` 加 playGenRef 代数；play 内 await cast 后校验代数（旧代迟到不得清新代 timers）+ 每个 timer 回调校验代数跳过；`index.test.tsx` 加「倍速切换旧代迟到 cast 不清新代」回归。Recordings 20 测试绿）
+- [x] W3 ForgotPassword 计时器泄漏：setInterval 卸载不清，最多 60s 对卸载组件 setState（web/src/pages/ForgotPassword/index.tsx:49）〔修复=timer ref + 卸载清理〕
+  - 证据：`fe7a404`（`web/src/pages/ForgotPassword/index.tsx` 加 countdownTimerRef；startCountdown 先清旧 interval，useEffect 卸载时 clearInterval；`index.test.tsx` 加「卸载清理倒计时」回归。ForgotPassword 6 测试绿）
 - [ ] W4 BackupCodes 剪贴板无 catch：http 下 clipboard undefined 同步 TypeError，拒绝成未处理 promise（web/src/components/BackupCodesDisplay/index.tsx:21）〔修复=try/catch 或 .catch + 卸载清理〕
 - [ ] W5 Domains 剪贴板无 catch：拒绝未处理且 message.success 先报成功（web/src/pages/Domains/index.tsx:435）〔修复=then/catch 链 + 守 undefined〕
 - [ ] G7 job Exec 超时泄漏：CombinedOutput 后不 cancel，计时器挂满 per-job 超时（internal/agent/rpc/job_provider.go:99）〔修复=WithTimeout 后 defer cancel〕
