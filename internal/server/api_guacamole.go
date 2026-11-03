@@ -40,6 +40,11 @@ const guacdDefaultAddr = "127.0.0.1:4822"
 // guacdDialTimeout 拨 guacd 超时
 const guacdDialTimeout = 10 * time.Second
 
+// guacdHandshakeTimeout guacd 握手读期限（select 响应）。var 化仅为测试
+// 注入短期限；默认值即生产取值。guacd 停滞时 ReadString 会永久阻塞，
+// 泄漏 handler 协程/连接/监听器/台账条目（G5），有期限则超时收尾。
+var guacdHandshakeTimeout = 15 * time.Second
+
 // dialGuacd 拨 guacd TCP 调用点。var 化（非内联）仅为测试注入 mock conn——
 // select write 失败分支需 guacdConn.Write 立即 error，而 TCP RST 时序
 // （loopback 写缓冲 + goroutine 调度）本质不确定；生产行为不变
@@ -472,7 +477,16 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	}
 	// 读 guacd 的 select 响应：args 参数名列表。connect 必须与这份列表逐位
 	// 对齐（含 VERSION 版本位）——解析出名字再按位组装值
-	// （真机验收发现稀疏形态被真 guacd 拒绝，2026-09-30）
+	// （真机验收发现稀疏形态被真 guacd 拒绝，2026-09-30）。
+	// 设读期限：guacd 停滞/挂死时 ReadString 不得永久阻塞（G5）。
+	if err := guacdConn.SetReadDeadline(time.Now().Add(guacdHandshakeTimeout)); err != nil {
+		log.Printf("Guacamole: set handshake read deadline failed: %v", err)
+		conn.Close()
+		_ = guacdConn.Close()
+		relay.Close()
+		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "set handshake deadline failed")
+		return
+	}
 	argsLine, err := hsReader.ReadString(';')
 	if err != nil {
 		log.Printf("Guacamole: read select response failed: %v", err)
@@ -482,6 +496,9 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "read select response failed")
 		return
 	}
+	// 握手读成功，清除读期限：guacdToWS 泵按会话关闭解除阻塞，不设
+	// 静默读超时（避免慢帧/长连接误断）。
+	_ = guacdConn.SetReadDeadline(time.Time{})
 	argNames := guacParseArgNames(argsLine)
 	if len(argNames) == 0 {
 		log.Printf("Guacamole: guacd args response malformed: %q", argsLine)
