@@ -469,9 +469,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	hsReader := bufio.NewReaderSize(guacdConn, guacamoleReadBuf)
 	if _, err := guacdConn.Write([]byte(guacEncode("select", protocolStr))); err != nil {
 		log.Printf("Guacamole: select write failed: %v", err)
-		conn.Close()
-		_ = guacdConn.Close()
-		relay.Close()
+		s.failGuacamoleSession(session)
 		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "select write failed")
 		return
 	}
@@ -481,18 +479,14 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	// 设读期限：guacd 停滞/挂死时 ReadString 不得永久阻塞（G5）。
 	if err := guacdConn.SetReadDeadline(time.Now().Add(guacdHandshakeTimeout)); err != nil {
 		log.Printf("Guacamole: set handshake read deadline failed: %v", err)
-		conn.Close()
-		_ = guacdConn.Close()
-		relay.Close()
+		s.failGuacamoleSession(session)
 		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "set handshake deadline failed")
 		return
 	}
 	argsLine, err := hsReader.ReadString(';')
 	if err != nil {
 		log.Printf("Guacamole: read select response failed: %v", err)
-		conn.Close()
-		_ = guacdConn.Close()
-		relay.Close()
+		s.failGuacamoleSession(session)
 		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "read select response failed")
 		return
 	}
@@ -502,9 +496,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	argNames := guacParseArgNames(argsLine)
 	if len(argNames) == 0 {
 		log.Printf("Guacamole: guacd args response malformed: %q", argsLine)
-		conn.Close()
-		_ = guacdConn.Close()
-		relay.Close()
+		s.failGuacamoleSession(session)
 		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "malformed args response")
 		return
 	}
@@ -531,9 +523,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 	relayHost, relayPortStr, err := net.SplitHostPort(relayAddr)
 	if err != nil {
 		log.Printf("Guacamole: relay addr malformed %q: %v", relayAddr, err)
-		conn.Close()
-		_ = guacdConn.Close()
-		relay.Close()
+		s.failGuacamoleSession(session)
 		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "relay addr malformed")
 		return
 	}
@@ -553,9 +543,7 @@ func (s *Server) handleGuacamoleWebSocket(w http.ResponseWriter, r *http.Request
 		guacEncode("connect", connectArgs...)
 	if _, err := guacdConn.Write([]byte(handshake)); err != nil {
 		log.Printf("Guacamole: handshake write failed: %v", err)
-		conn.Close()
-		_ = guacdConn.Close()
-		relay.Close()
+		s.failGuacamoleSession(session)
 		s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusFailed, "handshake write failed")
 		return
 	}
@@ -737,6 +725,24 @@ func indexByte(b []byte, c byte) int {
 }
 
 // closeGuacamoleSession 幂等关闭：WS + guacd TCP + 审计结束
+// failGuacamoleSession 握手失败收尾（S5）：只关闭连接并从活会话索引摘除，
+// 不改台账状态（failed 已由调用方 UpdateStatus 落账），也不触发录制收集/
+// 审计结束。与 closeGuacamoleSession 共用 once，避免握手失败后正常关闭
+// 路径重复收尾。
+func (s *Server) failGuacamoleSession(gs *GuacamoleSession) {
+	gs.once.Do(func() {
+		gs.ClientWS.Close()
+		_ = gs.guacd.Close()
+		if gs.relay != nil {
+			gs.relay.Close()
+		}
+		log.Printf("Guacamole handshake failed session cleaned: %s", gs.ID)
+		guacSessionsMu.Lock()
+		delete(guacSessions, gs.ID)
+		guacSessionsMu.Unlock()
+	})
+}
+
 func (s *Server) closeGuacamoleSession(gs *GuacamoleSession) {
 	gs.once.Do(func() {
 		gs.ClientWS.Close()
