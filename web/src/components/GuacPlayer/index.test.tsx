@@ -92,6 +92,17 @@ describe('GuacPlayer', () => {
     expect(recMock.pause).toHaveBeenCalled()
   })
 
+  it('effect 重跑时移除旧 Display，避免 canvas 残留', async () => {
+    const { rerender } = render(<GuacPlayer blob={blob} />)
+    const firstDisplay = await screen.findByTestId('guac-display')
+
+    rerender(<GuacPlayer blob={new Blob(['next-guac'])} />)
+
+    await screen.findByTestId('guac-display')
+    expect(firstDisplay).not.toBeInTheDocument()
+    expect(screen.getAllByTestId('guac-display')).toHaveLength(1)
+  })
+
   it('onseek 更新位置显示（先播放让 duration 就绪）', async () => {
     render(<GuacPlayer blob={blob} />)
     await waitFor(() => expect(recMock.getDisplay).toHaveBeenCalled())

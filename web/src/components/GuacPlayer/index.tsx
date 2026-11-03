@@ -97,13 +97,15 @@ const GuacPlayer: React.FC<GuacPlayerProps> = ({ blob, onError }) => {
       message.error(msg)
     }
 
-    displayRef.current.appendChild(rec.getDisplay().getElement())
+    const displayElement = rec.getDisplay().getElement()
+    displayRef.current.appendChild(displayElement)
     // duration 不在 effect 里同步 setState（set-state-in-effect）：
     // SessionRecording 的 getDuration 依赖异步解析的 frames，首次播放时
     // 才可靠；在 toggle 事件处理器里读，顺带更新 Slider 上限
     return () => {
       rec.pause()
       rec.disconnect()
+      displayElement.remove()
       recRef.current = null
     }
   }, [blob, onError])

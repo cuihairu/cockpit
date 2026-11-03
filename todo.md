@@ -175,7 +175,8 @@
   - 证据：本 commit（`internal/server/password_reset_handlers.go` 将 `printf` 空实现改为 `log.Printf`，邮件发送失败真实落日志；`password_reset_handlers_test.go` 覆盖回归。`go test ./internal/server -run ForgotPassword -count=1` 绿，`go vet` 绿，`go build ./...` 绿）
 - [x] S10 ParseBackupSources 忽略错误：sources JSON 损坏产出空清单照发 run 假完成（internal/server/backup_loop.go:93）〔修复=返回错误，startBackupRun 拒绝〕
   - 证据：`internal/server/backup_loop.go:89` `ParseBackupSources` 改为 `([]string, error)`，损坏 JSON 返回错误；`backup_loop.go:204` `startBackupRun` 在 `CreateBackupRun` 前校验 sources，损坏即拒绝不照发空清单；`backup_test.go:63` `TestParseBackupSources` 加损坏 JSON 断言 + `cov_loops_test.go:196` `TestCovStartBackupRunGuards` 加 malformed-sources 拒绝回归。`go test -short` 定向全绿 + `go vet` 绿。
-- [ ] W6 GuacPlayer canvas 残留：effect 重跑旧 canvas 同留 DOM（web/src/components/GuacPlayer/index.tsx:100）〔修复=cleanup 先移除旧显示元素〕
+- [x] W6 GuacPlayer canvas 残留：effect 重跑旧 canvas 同留 DOM（web/src/components/GuacPlayer/index.tsx:100）〔修复=cleanup 先移除旧显示元素〕
+  - 证据：本 commit（`web/src/components/GuacPlayer/index.tsx:101` 挂载时记录 `displayElement`，`:108` cleanup 在 pause/disconnect 后 `displayElement.remove()` 移除旧 Display；`web/src/components/GuacPlayer/index.test.tsx:96` 新增 `effect 重跑时移除旧 Display` 回归——rerender 新 blob 后旧 `guac-display` 脱离 DOM 且仅剩 1 个。web vitest 全量 100 文件/1159 用例绿 + `npm run build` 绿；另注 `npx tsc --noEmit` 的 Recordings 未用变量报错为既有缺陷（dfd13d92b 引入，`git stash` 验证与本改动无关），按仓库 build 脚本口径不改）
 - [ ] W7 dashboard 下拉刷新空操作：onRefresh 空 async 即收不重取，Future.wait 在 build 重建重启（mobile/lib/pages/dashboard_page.dart:19）〔修复=future 缓存字段 + onRefresh 重赋值 setState〕
 - [ ] W8 终端重连订阅泄漏：旧流订阅不取消，onDone/onError 在新连接后假报错横幅（mobile/lib/pages/terminal_page.dart:136）〔修复=重连先取消 _sub 并关旧 channel〕
 
