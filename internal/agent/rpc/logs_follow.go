@@ -112,12 +112,13 @@ func (p *LogsProvider) FollowStart(params map[string]interface{}) (interface{}, 
 	}
 
 	p.fs.mu.Lock()
-	if len(p.fs.follows) >= logsFollowMaxActive {
+	// 同 followId 替换旧会话不增加活跃计数：仅当该 ID 不存在且已达上限
+	// 时才拒绝（G9）。旧会话在锁外关闭，避免新会话被误判超限。
+	_, replacing := p.fs.follows[followID]
+	if !replacing && len(p.fs.follows) >= logsFollowMaxActive {
 		p.fs.mu.Unlock()
 		return nil, fmt.Errorf("too many active log follows (max %d)", logsFollowMaxActive)
 	}
-	// 同 followId 重复 start：覆盖旧会话（先杀旧进程防泄漏）。
-	// closeFn 内部要拿 p.fs.mu，必须在锁外调（Mutex 不可重入）
 	var old *logsFollowSession
 	if prev, exists := p.fs.follows[followID]; exists {
 		old = prev

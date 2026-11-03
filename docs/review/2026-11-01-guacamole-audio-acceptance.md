@@ -18,7 +18,7 @@
 | 4. L8/L16 编解码 | 部分 | L16 全程可用；L8 仅 RawAudioPlayer 支持，guacd 1.5.5 对 16-bit PCM 源只产 L16 |
 | 5. 传输（音频流到客户端） | **发现缺陷→已修复** | 网关空 `audio` 声明导致 guacd 一条 audio 指令都不发；声明 L8+L16 后音频流+5MB PCM 到达 |
 | 6. 播放（L16 可播放） | PASS | 5,013,504 字节 PCM 经网关到达，RawAudioPlayer 支持 audio/L16 |
-| 7. 静音按钮联动 | PASS（源码+单测） | AudioContext 单例 suspend/resume；index.test.tsx:332 覆盖 |
+| 7. 静音按钮联动 | PASS（源码+单测） | AudioContext 单例 suspend/resume；index.test.tsx:405 覆盖 |
 
 **关键发现**：`internal/server/api_guacamole.go` 的 guacd 握手里 `guacEncode("audio")` **空声明**
 （阶段二延后遗留）是「桌面无声音 / 静音按钮无效」的根因——guacd 只在客户端声明了支持的
@@ -119,8 +119,8 @@ const ctx = Guacamole.AudioContextFactory?.getAudioContext()
 if (muted) { void ctx.resume() } else { void ctx.suspend() }
 ```
 即静音按钮切换 → 全局 AudioContext 单例 suspend/resume（RawAudioPlayer 内部直连该
-单例），一次性全局静音/恢复。单测 `index.test.tsx:332` 覆盖 suspend→resume 切换，
-`:474` 覆盖 AudioContext 不可用（jsdom/旧浏览器）时静音不抛错。
+单例），一次性全局静音/恢复。单测 `index.test.tsx:405` 覆盖 suspend→resume 切换，
+`:547` 覆盖 AudioContext 不可用（jsdom/旧浏览器）时静音不抛错。
 
 ## 4. 遗留 / 待办
 

@@ -421,6 +421,9 @@ func (s *Server) Shutdown() {
 	if s.proxyMgr != nil {
 		s.proxyMgr.Stop()
 	}
+	if s.notifier != nil {
+		s.notifier.Close()
+	}
 	if s.db != nil {
 		s.db.Close()
 	}

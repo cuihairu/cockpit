@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -276,5 +277,38 @@ func TestJobCancelAfterExecDone(t *testing.T) {
 	m := res.(map[string]interface{})
 	if c, _ := m["cancelled"].(bool); c {
 		t.Fatalf("cancel after exec done should report cancelled=false, got %v", m)
+	}
+}
+
+// TestJobExecReleasesSessionAndTimer：exec 自然结束后句柄表应清空，
+// 且 cancel 必须被调用（G7 —— WithTimeout 的 timer 不释放会挂满超时）。
+// 直调 Exec 拿不到内部 cancel，故断言会话表无残留并验证多次执行不泄漏。
+func TestJobExecReleasesSessionAndTimer(t *testing.T) {
+	p := NewJobProvider()
+	const n = 20
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("job-release-%d", i)
+		res, err := p.Call("exec", map[string]interface{}{"command": testExecHello, "id": id, "timeout_s": 60})
+		if err != nil {
+			t.Fatalf("exec[%d]: %v", i, err)
+		}
+		m := res.(map[string]interface{})
+		if code := intField(m, "exit_code"); code != 0 {
+			t.Fatalf("exec[%d] exit_code = %d", i, code)
+		}
+	}
+	p.mu.Lock()
+	left := len(p.sessions)
+	p.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("session table not drained: %d entries left", left)
+	}
+	// 已结束 job 的 cancel 必须幂等（句柄已注销）
+	res, err := p.Call("cancel", map[string]interface{}{"id": "job-release-0"})
+	if err != nil {
+		t.Fatalf("cancel after done: %v", err)
+	}
+	if c, _ := res.(map[string]interface{})["cancelled"].(bool); c {
+		t.Fatalf("cancel after done should be false")
 	}
 }

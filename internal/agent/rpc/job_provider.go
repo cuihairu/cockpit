@@ -16,8 +16,8 @@ import (
 // 字段形式返回（exit_code / error），RPC 层不视为协议错误——server 据此
 // 落 job 状态（exit 0 → success，否则 failed，输出仍带回展示）。
 type JobProvider struct {
-	mu       sync.Mutex             // guards sessions
-	sessions map[string]jobSession  // jobId → ctx cancel；exec 期间持有，结束后注销
+	mu       sync.Mutex            // guards sessions
+	sessions map[string]jobSession // jobId → ctx cancel；exec 期间持有，结束后注销
 }
 
 type jobSession struct {
@@ -54,7 +54,7 @@ const (
 // jobExecMaxTimeout）。其余字段忽略（保留给后续 job.* 动作）。
 type ExecParams struct {
 	Command  string `json:"command"`
-	TimeoutS int  `json:"timeout_s"`
+	TimeoutS int    `json:"timeout_s"`
 	// ID 是 job 唯一标识（server 下发 job.exec 时必带，用于 cancel 定位句柄）。
 	// 旧版本 server 可能不传此字段；无 id 则不注册句柄表，cancel 幂等空操作。
 	ID string `json:"id,omitempty"`
@@ -97,6 +97,9 @@ func (p *JobProvider) Exec(params map[string]interface{}) (interface{}, error) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(ep.TimeoutS)*time.Second)
+	// WithTimeout 的 timer 必须释放。即使 cmd 已返回，不 cancel 也会把
+	// timer 挂满 per-job 超时（G7）。
+	defer cancel()
 
 	// 按 id 注册句柄（取消信号查找用）；无 id 或注册冲突不阻塞主流程
 	p.registerSession(ep.ID, cancel)
@@ -119,10 +122,10 @@ func (p *JobProvider) Exec(params map[string]interface{}) (interface{}, error) {
 	}
 
 	res := map[string]interface{}{
-		"exit_code": -1,
-		"output":    string(out),
-		"truncated": truncated,
-		"error":     "",
+		"exit_code":   -1,
+		"output":      string(out),
+		"truncated":   truncated,
+		"error":       "",
 		"duration_ms": duration.Milliseconds(),
 	}
 	if err != nil {

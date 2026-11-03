@@ -409,6 +409,29 @@ describe('Domains', () => {
       expect(Array.from(document.querySelectorAll('.ant-select-item-option')).map((o) => o.textContent)).toContain('ag-2'))
   })
 
+  it('复制失败：提示失败不假报成功（W5 回归）', async () => {
+    apiMock.getAgentDomainsSnippet.mockResolvedValue('# snippet for web-01')
+    const writeText = vi.fn(() => Promise.reject(new Error('denied')))
+    Object.assign(navigator, { clipboard: { writeText } })
+    renderPage()
+    await screen.findByText('blog.example.com')
+    fireEvent.mouseDown(screen.getAllByText('选择 agent 生成配置片段')[0].closest('.ant-select')!.querySelector('.ant-select-selector')!)
+    const opt = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll('.ant-select-item-option')).find(
+        (o) => o.textContent === 'web-01')
+      if (!el) throw new Error('option not found')
+      return el as HTMLElement
+    })
+    fireEvent.click(opt)
+    expect(await screen.findByText(/# snippet for web-01/)).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /复\s*制/ }))
+    })
+    expect(writeText).toHaveBeenCalledWith('# snippet for web-01')
+    expect(msgWarning).toHaveBeenCalledWith('复制失败，请手动复制')
+    expect(msgSuccess).not.toHaveBeenCalledWith('已复制')
+  })
+
   it('防御分支：apply 无 steps 字段兜底空数组；片段为 null 复制空串', async () => {
     apiMock.applyDomainBinding.mockResolvedValue({ status: 'ok' }) // 无 steps 字段
     apiMock.getAgentDomainsSnippet.mockResolvedValue(null)

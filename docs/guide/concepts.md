@@ -131,7 +131,7 @@ At startup the Agent runs capability detectors and reports the capabilities in t
 }
 ```
 
-There are currently 19 capabilities in total (18 always reported, plus the conditional `virt-libvirt`), from two classes of origins.
+There are currently 19 capabilities in total, from two classes of origins. Only `file`, `ddns`, and `oob` are always reported; the remaining 16 are conditionally reported when their platform/environment conditions are met.
 
 Probed (`internal/agent/detector/`, reported only when conditions are met):
 
