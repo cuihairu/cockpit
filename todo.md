@@ -167,7 +167,8 @@
 - [x] G9 FollowStart 容量误拒：16 活跃时重启既有 follow 被误拒，替换逻辑本支持同 ID（internal/agent/rpc/logs_follow.go:115）〔修复=先查既有 ID 再测容量〕〔commit fcd2b16d：internal/agent/rpc 全包 + -race 绿（跳过 2 个既有基线 flaky：TestStackGitDeployBusySkipped、TestCovPctFileSearchScannedLimit），含 TestLogsFollowCapacityReplaceAtMax〕
 - [x] G10 probe-agent transitions 竞态：close 后写 nil 与 alerter 并发读指针竞态（cmd/cockpit-probe-agent/main.go:116）〔修复=mutex 守护或属主协程置 nil〕
   - 证据：本 commit（`cmd/cockpit-probe-agent/main.go` 加 `stateMu` 守护 `transitions`/`written`；aleniter 回调锁内检查非阻塞发送，flushStatus 锁内捕获副本后置 nil 再锁外 close，幂等收尾；`go test ./cmd/cockpit-probe-agent/...` 全绿含 `-race`，`go vet` 绿，`go build ./...` 绿）
-- [ ] S7 proxy conns 覆盖泄漏：同 connID 重发 proxy_new 覆盖旧条目不关旧连接/协程（internal/proxy/handler.go:133）〔修复=覆盖前关闭删除既有条目〕
+- [x] S7 proxy conns 覆盖泄漏：同 connID 重发 proxy_new 覆盖旧条目不关旧连接/协程（internal/proxy/handler.go:133）〔修复=覆盖前关闭删除既有条目〕
+  - 证据：本 commit（`internal/proxy/handler.go` 加 `replaceConn`：锁内放新条目后锁外 `Close` 旧条目，`HandleProxyNew` 与 `openSSHProxy` 复用；`g3_conns_leak_test.go` 加 `TestS7ReplaceConnClosesOldSameID` 回归。`go test -race ./internal/proxy/...` 全绿含新回归，`go vet` 绿，`go build ./...` 绿）
 - [ ] S8 通知 goroutine 无追踪：context.Background 派生无 WaitGroup 协程，关停中可跑过 DB 关闭（internal/notification/service.go:149）〔修复=生命周期 context 或 WaitGroup〕
 - [ ] S9 密码重置邮件吞错：printf 空操作吞 SendPasswordResetEmail 错误，API 假报成功（internal/server/password_reset_handlers.go:62）〔修复=log.Printf + 追踪〕
 - [ ] S10 ParseBackupSources 忽略错误：sources JSON 损坏产出空清单照发 run 假完成（internal/server/backup_loop.go:93）〔修复=返回错误，startBackupRun 拒绝〕

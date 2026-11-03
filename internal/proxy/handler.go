@@ -92,6 +92,18 @@ func (h *Handler) removeConn(connID string, conn *AgentTargetConn) bool {
 	return true
 }
 
+// replaceConn 注册新连接并关闭同 connID 的旧条目（S7）。覆盖重建场景下
+// 旧连接及其读协程必须先关闭，否则旧协程会继续转发并长期占用资源。
+func (h *Handler) replaceConn(connID string, agentConn *AgentTargetConn) {
+	h.mu.Lock()
+	old, ok := h.conns[connID]
+	h.conns[connID] = agentConn
+	h.mu.Unlock()
+	if ok {
+		old.Close()
+	}
+}
+
 // Stop 停止处理器
 func (h *Handler) Stop() {
 	if !h.running.CompareAndSwap(true, false) {
@@ -143,9 +155,7 @@ func (h *Handler) HandleProxyNew(msg *protocol.Message) error {
 		Created: time.Now(),
 	}
 
-	h.mu.Lock()
-	h.conns[p.ConnID] = agentConn
-	h.mu.Unlock()
+	h.replaceConn(p.ConnID, agentConn)
 
 	log.Printf("Agent: New proxy connection %s -> %s", p.ConnID, p.Target)
 
@@ -175,9 +185,7 @@ func (h *Handler) openSSHProxy(p protocol.ProxyNewPayload) error {
 		sshSess: sshSess,
 	}
 
-	h.mu.Lock()
-	h.conns[p.ConnID] = agentConn
-	h.mu.Unlock()
+	h.replaceConn(p.ConnID, agentConn)
 
 	log.Printf("Agent: New SSH proxy session %s -> %s", p.ConnID, p.Target)
 	go h.readFromTarget(agentConn)

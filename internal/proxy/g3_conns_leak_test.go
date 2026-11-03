@@ -92,3 +92,30 @@ func TestG3RemoveConnKeepsNewSameID(t *testing.T) {
 		t.Error("new same-ID entry must survive old conn removal")
 	}
 }
+
+// TestS7ReplaceConnClosesOldSameID 验证 S7：同 connID 覆盖重建时旧连接
+// 必须被关闭（旧读协程退出），且新条目取代旧条目。
+func TestS7ReplaceConnClosesOldSameID(t *testing.T) {
+	h := NewHandler()
+	defer h.Stop()
+
+	oldClient, oldTarget := net.Pipe()
+	oldConn := &AgentTargetConn{ID: "s7-same", ProxyID: "s7-p", Target: "127.0.0.1:80", Conn: oldTarget}
+	covPutAgentConn(h, oldConn)
+
+	newClient, newTarget := net.Pipe()
+	defer newClient.Close()
+	newConn := &AgentTargetConn{ID: "s7-same", ProxyID: "s7-p", Target: "127.0.0.1:80", Conn: newTarget}
+	h.replaceConn("s7-same", newConn)
+
+	if !oldConn.closed.Load() {
+		t.Error("replaceConn must close the old same-ID connection (S7)")
+	}
+	cur, ok := covGetAgentConn(h, "s7-same")
+	if !ok || cur != newConn {
+		t.Error("replaceConn must leave the new connection in the map")
+	}
+	if oldClient.Close() != nil {
+		t.Error("old client close")
+	}
+}
