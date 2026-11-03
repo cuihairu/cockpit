@@ -49,11 +49,14 @@ func TestRunningWorkflowRuns(t *testing.T) {
 	defer db.Close()
 
 	now := time.Now()
+	// 同定义（wf-a）先建 failed 再建 running：新并发防护只拒绝「已有
+	// running 时再建 running」，failed 不占用 running 名额；顺序须让
+	// failed 先落库，否则 running 存在时建 failed 会冲突。
 	runs := []*WorkflowRun{
-		{ID: "r1", WorkflowID: "wf-a", Status: WorkflowRunStatusRunning, CreatedAt: now},
 		{ID: "r2", WorkflowID: "wf-a", Status: WorkflowRunStatusFailed, CreatedAt: now},
-		{ID: "r3", WorkflowID: "wf-b", Status: WorkflowRunStatusRunning, CreatedAt: now},
 		{ID: "r4", WorkflowID: "wf-b", Status: WorkflowRunStatusSuccess, CreatedAt: now},
+		{ID: "r1", WorkflowID: "wf-a", Status: WorkflowRunStatusRunning, CreatedAt: now},
+		{ID: "r3", WorkflowID: "wf-b", Status: WorkflowRunStatusRunning, CreatedAt: now},
 	}
 	for _, r := range runs {
 		if err := db.CreateWorkflowRun(r); err != nil {
