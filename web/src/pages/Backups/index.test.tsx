@@ -212,6 +212,21 @@ describe('Backups', () => {
     expect(screen.getByText('立即备份')).toBeInTheDocument()
   })
 
+  it('配置表：损坏 sources JSON 显式暴露错误标记而非空清单', async () => {
+    const broken = {
+      ...configs[0], id: 9, name: 'broken', sources: [], sources_ok: false,
+      sources_err: 'parse backup sources: unexpected end of JSON input',
+    } as unknown as BackupConfig
+    renderPage([broken])
+    expect(await screen.findByText('broken')).toBeInTheDocument()
+    // 伪装成「无来源」的静默空清单不得出现；显式错误 Tag 必须渲染
+    expect(screen.getByText('源路径损坏')).toBeInTheDocument()
+    expect(screen.queryByText('+1')).not.toBeInTheDocument()
+    // Tooltip 暴露原始错误
+    fireEvent.mouseEnter(screen.getByText('源路径损坏'))
+    expect(await screen.findByText(broken.sources_err!)).toBeInTheDocument()
+  })
+
   it('空态：无配置出 Empty', async () => {
     renderPage([])
     expect(await screen.findByText('尚未配置备份任务，点击右上角创建第一条配置')).toBeInTheDocument()

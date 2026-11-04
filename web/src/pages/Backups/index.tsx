@@ -233,18 +233,23 @@ const Backups = () => {
       title: '源路径',
       dataIndex: 'sources',
       key: 'sources',
-      render: (sources: string[]) => (
-        <Tooltip title={sources.join('\n')}>
-          <Space size={4} wrap>
-            {sources.slice(0, 2).map((s) => (
-              <Tag key={s} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {s}
-              </Tag>
-            ))}
-            {sources.length > 2 && <Tag>+{sources.length - 2}</Tag>}
-          </Space>
-        </Tooltip>
-      ),
+      render: (sources: string[], cfg: BackupConfig) =>
+        cfg.sources_ok === false ? (
+          <Tooltip title={cfg.sources_err || 'sources JSON 损坏'}>
+            <Tag color="error">源路径损坏</Tag>
+          </Tooltip>
+        ) : (
+          <Tooltip title={sources.join('\n')}>
+            <Space size={4} wrap>
+              {sources.slice(0, 2).map((s) => (
+                <Tag key={s} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {s}
+                </Tag>
+              ))}
+              {sources.length > 2 && <Tag>+{sources.length - 2}</Tag>}
+            </Space>
+          </Tooltip>
+        ),
     },
     { title: '目标目录', dataIndex: 'dest_dir', key: 'dest_dir', ellipsis: true },
     { title: '计划', dataIndex: 'schedule', key: 'schedule', width: 110, render: scheduleLabel },

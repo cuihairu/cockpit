@@ -370,6 +370,105 @@ void main() {
     await tester.runAsync(() => server.close());
   });
 
+  testWidgets('终端页：重连失败 → 旧连接被关闭且终端输出断开（W8 回归）',
+      (tester) async {
+    // 先建一条真实 WS 连接（旧连接），再让下一次 refresh 的 ticket 请求
+    // 500——断言 catch 分支关闭旧 channel（服务端观测断连）且错误横幅出现。
+    final sessions = <WebSocket>[];
+    final currentClosed = Completer<void>();
+    WebSocket? currentSession;
+    final server = (await tester.runAsync(() async {
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      try {
+        final s = await HttpServer.bind('127.0.0.1', 0);
+        s.listen((req) async {
+          final ws = await WebSocketTransformer.upgrade(req,
+              protocolSelector: (protocols) => protocols.first);
+          sessions.add(ws);
+          currentSession = ws;
+          ws.listen((_) {}, onDone: () {
+            if (!currentClosed.isCompleted) currentClosed.complete();
+          });
+        });
+        return s;
+      } finally {
+        HttpOverrides.global = saved;
+      }
+    }))!;
+
+    final adapter = MockAdapter();
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(
+            () => _UrlSettings('http://127.0.0.1:${server.port}')),
+        apiProvider.overrideWith(
+            (ref) async => CockpitApi(ApiClient.forTest(dio))),
+      ],
+      child: MaterialApp(
+        home: TerminalPage(
+          agent: _agentWithSsh(),
+          ssh: SshService(host: '10.0.0.1', port: 22),
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.byIcon(Icons.refresh), findsOneWidget);
+
+    // 首次 refresh：注册 ticket，在真区建立真实 WS 会话
+    adapter.on('POST', '/api/remote/tickets', 200,
+        {'ticket': 'tk-1', 'expires_at': '2030-01-01T00:00:00Z'});
+    await tester.runAsync(() async {
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      try {
+        final btn = tester.widget<IconButton>(find.ancestor(
+            of: find.byIcon(Icons.refresh),
+            matching: find.byType(IconButton)));
+        btn.onPressed!();
+        for (var i = 0; i < 50 && sessions.isEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      } finally {
+        HttpOverrides.global = saved;
+      }
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(sessions, isNotEmpty,
+        reason: '旧连接应已在服务端建立');
+    expect(currentSession, isNotNull);
+
+    // 下一次 refresh 时 ticket 500 → catch 分支走 _fail 并关闭旧 channel
+    adapter.on('POST', '/api/remote/tickets', 500, {'error': 'server error'});
+    await tester.runAsync(() async {
+      final btn = tester.widget<IconButton>(find.ancestor(
+          of: find.byIcon(Icons.refresh),
+          matching: find.byType(IconButton)));
+      btn.onPressed!();
+      for (var i = 0; i < 50 && !currentClosed.isCompleted; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    // 服务端已观测到旧 WS 断连 → catch 关闭旧 channel 生效
+    expect(currentClosed.isCompleted, isTrue,
+        reason: '重连失败后旧 WS socket 应被关闭');
+    // 错误横幅出现
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 5));
+    await tester.runAsync(() => server.close());
+  });
+
   testWidgets('终端页：ticket 返回前页面已退出 → 放弃连接并关闭 channel',
       (tester) async {
     // 门控 adapter：tickets 请求挂起，页面卸载后放行 → !mounted 分支

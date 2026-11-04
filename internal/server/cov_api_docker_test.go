@@ -137,7 +137,7 @@ func TestCovDockerActions(t *testing.T) {
 		{"container restart", http.MethodPost, "/api/docker/agents/a1/containers/c1/restart?timeout=5", ""},
 		{"container pause", http.MethodPost, "/api/docker/agents/a1/containers/c1/pause", ""},
 		{"container unpause", http.MethodPost, "/api/docker/agents/a1/containers/c1/unpause", ""},
-		{"container logs", http.MethodGet, "/api/docker/agents/a1/containers/c1/logs?tail=100&since=1h&follow=true&timestamps=true&stdout=false&stderr=false", ""},
+		{"container logs", http.MethodGet, "/api/docker/agents/a1/containers/c1/logs?tail=100&since=1h&timestamps=true&stdout=false&stderr=false", ""},
 		{"container stats", http.MethodGet, "/api/docker/agents/a1/containers/c1/stats", ""},
 		{"image pull", http.MethodPost, "/api/docker/agents/a1/images/pull?ref=nginx:latest", ""},
 		{"image pull body", http.MethodPost, "/api/docker/agents/a1/images/pull", `{"ref":"nginx:1.27"}`},

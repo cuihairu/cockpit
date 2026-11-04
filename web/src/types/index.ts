@@ -767,6 +767,8 @@ export interface BackupConfig {
   agent_id: string
   name: string // 备份文件名前缀
   sources: string[] // 源路径列表
+  sources_ok?: boolean // S10：损坏 sources JSON 时 false，视图显式暴露
+  sources_err?: string
   dest_dir: string
   schedule: string // manual / daily@HH:mm / every:Nh
   retention: number // 保留份数，0 = 不清理

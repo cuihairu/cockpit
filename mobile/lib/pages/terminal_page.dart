@@ -85,6 +85,12 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
         onDone: () => _fail('连接已关闭', generation: generation),
       );
     } catch (e) {
+      // 新连接失败时旧 channel 仍存活（W8）：关闭僵尸 socket，
+      // 清掉仍指向旧 channel 的 xterm 回调，避免输入发往无人读取的旧流。
+      unawaited(_channel?.sink.close());
+      _channel = null;
+      _terminal.onOutput = null;
+      _terminal.onResize = null;
       _fail('$e', generation: generation);
     }
   }

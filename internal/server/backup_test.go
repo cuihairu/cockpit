@@ -240,6 +240,61 @@ func TestBackupConfigCreateValidation(t *testing.T) {
 	}
 }
 
+func TestBackupConfigViewSurfacesMalformedSources(t *testing.T) {
+	// S10：损坏的 sources JSON 在视图不得静默渲染为空清单，须显式暴露。
+	db := testServerDB(t)
+	s := &Server{db: db, registry: NewRegistry()}
+	withFakeBackupAgent(t, s, "a1", nil)
+
+	bad := &storage.BackupConfig{
+		AgentID: "a1", Name: "broken", Sources: `{`, DestDir: "/mnt/bak",
+		Schedule: "manual", Enabled: true,
+	}
+	if err := db.CreateBackupConfig(bad); err != nil {
+		t.Fatalf("create bad config: %v", err)
+	}
+	good := &storage.BackupConfig{
+		AgentID: "a1", Name: "ok", Sources: `["/etc/nginx"]`, DestDir: "/mnt/bak",
+		Schedule: "manual", Enabled: true,
+	}
+	if err := db.CreateBackupConfig(good); err != nil {
+		t.Fatalf("create good config: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	s.handleBackupConfigsList(rec, httptest.NewRequest(http.MethodGet, "/api/backups/configs", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	var list struct {
+		Configs []backupConfigView `json:"configs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Configs) != 2 {
+		t.Fatalf("configs = %d, want 2", len(list.Configs))
+	}
+	byName := map[string]backupConfigView{}
+	for _, c := range list.Configs {
+		byName[c.Name] = c
+	}
+	badView := byName["broken"]
+	if badView.SourcesOK {
+		t.Error("malformed sources should be flagged not-ok")
+	}
+	if badView.SourcesErr == "" {
+		t.Error("malformed sources should expose error message")
+	}
+	goodView := byName["ok"]
+	if !goodView.SourcesOK || goodView.SourcesErr != "" {
+		t.Errorf("valid sources view = ok:%v err:%q, want ok", goodView.SourcesOK, goodView.SourcesErr)
+	}
+	if len(goodView.Sources) != 1 || goodView.Sources[0] != "/etc/nginx" {
+		t.Errorf("valid sources = %v", goodView.Sources)
+	}
+}
+
 func TestBackupRunDispatchesAndTracks(t *testing.T) {
 	s := newBackupTestServer(t)
 	var gotTaskGet int

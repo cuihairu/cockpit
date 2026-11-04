@@ -106,6 +106,8 @@ type backupConfigView struct {
 	AgentID    string   `json:"agent_id"`
 	Name       string   `json:"name"`
 	Sources    []string `json:"sources"`
+	SourcesOK  bool     `json:"sources_ok"`
+	SourcesErr string   `json:"sources_err,omitempty"`
 	DestDir    string   `json:"dest_dir"`
 	Schedule   string   `json:"schedule"`
 	Retention  int      `json:"retention"`
@@ -119,12 +121,19 @@ type backupConfigView struct {
 }
 
 func backupConfigToView(cfg *storage.BackupConfig) backupConfigView {
-	sources, _ := ParseBackupSources(cfg.Sources)
+	sources, err := ParseBackupSources(cfg.Sources)
+	sourcesOK := err == nil
+	sourcesErr := ""
+	if err != nil {
+		sourcesErr = err.Error()
+	}
 	return backupConfigView{
 		ID:         cfg.ID,
 		AgentID:    cfg.AgentID,
 		Name:       cfg.Name,
 		Sources:    sources,
+		SourcesOK:  sourcesOK,
+		SourcesErr: sourcesErr,
 		DestDir:    cfg.DestDir,
 		Schedule:   cfg.Schedule,
 		Retention:  cfg.Retention,

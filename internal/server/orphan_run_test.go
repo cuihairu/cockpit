@@ -33,7 +33,8 @@ func TestRecoverOrphanRuns(t *testing.T) {
 	runs := []*storage.WorkflowRun{
 		{ID: "r-live", WorkflowID: "wf-a", Status: storage.WorkflowRunStatusRunning, CreatedAt: now},
 		// 终态 run：清扫不得触碰
-		{ID: "r-done", WorkflowID: "wf-a", Status: storage.WorkflowRunStatusSuccess, CreatedAt: now},
+		// 用独立 workflow，避免 S4「同 workflow 已有 running」前置冲突
+		{ID: "r-done", WorkflowID: "wf-b", Status: storage.WorkflowRunStatusSuccess, CreatedAt: now},
 	}
 	for _, r := range runs {
 		if err := db.CreateWorkflowRun(r); err != nil {
