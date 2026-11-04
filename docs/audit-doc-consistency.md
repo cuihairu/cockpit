@@ -22,7 +22,7 @@
 | --- | --- |
 | Route registration (mux direct mount + `/api/` fallback switch) | `internal/server/server.go:165-310`, `internal/server/api.go:34-172` |
 | Full capability set of 17 (detector 7 + code direct-report 10) | `internal/agent/detector/` (7 files), `internal/agent/agent.go:341-477` |
-| Permission points' single source of truth | `internal/storage/role.go:29-60` `resourceActions`, `internal/server/rbac.go:23-88` |
+| Permission points' single source of truth | `internal/storage/role.go:29-67` `resourceActions`, `internal/server/rbac.go:23-88` `resourceRules` |
 | Proxy data-plane dialing | `internal/proxy/handler.go:116` (`net.DialTimeout("tcp",…)`), `internal/proxy/ssh_session.go:125` (`ssh.Dial("tcp",…)`) |
 | guacd recording archival | `internal/server/api_guacamole.go:209-250` `collectGuacRecording` |
 | GHCR tag field-verified (anonymous token + registry API) | Only `latest`/`main`/`sha-*` exist in practice; the mechanism is in `.github/workflows/docker.yml:67-82` (a `v*` semver has never been triggered) |
@@ -246,3 +246,34 @@ domain term for vault unlocking, not filler; "paradigm" in reference-projects /
 file-manager-design kept (technical term); "harness" kept (test harness).
 
 Three-bucket count for this increment: **0 / 0 / 0**. P0: none.
+
+## Fifth Round (2026-11-05, fleet audit wave 2)
+
+Method per the audit spec: enumerate the doc surface → mechanically sweep every
+`file:line` anchor in `docs/**` + root READMEs against the working tree (1262 in-repo
+anchors checked for bounds; 747 symbol-anchored refs sampled for content match) →
+verify the public face (`gh repo view` description/homepage/topics vs README headline)
+and README technical claims (notification channels, `/ws` route, version output, Go
+version, dependency versions) → classify into the three buckets → fix docs with the
+source as truth.
+
+| ID | Doc page | Claim | Source evidence | Category | Severity | Disposition |
+| --- | --- | --- | --- | --- | --- | --- |
+| W2-1 | design/external-session-api.md:97 (+zh twin :117) | `RemoteSessionManager` ledger base located at `api_remote.go:596-604` | Type is defined at `internal/server/remote_session.go:43-48`; `api_remote.go:596-604` is the `handleRemoteSessions` handler | Mismatch | P2 | Cite `remote_session.go:43-48` for the type, keep `api_remote.go:596-604` as the handler anchor |
+| W2-2 | audit-doc-consistency.md:25 Ground-Truth Anchors (+zh twin :22) | `resourceActions` at `role.go:29-60` | Map now spans `internal/storage/role.go:29-67` (verified `^}` at :67); `rbac.go:23-88` is `resourceRules` | Mismatch | P2 | Anchor ranges corrected |
+| W2-3 | todo.md W8 review note (original :435) | Note cites `terminal_page.dart:66-69` / `:139` as evidence | Actual: connecting setState at `:50-53` (`:51`), reconnect button gate at `:169`; the cited lines contain neither | Mismatch | P1 | todo.md refs corrected to `:50-53` / `:169` (also closes open review finding "line refs unlocatable") |
+| W2-4 | todo.md W8 review note (original :435) | "the stale-catch scenario is unreachable in the real UI" | `_connect` is async and the button only disappears after the next-frame rebuild (`terminal_page.dart:169`); a same-frame double tap starts two overlapping `_connect` calls, and the catch branch (`:90-94`) closes `_channel` without a generation check — a stale request failing after a newer connect succeeded closes the new channel | Doc ahead of code | P1 | Review note corrected; residual race registered as an open todo requirement (code fix owed; this round is docs-only) |
+| W2-5 | review/luna-review-2026-10-18.md | 4 anchors point past EOF (persona-vault-mapping.md:72, websocket-token-auth.md:47, external-session-api.md:151/169) | Files have since shrunk (external-session-api.md is now 130 lines) | Mismatch (historical) | P2 | Kept as-is: dated review snapshot, not living doc surface; readers are directed to the response doc and current pages |
+
+Verified consistent (not in the table): README/README.zh headline and feature claims vs
+`internal/notification/` (4 channels), `internal/server` `/ws` route, `cmd/cockpit-agent`
+version output format and `-server/-secret/-region/-zone` flags, `go.mod` 1.27.3 vs docs
+"Go 1.27", `web/package.json` react ^19.3.1 + guacamole-common-js 1.5.0 vs README
+Foundations; `gh repo view` description "Personal Hybrid Infrastructure Console" matches
+the README first paragraph; topics unchanged and accurate; capability-count fix
+(2026-11-02) still correct against `internal/agent/agent.go`; `config/cockpit.yaml`
+`enrollment_secret` key matches agent-config/getting-started docs; audio handshake
+anchor moved `api_guacamole.go:533`→`:540` after comment insertion (on-topic line, noted;
+dated 2026-11-02 increment left untouched as a snapshot).
+
+Three-bucket count for this round: **1 / 0 / 4** (ahead / behind / mismatch). P0: none.

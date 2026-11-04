@@ -114,7 +114,7 @@ remote_control:
 
 - `GET /api/external/remote/sessions` —— 只返回**本 caller** 发起的会话
   （台账按 caller 名过滤；台账底座 `RemoteSessionManager`，
-  `internal/server/api_remote.go:596-604` 为全量视图，外部入口加过滤）。
+  `RemoteSessionManager`（`internal/server/remote_session.go:43-48`）为台账基座，`internal/server/api_remote.go:596-604` 为全量视图 handler，外部入口加过滤）。
 - `GET /api/external/remote/sessions/{id}` —— 单会话状态（pending/
   connected/closed/failed；台账登记口径见 续批九 D-2026-10-12-4）。
 - `DELETE /api/external/remote/sessions/{id}` —— 终止：命中活会话先

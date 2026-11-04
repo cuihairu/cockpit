@@ -94,7 +94,7 @@ remote_control:
 
 ### E4 Lifecycle: query and terminate
 
-- `GET /api/external/remote/sessions` — returns only sessions started by **this caller** (the ledger is filtered by caller name; the ledger base is `RemoteSessionManager`, `internal/server/api_remote.go:596-604` is the full view, the external entry adds filtering).
+- `GET /api/external/remote/sessions` — returns only sessions started by **this caller** (the ledger is filtered by caller name; the ledger base is `RemoteSessionManager` (`internal/server/remote_session.go:43-48`), `internal/server/api_remote.go:596-604` is the full-view handler, the external entry adds filtering).
 - `GET /api/external/remote/sessions/{id}` — single session status (pending/connected/closed/failed; ledger registration framing see batch nine D-2026-10-12-4).
 - `DELETE /api/external/remote/sessions/{id}` — terminate: on hitting a live session, call `terminateLiveSession` (`internal/server/api_remote.go:675`) first and then close out the ledger, same as the existing manual DELETE semantics. **It can only delete sessions it started itself**; someone else's session returns 404 (existence is not disclosed).
 - The 5-minute one-time ticket is unchanged; a session is not terminated because memex disconnects (the connection belongs to the memex client, the session belongs to the ledger).

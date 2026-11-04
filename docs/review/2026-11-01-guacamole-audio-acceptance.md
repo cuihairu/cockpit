@@ -1,6 +1,6 @@
 # Guacamole RDP 音频真机验收（D4）
 
-> 任务：todo.md:46 D4「RDP 音频 mimetype 与 L8/L16 编解码确认，静音按钮行为联动验证」。
+> 任务：todo.md:93 D4「RDP 音频 mimetype 与 L8/L16 编解码确认，静音按钮行为联动验证」。
 > 决策依据：`docs/review/2026-10-30-decisions.md` 第 12 项（分段确认音源、协商格式、传输、
 > 播放、静音，才能知道该修哪一层）。
 > 验收面：`docs/remote-desktop-guacamole-design.md` §音频风险（L8/L16 原始 PCM、
