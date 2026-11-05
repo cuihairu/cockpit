@@ -16,8 +16,10 @@
 
 ### 真机验收（等硬件/真实环境/凭据）
 
-- [ ] service-health 生产接入：docker VM agent 改 SERVER_URL 指生产后 enable〔阻塞=缺生产 WS 地址或 LAN 暴露授权｜解锁=配置新出口后改 SERVER_URL 并 enable〕
+- [ ] service-health 生产接入：docker VM agent 改 SERVER_URL 指生产后 enable〔阻塞=缺生产 enrollment 凭据/授权改 SERVER_URL 并 enable｜解锁=凭据到位后改 SERVER_URL 并 enable〕
+  - 2026-11-06 复核：生产入口已可达（`wss://cockpit.cuihairu.site/ws` 实测 HTTP/1.1 升级 101 握手成功 + `/health` 200 `{"agents":1}`），原「缺生产 WS 地址」阻塞解除；但 docker VM 192.168.5.5 的 `/etc/default/cockpit-agent` 的 `SERVER_URL` 仍指向已停用 dev `ws://192.168.5.188:9000/ws`（agent `bad handshake`、重启计数 77297），未改生产入口前不勾；本地无生产 `AGENT_ENROLLMENT_SECRET`/admin 凭据，不擅自改生产 agent（真机验收不代测）。
 - [ ] Windows SCM 服务管理：连接层 list/启停/自启/restart 30s 超时路径提权实测（校验层 4 项已两台真机双证）〔阻塞=缺提权 admin agent 会话〕
+  - 2026-11-06 复核：Windows 主机 10.240.0.5:22 可达（`OpenSSH_for_Windows_9.5`，known_hosts 有记录），但 SSH 认证失败（publickey/password 均 Permission denied，含 `~/.ssh/id_ed25519_win`），无法进入提权会话实测；阻塞=缺提权 admin agent 会话仍成立，不勾。
 - [ ] macOS launchd 服务管理：launchctl 执行层 list/启停/自启/kickstart 回退（校验层探针已备，checklist:251）〔阻塞=缺 macOS 主机〕
 - [ ] NAS 真机 API：DSM 6/7、TrueNAS CORE/SCALE、OMV；mdadm 降级演练；ZFS/SMB/NFS 主机（checklist:223-227）〔阻塞=缺 NAS 设备与账号〕
 - [ ] 备份云远端：真实 S3/B2、限速、GB 级完整链（server 侧 rclone 需宿主安装，checklist:51-52）〔阻塞=缺真实 S3/B2 凭据与宿主 rclone〕
