@@ -53,6 +53,7 @@ const CloudAccountsPage = () => {
       alias: account.alias,
       secret: '',
       username: '',
+      region: account.region,
       scopes: account.scopes,
       enabled: account.enabled,
       confirmKey: '',
@@ -176,6 +177,9 @@ const CloudAccountsPage = () => {
           </Form.Item>
           <Form.Item label="配套用户名（可选）" name="username">
             <Input autoComplete="off" />
+          </Form.Item>
+          <Form.Item label="默认地域" name="region" extra="用于厂商发现与创建缺省地域">
+            <Input placeholder="cn-hangzhou / ap-guangzhou" />
           </Form.Item>
           <Form.Item label="权限范围" name="scopes">
             <Select mode="tags" open={false} placeholder="例如 ecs:read" />

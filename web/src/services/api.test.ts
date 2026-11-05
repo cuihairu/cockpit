@@ -198,6 +198,17 @@ describe('ApiService 全方法驱动（URL/method/参数序列化不抛错）', 
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).joinAgentOverlayNetwork('x', 'x', 'x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).leaveAgentOverlayNetwork('x', 'x', 'x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).agentOverlayService('x', 'x', 'x')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getCloudAccounts()
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).saveCloudAccount({
+      vendor: 'aliyun', alias: 'prod', secret: 'x', confirmKey: 'aliyun/prod',
+    })
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).deleteCloudAccount('x')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getCloudInstances('x')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).cloudInstanceAction('x', 'start', 'x')
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).cloudInstanceCreate('x', {
+      name: 'n', spec: 's', image_id: 'i',
+    })
+    await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getCloudOperation('x', 'x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getSmartStatus('x')
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).getSmartConfig()
     await (api as never as Record<string, (...args: unknown[]) => Promise<unknown>>).putSmartConfig('x')

@@ -257,3 +257,41 @@ func TestDeleteCloudAccountAccountDeleteError(t *testing.T) {
 		t.Error("missing cloud_accounts table should propagate an error")
 	}
 }
+
+// TestGetCloudAccountLookup 覆盖 GetCloudAccount 命中/未命中两分支（ErrNotFound 上抛）。
+func TestGetCloudAccountLookup(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	if err := db.UpsertCloudAccount(&CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	accounts, _ := db.ListCloudAccounts()
+	got, err := db.GetCloudAccount(accounts[0].ID)
+	if err != nil || got.ID != accounts[0].ID || got.Vendor != "aliyun" {
+		t.Fatalf("GetCloudAccount(hit) = %+v, %v", got, err)
+	}
+	if _, err := db.GetCloudAccount("no-such-account"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetCloudAccount(missing) = %v, want ErrNotFound", err)
+	}
+}
+
+// TestGetCloudInstanceLookup 覆盖 GetCloudInstance 命中/未命中两分支（ErrNotFound 上抛）。
+func TestGetCloudInstanceLookup(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	if err := db.UpsertCloudAccount(&CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	accounts, _ := db.ListCloudAccounts()
+	if err := db.UpsertCloudInstance(&CloudInstanceInput{AccountID: accounts[0].ID, NativeID: "i-1", Status: "running"}); err != nil {
+		t.Fatalf("seed instance: %v", err)
+	}
+	insts, _ := db.ListCloudInstances(accounts[0].ID)
+	got, err := db.GetCloudInstance(insts[0].ID)
+	if err != nil || got.ID != insts[0].ID || got.NativeID != "i-1" {
+		t.Fatalf("GetCloudInstance(hit) = %+v, %v", got, err)
+	}
+	if _, err := db.GetCloudInstance("no-such-instance"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetCloudInstance(missing) = %v, want ErrNotFound", err)
+	}
+}

@@ -109,6 +109,9 @@ import type {
   DomainDriftResponse,
   CloudAccount,
   CloudAccountInput,
+  CloudInstance,
+  CloudInstanceSpecInput,
+  CloudOperation,
   OobRedirectApplyResult,
   OobRedirectListResult,
   OobRedirectSpec,
@@ -1453,6 +1456,7 @@ class ApiService {
       alias: input.alias,
       secret: input.secret,
       username: input.username,
+      region: input.region,
       scopes: input.scopes,
       enabled: input.enabled,
       confirm_key: input.confirmKey,
@@ -1462,6 +1466,38 @@ class ApiService {
   async deleteCloudAccount(id: string): Promise<void> {
     await this.client.delete(`/cloud/accounts/${encodeURIComponent(id)}`, {
       data: { confirm_id: id },
+    })
+  }
+
+  async getCloudInstances(accountId: string): Promise<CloudInstance[]> {
+    const resp = await this.client.get<unknown, { data: CloudInstance[] }>(
+      `/cloud/accounts/${encodeURIComponent(accountId)}/instances`,
+    )
+    return resp.data ?? []
+  }
+
+  async cloudInstanceAction(
+    accountId: string,
+    action: 'start' | 'stop' | 'delete',
+    instanceId: string,
+  ): Promise<CloudOperation> {
+    return this.client.post<unknown, CloudOperation>(`/cloud/instances/${encodeURIComponent(accountId)}/actions`, {
+      action,
+      instance_id: instanceId,
+      confirm_key: instanceId,
+    })
+  }
+
+  async cloudInstanceCreate(accountId: string, spec: CloudInstanceSpecInput): Promise<CloudOperation> {
+    return this.client.post<unknown, CloudOperation>(`/cloud/instances/${encodeURIComponent(accountId)}/actions`, {
+      action: 'create',
+      ...spec,
+    })
+  }
+
+  async getCloudOperation(accountId: string, operationId: string): Promise<CloudOperation> {
+    return this.client.post<unknown, CloudOperation>(`/cloud/instances/${encodeURIComponent(accountId)}/operations`, {
+      operation_id: operationId,
     })
   }
 

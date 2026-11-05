@@ -181,6 +181,9 @@ const ResourceOob = "oob"
 // ResourceCloudAccount 多云账号资源类型（引用台账与 secret 维护）
 const ResourceCloudAccount = "cloud_account"
 
+// ResourceCloudInstance 多云实例资源类型（发现/生命周期操作）
+const ResourceCloudInstance = "cloud_instance"
+
 // Status 状态
 const (
 	StatusSuccess = "success"

@@ -59,6 +59,7 @@ const CertsPage = lazy(() => import('./pages/Resources/CertsPage'))
 const GatewaysPage = lazy(() => import('./pages/Resources/GatewaysPage'))
 const StoragesPage = lazy(() => import('./pages/Resources/StoragesPage'))
 const CloudAccountsPage = lazy(() => import('./pages/Resources/CloudAccountsPage'))
+const CloudInstancesPage = lazy(() => import('./pages/Resources/CloudInstancesPage'))
 const Workbench = lazy(() => import('./pages/Workbench'))
 const LogSearch = lazy(() => import('./pages/LogSearch'))
 const Docker = lazy(() => import('./pages/Docker'))
@@ -167,6 +168,11 @@ const routeConfig: PermRouteItem = {
         {
           path: '/resources/cloud-accounts',
           name: '云账号',
+          perm: 'cloud:read',
+        },
+        {
+          path: '/resources/cloud-instances',
+          name: '云实例',
           perm: 'cloud:read',
         },
       ],
@@ -533,6 +539,7 @@ const MainLayout = () => {
               <Route path="/resources/gateways" element={<GatewaysPage />} />
               <Route path="/resources/storages" element={<StoragesPage />} />
               <Route path="/resources/cloud-accounts" element={<CloudAccountsPage />} />
+              <Route path="/resources/cloud-instances" element={<CloudInstancesPage />} />
               <Route path="/workbench" element={<Workbench />} />
               <Route path="/logsearch" element={<LogSearch />} />
               <Route path="/agents" element={<Agents />} />

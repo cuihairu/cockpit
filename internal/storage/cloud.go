@@ -47,7 +47,8 @@ type CloudAccount struct {
 	ID            string    `gorm:"primaryKey;size:32" json:"id"`
 	Vendor        string    `gorm:"size:32;uniqueIndex:idx_cloud_acct_vendor_alias" json:"vendor"`
 	Alias         string    `gorm:"size:64;uniqueIndex:idx_cloud_acct_vendor_alias" json:"alias"`
-	CredentialRef string    `gorm:"size:128" json:"credentialRef"` // 仅 ${VAR} 引用，ValidateCloudCredentialRef 把关
+	CredentialRef string    `gorm:"size:128" json:"credentialRef"`   // 仅 ${VAR} 引用，ValidateCloudCredentialRef 把关
+	Region        string    `gorm:"size:64" json:"region,omitempty"` // 适配器查询/创建缺省地域（云 API 按地域级查询）
 	Scopes        []string  `gorm:"serializer:json" json:"scopes"`
 	Enabled       bool      `json:"enabled"`
 	CreatedAt     time.Time `json:"createdAt"`
@@ -59,6 +60,7 @@ type CloudAccountInput struct {
 	Vendor        string
 	Alias         string
 	CredentialRef string
+	Region        string
 	Scopes        []string
 	Enabled       bool
 }
@@ -114,7 +116,7 @@ func (d *DB) UpsertCloudAccount(in *CloudAccountInput) error {
 		rec := CloudAccount{
 			ID: id, Vendor: in.Vendor, Alias: in.Alias,
 			CredentialRef: in.CredentialRef, Scopes: in.Scopes,
-			Enabled: true, // 新建默认启用；更新走 in.Enabled
+			Region: in.Region, Enabled: true, // 新建默认启用；更新走 in.Enabled
 		}
 		return d.db.Create(&rec).Error
 	}
@@ -123,10 +125,21 @@ func (d *DB) UpsertCloudAccount(in *CloudAccountInput) error {
 	}
 	updates := map[string]interface{}{
 		"credential_ref": in.CredentialRef,
+		"region":         in.Region,
 		"scopes":         in.Scopes,
 		"enabled":        in.Enabled,
 	}
 	return d.db.Model(&existing).Updates(updates).Error
+}
+
+// GetCloudAccount 按 ID 取单账号；不存在返回 ErrNotFound。
+func (d *DB) GetCloudAccount(id string) (CloudAccount, error) {
+	var out CloudAccount
+	err := d.db.First(&out, "id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return out, ErrNotFound
+	}
+	return out, err
 }
 
 // ListCloudAccounts 返回全部云账号。
@@ -194,6 +207,16 @@ func (d *DB) UpsertCloudInstance(in *CloudInstanceInput) error {
 func (d *DB) ListCloudInstances(accountID string) ([]CloudInstance, error) {
 	var out []CloudInstance
 	err := d.db.Where("account_id = ?", accountID).Order("created_at").Find(&out).Error
+	return out, err
+}
+
+// GetCloudInstance 按 ID 取单实例；不存在返回 ErrNotFound。
+func (d *DB) GetCloudInstance(id string) (CloudInstance, error) {
+	var out CloudInstance
+	err := d.db.First(&out, "id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return out, ErrNotFound
+	}
 	return out, err
 }
 

@@ -61,6 +61,12 @@ type Server struct {
 	cloudProviders *cloud.Registry
 	cfg            *config.Config
 	upgrader       websocket.Upgrader
+	// cloudOps 追踪在途云生命周期操作（key=accountID/nativeID/kind），
+	// 由 handleCloudInstanceAction 写入、轮询端点推进（GetOperation）。
+	cloudOps   map[string]cloud.Operation
+	cloudOpsMu sync.Mutex
+	// cloudProviderFn 测试注入点：替代真实适配器构造（生产为 cloudProvider）。
+	cloudProviderFn func(account *storage.CloudAccount) (cloud.Provider, error)
 
 	mu     sync.RWMutex
 	ctx    context.Context
@@ -183,6 +189,7 @@ func NewServer(cfg *config.Config) *Server {
 		livenessStore:  newLivenessStore(),
 		oobProviders:   newOOBRegistry(),
 		cloudProviders: cloud.NewRegistry(),
+		cloudOps:       map[string]cloud.Operation{},
 		cfg:            cfg,
 		upgrader: websocket.Upgrader{
 			CheckOrigin:     isOriginAllowed,

@@ -38,9 +38,9 @@
 - [ ] vault 硬验收：真 persona 服务端实测 provider 切换〔阻塞=缺 persona 服务端地址与 token〕
 - [ ] jenkins/external endpoint 凭据 vault 引用〔阻塞=缺链接功能立项〕
 
-### 多云扩展（未立项待拍板；全文核验见 docs/review/chatgpt-2026-10-20-multicloud-positioning.md）
+### 多云扩展（2026-10-20 评审导入；P0 已拍板开工，P1/P2 未立项待拍板；全文核验见 docs/review/chatgpt-2026-10-20-multicloud-positioning.md）
 
-- [ ] P0 云账号接入/资源自动发现/Provider Framework/计算生命周期闭环/成本地基：适配器与接线片已落（cfeee64/8bf385c/df558ff，`internal/cloud` aliyun/tencent、账号 web 双确认）；剩余 Quota 子片与双厂商闭环验收〔阻塞=缺真实云 AccessKey｜解锁=凭据经 vault 到位〕
+- [x] P0 云账号接入/资源自动发现/Provider Framework/计算生命周期闭环/成本地基：适配器与接线片已落（cfeee64/8bf385c/df558ff，`internal/cloud` aliyun/tencent、账号 web 双确认）〔2026-10-20 用户拍板开工（首批厂商已代决：阿里云+腾讯云）〕；剩余=厂商发现/生命周期接线（仓内可开工，缺口清单见 docs/design/cloud-lifecycle-wiring.md）、Quota 子片与双厂商闭环验收〔阻塞=缺真实云 AccessKey（仅 Quota 子片与闭环验收依赖凭据；发现/生命周期接线不阻塞）｜解锁=凭据经 vault 到位〕
 - [ ] P1 资源池与容量/Go Reconciler/云网络/预算策略引擎/双重控制边界裁定（「OpenTofu vs Reconciler 写入权」先裁定，见 docs/design/p1-resource-ownership.md）〔阻塞=缺用户裁决（P0 闭环后）〕
 - [ ] P2 智能调度/成本优化/控制面高可用〔阻塞=缺真实需求〕
 
