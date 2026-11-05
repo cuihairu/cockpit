@@ -85,6 +85,10 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
         onDone: () => _fail('连接已关闭', generation: generation),
       );
     } catch (e) {
+      // 同帧双击竞态（W8 残余）：旧代请求失败不得误关新代已建立的连接。
+      // 代际已过期说明本 catch 属于被更新的 _connect 取代的旧调用，任何
+      // 对 _channel 的关闭/置空都会破坏新连接的收发，直接弃置。
+      if (generation != _connectGeneration) return;
       // 新连接失败时旧 channel 仍存活（W8）：关闭僵尸 socket，
       // 清掉仍指向旧 channel 的 xterm 回调，避免输入发往无人读取的旧流。
       unawaited(_channel?.sink.close());

@@ -85,6 +85,38 @@ class _GatedAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+/// 同帧双击竞态（W8 残余）用例的 ticket 适配器：第一次调用挂起在 gate，
+/// 放行后返回 500（旧代失败）；第二次调用立即返回 200（新代成功）。
+class _RaceAdapter implements HttpClientAdapter {
+  _RaceAdapter(this.gate);
+
+  final Completer<void> gate;
+  int calls = 0;
+
+  ResponseBody _body(int status, Object? body) => ResponseBody.fromString(
+        jsonEncode(body),
+        status,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      );
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    calls++;
+    if (calls == 1) {
+      await gate.future;
+      return _body(500, {'error': 'stale generation ticket'});
+    }
+    return _body(200,
+        {'ticket': 'tk-race', 'expires_at': '2030-01-01T00:00:00Z'});
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 class _UrlSettings extends SettingsNotifier {
   _UrlSettings(this.url, {this.selfSigned = false});
 
@@ -463,6 +495,97 @@ void main() {
         reason: '重连失败后旧 WS socket 应被关闭');
     // 错误横幅出现
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 5));
+    await tester.runAsync(() => server.close());
+  });
+
+  testWidgets('终端页：重连同帧双击 → 旧代失败不误关新连接（W8 残余回归）',
+      (tester) async {
+    // 旧代（gen2）ticket 挂起；新代（gen3）ticket 立即成功并建立真实 WS。
+    // 放行旧代返回 500 后，catch 分支不得因代际过期误关新连接的 channel，
+    // 也不得把新连接置为错误态（回归前会误关 sessions.last）。
+    final sessions = <WebSocket>[];
+    final closed = <bool>[];
+    final server = (await tester.runAsync(() async {
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      try {
+        final s = await HttpServer.bind('127.0.0.1', 0);
+        s.listen((req) async {
+          final ws = await WebSocketTransformer.upgrade(req,
+              protocolSelector: (protocols) => protocols.first);
+          sessions.add(ws);
+          closed.add(false);
+          ws.listen((_) {},
+              onDone: () => closed[closed.length - 1] = true);
+        });
+        return s;
+      } finally {
+        HttpOverrides.global = saved;
+      }
+    }))!;
+
+    // 首轮不 mock ticket：404 快速失败（fake-async 安全）→ 错误态出重连按钮
+    final adapter = MockAdapter();
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = adapter;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        settingsProvider.overrideWith(
+            () => _UrlSettings('http://127.0.0.1:${server.port}')),
+        apiProvider.overrideWith(
+            (ref) async => CockpitApi(ApiClient.forTest(dio))),
+      ],
+      child: MaterialApp(
+        home: TerminalPage(
+          agent: _agentWithSsh(),
+          ssh: SshService(host: '10.0.0.1', port: 22),
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.byIcon(Icons.refresh), findsOneWidget);
+
+    // 同帧双击：两次 onPressed 同步触发（按钮下一帧才重建消失）
+    final gate = Completer<void>();
+    dio.httpClientAdapter = _RaceAdapter(gate);
+    await tester.runAsync(() async {
+      final saved = HttpOverrides.current;
+      HttpOverrides.global = null;
+      try {
+        final btn = tester.widget<IconButton>(find.ancestor(
+            of: find.byIcon(Icons.refresh),
+            matching: find.byType(IconButton)));
+        btn.onPressed!();
+        btn.onPressed!();
+        // 等新代（gen3）真实 WS 建连
+        for (var i = 0; i < 50 && sessions.isEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      } finally {
+        HttpOverrides.global = saved;
+      }
+    });
+    expect(sessions, isNotEmpty, reason: '新代连接应已建立');
+
+    // 放行旧代 ticket → 500 → catch；旧代代际已过期，不得误关新连接
+    await tester.runAsync(() async {
+      gate.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.byIcon(Icons.error_outline), findsNothing,
+        reason: '旧代失败不得把新连接置为错误态');
+    expect(closed.last, isFalse,
+        reason: '旧代 catch 不得误关新代已建立的 WS 连接');
+    expect(find.byIcon(Icons.refresh), findsOneWidget,
+        reason: '新连接仍处于 connected（重连按钮可见）');
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 5));

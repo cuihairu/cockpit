@@ -50,9 +50,9 @@
 - [ ] P0 安全两件：短期凭据+资源级权限（依托既有 vault）/轻量运行模式〔阻塞=缺用户拍板（已落设计 docs/design/resource-permission-matrix.md）〕
 - [ ] P1 离线数据缓冲/远程协作（会话共享）/统一电源控制（WoL+PVE）/四套源码深读笔记〔阻塞=缺用户拍板（P0 后；已落设计 docs/design/offline-buffer-design.md）〕
 
-### 带外管理 OOB（未立项待拍板；全文/矩阵/跟踪见 docs/review/oob-management-2026-10-20.md）
+### 带外管理 OOB（2026-10-20 评审+用户裁决导入；P0 已拍板开工，P1 未立项待拍板；全文/矩阵/跟踪见 docs/review/oob-management-2026-10-20.md）
 
-- [ ] OpenWrt 片D 真机自启动验收：断电/看门狗恢复（框架/Redfish/AMT/DASH/WOL f9210ab/探活 62b7e6d/procd 看门狗 32bf697 片已落）〔阻塞=缺真机〕
+- [ ] OpenWrt 片D 真机自启动验收：断电/看门狗恢复（框架/Redfish/AMT/DASH/WOL f9210ab/探活 62b7e6d/procd 看门狗 32bf697 片已落）〔2026-10-20 用户裁决第四线：自启动可靠〕〔阻塞=缺真机〕
 - [ ] P1 支持机型矩阵文档（中英，三态实测制，未实测不入表）/Snapdragon Guardian 研究档/IP-KVM 外置兜底〔阻塞=缺用户拍板（P0 后）〕
 
 ### 虚拟化 Provider（只读片已落 e36ea6e；写片设计见 docs/design/libvirt-write-slice.md）
@@ -61,7 +61,7 @@
 
 ### 代码深审 P2/P3（明细见 docs/review/2026-11-01-code-review.md）
 
-- [ ] W8 残余竞态：重连按钮同帧双击可启动重叠 `_connect`（按钮要下一帧重建才消失，terminal_page.dart:169），旧代请求失败时 catch 无 generation 校验会误关新连接（mobile/lib/pages/terminal_page.dart:90）〔2026-11-05 文档审计证实可达；修法=catch 分支补代际校验〕
+- [x] W8 残余竞态：重连按钮同帧双击可启动重叠 `_connect`（按钮要下一帧重建才消失，terminal_page.dart:169），旧代请求失败时 catch 无 generation 校验会误关新连接（mobile/lib/pages/terminal_page.dart:90）〔2026-11-05 文档审计证实可达；修法=catch 分支补代际校验〕〔证据：本 commit，mobile 全量 190 用例+analyze 0 问题；回归用例「重连同帧双击 → 旧代失败不误关新连接」实测无修复时失败（旧代失败误关新连接+置错误态）、有修复时绿〕
 
 ## 已完成
 
@@ -245,3 +245,28 @@
 - 移动端 VNC/桌面观看（D7；触发条件见 docs/guide/mobile-design.md）
 - 大规模目录重命名
 - 自研 mesh 组网数据面（2026-10-20 用户令：mesh 组网交给 meshlet；本机基础信息由 cockpit-agent 只读供给，边界见 meshlet ADR-013，重开需再拍板）
+
+## 审核发现
+
+- [x] 审核发现：多云 P0 待办将剩余工作缩成 Quota 与验收，漏掉尚未实现的厂商发现和生命周期接线，易误判凭据是唯一阻塞（todo.md:43）——属实，已修〔证据：本 commit；todo.md:43 剩余口径改为「厂商发现/生命周期接线（仓内可开工，缺口清单 docs/design/cloud-lifecycle-wiring.md）+Quota 子片+双厂商闭环验收」；核实 `internal/server/api_cloud.go` 仅账号+只读实例台账，`cloudProviders` 注册表从未 `Register`（provider.go/registry.go）〕
+- [x] 审核发现：整编删除了多云与 OOB P0 已获批准的标记，却保留整节「未立项待拍板」，会误导后续工作授权判断（todo.md:41）——属实，已修〔证据：本 commit；todo.md:41/53 标题改「P0 已拍板开工，P1/P2 未立项待拍板」，条目补 2026-10-20 拍板/裁决；对齐 docs/review/2026-10-30-decisions.md:30「标题未拍板不能推翻条目内已批准事实」〕
+- [x] 审核发现：中英文 OpenWrt 设计及 OOB 评审的新 todo 行号指向竞品功能而非 OOB 条目，英文片 D 还指向竞品章节标题（docs/design/oob-openwrt-bootstrap.md:10）——属实，已修〔证据：本 commit；docs/design/oob-openwrt-bootstrap.md 与 zh 版 todo.md:49/47 全部改 :55；核对当前 todo.md:55=OpenWrt 片D 条目〕
+- [x] 审核发现：多云评审的新 todo.md:34 引用指向功能章节而非多云 P0，且同处仍将已落地的腾讯适配器列为待做（docs/review/chatgpt-2026-10-20-multicloud-positioning.md:214）——属实，已修〔证据：本 commit；:214/:216/:219 改 todo.md:43，:219 腾讯云 CVM 片4 已落 df558ff 并移除「待做」〕
+- [x] 审核发现：决策报告的 28 项待办行号对照仍使用整编前行号，与同报告更新后的来源及当前待办不一致（docs/review/2026-10-30-decisions.md:609）——属实，已修〔证据：本 commit；:609 映射改 01→19…12→93…26→55/56→60，对齐正文 :625-751 及当前 todo.md〕
+- [x] 审核发现：本轮 diff 未见问题（09043f37..HEAD）——复核成立，无需改动〔证据：本 commit；区间仅 a55eb2f9 纯 docs CSS（.vitepress/theme/custom.css 5 行），无代码/测试改动〕
+- [ ] 审核发现：listCloudOperations 的账号过滤恒为真——cloudOperationKey(accountID, op.ID) 直接用入参 accountID 拼键再 HasPrefix(accountID+"/")，等于对自身前缀判真，返回全账号操作，跨账号泄露（含实例原生 ID/厂商请求 ID）（internal/server/api_cloud.go:407）
+- [ ] 审核发现：handleCloudInstances 发现同步失败与 provider 构造失败均被静默吞掉（serr/perr 空 if 块），无任何日志或审计，厂商 API 故障与凭据未配置对运维不可见（internal/server/api_cloud.go:483-487）
+- [ ] 审核发现：GET /accounts/{id}/instances 每次读取都同步调用厂商 ListInstances（含 15s 超时预算）且无缓存/TTL，读路径被网络写放大，页面刷新可长时间阻塞（internal/server/api_cloud.go:483）
+- [ ] 审核发现：handleCloudOperation 无论列操作（OperationID 为空）还是取终态，都先构造 provider（读 vault，可 503），而这两条路径根本不需 provider，构造结果在列表分支被丢弃（internal/server/api_cloud.go:349-369）
+- [ ] 审核发现：创建实例的前端/后端均把 security_group_id 标为可选，但 aliyun/tencent 适配器都强制要求非空，用户留空会拿到无明细的 502「Failed to call cloud provider」（web/src/pages/Resources/CloudInstancesPage.tsx:166、internal/server/api_cloud.go:220）
+- [ ] 审核发现：账号创建不校验 region（validate() 只查 vendor/alias/secret），但适配器要求 region 非空（aliyun.New 空 region 返回 nil），缺省账号的生命周期操作走默认分支回 500「Failed to load cloud provider」，报错误导（internal/server/api_cloud.go:74-86、156）
+- [ ] 审核发现：op.ID 被覆写为「厂商ID-时间戳」，违背 cloud.NewOperation 声明的确定性 ID 契约（同一次云操作保持同一 ID），且时间戳与厂商请求 ID 无关，仅靠纳秒唯一（internal/server/api_cloud.go:307、335）
+- [ ] 审核发现：callCloudLifecycleAPI 先在一次性的丢弃 mux 上注册 handler（s.registerCloudAPI(http.NewServeMux())），属死代码，随后才在真正 mux 上二次注册（internal/server/api_cloud_lifecycle_test.go:101）
+- [ ] 审核发现：TestCloudDiscoverySync 依赖 instances[0]/[1] 顺序，而 ListCloudInstances 按 created_at 排序，同批写入若时间戳相同则顺序未定义，存在偶发断言失败风险（internal/server/api_cloud_lifecycle_test.go:128）
+- [ ] 审核发现：操作列表过滤使用请求账号重新拼接键而非检查实际存储键，导致查询任一账号时返回所有账号的操作记录（internal/server/api_cloud.go:407）。
+- [ ] 审核发现：创建请求显式选择按量计费时未被 switch 接受，页面选择「按量」会收到 400，只有不传计费模式才能创建按量实例（internal/server/api_cloud.go:315）。
+- [ ] 审核发现：创建允许指定不同于账号默认地域的地域，但发现、生命周期操作和轮询仍使用账号默认地域，导致跨地域创建的实例无法被发现或正确跟踪（internal/server/api_cloud.go:325）。
+- [ ] 审核发现：同步保留云端已不存在的实例且不更新状态，释放成功后页面仍将其显示为原状态和计费状态并允许继续操作（internal/server/api_cloud.go:180）。
+- [ ] 审核发现：页面收到异步操作后只立即刷新一次且从不轮询操作，云端稍后完成或失败时用户看不到最终结果和更新后的状态（web/src/pages/Resources/CloudInstancesPage.tsx:43）。
+- [ ] 审核发现：云操作仅保存在进程内存中，服务重启后已受理操作的查询返回 404，无法继续跟踪云端仍在执行的创建或释放（internal/server/api_cloud.go:386）。
+- [ ] 审核发现：构造云适配器未检查账号的 enabled 状态，已禁用的云账号仍会被发现并可发起创建、启停和释放操作（internal/server/api_cloud.go:140）。
