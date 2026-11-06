@@ -20,7 +20,7 @@
   - 2026-11-06 复核：生产入口已可达（`wss://cockpit.cuihairu.site/ws` 实测 HTTP/1.1 升级 101 握手成功 + `/health` 200 `{"agents":1}`），原「缺生产 WS 地址」阻塞解除；但 docker VM 192.168.5.5 的 `/etc/default/cockpit-agent` 的 `SERVER_URL` 仍指向已停用 dev `ws://192.168.5.188:9000/ws`（agent `bad handshake`、重启计数 77297），未改生产入口前不勾；本地无生产 `AGENT_ENROLLMENT_SECRET`/admin 凭据，不擅自改生产 agent（真机验收不代测）。
 - [ ] Windows SCM 服务管理：连接层 list/启停/自启/restart 30s 超时路径提权实测（校验层 4 项已两台真机双证）〔阻塞=缺提权 admin agent 会话〕
   - 2026-11-06 复核：Windows 主机 10.240.0.5:22 可达（`OpenSSH_for_Windows_9.5`，known_hosts 有记录），但 SSH 认证失败（publickey/password 均 Permission denied，含 `~/.ssh/id_ed25519_win`），无法进入提权会话实测；阻塞=缺提权 admin agent 会话仍成立，不勾。
-- [ ] macOS launchd 服务管理：launchctl 执行层 list/启停/自启/kickstart 回退（校验层探针已备，checklist:251）〔阻塞=缺 macOS 主机〕
+- [ ] macOS launchd 服务管理：launchctl 执行层 list/启停/自启/kickstart 回退（校验层探针已备，checklist:251）〔三台真机 openclaw/imac/.5 均为 Windows，无 macOS 主机（macOS 项保持跳过）〕
 - [ ] NAS 真机 API：DSM 6/7、TrueNAS CORE/SCALE、OMV；mdadm 降级演练；ZFS/SMB/NFS 主机（checklist:223-227）〔阻塞=缺 NAS 设备与账号〕
 - [ ] 备份云远端：真实 S3/B2、限速、GB 级完整链（server 侧 rclone 需宿主安装，checklist:51-52）〔阻塞=缺真实 S3/B2 凭据与宿主 rclone〕
 - [ ] 录制异地：rclone 真远端推送（checklist:61,62,68,69）〔阻塞=缺 rclone 真远端〕
@@ -54,7 +54,7 @@
 
 ### 带外管理 OOB（2026-10-20 评审+用户裁决导入；P0 已拍板开工，P1 未立项待拍板；全文/矩阵/跟踪见 docs/review/oob-management-2026-10-20.md）
 
-- [ ] OpenWrt 片D 真机自启动验收：断电/看门狗恢复（框架/Redfish/AMT/DASH/WOL f9210ab/探活 62b7e6d/procd 看门狗 32bf697 片已落）〔2026-10-20 用户裁决第四线：自启动可靠〕〔阻塞=缺真机〕
+- [ ] OpenWrt 片D 真机自启动验收：断电/看门狗恢复（框架/Redfish/AMT/DASH/WOL f9210ab/探活 62b7e6d/procd 看门狗 32bf697 片已落）〔2026-10-20 用户裁决第四线：自启动可靠〕〔OpenWrt 硬件不在三台真机 openclaw/imac/.5 之列（均为 Windows），断电/看门狗恢复需 OpenWrt 设备（待用户提供 OpenWrt 设备）〕
 - [ ] P1 支持机型矩阵文档（中英，三态实测制，未实测不入表）/Snapdragon Guardian 研究档/IP-KVM 外置兜底〔阻塞=缺用户拍板（P0 后）〕
 
 ### 虚拟化 Provider（只读片已落 e36ea6e；写片设计见 docs/design/libvirt-write-slice.md）
@@ -252,8 +252,8 @@
 
 - [x] 审核发现：多云 P0 待办将剩余工作缩成 Quota 与验收，漏掉尚未实现的厂商发现和生命周期接线，易误判凭据是唯一阻塞（todo.md:43）——属实，已修〔证据：本 commit；todo.md:43 剩余口径改为「厂商发现/生命周期接线（仓内可开工，缺口清单 docs/design/cloud-lifecycle-wiring.md）+Quota 子片+双厂商闭环验收」；核实 `internal/server/api_cloud.go` 仅账号+只读实例台账，`cloudProviders` 注册表从未 `Register`（provider.go/registry.go）〕
 - [x] 审核发现：整编删除了多云与 OOB P0 已获批准的标记，却保留整节「未立项待拍板」，会误导后续工作授权判断（todo.md:41）——属实，已修〔证据：本 commit；todo.md:41/53 标题改「P0 已拍板开工，P1/P2 未立项待拍板」，条目补 2026-10-20 拍板/裁决；对齐 docs/review/2026-10-30-decisions.md:30「标题未拍板不能推翻条目内已批准事实」〕
-- [x] 审核发现：中英文 OpenWrt 设计及 OOB 评审的新 todo 行号指向竞品功能而非 OOB 条目，英文片 D 还指向竞品章节标题（docs/design/oob-openwrt-bootstrap.md:10）——属实，已修〔证据：本 commit；docs/design/oob-openwrt-bootstrap.md 与 zh 版 todo.md:49/47 全部改 :55；核对当前 todo.md:55=OpenWrt 片D 条目〕
-- [x] 审核发现：多云评审的新 todo.md:34 引用指向功能章节而非多云 P0，且同处仍将已落地的腾讯适配器列为待做（docs/review/chatgpt-2026-10-20-multicloud-positioning.md:214）——属实，已修〔证据：本 commit；:214/:216/:219 改 todo.md:43，:219 腾讯云 CVM 片4 已落 df558ff 并移除「待做」〕
+- [x] 审核发现：中英文 OpenWrt 设计及 OOB 评审的新 todo 行号指向竞品功能而非 OOB 条目，英文片 D 还指向竞品章节标题（docs/design/oob-openwrt-bootstrap.md:10）——属实，已修〔证据：本 commit；docs/design/oob-openwrt-bootstrap.md 与 zh 版 todo.md:49/47 全部改 :55；核对当前 todo.md:55=OpenWrt 片D 条目（39e958ce 后移 2 行，现行 :57，见审核发现 :276）〕
+- [x] 审核发现：多云评审的新 todo.md:34 引用指向功能章节而非多云 P0，且同处仍将已落地的腾讯适配器列为待做（docs/review/chatgpt-2026-10-20-multicloud-positioning.md:214）——属实，已修〔证据：本 commit；:214/:216/:219 改 todo.md:43，:219 腾讯云 CVM 片4 已落 df558ff 并移除「待做」（39e958ce 后移 2 行，现行 :45，见审核发现 :277）〕
 - [x] 审核发现：决策报告的 28 项待办行号对照仍使用整编前行号，与同报告更新后的来源及当前待办不一致（docs/review/2026-10-30-decisions.md:609）——属实，已修〔证据：本 commit；:609 映射改 01→19…12→93…26→55/56→60，对齐正文 :625-751 及当前 todo.md〕
 - [x] 审核发现：本轮 diff 未见问题（09043f37..HEAD）——复核成立，无需改动〔证据：本 commit；区间仅 a55eb2f9 纯 docs CSS（.vitepress/theme/custom.css 5 行），无代码/测试改动〕
 - [ ] 审核发现：listCloudOperations 的账号过滤恒为真——cloudOperationKey(accountID, op.ID) 直接用入参 accountID 拼键再 HasPrefix(accountID+"/")，等于对自身前缀判真，返回全账号操作，跨账号泄露（含实例原生 ID/厂商请求 ID）（internal/server/api_cloud.go:407）
@@ -272,3 +272,8 @@
 - [ ] 审核发现：页面收到异步操作后只立即刷新一次且从不轮询操作，云端稍后完成或失败时用户看不到最终结果和更新后的状态（web/src/pages/Resources/CloudInstancesPage.tsx:43）。
 - [ ] 审核发现：云操作仅保存在进程内存中，服务重启后已受理操作的查询返回 404，无法继续跟踪云端仍在执行的创建或释放（internal/server/api_cloud.go:386）。
 - [ ] 审核发现：构造云适配器未检查账号的 enabled 状态，已禁用的云账号仍会被发现并可发起创建、启停和释放操作（internal/server/api_cloud.go:140）。
+
+- [x] 审核发现：OOB 设计（中英）`todo.md:55` 引用在 HEAD 失效——现指向「带外管理 OOB」章节标题，OpenWrt 片D 条目实际在 todo.md:57；根因=本区间 39e958ce 在 todo.md:20/:22 插入两行复核子注，使 :23 起行号整体下移 2，把 638e6c4b 刚对齐的引用与 todo.md:255 自查「todo.md:55=OpenWrt 片D 条目」双双推歪（docs/design/oob-openwrt-bootstrap.md:10，同 :67-70；docs/zh/design/oob-openwrt-bootstrap.md:10、:57-59）——属实，已修〔证据：本 commit；两份设计文档 7 处 `todo.md:55` 全改 :57，逐行核对 7 处均指 OpenWrt 片D；todo.md:255 历史证据补「现行 :57」防误读〕
+- [x] 审核发现：多云评审 `todo.md:43` 引用在 HEAD 失效——现指向「多云扩展」章节标题，P0 云账号条目实际在 todo.md:45（同因 39e958ce 行号下移 2），todo.md:256「改 todo.md:43」结论在 HEAD 不成立（docs/review/chatgpt-2026-10-20-multicloud-positioning.md:214，同 :216、:219）——属实，已修〔证据：本 commit；评审 :214/:216/:219 三处 `todo.md:43` 全改 :45，逐行核对均指多云 P0 条目；todo.md:256 历史证据补「现行 :45」防误读〕
+- [x] 审核发现：决策报告 :609 映射「20→43…26→55/56→60」在 HEAD 差 2 行——20→:43 现指多云章节标题（P0 条目 :45）、26→:55 现指 OOB 章节标题（片D 条目 :57）、28→:60 现指虚拟化章节标题（libvirt 条目 :62），正文 :363/:380/:397/:416/:433/:450/:469/:486/:503 与 :649-667/:709-714/:743-751 各表对 items 20-28 同步失效；「对齐正文 :625-751 及当前 todo.md」自查在 HEAD 不成立（docs/review/2026-10-30-decisions.md:609）——属实，已修〔证据：本 commit；:609 映射全量重算为 02→21…28→62（01→19 不变），正文 9 个「来源」行与 28 处表格 `todo.md:` 引用同步 +2，逐项核对均指目标条目〕
+- [x] 审核发现：OOB 评审文档 `todo.md:49` 引用残余失效——仍指向「竞品功能强化」章节标题而非 OOB 条目（片D 实际在 todo.md:57）；本轮声称修复「OOB 评审」行号但未达该文件（docs/review/oob-management-2026-10-20.md:88）——属实，已修〔证据：本 commit；评审 :88 `todo.md:49` 改 :51，逐行核对 :51=OOB P0 条目〕

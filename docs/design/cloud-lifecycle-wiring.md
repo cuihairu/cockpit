@@ -6,7 +6,7 @@ status: inventory (2026-10-30, 已代决 docs/review/2026-10-30-decisions.md 项
 # P0 云厂商发现/生命周期 API 与界面接线缺口清单（项 20）
 
 > 依据：决策项 20 立即执行动作「再盘点厂商发现、生命周期 API 与界面仍缺的接线」。
-> 状态：**盘点完成**（无需凭据，本仓只读核对，commit 73c0a0b）。真实账号契约核对与生命周期闭环需用户提供 AccessKey（待用户）。
+> 状态：**盘点完成**（无需凭据，本仓只读核对，commit 73c0a0b）。真实账号契约核对与生命周期闭环需用户提供 AccessKey（凭据类输入，非测试机缺口；三台 Windows 真机 openclaw/imac/.5 在位）（待用户）。
 > 前置：`docs/design/cloud-provider.md`（P0 Slice 1 设计，接口/能力声明/Operation 状态机已定）；`internal/server/api_cloud.go`（当前实例路由只读数据库台账）。
 
 ## 1. 现状盘点（已核实）
