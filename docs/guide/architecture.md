@@ -1,4 +1,4 @@
-# Architecture and Boundaries
+# Architecture and Source Layers
 
 
 This document is authoritative on the current repository implementation, describing Cockpit's runtime topology, module responsibilities, and boundaries. It is not a long-term vision document; when code behavior changes, this page should be updated first.
@@ -64,6 +64,72 @@ The current sources of truth are not single. Inventory is declarative asset inpu
 | `web/src/services` | Frontend API client; communicates with the Server uniformly through `/api` |
 
 Cross-module calls should respect these boundaries. For instance, an API handler should not parse inventory files directly; it should query runtime results through storage. The Agent should not write to the Server database directly; it should have the Server persist things through protocol messages.
+
+### Source Layers
+
+These layers are responsibilities, not directory names. The source-linked glossary lives in [Concepts](/guide/concepts#glossary).
+
+#### L0 Shell and Process Bootstrap
+
+The CLI parses commands, probes default configuration paths, maps flags to typed startup configuration, and launches the Server, Agent, or probe Agent without owning runtime services. `cmd/cockpit/main.go:22` defines the probe order; `cmd/cockpit/main.go:61` dispatches commands; `cmd/cockpit-agent/main.go:75` maps `start` flags; `cmd/cockpit-probe-agent/main.go:26` launches the dedicated probe process.
+
+#### L1 Transport and Contract
+
+`/ws` upgrades an Agent connection, requires `register` as the first frame, then runs read and write loops. `internal/server/websocket.go:70` owns the handshake; `internal/protocol/message.go:8` owns message types; `internal/protocol/codec.go:19` owns JSON over WebSocket encoding. `internal/agent/agent.go:355` dials with HTTP/1.1 and a connection generation, while `internal/agent/agent.go:677` dispatches incoming control frames.
+
+#### L2 Server Composition and Runtime Control
+
+The Server owns process-scoped context, background work accounting, route middleware order, subsystem start/stop, and Agent RPC correlation. `internal/server/server.go:126` opens SQLite and composes dependencies; `internal/server/server.go:204` starts subsystems and listeners; `internal/server/server.go:411` shuts them down in dependency order; `internal/server/server.go:503` correlates an RPC request with a pending response channel.
+
+#### L3 Control API and Session Policy
+
+REST handlers translate authenticated requests into resource operations, Agent RPC calls, or streaming-session control. Central routing is `internal/server/api.go:16`; authenticated public and protected routes are registered at `internal/server/server.go:354`; JWT, RBAC, and audit wrappers compose at `internal/server/server.go:283`; Web routes and permission menus are declared at `web/src/App.tsx:120` and rendered at `web/src/App.tsx:533`.
+
+#### L4 Orchestration and Scheduling
+
+Jobs and Workflows persist intent and step state before dispatch; schedulers and scanners reapply it over time. Job submission is `internal/server/api_jobs.go:63`, dispatch is `internal/server/api_jobs.go:401`, Workflow run creation is `internal/server/api_workflow.go:484`, and the step state machine is `internal/server/api_workflow.go:582`. The probe runner starts its periodic loop at `internal/probe/runner.go:185`; inventory hot reload starts at `internal/sync/watcher.go:57`.
+
+#### L5 Persistence and Secret Custody
+
+SQLite is the durable business state plane, while the Vault is the separately unlocked encrypted-secret plane. `internal/storage/storage.go:40` opens and migrates SQLite; `internal/storage/storage.go:102` lists the model set. The Vault selects its provider at `internal/server/server.go:140`; the local encrypted provider reads and writes rows through `internal/vault/local.go:122`.
+
+#### L6 Execution Providers and Platform Detection
+
+The Agent maps `<provider>.<action>` RPC methods to capability providers that execute locally or against locally reachable systems. The provider contract is `internal/agent/provider/provider.go:4`; method routing is `internal/agent/rpc/router.go:70`; detection registration is `internal/agent/detector/detector.go:10`; capability-driven wiring is `internal/agent/providers.go:18`.
+
+#### L7 Integrations and Notification Egress
+
+Server-side adapters turn stored accounts or YAML credentials into cloud, DNS, overlay, and notification calls. The cloud Registry validates declared capabilities at `internal/cloud/registry.go:23`; the capability contract is `internal/cloud/provider.go:13`; notification channels are built at `internal/notification/service.go:68`; DNS and overlay adapters are wired during Server startup at `internal/server/server.go:255`.
+
+#### L8 Interface Delivery and Client State
+
+The Server serves the SPA and API from one process, while Web and mobile clients keep only presentation/session-local state. Static fallback is `internal/server/web.go:12`; the Web API gateway is `web/src/services/api.ts:122`; mobile preferences and secure-token boundaries are `mobile/lib/state/settings.dart:10`; the terminal data path reconnects through `web/src/components/TerminalModal/index.tsx:115`.
+
+#### State and Channel Matrix
+
+| Layer | Runtime state | Inbound callers | Channels |
+| --- | --- | --- | --- |
+| L0 | Process environment and CLI flags | Operator | CLI flags, YAML loader |
+| L1 | Agent connection objects, send queues, pending RPC map | Agents | WebSocket `/ws`, JSON frames |
+| L2 | Context, WaitGroups, middleware chain | All server modules | In-process calls |
+| L3 | Remote tickets and sessions in memory; JWT in browser/mobile secure storage | Web, mobile, external scripts | REST `/api`, browser WebSocket `/api/remote/terminal` |
+| L4 | Jobs/Workflows/ProbeResult in SQLite; timers in memory | REST, background loops | SQLite, Agent RPC, probe HTTP/ICMP/TCP |
+| L5 | Business models and encrypted Vault rows | L2-L7 | GORM/SQLite, encryption keys |
+| L6 | Agent provider sessions and task follow buffers | Server RPC | Local process/file/socket calls; proxy frames |
+| L7 | Cloud discovery TTL cache in memory; credentials from config/env | REST and scanners | HTTPS providers, email/webhook/Telegram |
+| L8 | Browser/mobile UI state only | Users | Static HTTP, REST, session WebSocket |
+
+### Layering Rationale
+
+1. Bootstrap is separate from execution so multiple command targets can share one configuration probe path without embedding service lifecycles in argument parsing (`cmd/cockpit/main.go:22`).
+2. The WS contract is separate from handlers because registration, upstream reporting, and proxy forwarding share one connection generation and one serialized writer (`internal/agent/agent.go:355`; the write loop is provided by `internal/core/report/upstream.go`).
+3. Server composition is separate from REST because background loops and DB shutdown need one process context that outlives any request (`internal/server/server.go:203`; `internal/server/server.go:411`).
+4. Control APIs are separate from orchestration because request handlers create durable Jobs and return before Agent execution finishes (`internal/server/api_jobs.go:63`; `internal/server/api_jobs.go:401`).
+5. Workflow state is separate from Job state because an in-flight definition must be frozen while its steps create separate auditable Job attempts (`internal/server/api_workflow.go:426`; `internal/server/api_workflow.go:682`).
+6. Persistence and Vault are separate because ordinary query rows and unlock-gated encrypted secrets have different lifecycles and access rules (`internal/storage/storage.go:40`; `internal/vault/local.go:122`).
+7. Agent execution is provider-pluggable because capability detection must skip unavailable integrations without breaking the always-on heartbeat (`internal/agent/providers.go:18`; `internal/agent/agent.go:424`).
+8. Server integrations are separate from Agent providers because cloud/DNS/overlay resources use global credentials, while node execution is gated by local capabilities and environment (`internal/server/server.go:255`; `internal/agent/providers.go:18`).
+9. Interface delivery is separate from source-of-truth state because clients may cache tokens and preferences locally, but `/api` remains the authoritative runtime path (`web/src/services/api.ts:126`; `mobile/lib/state/settings.dart:10`).
 
 ## Control Flow
 

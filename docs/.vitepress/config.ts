@@ -24,7 +24,7 @@ export default withMermaid(defineConfig({
       root: {
         nav: [
           { text: 'Guide', link: '/guide/introduction' },
-          { text: 'Architecture', link: '/guide/architecture' },
+          { text: 'Architecture & Source Layers', link: '/guide/architecture' },
           { text: 'Research', link: '/research/ops-oss-survey' }
         ],
 
@@ -41,7 +41,7 @@ export default withMermaid(defineConfig({
             {
               text: 'Architecture',
               items: [
-                { text: 'Architecture and Boundaries', link: '/guide/architecture' },
+                { text: 'Architecture and Source Layers', link: '/guide/architecture' },
                 { text: 'Agent Egress and SD-WAN', link: '/guide/agent-egress-sdwan' },
                 { text: 'Protocol', link: '/guide/protocol' },
                 { text: 'WebSocket Token Auth', link: '/websocket-token-auth' },
@@ -94,7 +94,7 @@ export default withMermaid(defineConfig({
       zh: {
         nav: [
           { text: '指南', link: '/zh/guide/introduction' },
-          { text: '架构', link: '/zh/guide/architecture' },
+          { text: '架构与源码分层', link: '/zh/guide/architecture' },
           { text: '调研', link: '/zh/research/ops-oss-survey' }
         ],
 
@@ -111,7 +111,7 @@ export default withMermaid(defineConfig({
             {
               text: '架构',
               items: [
-                { text: '架构与边界', link: '/zh/guide/architecture' },
+                { text: '架构与源码分层', link: '/zh/guide/architecture' },
                 { text: 'Agent 出口与 SD-WAN', link: '/zh/guide/agent-egress-sdwan' },
                 { text: '协议定义', link: '/zh/guide/protocol' },
                 { text: 'WebSocket 认证', link: '/zh/websocket-token-auth' },

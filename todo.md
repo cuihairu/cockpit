@@ -277,3 +277,38 @@
 - [x] 审核发现：多云评审 `todo.md:43` 引用在 HEAD 失效——现指向「多云扩展」章节标题，P0 云账号条目实际在 todo.md:45（同因 39e958ce 行号下移 2），todo.md:256「改 todo.md:43」结论在 HEAD 不成立（docs/review/chatgpt-2026-10-20-multicloud-positioning.md:214，同 :216、:219）——属实，已修〔证据：本 commit；评审 :214/:216/:219 三处 `todo.md:43` 全改 :45，逐行核对均指多云 P0 条目；todo.md:256 历史证据补「现行 :45」防误读〕
 - [x] 审核发现：决策报告 :609 映射「20→43…26→55/56→60」在 HEAD 差 2 行——20→:43 现指多云章节标题（P0 条目 :45）、26→:55 现指 OOB 章节标题（片D 条目 :57）、28→:60 现指虚拟化章节标题（libvirt 条目 :62），正文 :363/:380/:397/:416/:433/:450/:469/:486/:503 与 :649-667/:709-714/:743-751 各表对 items 20-28 同步失效；「对齐正文 :625-751 及当前 todo.md」自查在 HEAD 不成立（docs/review/2026-10-30-decisions.md:609）——属实，已修〔证据：本 commit；:609 映射全量重算为 02→21…28→62（01→19 不变），正文 9 个「来源」行与 28 处表格 `todo.md:` 引用同步 +2，逐项核对均指目标条目〕
 - [x] 审核发现：OOB 评审文档 `todo.md:49` 引用残余失效——仍指向「竞品功能强化」章节标题而非 OOB 条目（片D 实际在 todo.md:57）；本轮声称修复「OOB 评审」行号但未达该文件（docs/review/oob-management-2026-10-20.md:88）——属实，已修〔证据：本 commit；评审 :88 `todo.md:49` 改 :51，逐行核对 :51=OOB P0 条目〕
+
+## 源码分层分析 2026-11-07
+
+### 抽象层清单
+
+- L0 进程外壳：解析命令与配置探测，薄壳启动 Server/Agent/探针，不拥有运行期服务。（cmd/cockpit/main.go:22）
+- L1 传输契约：统一 Server-Agent WebSocket 帧类型、注册握手、JSON 编解码和 ID/proxy 关联。（internal/protocol/message.go:8）
+- L2 Server 运行时组合：组装依赖，管理 context、后台任务、中间件链、子系统启停和 RPC 关联。（internal/server/server.go:126）
+- L3 控制 API 与会话策略：认证 REST 请求，分配远控票据/会话，转发资源操作或流式数据面控制。（internal/server/api.go:31）
+- L4 编排与调度：先落 Job/Workflow/探测意图，再后台派发、重试、推进和周期扫描。（internal/server/api_workflow.go:484）
+- L5 持久化与秘密保管：SQLite 拥有业务模型和迁移；Vault 独立解锁并加密凭据行。（internal/storage/storage.go:40）
+- L6 执行 Provider：Agent 按探测能力装配本地/本侧可达执行器，并把 RPC 动作路由到 Provider。（internal/agent/rpc/router.go:70）
+- L7 集成与通知出口：Server 用全局凭据/账号适配云、DNS/ACME、overlay、第三方系统和多渠道通知。（internal/notification/service.go:68）
+- L8 接口交付与客户端状态：同进程交付 SPA/API/WebSocket；Web/mobile 只保留本地偏好、token 和会话 UI 状态。（web/src/App.tsx:533）
+
+### 超大文件候选
+
+- [ ] LAY-001 [P1] 拆分 docs/guide/concepts.md（245 行）——新增 glossary 后概念、状态、能力与差异说明混在单页，可按“运行态/声明源/安全”拆分。（docs/guide/concepts.md:1）
+- [ ] LAY-002 [P1] 拆分 web/src/types/index.ts（1712 行）——云、远控、备份、Workflow、设置等全部领域类型集中，页面局部修改会被迫触碰共享巨型文件。（web/src/types/index.ts:1）
+- [ ] LAY-003 [P1] 拆分 web/src/services/api.ts（1570 行）——单个 ApiService 汇聚全部 REST 资源与两种流式协议，领域 API 可按资源边界拆分。（web/src/services/api.ts:122）
+- [ ] LAY-004 [P1] 拆分 web/src/components/FileBrowser/index.tsx（1239 行）——远端浏览、操作、传输和 UI 布局同文件，组件接口与副作用耦合。（web/src/components/FileBrowser/index.tsx:1）
+- [ ] LAY-005 [P1] 拆分 scripts/acceptance/guac/probe/main.go（1171 行）——验收主流程、协议构造、会话断言和输出聚合集中，场景扩展会继续膨胀。（scripts/acceptance/guac/probe/main.go:1）
+- [ ] LAY-006 [P1] 拆分 internal/server/api.go（1166 行）——中央分发器混合认证辅助、用户/资源 handler 和大量私有 view 类型。（internal/server/api.go:31）
+- [ ] LAY-007 [P1] 拆分 scripts/acceptance/agent-backup/probe/main.go（1157 行）——备份验收的状态机、远端探测与报告输出耦合在 main 包单文件。（scripts/acceptance/agent-backup/probe/main.go:1）
+- [ ] LAY-008 [P1] 拆分 internal/server/api_workflow.go（1090 行）——HTTP 解码、定义 CRUD、编排状态机、变量替换和结果快照同文件。（internal/server/api_workflow.go:484）
+- [ ] LAY-009 [P1] 拆分 scripts/acceptance/workflows/probe/main.go（1022 行）——Workflow 验收的步骤、审批、取消和报告逻辑集中，新增用例会进一步扩张入口。（scripts/acceptance/workflows/probe/main.go:1）
+
+测试文件与验收 probe 未列入拆分候选之外的“生产路径优先级”，但上表只保留非 `_test.go`、非生成文件。
+
+### 目录/分类问题
+
+- `docs/guide/concepts.md` 新增源码术语表后，既是入门概念页又是架构证据索引；可后续拆出 `docs/guide/source-layers.md`，两语言页互链（docs/guide/concepts.md:225）。
+- `internal/server/api.go` 名义上是 API 聚合入口，但 `handleAPI` 中央 switch、用户/资源 CRUD、审计辅助和 view 类型混合，按资源拆分后可让 `api.go` 只保留路由分发（internal/server/api.go:31）。
+- `web/src/types/index.ts` 与 `web/src/services/api.ts` 都是按“通用前端类型/API”归类，不是按领域；建议拆 `types/remote`、`types/cloud`、`services/workflows` 等已有模式（web/src/types/index.ts:1）。
+- `internal/server/api_workflow.go` 承载 REST 与编排引擎两种职责，目录分类只反映 API 面；状态机可独立成 `workflow/engine.go`（internal/server/api_workflow.go:582）。
