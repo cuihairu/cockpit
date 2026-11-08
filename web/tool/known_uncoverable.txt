@@ -24,7 +24,6 @@ components/GuacamoleModal/index.tsx:287 doDeleteSaved savedCred 判空早退：�
 pages/Workbench/index.tsx:103 openAgentTerminal selectedAgent 防御早退：兜底按钮在 SSH Tab 内，Tab 仅在选中 agent 后可切
 pages/Recordings/index.tsx:83 recording null 早退：回放入口由行内按钮发起，recording 必已选中
 pages/Recordings/index.tsx:166 recording/termDivRef null 早退：弹窗内容未挂载时不建终端，防御
-pages/Backups/index.tsx:376 restoreTarget null 早退：恢复按钮仅在选中目标后可点
 pages/AuditLogs/index.tsx:68 parseAuditDetails 空串早退：详情为空的行不进解析调用，防御
 workbench/LogsPanel.tsx:207 frames.pop() ?? '' 兜底：split 结果至少一个元素，pop 永不返回 undefined
 
@@ -69,8 +68,6 @@ pages/Docker/index.tsx:263 容器状态 Tag color 内联映射：running/exited/
 pages/Docker/index.tsx:175 switch 语句行：各 case 分支计数正常，switch 行本身 v8 记 0
 pages/Recordings/index.tsx:91 guac blob 加载失败 catch：错误文案断言已实证，promise catch 回调链漏计
 pages/Recordings/index.tsx:100 回放 Modal title 内联模板：标题断言已有
-pages/Recordings/index.tsx:188 倍速 effect 条件：2x 切换重拉用例已实证该路径执行
-pages/Recordings/index.tsx:197 effect 依赖数组行：非执行语句，v8 挂计
 components/MetricsChart/index.tsx:85 tooltip formatter：params 四向（name/seriesName/value 缺省）均已断言，echarts 内联回调漏计
 components/FileBrowser/index.tsx:534 该按钮仅特定目录态渲染：对应态不可达该渲染分支（既定判定，行为由其余态断言覆盖）
 
@@ -111,7 +108,6 @@ App.tsx:521 同上（首项 link 内联 onClick navigate('/')；原 513）
 
 # components/GuacPlayer/index.tsx（解析器/连接体已由 duck tunnel 用例覆盖，剩两点）
 components/GuacPlayer/index.tsx:39 parseGuacInstructions elements.length > 0 假侧：内层循环进入时至少 push 一个元素或抛错，恒真死侧
-components/GuacPlayer/index.tsx:135 Slider tooltip formatter (v ?? 0)：悬停才触发的内联纯函数，jsdom 不可悬停；格式化逻辑已由等价断言覆盖（原 82 漂移）
 
 # components/GuacamoleModal/index.tsx（保险箱/剪贴板主路径已由新用例覆盖，剩死侧与漏计）
 components/GuacamoleModal/index.tsx:156 ticket width Number(...) || 1280 兜底：分辨率经下拉白名单（恒 WxH 格式），split 后必为数字（原 115 漂移）
@@ -123,17 +119,7 @@ components/GuacamoleModal/index.tsx:637 工具栏错误文案 JSX 短路（error
 components/GuacamoleModal/index.tsx:661 disconnected && !showCredentials 复合条件：各单态渲染断言均有，复合分支 v8 漏计（原 470 漂移）
 
 # components/TerminalModal/index.tsx（!visible 清理家族 + 判空防御 + 封闭取值死侧）
-components/TerminalModal/index.tsx:132 ws.onmessage resize 分支 fitAddonRef 判空 null 侧：WS 消息仅在终端建成后到达，ref 必已赋值，防御
-components/TerminalModal/index.tsx:239 !visible 清理入口：主 effect（[connectWebSocket, visible, authPending]）cleanup 先行 dispose 并置 null，本 effect（[visible]）后跑时 terminalInstanceRef.current 恒 null，判空恒 false
-components/TerminalModal/index.tsx:241 同 239 死代码清理体（wsRef 判空）
-components/TerminalModal/index.tsx:242 同 239（close 调用）
-components/TerminalModal/index.tsx:243 同 239（置 null）
-components/TerminalModal/index.tsx:245 同 239（terminal reset）
-components/TerminalModal/index.tsx:246 同 239（setConnected(false)）
 components/TerminalModal/index.tsx:270 handleReconnect terminalInstanceRef 判空：重连按钮仅终端视图渲染，ref 恒有值，防御
-components/TerminalModal/index.tsx:324 doDeleteSaved savedCred 判空早退：删除入口仅已存凭据面板渲染，savedCred 恒非空（原 328，proceedWithAuth 死分支删除后漂移）
-components/TerminalModal/index.tsx:350 handleVaultVerified action 封闭取值外不可达：pendingVaultAction 仅 save-connect/delete 两值（原 354 漂移）
-components/TerminalModal/index.tsx:371 受限认证面板 authMethods?.join || '未知' 兜底：该面板仅在 authMethods 已提供（无 password/publickey）时渲染，恒已定义（原 375 漂移）
 
 # pages/Cron/index.tsx - 防御性/内联分支
 pages/Cron/index.tsx:372 用户筛选 onChange v ?? '' 兜底：选择不可清空，null 分支防御
@@ -150,70 +136,7 @@ pages/SetupTOTP/index.tsx:55 同上（进入 step1）
 pages/SetupTOTP/index.tsx:56 同上（回调收尾）
 # ---- 2026-10-03 新增特性收口（TagManageModal/Agent标签/Workbench增强）----
 # components/TagManageModal.tsx - 标签管理弹窗新增组件，暂无专项测试，功能由集成测试间接覆盖
-components/TagManageModal.tsx:19
-components/TagManageModal.tsx:20
-components/TagManageModal.tsx:21
-components/TagManageModal.tsx:22
-components/TagManageModal.tsx:23
-components/TagManageModal.tsx:24
-components/TagManageModal.tsx:25
-components/TagManageModal.tsx:27
-components/TagManageModal.tsx:28
-components/TagManageModal.tsx:29
-components/TagManageModal.tsx:30
-components/TagManageModal.tsx:31
-components/TagManageModal.tsx:33
-components/TagManageModal.tsx:35
-components/TagManageModal.tsx:39
-components/TagManageModal.tsx:40
-components/TagManageModal.tsx:43
-components/TagManageModal.tsx:44
-components/TagManageModal.tsx:45
-components/TagManageModal.tsx:46
-components/TagManageModal.tsx:47
-components/TagManageModal.tsx:49
-components/TagManageModal.tsx:50
-components/TagManageModal.tsx:51
-components/TagManageModal.tsx:52
-components/TagManageModal.tsx:53
-components/TagManageModal.tsx:55
-components/TagManageModal.tsx:56
-components/TagManageModal.tsx:60
 components/TagManageModal.tsx:61
-components/TagManageModal.tsx:62
-components/TagManageModal.tsx:63
-components/TagManageModal.tsx:64
-components/TagManageModal.tsx:65
-components/TagManageModal.tsx:67
-components/TagManageModal.tsx:68
-components/TagManageModal.tsx:69
-components/TagManageModal.tsx:70
-components/TagManageModal.tsx:71
-components/TagManageModal.tsx:73
-components/TagManageModal.tsx:77
-components/TagManageModal.tsx:78
-components/TagManageModal.tsx:79
-components/TagManageModal.tsx:80
-components/TagManageModal.tsx:81
-components/TagManageModal.tsx:83
-components/TagManageModal.tsx:87
-components/TagManageModal.tsx:88
-components/TagManageModal.tsx:89
-components/TagManageModal.tsx:90
-components/TagManageModal.tsx:93
-components/TagManageModal.tsx:99
-components/TagManageModal.tsx:106
-components/TagManageModal.tsx:109
-components/TagManageModal.tsx:126
-components/TagManageModal.tsx:127
-components/TagManageModal.tsx:129
-components/TagManageModal.tsx:136
-components/TagManageModal.tsx:140
-components/TagManageModal.tsx:144
-components/TagManageModal.tsx:152
-components/TagManageModal.tsx:155
-components/TagManageModal.tsx:159
-components/TagManageModal.tsx:160
 
 # pages/Agents/columns.tsx - Agent 列新增标签筛选渲染分支，现有表格用例覆盖基础渲染
 pages/Agents/columns.tsx:12
@@ -262,31 +185,19 @@ pages/Workbench/index.tsx:255
 # 多云账号端点块插入 +2 漂移：2026-10-21 校准；oob redirect 类型导入 +4 漂移：
 # 2026-10-28 校准（import 区 4 行插入，全文件其后行号 +4）；
 # 2026-11-05 云实例端点块插入 +3 漂移（1446 段），import 类型 +3 漂移（337 段））
-services/api.ts:353
-services/api.ts:337
-services/api.ts:341
-services/api.ts:345
-services/api.ts:349
 services/api.ts:340
 services/api.ts:344
 services/api.ts:348
 services/api.ts:352
 services/api.ts:356
 # getFirewallStatus：防火墙观测新端点，页面经 mock 测，方法体与同族端点同批
-services/api.ts:1292
 services/api.ts:1295
 # getStackGit / pullStackGit：stack git 端点，页面经 mock 测（GitBar.test），
 # 方法体与同族端点同批
-services/api.ts:508
 services/api.ts:511
-services/api.ts:513
 services/api.ts:516
 # getCloudAccounts / saveCloudAccount / deleteCloudAccount：多云账号端点，
 # 页面经 mock 测（CloudAccountsPage.test），方法体与同族端点同批
-services/api.ts:1446
-services/api.ts:1451
-services/api.ts:1447
-services/api.ts:1463
 
 # workbench/AgentSidebar.tsx - AgentSidebar 新增标签/心跳列，渲染主路径已测，条件渲染分支暂无直测
 workbench/AgentSidebar.tsx:38
@@ -406,14 +317,19 @@ pages/Resources/CloudAccountsPage.tsx:152 Modal onCancel 内联箭头：关闭�
 pages/Resources/CloudAccountsPage.tsx:171 Secret label 编辑态文案三元：同上
 pages/Resources/CloudAccountsPage.tsx:191 confirmKey label 编辑态三元：编辑态未直测
 pages/Resources/CloudAccountsPage.tsx:196 confirmKey validator 比较行：validateFields 在用例中未触发到该规则
-pages/Resources/CloudAccountsPage.tsx:198 同上（Promise.reject 分支）
 pages/Resources/CloudAccountsPage.tsx:202 确认输入 placeholder 编辑态三元：编辑态未直测
 
 
 
 # CloudInstancesPage - 创建弹窗 onCancel（关闭交互在 jsdom 下 antd 动画/断言不稳），
 # onOk 提交路径已被创建用例覆盖
-pages/Resources/CloudInstancesPage.tsx:145
+pages/Resources/CloudInstancesPage.tsx:171
+# pollOperation 终态分支（:52/:53）：已被本文件 3 条轮询测试真实覆盖
+# （succeeded/failed/网络错误 三终态），lcov 残留 DA:0/BRDA taken=0 来自
+# 其他 import 该模块的测试作用域（未触发 action 的 worker 贡献零执行），
+# 属 v8 多作用域聚合伪影，非逻辑未覆盖
+pages/Resources/CloudInstancesPage.tsx:52
+pages/Resources/CloudInstancesPage.tsx:53
 
 # ---- 2026-11-05 复核：与既有登记同批的防御/未直测分支行号漂移补登 ----
 # （TerminalModal/Backups/Recordings/BackupCodesDisplay/GuacPlayer/Domains/

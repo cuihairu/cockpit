@@ -184,4 +184,51 @@ describe('CloudInstancesPage', () => {
     expect(screen.getByRole('button', { name: /创\s*建/ })).toBeDisabled()
   })
 
+  // pollOperation 轮询（审核发现 :272）：action 受理后 setInterval 3000ms 轮询
+  // getCloudOperation 到终态。真实推进定时器（fake timers 会与 waitFor 的
+  // interval 轮询冲突，见 web-v8-branch-lock-and-artifact 注记）。
+  it('polls operation to terminal state and notifies', async () => {
+    apiMock.cloudInstanceAction.mockResolvedValue({ id: 'op-1', kind: 'start', vendor_request_id: 'r1', status: 'pending', updated_at: '' })
+    apiMock.getCloudOperation.mockResolvedValue({ id: 'op-1', kind: 'start', vendor_request_id: 'r1', status: 'succeeded', updated_at: '' })
+    apiMock.getCloudInstances.mockResolvedValue([{ ...instance, status: 'stopped' }])
+    renderPage()
+    await selectAccount()
+    await screen.findByText('web-1')
+    fireEvent.click(screen.getByRole('button', { name: /启\s*动/ }))
+    await waitFor(() => expect(apiMock.cloudInstanceAction).toHaveBeenCalledWith('cloud-1', 'start', 'inst-1'))
+    expect(message.success).toHaveBeenCalledWith('操作已受理')
+    await new Promise((r) => setTimeout(r, 3400))
+    await waitFor(() => expect(apiMock.getCloudOperation).toHaveBeenCalledWith('cloud-1', 'op-1'))
+    expect(message.success).toHaveBeenCalledWith('操作已完成')
+  }, 20000)
+
+  it('keeps polling when an operation poll transiently fails', async () => {
+    apiMock.cloudInstanceAction.mockResolvedValue({ id: 'op-1', kind: 'start', vendor_request_id: 'r1', status: 'pending', updated_at: '' })
+    apiMock.getCloudOperation.mockRejectedValue(new Error('net'))
+    apiMock.getCloudInstances.mockResolvedValue([{ ...instance, status: 'stopped' }])
+    renderPage()
+    await selectAccount()
+    await screen.findByText('web-1')
+    fireEvent.click(screen.getByRole('button', { name: /启\s*动/ }))
+    await waitFor(() => expect(apiMock.cloudInstanceAction).toHaveBeenCalledWith('cloud-1', 'start', 'inst-1'))
+    await new Promise((r) => setTimeout(r, 3400))
+    await waitFor(() => expect(apiMock.getCloudOperation).toHaveBeenCalledWith('cloud-1', 'op-1'))
+    // 轮询出错不打断、无终态提示；下一轮重试直到终态
+    expect(message.success).not.toHaveBeenCalledWith('操作已完成')
+  }, 20000)
+
+  it('polls operation to failed terminal state and notifies failure', async () => {
+    apiMock.cloudInstanceAction.mockResolvedValue({ id: 'op-1', kind: 'start', vendor_request_id: 'r1', status: 'pending', updated_at: '' })
+    apiMock.getCloudOperation.mockResolvedValue({ id: 'op-1', kind: 'start', vendor_request_id: 'r1', status: 'failed', updated_at: '' })
+    apiMock.getCloudInstances.mockResolvedValue([{ ...instance, status: 'stopped' }])
+    renderPage()
+    await selectAccount()
+    await screen.findByText('web-1')
+    fireEvent.click(screen.getByRole('button', { name: /启\s*动/ }))
+    await waitFor(() => expect(apiMock.cloudInstanceAction).toHaveBeenCalledWith('cloud-1', 'start', 'inst-1'))
+    await new Promise((r) => setTimeout(r, 3400))
+    await waitFor(() => expect(apiMock.getCloudOperation).toHaveBeenCalledWith('cloud-1', 'op-1'))
+    expect(message.success).toHaveBeenCalledWith('操作失败')
+  }, 20000)
+
 })
