@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/cuihairu/cockpit/internal/cloud"
+
 	"gorm.io/gorm"
 )
 
@@ -95,6 +97,66 @@ type CloudInstanceInput struct {
 	BillingMode      string
 	BillingContinues bool
 	RawVendorStatus  string
+}
+
+// CloudOperationRecord 持久化的云操作（表 cloud_operations；领域模型
+// internal/cloud.Operation 的持久化形态）。云操作只保存在进程内存会导致
+// 服务重启后已受理操作丢失（审核发现 :273），改为落库以便重启后继续跟踪
+// 云端仍在执行的创建/释放。
+type CloudOperationRecord struct {
+	ID              string    `gorm:"primaryKey;size:64" json:"id"`
+	AccountID       string    `gorm:"size:32;index:idx_cloud_op_acct_id" json:"accountId"`
+	Kind            string    `gorm:"size:16" json:"kind"`
+	NativeID        string    `gorm:"size:128" json:"nativeId,omitempty"`
+	VendorRequestID string    `gorm:"size:128" json:"vendorRequestId"`
+	Status          string    `gorm:"size:16" json:"status"`
+	Error           string    `gorm:"size:512" json:"error,omitempty"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
+// 复合唯一索引：同一账号下操作 ID 唯一，不同账号允许相同操作 ID。
+func (CloudOperationRecord) TableName() string { return "cloud_operations" }
+
+// CloudOperationInput 操作写入入参。
+type CloudOperationInput struct {
+	AccountID       string
+	Kind            string
+	NativeID        string
+	VendorRequestID string
+	Status          string
+	Error           string
+	UpdatedAt       time.Time
+}
+
+// UpsertCloudOperation 保存/更新云操作（同账号+操作 ID 视为更新）。
+func (d *DB) UpsertCloudOperation(in *CloudOperationInput) error {
+	if in.AccountID == "" || in.Kind == "" || in.VendorRequestID == "" {
+		return errors.New("account_id, kind and vendor_request_id required")
+	}
+	rec := CloudOperationRecord{
+		ID:        cloud.OperationID(in.Kind, in.VendorRequestID),
+		AccountID: in.AccountID, Kind: in.Kind, NativeID: in.NativeID,
+		VendorRequestID: in.VendorRequestID, Status: in.Status, Error: in.Error,
+		UpdatedAt: in.UpdatedAt,
+	}
+	return d.db.Save(&rec).Error
+}
+
+// ListCloudOperations 返回某账号下的全部操作（按账号硬过滤，不跨账号）。
+func (d *DB) ListCloudOperations(accountID string) ([]CloudOperationRecord, error) {
+	var out []CloudOperationRecord
+	err := d.db.Where("account_id = ?", accountID).Order("updated_at").Find(&out).Error
+	return out, err
+}
+
+// GetCloudOperation 按账号+操作 ID 取单操作；不存在返回 ErrNotFound。
+func (d *DB) GetCloudOperation(accountID, operationID string) (CloudOperationRecord, error) {
+	var out CloudOperationRecord
+	err := d.db.Where("account_id = ? AND id = ?", accountID, operationID).First(&out).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return out, ErrNotFound
+	}
+	return out, err
 }
 
 // UpsertCloudAccount 保存/更新云账号（同 vendor+alias 视为更新）。

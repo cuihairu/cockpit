@@ -98,8 +98,8 @@ func callCloudLifecycleAPI(s *Server, method, path, body string) *httptest.Respo
 	token, _ := s.auth.GenerateToken("1", "admin", "admin")
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
-	s.registerCloudAPI(http.NewServeMux())
-	// 直接调 handler（与现有 callCloudAPI 同法）
+	// 经真实 ServeMux 注册一次并服务（审核发现 :266：先前在此先注册一次
+	// 一次性丢弃 mux 的死代码，随后才二次注册）。
 	mux := http.NewServeMux()
 	s.registerCloudAPI(mux)
 	mux.ServeHTTP(rec, req)
@@ -125,11 +125,26 @@ func TestCloudDiscoverySync(t *testing.T) {
 	if err != nil || len(instances) != 2 {
 		t.Fatalf("instances after sync = %d (%v)", len(instances), err)
 	}
-	if instances[0].NativeID != "i-1" || instances[0].Status != string(cloud.InstanceRunning) {
-		t.Fatalf("instance[0] = %+v", instances[0])
+	// 断言与返回顺序无关（审核发现 :267）：同批写入若 created_at 相同则顺序
+	// 未定义，按 NativeID 建索引再核对字段，不依赖 instances[0]/[1]。
+	byNative := map[string]cloud.Instance{}
+	for _, it := range compute.instances {
+		byNative[it.NativeID] = it
 	}
-	if instances[1].BillingContinues != true || instances[1].BillingMode != string(cloud.BillingPrepaid) {
-		t.Fatalf("instance[1] billing = %+v", instances[1])
+	for i := range instances {
+		want, ok := byNative[instances[i].NativeID]
+		if !ok {
+			t.Fatalf("unexpected instance %s", instances[i].NativeID)
+		}
+		if instances[i].Status != string(want.Status) {
+			t.Fatalf("instance[%s] status = %s, want %s", instances[i].NativeID, instances[i].Status, want.Status)
+		}
+		if instances[i].BillingMode != string(want.BillingMode) {
+			t.Fatalf("instance[%s] billing = %s, want %s", instances[i].NativeID, instances[i].BillingMode, want.BillingMode)
+		}
+		if instances[i].BillingContinues != want.BillingContinues {
+			t.Fatalf("instance[%s] billingContinues = %v, want %v", instances[i].NativeID, instances[i].BillingContinues, want.BillingContinues)
+		}
 	}
 }
 
@@ -175,6 +190,11 @@ func TestCloudLifecycleStart(t *testing.T) {
 	}
 	if op.Kind != cloud.OperationStart || op.Status != cloud.OperationPending {
 		t.Fatalf("op = %+v", op)
+	}
+	// 覆盖审核发现 :265：op.ID 不得被覆写为「厂商ID-时间戳」，必须保持
+	// cloud.NewOperation 的确定性 ID（kind-vendorRequestID）。
+	if op.ID != "start-req-1" {
+		t.Fatalf("op.ID = %q, want deterministic start-req-1", op.ID)
 	}
 	if len(compute.calls) != 1 || compute.calls[0] != "start:i-1" {
 		t.Fatalf("calls = %v", compute.calls)
@@ -327,3 +347,133 @@ func (baseOnlyCloudProvider) Capabilities() []cloud.Capability { return nil }
 // 确保适配器构造路径存在（编译期引用，避免 unused 导入）。
 var _ = aliyun.New
 var _ = tencent.New
+
+// TestCloudOperationsCrossAccountFilter 覆盖审核发现 :259/:268：
+// 查询任一账号的操作列表不得返回其他账号的操作（账号过滤恒真曾导致跨账号泄露）。
+func TestCloudOperationsCrossAccountFilter(t *testing.T) {
+	compute := &fakeCloudCompute{}
+	s, account := newCloudLifecycleServer(t, compute)
+	if err := s.db.UpsertCloudAccount(&storage.CloudAccountInput{
+		Vendor: "tencent", Alias: "lab", CredentialRef: "${CLOUD_TENCENT_LAB}", Region: "ap-guangzhou",
+	}); err != nil {
+		t.Fatalf("seed second account: %v", err)
+	}
+	accts, _ := s.db.ListCloudAccounts()
+	var other *storage.CloudAccount
+	for i := range accts {
+		if accts[i].ID != account.ID {
+			other = &accts[i]
+		}
+	}
+	op := cloud.NewOperation(cloud.OperationStop, "req-other", time.Now().UTC())
+	s.storeCloudOperation(other.ID, &op)
+
+	// 请求账号 A 列表不得包含账号 B 的操作
+	rec := callCloudLifecycleAPI(s, http.MethodGet, "/api/cloud/instances/"+account.ID+"/operations", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "req-other") {
+		t.Fatalf("cross-account operation leaked: %s", rec.Body.String())
+	}
+}
+
+// TestCloudOperationTerminalAppliesToLedger 覆盖审核发现 :271：
+// 释放成功（终态）后实例应从台账移除，不再显示为原状态可继续操作。
+func TestCloudOperationTerminalAppliesToLedger(t *testing.T) {
+	compute := &fakeCloudCompute{}
+	s, account := newCloudLifecycleServer(t, compute)
+	if err := s.db.UpsertCloudInstance(&storage.CloudInstanceInput{
+		AccountID: account.ID, NativeID: "i-1", Status: "running", BillingMode: "on-demand",
+	}); err != nil {
+		t.Fatalf("seed instance: %v", err)
+	}
+	insts, _ := s.db.ListCloudInstances(account.ID)
+	op := cloud.NewOperation(cloud.OperationDelete, "req-d", time.Now().UTC())
+	op.NativeID = "i-1"
+	running, _ := op.WithStatus(cloud.OperationRunning, time.Now().UTC())
+	done, _ := running.MarkSucceeded("i-1", time.Now().UTC())
+	s.storeCloudOperation(account.ID, &done)
+
+	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/operations", `{"operation_id":"`+done.ID+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("poll status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	insts, _ = s.db.ListCloudInstances(account.ID)
+	if len(insts) != 0 {
+		t.Fatalf("instance should be removed after release, got %+v", insts)
+	}
+}
+
+// TestCloudDiscoverySyncTTL 覆盖审核发现 :261：TTL 内读路径不重复调厂商
+// ListInstances（读路径被网络写放大）；TTL 过期后再次同步。
+func TestCloudDiscoverySyncTTL(t *testing.T) {
+	compute := &fakeCloudCompute{instances: []cloud.Instance{{NativeID: "i-1", Name: "web", Region: "cn-hangzhou", Status: cloud.InstanceRunning}}}
+	s, account := newCloudLifecycleServer(t, compute)
+	// 注入极小 TTL：首读同步，第二读（TTL 内）不调厂商。
+	s.cloudSyncTTL = newCloudSyncTTLCache(time.Hour)
+
+	rec := callCloudAPI(s, http.MethodGet, "/api/cloud/accounts/"+account.ID+"/instances", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first status = %d", rec.Code)
+	}
+	if len(compute.calls) != 1 || compute.calls[0] != "list" {
+		t.Fatalf("first calls = %v", compute.calls)
+	}
+	rec = callCloudAPI(s, http.MethodGet, "/api/cloud/accounts/"+account.ID+"/instances", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second status = %d", rec.Code)
+	}
+	if len(compute.calls) != 1 {
+		t.Fatalf("TTL not honored, calls = %v", compute.calls)
+	}
+}
+
+// TestCloudOperationPollPersists 覆盖审核发现 :273：操作轮询后落库，重启
+// （同库新 Server）仍可取回，不会 404。
+func TestCloudOperationPollPersists(t *testing.T) {
+	compute := &fakeCloudCompute{}
+	s, account := newCloudLifecycleServer(t, compute)
+	op := cloud.NewOperation(cloud.OperationStop, "req-persist", time.Now().UTC())
+	op.NativeID = "i-1"
+	s.storeCloudOperation(account.ID, &op)
+
+	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/operations", `{"operation_id":"`+op.ID+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("poll status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	// 同库新 Server（模拟重启）仍可读到已持久化操作。
+	s2 := &Server{db: s.db, auth: s.auth, audit: s.audit, cloudSyncTTL: newCloudSyncTTLCache(time.Hour)}
+	got, err := s2.getCloudOperation(account.ID, op.ID)
+	if err != nil || got.ID != op.ID {
+		t.Fatalf("after restart getCloudOperation = %+v, %v", got, err)
+	}
+}
+
+// TestCloudLifecycleCrossRegion 覆盖审核发现 :270：生命周期操作使用实例
+// 所在区域而非账号默认地域。
+func TestCloudLifecycleCrossRegion(t *testing.T) {
+	compute := &fakeCloudCompute{nextOp: cloud.NewOperation(cloud.OperationStart, "req-x", time.Now().UTC())}
+	s, account := newCloudLifecycleServer(t, compute)
+	// 账号默认 cn-hangzhou；实例在 ap-beijing（跨地域）。
+	if err := s.db.UpsertCloudInstance(&storage.CloudInstanceInput{
+		AccountID: account.ID, NativeID: "i-x", Region: "ap-beijing", Status: "stopped",
+	}); err != nil {
+		t.Fatalf("seed instance: %v", err)
+	}
+	insts, _ := s.db.ListCloudInstances(account.ID)
+	// 注入 region-aware 构造器
+	var gotRegion string
+	s.cloudProviderFn = func(a *storage.CloudAccount) (cloud.Provider, error) {
+		gotRegion = a.Region
+		return compute, nil
+	}
+	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/actions",
+		`{"action":"start","instance_id":"`+insts[0].ID+`","confirm_key":"`+insts[0].ID+`"}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("cross-region start status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if gotRegion != "ap-beijing" {
+		t.Fatalf("provider region = %q, want ap-beijing (instance region)", gotRegion)
+	}
+}

@@ -62,16 +62,40 @@ func TestCloudProviderConstruction(t *testing.T) {
 	if err := p.Write("cloud/tencent/lab", &vault.Entry{Path: "cloud/tencent/lab", Kind: "pair", Username: "sid", Value: "skey"}); err != nil {
 		t.Fatalf("write tencent: %v", err)
 	}
-	aliyunP, err := s.cloudProvider(&storage.CloudAccount{Vendor: "aliyun", Alias: "prod", Region: "cn-hangzhou"})
+	aliyunP, err := s.cloudProvider(&storage.CloudAccount{Vendor: "aliyun", Alias: "prod", Region: "cn-hangzhou", Enabled: true})
 	if err != nil || aliyunP.Identity().Vendor != "aliyun" {
 		t.Fatalf("aliyun provider = %v, %v", aliyunP, err)
 	}
-	tencentP, err := s.cloudProvider(&storage.CloudAccount{Vendor: "tencent", Alias: "lab", Region: "ap-guangzhou"})
+	tencentP, err := s.cloudProvider(&storage.CloudAccount{Vendor: "tencent", Alias: "lab", Region: "ap-guangzhou", Enabled: true})
 	if err != nil || tencentP.Identity().Vendor != "tencent" {
 		t.Fatalf("tencent provider = %v, %v", tencentP, err)
 	}
 	if _, err := s.cloudProvider(&storage.CloudAccount{Vendor: "aws", Alias: "x", Region: "r"}); !errors.Is(err, cloud.ErrNotSupported) {
 		t.Fatalf("unknown vendor err = %v", err)
+	}
+}
+
+// TestCloudProviderDisabledAccount 覆盖审核发现 :274：已禁用账号不得被发现
+// 或发起生命周期操作。
+func TestCloudProviderDisabledAccount(t *testing.T) {
+	s, p := newCloudAPIServer(t)
+	if err := p.Write("cloud/aliyun/prod", &vault.Entry{Path: "cloud/aliyun/prod", Kind: "pair", Username: "ak", Value: "sk"}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, err := s.cloudProvider(&storage.CloudAccount{
+		Vendor: "aliyun", Alias: "prod", Region: "cn-hangzhou", Enabled: false,
+	})
+	if !errors.Is(err, cloud.ErrNotSupported) {
+		t.Fatalf("disabled account err = %v, want ErrNotSupported", err)
+	}
+}
+
+// TestCloudAccountRegionRequired 覆盖审核发现 :264：账号创建必须校验 region，
+// 否则生命周期操作报「Failed to load cloud provider」误导。
+func TestCloudAccountRegionRequired(t *testing.T) {
+	req := &cloudAccountRequest{Vendor: "aliyun", Alias: "prod", Secret: "secret"}
+	if msg, ok := req.validate(); ok || msg != "region required" {
+		t.Fatalf("validate() = %q, %v; want region required", msg, ok)
 	}
 }
 
@@ -81,7 +105,7 @@ func TestCloudProviderNotConfigured(t *testing.T) {
 	if err := p.Write("cloud/aliyun/prod", &vault.Entry{Path: "cloud/aliyun/prod", Kind: "pair", Username: "ak", Value: "sk"}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, err := s.cloudProvider(&storage.CloudAccount{Vendor: "aliyun", Alias: "prod", Region: "cn-hangzhou"})
+	_, err := s.cloudProvider(&storage.CloudAccount{Vendor: "aliyun", Alias: "prod", Region: "cn-hangzhou", Enabled: true})
 	// 有凭据+地域应构造成功
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
@@ -125,7 +149,7 @@ func TestCloudLifecycleCreate(t *testing.T) {
 	compute := &fakeCloudCompute{nextOp: cloud.NewOperation(cloud.OperationCreate, "req-c", time.Now().UTC())}
 	s, account := newCloudLifecycleServer(t, compute)
 	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/actions",
-		`{"action":"create","name":"web","spec":"s","image_id":"i","billing_mode":"prepaid"}`)
+		`{"action":"create","name":"web","spec":"s","image_id":"i","security_group_id":"sg-1","billing_mode":"prepaid"}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("create status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -148,7 +172,7 @@ func TestCloudLifecycleCreateVendorErr(t *testing.T) {
 	compute := &fakeCloudCompute{callErr: errors.New("boom")}
 	s, account := newCloudLifecycleServer(t, compute)
 	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/actions",
-		`{"action":"create","name":"web","spec":"s","image_id":"i"}`)
+		`{"action":"create","name":"web","spec":"s","image_id":"i","security_group_id":"sg-1"}`)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("create vendor err status = %d", rec.Code)
 	}
@@ -158,9 +182,37 @@ func TestCloudLifecycleCreateSpot(t *testing.T) {
 	compute := &fakeCloudCompute{nextOp: cloud.NewOperation(cloud.OperationCreate, "req-c", time.Now().UTC())}
 	s, account := newCloudLifecycleServer(t, compute)
 	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/actions",
-		`{"action":"create","name":"web","spec":"s","image_id":"i","billing_mode":"spot"}`)
+		`{"action":"create","name":"web","spec":"s","image_id":"i","security_group_id":"sg-1","billing_mode":"spot"}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("spot create status = %d", rec.Code)
+	}
+}
+
+// TestCloudLifecycleCreateOnDemand 覆盖审核发现 :269：显式按量计费被 switch
+// 接受（页面选择「按量」不再收到 400）。
+func TestCloudLifecycleCreateOnDemand(t *testing.T) {
+	compute := &fakeCloudCompute{nextOp: cloud.NewOperation(cloud.OperationCreate, "req-c", time.Now().UTC())}
+	s, account := newCloudLifecycleServer(t, compute)
+	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/actions",
+		`{"action":"create","name":"web","spec":"s","image_id":"i","security_group_id":"sg-1","billing_mode":"on-demand"}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("on-demand create status = %d, body %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCloudLifecycleCreateMissingSecurityGroup 覆盖审核发现 :263：后端拒绝
+// 缺 security_group_id 的创建（前端标可选但适配器强制要求非空，留空会拿到
+// 无明细的 502）。
+func TestCloudLifecycleCreateMissingSecurityGroup(t *testing.T) {
+	compute := &fakeCloudCompute{}
+	s, account := newCloudLifecycleServer(t, compute)
+	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/actions",
+		`{"action":"create","name":"web","spec":"s","image_id":"i"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing sg status = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "security_group_id required") {
+		t.Fatalf("missing sg body = %s", rec.Body.String())
 	}
 }
 
@@ -177,9 +229,17 @@ func TestCloudOperationNoCompute(t *testing.T) {
 	compute := &fakeCloudCompute{}
 	s, account := newCloudLifecycleServer(t, compute)
 	s.cloudProviderFn = func(a *storage.CloudAccount) (cloud.Provider, error) { return baseOnlyCloudProvider{}, nil }
+	// 列表路径不构造 provider（审核发现 :262：列操作与终态取回都不需要）。
 	rec := callCloudLifecycleAPI(s, http.MethodGet, "/api/cloud/instances/"+account.ID+"/operations", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list no compute status = %d", rec.Code)
+	}
+	// 非终态轮询仍需要 compute：provider 缺 compute 能力 → 501。
+	op := cloud.NewOperation(cloud.OperationStart, "req-nc", time.Now().UTC())
+	s.storeCloudOperation(account.ID, &op)
+	rec = callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/operations", `{"operation_id":"`+op.ID+`"}`)
 	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("no compute status = %d", rec.Code)
+		t.Fatalf("poll no compute status = %d", rec.Code)
 	}
 }
 
@@ -337,7 +397,7 @@ func TestCloudProviderTencentNotConfigured(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	// 地域空 -> tencent.New nil -> not configured
-	_, err := s.cloudProvider(&storage.CloudAccount{Vendor: "tencent", Alias: "lab", Region: ""})
+	_, err := s.cloudProvider(&storage.CloudAccount{Vendor: "tencent", Alias: "lab", Region: "", Enabled: true})
 	if err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("err = %v, want not configured", err)
 	}
@@ -346,10 +406,14 @@ func TestCloudProviderTencentNotConfigured(t *testing.T) {
 func TestCloudOperationProviderErr(t *testing.T) {
 	compute := &fakeCloudCompute{}
 	s, account := newCloudLifecycleServer(t, compute)
+	// 先落一条非终态操作，使轮询走到 provider 构造（审核发现 :262 后
+	// 非终态轮询才需要 provider；不存在操作应 404，不构造 provider）。
+	op := cloud.NewOperation(cloud.OperationStart, "req-p", time.Now().UTC())
+	s.storeCloudOperation(account.ID, &op)
 	// 覆盖 provider 构造失败（vault 未配置）
 	s.cloudProviderFn = nil
 	s.vaultProvider = nil
-	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/operations", `{"operation_id":"x"}`)
+	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/operations", `{"operation_id":"`+op.ID+`"}`)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("provider err status = %d", rec.Code)
 	}

@@ -128,6 +128,7 @@ func (d *DB) migrate() error {
 		&AcmeCert{},
 		&CloudAccount{},
 		&CloudInstance{},
+		&CloudOperationRecord{},
 		&AcmeDeployTarget{},
 		&DomainBinding{},
 		&Role{},

@@ -1632,7 +1632,7 @@ export interface CloudInstanceSpecInput {
   zone?: string
   spec: string
   image_id: string
-  security_group_id?: string
+  security_group_id: string
   billing_mode?: string
 }
 

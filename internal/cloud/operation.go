@@ -9,12 +9,18 @@ import (
 // 不引入随机源（同一次云操作在重试/落库间保持同一 ID）。
 func NewOperation(kind OperationKind, vendorRequestID string, now time.Time) Operation {
 	return Operation{
-		ID:              fmt.Sprintf("%s-%s", kind, vendorRequestID),
+		ID:              OperationID(string(kind), vendorRequestID),
 		Kind:            kind,
 		VendorRequestID: vendorRequestID,
 		Status:          OperationPending,
 		UpdatedAt:       now,
 	}
+}
+
+// OperationID 由 kind 与厂商请求 ID 确定性拼接，不引入随机源（同一次云操作
+// 在重试/落库间保持同一 ID）。持久层复用同一规则，保证重启后操作 ID 不变。
+func OperationID(kind, vendorRequestID string) string {
+	return fmt.Sprintf("%s-%s", kind, vendorRequestID)
 }
 
 // IsTerminal 判断是否终态。

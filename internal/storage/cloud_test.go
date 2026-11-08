@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateCloudCredentialRef(t *testing.T) {
@@ -222,6 +223,68 @@ func TestResolveCloudCredentialRef(t *testing.T) {
 	// 非引用形态：直接拒绝，不走 env
 	if _, err := ResolveCloudCredentialRef("AKIDplaintext"); err == nil {
 		t.Error("non-reference should be rejected")
+	}
+}
+
+func TestCloudOperationCRUD(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+
+	if err := db.UpsertCloudAccount(&CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	accounts, _ := db.ListCloudAccounts()
+	accID := accounts[0].ID
+
+	in := &CloudOperationInput{
+		AccountID: accID, Kind: "start", NativeID: "i-1", VendorRequestID: "req-1",
+		Status: "pending", UpdatedAt: time.Now(),
+	}
+	if err := db.UpsertCloudOperation(in); err != nil {
+		t.Fatalf("UpsertCloudOperation() error = %v", err)
+	}
+
+	list, err := db.ListCloudOperations(accID)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListCloudOperations() = %d, %v", len(list), err)
+	}
+	if list[0].Kind != "start" || list[0].VendorRequestID != "req-1" || list[0].Status != "pending" {
+		t.Fatalf("op fields = %+v", list[0])
+	}
+
+	// 更新状态（同账号+操作 ID 视为更新）
+	in.Status = "succeeded"
+	if err := db.UpsertCloudOperation(in); err != nil {
+		t.Fatalf("UpsertCloudOperation(update) error = %v", err)
+	}
+	list, _ = db.ListCloudOperations(accID)
+	if len(list) != 1 || list[0].Status != "succeeded" {
+		t.Fatalf("after update = %+v", list)
+	}
+
+	// 按账号+ID 取单条
+	got, err := db.GetCloudOperation(accID, list[0].ID)
+	if err != nil || got.Status != "succeeded" {
+		t.Fatalf("GetCloudOperation() = %+v, %v", got, err)
+	}
+	if _, err := db.GetCloudOperation(accID, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing op err = %v, want ErrNotFound", err)
+	}
+
+	// 跨账号过滤：别的账号看不到
+	if err := db.UpsertCloudAccount(&CloudAccountInput{Vendor: "tencent", Alias: "lab", CredentialRef: "${TC_AK}"}); err != nil {
+		t.Fatalf("seed second account: %v", err)
+	}
+	all, _ := db.ListCloudAccounts()
+	var otherID string
+	for _, a := range all {
+		if a.ID != accID {
+			otherID = a.ID
+		}
+	}
+	other, _ := db.ListCloudOperations(otherID)
+	if len(other) != 0 {
+		t.Errorf("cross-account op leak: %d rows", len(other))
 	}
 }
 

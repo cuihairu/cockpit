@@ -11,6 +11,7 @@ vi.mock('@/services/api', () => ({
     getCloudInstances: vi.fn(),
     cloudInstanceAction: vi.fn(),
     cloudInstanceCreate: vi.fn(),
+    getCloudOperation: vi.fn(),
   },
 }))
 
@@ -68,6 +69,7 @@ describe('CloudInstancesPage', () => {
     permRef.write = true
     apiMock.getCloudAccounts.mockResolvedValue([account])
     apiMock.getCloudInstances.mockResolvedValue([instance])
+    apiMock.getCloudOperation.mockResolvedValue({ id: 'op-1', kind: 'start', vendor_request_id: 'r1', status: 'succeeded', updated_at: '' })
     window.prompt = vi.fn(() => 'inst-1')
   })
 
@@ -141,6 +143,7 @@ describe('CloudInstancesPage', () => {
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'web-2' } })
     fireEvent.change(screen.getByLabelText('规格'), { target: { value: 'ecs.g6.large' } })
     fireEvent.change(screen.getByLabelText('镜像 ID'), { target: { value: 'ami-1' } })
+    fireEvent.change(screen.getByLabelText('安全组 ID'), { target: { value: 'sg-1' } })
     fireEvent.click(document.querySelector('.ant-modal-footer .ant-btn-primary')!)
     await waitFor(() => expect(apiMock.cloudInstanceCreate).toHaveBeenCalledWith('cloud-1', expect.objectContaining({ name: 'web-2', spec: 'ecs.g6.large', image_id: 'ami-1' })))
     expect(message.success).toHaveBeenCalledWith('创建已受理')
@@ -155,6 +158,7 @@ describe('CloudInstancesPage', () => {
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'web-2' } })
     fireEvent.change(screen.getByLabelText('规格'), { target: { value: 'ecs.g6.large' } })
     fireEvent.change(screen.getByLabelText('镜像 ID'), { target: { value: 'ami-1' } })
+    fireEvent.change(screen.getByLabelText('安全组 ID'), { target: { value: 'sg-1' } })
     fireEvent.click(document.querySelector('.ant-modal-footer .ant-btn-primary')!)
     await waitFor(() => expect(message.error).toHaveBeenCalled())
   })

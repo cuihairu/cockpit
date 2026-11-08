@@ -44,7 +44,7 @@ func callCloudAPI(s *Server, method, path, body string) *httptest.ResponseRecord
 func TestCloudAccountsLifecycle(t *testing.T) {
 	s, vaultProvider := newCloudAPIServer(t)
 
-	save := `{"vendor":"aliyun","alias":"prod","secret":"secret-value","scopes":["ecs:read"],"confirm_key":"aliyun/prod"}`
+	save := `{"vendor":"aliyun","alias":"prod","secret":"secret-value","region":"cn-hangzhou","scopes":["ecs:read"],"confirm_key":"aliyun/prod"}`
 	if code := callCloudAPI(s, http.MethodPut, "/api/cloud/accounts", save).Code; code != http.StatusOK {
 		t.Fatalf("save status = %d, want %d", code, http.StatusOK)
 	}
@@ -76,7 +76,7 @@ func TestCloudAccountsLifecycle(t *testing.T) {
 
 func TestCloudAccountsDoubleConfirmation(t *testing.T) {
 	s, _ := newCloudAPIServer(t)
-	if code := callCloudAPI(s, http.MethodPut, "/api/cloud/accounts", `{"vendor":"aliyun","alias":"prod","secret":"x","confirm_key":"aliyun/other"}`).Code; code != http.StatusBadRequest {
+	if code := callCloudAPI(s, http.MethodPut, "/api/cloud/accounts", `{"vendor":"aliyun","alias":"prod","secret":"x","region":"cn-hangzhou","confirm_key":"aliyun/other"}`).Code; code != http.StatusBadRequest {
 		t.Fatalf("save confirm status = %d", code)
 	}
 	if err := s.db.UpsertCloudAccount(&storage.CloudAccountInput{Vendor: "aliyun", Alias: "prod", CredentialRef: "${AK}"}); err != nil {

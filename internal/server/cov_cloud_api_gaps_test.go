@@ -29,7 +29,7 @@ func (f *cloudStubVault) List(string) ([]vault.EntryMeta, error) {
 }
 func (f *cloudStubVault) Delete(string) error { return f.deleteErr }
 
-const covCloudSaveBody = `{"vendor":"aliyun","alias":"prod","secret":"x","confirm_key":"aliyun/prod"}`
+const covCloudSaveBody = `{"vendor":"aliyun","alias":"prod","secret":"x","region":"cn-hangzhou","confirm_key":"aliyun/prod"}`
 
 // TestCovCloudAccountValidationBranches 校验/解码/方法面错误分支。
 func TestCovCloudAccountValidationBranches(t *testing.T) {

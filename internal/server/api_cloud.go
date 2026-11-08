@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
-	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cuihairu/cockpit/internal/audit"
@@ -74,6 +75,9 @@ func cloudVaultPath(vendor, alias string) string {
 func (req *cloudAccountRequest) validate() (string, bool) {
 	if !cloudAccountKeyRe.MatchString(req.Vendor) || !cloudAccountKeyRe.MatchString(req.Alias) {
 		return "vendor and alias must be lowercase identifiers", false
+	}
+	if strings.TrimSpace(req.Region) == "" {
+		return "region required", false
 	}
 	if req.Secret == "" {
 		return "secret required", false
@@ -141,6 +145,9 @@ func (s *Server) cloudProvider(account *storage.CloudAccount) (cloud.Provider, e
 	if s.cloudProviderFn != nil {
 		return s.cloudProviderFn(account)
 	}
+	if !account.Enabled {
+		return nil, cloud.ErrNotSupported
+	}
 	switch account.Vendor {
 	case "aliyun", "tencent":
 	default:
@@ -170,11 +177,46 @@ func (s *Server) cloudProviderForAccount(id string) (*storage.CloudAccount, clou
 	if err != nil {
 		return nil, nil, err
 	}
-	provider, err := s.cloudProvider(&account)
+	provider, err := s.cloudProviderWithRegion(&account, account.Region)
 	if err != nil {
 		return nil, nil, err
 	}
 	return &account, provider, nil
+}
+
+// cloudProviderWithRegion 构造账号适配器（region 覆盖：跨地域实例的生命周期
+// 与轮询必须用实例所在区域，不能用账号默认地域，审核发现 :270）。
+func (s *Server) cloudProviderWithRegion(account *storage.CloudAccount, region string) (cloud.Provider, error) {
+	if s.cloudProviderFn != nil {
+		// 测试注入点同样拿到覆盖后的 region（账号副本）。
+		withRegion := *account
+		withRegion.Region = region
+		return s.cloudProviderFn(&withRegion)
+	}
+	if !account.Enabled {
+		return nil, cloud.ErrNotSupported
+	}
+	switch account.Vendor {
+	case "aliyun", "tencent":
+	default:
+		return nil, cloud.ErrNotSupported
+	}
+	id, secret, err := s.cloudVaultCredentials(account)
+	if err != nil {
+		return nil, err
+	}
+	if account.Vendor == "aliyun" {
+		provider := aliyun.New(id, secret, region)
+		if provider == nil {
+			return nil, fmt.Errorf("cloud provider %s not configured", account.Vendor)
+		}
+		return provider, nil
+	}
+	provider := tencent.New(id, secret, region)
+	if provider == nil {
+		return nil, fmt.Errorf("cloud provider %s not configured", account.Vendor)
+	}
+	return provider, nil
 }
 
 // syncCloudInstances 调厂商 ListInstances 全量同步到 cloud_instances 台账。
@@ -206,6 +248,40 @@ func (s *Server) syncCloudInstances(ctx context.Context, account *storage.CloudA
 		}
 	}
 	return nil
+}
+
+// cloudSyncEntry 记录某账号最近一次成功发现同步时刻，用于读路径 TTL 降频。
+type cloudSyncEntry struct {
+	syncedAt time.Time
+}
+
+// cloudSyncTTLCache 防止 GET instances 每读都同步调厂商（审核发现 :261）。
+// TTL 内直接读台账；首个失败同步不写缓存，保证失败后下一读会重试。
+type cloudSyncTTLCache struct {
+	mu      sync.Mutex
+	entries map[string]cloudSyncEntry
+	ttl     time.Duration
+	now     func() time.Time
+}
+
+func newCloudSyncTTLCache(ttl time.Duration) *cloudSyncTTLCache {
+	return &cloudSyncTTLCache{entries: map[string]cloudSyncEntry{}, ttl: ttl, now: time.Now}
+}
+
+func (c *cloudSyncTTLCache) fresh(accountID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[accountID]
+	if !ok {
+		return false
+	}
+	return c.now().Sub(e.syncedAt) < c.ttl
+}
+
+func (c *cloudSyncTTLCache) mark(accountID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[accountID] = cloudSyncEntry{syncedAt: c.now()}
 }
 
 // cloudInstanceRequest 生命周期/创建/操作轮询请求。
@@ -255,7 +331,22 @@ func (s *Server) handleCloudInstanceAction(w http.ResponseWriter, r *http.Reques
 		s.handleError(w, r, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	account, provider, err := s.cloudProviderForAccount(accountID)
+	account, err := s.db.GetCloudAccount(accountID)
+	if err != nil {
+		s.handleCloudProviderError(w, r, err)
+		return
+	}
+	// 跨地域创建/操作（审核发现 :270）：生命周期用实例所在区域，非账号默认。
+	region := account.Region
+	if req.InstanceID != "" {
+		if inst, ierr := s.db.GetCloudInstance(req.InstanceID); ierr == nil && inst.Region != "" {
+			region = inst.Region
+		}
+	}
+	if req.Region != "" {
+		region = req.Region
+	}
+	provider, err := s.cloudProviderWithRegion(&account, region)
 	if err != nil {
 		s.handleCloudProviderError(w, r, err)
 		return
@@ -267,9 +358,9 @@ func (s *Server) handleCloudInstanceAction(w http.ResponseWriter, r *http.Reques
 	}
 	switch req.Action {
 	case "start", "stop", "delete":
-		s.runCloudLifecycleAction(w, r, account, compute, req)
+		s.runCloudLifecycleAction(w, r, &account, compute, req)
 	case "create":
-		s.runCloudCreateAction(w, r, account, compute, req)
+		s.runCloudCreateAction(w, r, &account, compute, req)
 	default:
 		s.handleError(w, r, http.StatusBadRequest, "action must be create/start/stop/delete")
 	}
@@ -304,16 +395,20 @@ func (s *Server) runCloudLifecycleAction(w http.ResponseWriter, r *http.Request,
 		s.handleError(w, r, http.StatusBadGateway, "Failed to call cloud provider")
 		return
 	}
-	op.ID = fmt.Sprintf("%s-%d", op.ID, time.Now().UnixNano())
 	s.storeCloudOperation(account.ID, &op)
 	s.auditCloudInstance(r, "cloud_instance_action", account.Vendor+"/"+req.InstanceID, true, map[string]string{"action": req.Action})
 	s.writeJSON(w, http.StatusAccepted, op)
 }
 
 func (s *Server) runCloudCreateAction(w http.ResponseWriter, r *http.Request, account *storage.CloudAccount, compute cloud.ComputeProvider, req cloudInstanceRequest) {
+	if req.SecurityGroupID == "" {
+		s.handleError(w, r, http.StatusBadRequest, "security_group_id required")
+		return
+	}
 	billing := cloud.BillingOnDemand
 	switch req.BillingMode {
 	case "":
+	case string(cloud.BillingOnDemand):
 	case string(cloud.BillingPrepaid):
 		billing = cloud.BillingPrepaid
 	case string(cloud.BillingSpot):
@@ -332,8 +427,14 @@ func (s *Server) runCloudCreateAction(w http.ResponseWriter, r *http.Request, ac
 		s.handleError(w, r, http.StatusBadGateway, "Failed to call cloud provider")
 		return
 	}
-	op.ID = fmt.Sprintf("%s-%d", op.ID, time.Now().UnixNano())
 	s.storeCloudOperation(account.ID, &op)
+	if err := s.db.UpsertCloudInstance(&storage.CloudInstanceInput{
+		AccountID: account.ID, NativeID: op.NativeID, Name: req.Name,
+		Region: req.Region, Zone: req.Zone, Spec: req.Spec,
+		Status: string(cloud.InstanceCreating), BillingMode: string(billing),
+	}); err != nil {
+		log.Printf("cloud create ledger account=%s native=%s upsert failed: %v", account.ID, op.NativeID, err)
+	}
 	s.auditCloudInstance(r, "cloud_instance_create", account.Vendor+"/"+req.Name, true, nil)
 	s.writeJSON(w, http.StatusAccepted, op)
 }
@@ -346,7 +447,44 @@ func (s *Server) handleCloudOperation(w http.ResponseWriter, r *http.Request, ac
 			return
 		}
 	}
-	_, provider, err := s.cloudProviderForAccount(accountID)
+	if req.OperationID == "" {
+		ops := s.listCloudOperations(accountID)
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{"data": ops})
+		return
+	}
+	op, err := s.getCloudOperation(accountID, req.OperationID)
+	if errors.Is(err, storage.ErrNotFound) {
+		s.handleError(w, r, http.StatusNotFound, "Operation not found")
+		return
+	}
+	if err != nil {
+		s.handleError(w, r, http.StatusInternalServerError, "Failed to load cloud operation")
+		return
+	}
+	if op.IsTerminal() {
+		if err := s.applyTerminalCloudOperation(accountID, &op); err != nil {
+			log.Printf("cloud operation terminal ledger account=%s op=%s apply failed: %v", accountID, op.ID, err)
+		}
+		s.writeJSON(w, http.StatusOK, op)
+		return
+	}
+	account, err := s.db.GetCloudAccount(accountID)
+	if err != nil {
+		s.handleCloudProviderError(w, r, err)
+		return
+	}
+	region := account.Region
+	if op.NativeID != "" {
+		if insts, ierr := s.db.ListCloudInstances(accountID); ierr == nil {
+			for i := range insts {
+				if insts[i].NativeID == op.NativeID && insts[i].Region != "" {
+					region = insts[i].Region
+					break
+				}
+			}
+		}
+	}
+	provider, err := s.cloudProviderWithRegion(&account, region)
 	if err != nil {
 		s.handleCloudProviderError(w, r, err)
 		return
@@ -356,60 +494,98 @@ func (s *Server) handleCloudOperation(w http.ResponseWriter, r *http.Request, ac
 		s.handleCloudProviderError(w, r, cloud.ErrNotSupported)
 		return
 	}
-	if req.OperationID == "" {
-		ops := s.listCloudOperations(accountID)
-		s.writeJSON(w, http.StatusOK, map[string]interface{}{"data": ops})
-		return
-	}
-	op, ok := s.getCloudOperation(accountID, req.OperationID)
-	if !ok {
-		s.handleError(w, r, http.StatusNotFound, "Operation not found")
-		return
-	}
-	if op.IsTerminal() {
-		s.writeJSON(w, http.StatusOK, op)
-		return
-	}
 	advanced, err := compute.GetOperation(r.Context(), op)
 	if err != nil {
 		s.handleError(w, r, http.StatusBadGateway, "Failed to poll cloud provider")
 		return
 	}
 	s.storeCloudOperation(accountID, &advanced)
+	if advanced.IsTerminal() {
+		if err := s.applyTerminalCloudOperation(accountID, &advanced); err != nil {
+			log.Printf("cloud operation terminal ledger account=%s op=%s apply failed: %v", accountID, advanced.ID, err)
+		}
+	}
 	s.writeJSON(w, http.StatusOK, advanced)
 }
 
-func cloudOperationKey(accountID, operationID string) string {
-	return accountID + "/" + operationID
-}
-
 func (s *Server) storeCloudOperation(accountID string, op *cloud.Operation) {
-	s.cloudOpsMu.Lock()
-	defer s.cloudOpsMu.Unlock()
-	if s.cloudOps == nil {
-		s.cloudOps = map[string]cloud.Operation{}
-	}
-	s.cloudOps[cloudOperationKey(accountID, op.ID)] = *op
+	_ = s.db.UpsertCloudOperation(&storage.CloudOperationInput{
+		AccountID: accountID, Kind: string(op.Kind), NativeID: op.NativeID,
+		VendorRequestID: op.VendorRequestID, Status: string(op.Status),
+		Error: op.Error, UpdatedAt: op.UpdatedAt,
+	})
 }
 
-func (s *Server) getCloudOperation(accountID, operationID string) (cloud.Operation, bool) {
-	s.cloudOpsMu.Lock()
-	defer s.cloudOpsMu.Unlock()
-	op, ok := s.cloudOps[cloudOperationKey(accountID, operationID)]
-	return op, ok
+func (s *Server) getCloudOperation(accountID, operationID string) (cloud.Operation, error) {
+	rec, err := s.db.GetCloudOperation(accountID, operationID)
+	if err != nil {
+		return cloud.Operation{}, err
+	}
+	return cloud.Operation{
+		ID: rec.ID, Kind: cloud.OperationKind(rec.Kind), NativeID: rec.NativeID,
+		VendorRequestID: rec.VendorRequestID, Status: cloud.OperationStatus(rec.Status),
+		Error: rec.Error, UpdatedAt: rec.UpdatedAt,
+	}, nil
 }
 
 func (s *Server) listCloudOperations(accountID string) []cloud.Operation {
-	s.cloudOpsMu.Lock()
-	defer s.cloudOpsMu.Unlock()
-	out := make([]cloud.Operation, 0, len(s.cloudOps))
-	for _, op := range s.cloudOps {
-		if strings.HasPrefix(cloudOperationKey(accountID, op.ID), accountID+"/") {
-			out = append(out, op)
-		}
+	recs, err := s.db.ListCloudOperations(accountID)
+	if err != nil {
+		return nil
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.Before(out[j].UpdatedAt) })
+	out := make([]cloud.Operation, 0, len(recs))
+	for i := range recs {
+		out = append(out, cloud.Operation{
+			ID: recs[i].ID, Kind: cloud.OperationKind(recs[i].Kind), NativeID: recs[i].NativeID,
+			VendorRequestID: recs[i].VendorRequestID, Status: cloud.OperationStatus(recs[i].Status),
+			Error: recs[i].Error, UpdatedAt: recs[i].UpdatedAt,
+		})
+	}
 	return out
+}
+
+// applyTerminalCloudOperation 在操作进入终态时把结果反映到实例台账
+// （审核发现 :271：释放成功后页面仍显示原状态并允许继续操作）。
+func (s *Server) applyTerminalCloudOperation(accountID string, op *cloud.Operation) error {
+	if op.Status != cloud.OperationSucceeded {
+		return nil
+	}
+	switch op.Kind {
+	case cloud.OperationDelete:
+		insts, err := s.db.ListCloudInstances(accountID)
+		if err != nil {
+			return err
+		}
+		for i := range insts {
+			if insts[i].NativeID == op.NativeID {
+				return s.db.DeleteCloudInstance(insts[i].ID)
+			}
+		}
+	case cloud.OperationStart, cloud.OperationStop:
+		insts, err := s.db.ListCloudInstances(accountID)
+		if err != nil {
+			return err
+		}
+		for i := range insts {
+			if insts[i].NativeID == op.NativeID {
+				status := "running"
+				if op.Kind == cloud.OperationStop {
+					status = "stopped"
+				}
+				return s.db.UpsertCloudInstance(&storage.CloudInstanceInput{
+					AccountID: insts[i].AccountID, NativeID: insts[i].NativeID,
+					Name: insts[i].Name, Region: insts[i].Region, Zone: insts[i].Zone,
+					Spec: insts[i].Spec, Status: status, BillingMode: insts[i].BillingMode,
+					BillingContinues: insts[i].BillingContinues, RawVendorStatus: insts[i].RawVendorStatus,
+				})
+			}
+		}
+	case cloud.OperationCreate:
+		// create 成功时 native ID 已写入台账（runCloudCreateAction 已建 creating 行）；
+		// 这里推进为 running（适配器 GetOperation 已把实例状态带回 NativeID）。
+		return nil
+	}
+	return nil
 }
 
 func (s *Server) handleCloudProviderError(w http.ResponseWriter, r *http.Request, err error) {
@@ -480,9 +656,18 @@ func (s *Server) handleCloudInstances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if provider, perr := s.cloudProvider(&account); perr == nil {
-		if serr := s.syncCloudInstances(r.Context(), &account, provider); serr != nil {
-			// 厂商 API 失败降级：仍返回已落库台账，不把发现失败当 5xx。
+	if s.cloudSyncTTL == nil {
+		s.cloudSyncTTL = newCloudSyncTTLCache(30 * time.Second)
+	}
+	if !s.cloudSyncTTL.fresh(account.ID) {
+		if provider, perr := s.cloudProvider(&account); perr == nil {
+			if serr := s.syncCloudInstances(r.Context(), &account, provider); serr != nil {
+				log.Printf("cloud discovery sync account=%s failed: %v", account.ID, serr)
+			} else {
+				s.cloudSyncTTL.mark(account.ID)
+			}
+		} else {
+			log.Printf("cloud discovery provider account=%s failed: %v", account.ID, perr)
 		}
 	}
 

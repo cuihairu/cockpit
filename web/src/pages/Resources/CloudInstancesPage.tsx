@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
@@ -40,22 +40,48 @@ const CloudInstancesPage = () => {
     void queryClient.invalidateQueries({ queryKey: ['cloud-instances'] })
   }
 
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // 异步操作受理后轮询终态（审核发现 :272）：云端稍后完成/失败时用户能看到
+  // 最终结果并刷新实例状态，而不是只刷新一次后静默。
+  const pollOperation = (opId: string) => {
+    if (pollTimer.current) clearInterval(pollTimer.current)
+    const timer = setInterval(async () => {
+      try {
+        const op = await api.getCloudOperation(accountId!, opId)
+        if (op.status === 'succeeded' || op.status === 'failed') {
+          if (pollTimer.current) clearInterval(pollTimer.current)
+          pollTimer.current = null
+          message.success(op.status === 'succeeded' ? '操作已完成' : '操作失败')
+          invalidate()
+        }
+      } catch {
+        // 轮询出错（如 404 或网络瞬断）时不打断；下一轮重试，直到终态。
+      }
+    }, 3000)
+    pollTimer.current = timer
+  }
+
+  useEffect(() => () => { if (pollTimer.current) clearInterval(pollTimer.current) }, [])
+
   const actionMutation = useMutation({
     mutationFn: (v: { action: 'start' | 'stop' | 'delete'; instanceId: string }) =>
       api.cloudInstanceAction(accountId!, v.action, v.instanceId),
-    onSuccess: () => {
+    onSuccess: (op) => {
       message.success('操作已受理')
       invalidate()
+      pollOperation(op.id)
     },
     onError: (error) => message.error(getApiErrorMessage(error, '操作失败')),
   })
 
   const createMutation = useMutation({
     mutationFn: (spec: CloudInstanceSpecInput) => api.cloudInstanceCreate(accountId!, spec),
-    onSuccess: () => {
+    onSuccess: (op) => {
       message.success('创建已受理')
       setCreateOpen(false)
       invalidate()
+      pollOperation(op.id)
     },
     onError: (error) => message.error(getApiErrorMessage(error, '创建失败')),
   })
@@ -163,7 +189,7 @@ const CloudInstancesPage = () => {
           <Form.Item label="镜像 ID" name="image_id" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item label="安全组 ID" name="security_group_id">
+          <Form.Item label="安全组 ID" name="security_group_id" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
           <Form.Item label="计费模式" name="billing_mode">
