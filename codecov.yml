@@ -1,0 +1,8 @@
+# codecov 报告口径：排除结构性不可测的代码。
+#
+# scripts/acceptance/** 是真机验收辅助资产（22 个独立 package main 工具，
+# 生产代码不 import 它们），进程内无法确定性覆盖，已按块登记在
+# tool/known_uncoverable.txt（"main() 场景编排（真机 ...）"）。排除后
+# Go 代码覆盖率口径与生产代码一致。
+ignore:
+  - "scripts/acceptance/**"
