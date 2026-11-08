@@ -111,7 +111,7 @@ KDF 只在 vault 包定义一处：env key 走 `sha256`（兼容存量密文）�
 |------|------|--------|------|
 | `vault.provider` | string | `local` | 密码箱提供商，经注册表解析（`internal/vault.Register`）；未知值**启动即报错**，不降级（V7）。切换 provider 只改此值，业务代码零改动 |
 | `vault.session_ttl` | duration | `0` | provider 级解锁会话时长（`5m` 等 Go duration 写法）；`0` = 进程生命周期。local 实现随启动解锁，TTL 到期自动上锁后**需重启进程重新解锁**——自托管无人值守建议保持 `0`。用户级 vault token（10 分钟）在 API 层独立计时，不受此字段影响 |
-| `vault.providers.persona.endpoint` | string | —（persona 选中时必填） | persona Connect API 基址（`persona connect serve`，如 `http://127.0.0.1:8747`）。仅在 `vault.provider: persona` 时实例化；缺失/非法启动即报错（fail-fast 不降级） |
+| `vault.providers.persona.endpoint` | string | —（persona 选中时必填） | persona Connect API 基址：TCP 形态 `http://127.0.0.1:8747`（`persona connect serve`），或 unix socket 形态 `unix:///run/user/1000/persona/connect.sock`（`persona connect serve --unix-socket`，provider 直连 socket、不经 DNS/TCP）。仅在 `vault.provider: persona` 时实例化；缺失/非法启动即报错（fail-fast 不降级） |
 | `vault.providers.persona.token` | string | —（必填） | persona Connect token（`pconn_…`，视同密码）；`PERSONA_CONNECT_TOKEN` env 优先，yaml 不落 secret。token 被拒（401）为显式错误，不按锁定处理 |
 | `vault.providers.persona.timeout` | duration | `5s` | Connect API HTTP 超时；须为正 |
 | `vault.providers.persona.session_ttl` | duration | `0`（回退 `vault.session_ttl`） | persona 会话时长；`Unlock` 走 health+items 双探握手，TTL 到期自动上锁后重跑 `Unlock` 即恢复 |

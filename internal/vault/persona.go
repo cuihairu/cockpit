@@ -7,10 +7,12 @@ package vault
 // 连不上/未解锁一律包 ErrLocked 拒绝服务，绝不降级 local。
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -39,24 +41,43 @@ var personaSecretFields = map[string][2]string{
 
 // PersonaProvider persona Connect API provider。
 type PersonaProvider struct {
-	endpoint string // Connect API 基址（http://127.0.0.1:port）
-	token    string // Connect token（pconn_…，视同密码）
-	client   *http.Client
-	sess     *Session
-	audit    AuditFunc
+	endpoint   string // Connect API 基址（http://127.0.0.1:port；unix 端点时为 http://localhost 占位）
+	socketPath string // 非空 = unix socket 路径（unix:// 端点），Dial 忽略 host 直连
+	token      string // Connect token（pconn_…，视同密码）
+	client     *http.Client
+	sess       *Session
+	audit      AuditFunc
 }
 
 // NewPersona 构建 persona provider。cfg 键：endpoint（必填）、token（必填，
 // 通常由 PERSONA_CONNECT_TOKEN 经配置默认值注入）、timeout（可选，默认 5s）。
 // ttl 为已解析的会话时长（persona session_ttl 或全局回退，由装配方决定）。
 // endpoint/token 缺失启动即报错（fail-fast，不半初始化）。
+//
+// endpoint 两种形态：
+//   - http(s)://host[:port]  —— TCP 基址（`persona connect serve`，默认传输）；
+//   - unix:///abs/path.sock  —— unix domain socket（persona 的
+//     `connect serve --unix-socket`，0600 + accept 层属主 uid 校验）。
+//     请求基址固定 http://localhost（Host 头 persona 对 unix 传输不校验），
+//     实际连接经自定义 Dial 直连 socket，不经 DNS/TCP。
 func NewPersona(cfg map[string]string, ttl time.Duration, audit AuditFunc) (*PersonaProvider, error) {
 	endpoint := strings.TrimRight(cfg["endpoint"], "/")
 	if endpoint == "" {
 		return nil, errors.New("vault: persona: endpoint required")
 	}
-	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		return nil, errors.New("vault: persona: endpoint must be an http(s) url")
+	var socketPath string
+	switch {
+	case strings.HasPrefix(endpoint, "http://"), strings.HasPrefix(endpoint, "https://"):
+		// TCP 基址原样使用。
+	default:
+		// 绝对路径的 unix:// 端点（unix:///abs/path）；其余形态（缺路径、
+		// 非 unix scheme、非绝对路径）一律 fail-fast。
+		u, err := url.Parse(endpoint)
+		if err != nil || u.Scheme != "unix" || u.Opaque != "" || u.Host != "" || !strings.HasPrefix(u.Path, "/") {
+			return nil, errors.New("vault: persona: endpoint must be an http(s) url or unix:///path/to/connect.sock")
+		}
+		socketPath = u.Path
+		endpoint = "http://localhost"
 	}
 	token := cfg["token"]
 	if token == "" {
@@ -73,12 +94,24 @@ func NewPersona(cfg map[string]string, ttl time.Duration, audit AuditFunc) (*Per
 		}
 		timeout = d
 	}
+	client := &http.Client{Timeout: timeout}
+	if socketPath != "" {
+		// 全新 Transport：不继承 http.Proxy 环境变量（unix 连接与代理无关），
+		// 无 TLS（基址固定 http）。DialContext 忽略 addr，直连 socket。
+		dialer := &net.Dialer{}
+		client.Transport = &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return dialer.DialContext(ctx, "unix", socketPath)
+			},
+		}
+	}
 	return &PersonaProvider{
-		endpoint: endpoint,
-		token:    token,
-		client:   &http.Client{Timeout: timeout},
-		sess:     NewSession(ttl),
-		audit:    audit,
+		endpoint:   endpoint,
+		socketPath: socketPath,
+		token:      token,
+		client:     client,
+		sess:       NewSession(ttl),
+		audit:      audit,
 	}, nil
 }
 
