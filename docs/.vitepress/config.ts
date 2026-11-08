@@ -68,7 +68,15 @@ export default withMermaid(defineConfig({
               text: 'Design',
               items: [
                 { text: 'agent-core 3-Layer Architecture', link: '/design/agent-core-architecture' },
-                { text: 'External Session API (memex)', link: '/design/external-session-api' }
+                { text: 'External Session API (memex)', link: '/design/external-session-api' },
+                { text: 'Agent Capability Contract (P0 Slice 1)', link: '/design/agent-capability-contract' },
+                { text: 'Agent Secret Lifecycle', link: '/design/agent-secret-lifecycle' },
+                { text: 'Cloud Lifecycle Wiring Gaps', link: '/design/cloud-lifecycle-wiring' },
+                { text: 'Cloud Provider Framework', link: '/design/cloud-provider' },
+                { text: 'libvirt Binding & Write Slice', link: '/design/libvirt-write-slice' },
+                { text: 'Offline Buffer Design', link: '/design/offline-buffer-design' },
+                { text: 'OpenWrt Bootstrap Node', link: '/design/oob-openwrt-bootstrap' },
+                { text: 'P1 Resource Ownership', link: '/design/p1-resource-ownership' }
               ]
             }
           ],
@@ -85,6 +93,15 @@ export default withMermaid(defineConfig({
               text: 'Research',
               items: [
                 { text: 'Ops OSS Survey', link: '/research/ops-oss-survey' }
+              ]
+            }
+          ],
+          '/': [
+            {
+              text: 'Reference',
+              items: [
+                { text: 'Agent Configuration', link: '/agent-config' },
+                { text: 'Agent ID Policy', link: '/agent-id' }
               ]
             }
           ]
@@ -138,7 +155,16 @@ export default withMermaid(defineConfig({
               text: '设计',
               items: [
                 { text: 'agent-core 三层架构（core/平台层/插件）', link: '/zh/design/agent-core-architecture' },
-                { text: '外部新建远程会话接口契约（memex）', link: '/zh/design/external-session-api' }
+                { text: '外部新建远程会话接口契约（memex）', link: '/zh/design/external-session-api' },
+                { text: '云厂商框架设计', link: '/zh/design/cloud-provider' },
+                { text: 'Hypervisor 平台能力设计', link: '/zh/design/hypervisor-capabilities' },
+                { text: 'Agent 能力契约设计（P0 首片）', link: '/zh/design/agent-capability-contract' },
+                { text: 'Agent 准入与 secret 生命周期设计', link: '/zh/design/agent-secret-lifecycle' },
+                { text: '云厂商发现/生命周期接线缺口清单', link: '/zh/design/cloud-lifecycle-wiring' },
+                { text: 'libvirt 绑定选型与启停片设计', link: '/zh/design/libvirt-write-slice' },
+                { text: '离线缓冲与电源接口归并设计', link: '/zh/design/offline-buffer-design' },
+                { text: 'OpenWrt Bootstrap 节点设计', link: '/zh/design/oob-openwrt-bootstrap' },
+                { text: 'P1 资源池所有权设计', link: '/zh/design/p1-resource-ownership' }
               ]
             }
           ],
@@ -155,6 +181,15 @@ export default withMermaid(defineConfig({
               text: '调研',
               items: [
                 { text: '运维开源方案调研', link: '/zh/research/ops-oss-survey' }
+              ]
+            }
+          ],
+          '/zh/': [
+            {
+              text: '参考',
+              items: [
+                { text: 'Agent 配置参考', link: '/zh/agent-config' },
+                { text: 'Agent ID 生成策略', link: '/zh/agent-id' }
               ]
             }
           ]
