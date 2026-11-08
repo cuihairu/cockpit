@@ -279,9 +279,9 @@ func TestCovHeartbeatLoopTicks(t *testing.T) {
 	a := NewAgent(Config{ServerURL: "ws://127.0.0.1:1"})
 	defer a.Stop()
 
-	// 在启动任何 goroutine 前写入（此时不存在并发读者）
-	oldInterval := heartbeatInterval
-	heartbeatInterval = 10 * time.Millisecond
+	// 在启动任何 goroutine 前写入（此时不存在并发读者）；恢复经
+	// injectSwap，即便 loop 尚在退出途中也无竞争（见 inject.go）
+	oldInterval := injectSwap(&heartbeatInterval, 10*time.Millisecond)
 
 	a.registered.Store(true)
 	go a.heartbeatLoop()
@@ -294,11 +294,12 @@ func TestCovHeartbeatLoopTicks(t *testing.T) {
 		t.Errorf("message type = %q, want heartbeat", msg.Type)
 	}
 
-	// 首个 tick 已观测（NewTicker 的读先于 tick 发生）；取消并等待
-	// heartbeatLoop 退出后再恢复，避免数据竞争
+	// 首个 tick 已观测（NewTicker 的读先于 tick 发生）；取消并等 loop
+	// 自行退出——恢复本身已由 injectSwap 的锁保证，等退出只为不把
+	// 残存 loop 带进后续测试
 	a.cancel()
 	time.Sleep(100 * time.Millisecond)
-	heartbeatInterval = oldInterval
+	injectSwap(&heartbeatInterval, oldInterval)
 }
 
 func TestCovSendHeartbeatQueueFullTriggersReconnect(t *testing.T) {

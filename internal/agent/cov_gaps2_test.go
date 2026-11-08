@@ -22,9 +22,8 @@ import (
 // setPublicIPEndpoints 注入 publicIP 探测端点并注册恢复（注入点见 localip.go）
 func setPublicIPEndpoints(t *testing.T, endpoints []string) {
 	t.Helper()
-	saved := publicIPEndpoints
-	publicIPEndpoints = endpoints
-	t.Cleanup(func() { publicIPEndpoints = saved })
+	saved := injectSwap(&publicIPEndpoints, endpoints)
+	t.Cleanup(func() { injectSwap(&publicIPEndpoints, saved) })
 }
 
 // TestCovStartSSHKeyWarning 覆盖 Start 里 EnsureSSHKeys 失败仅告警继续的
@@ -61,9 +60,8 @@ func TestCovRegisterAutoFallbackBias(t *testing.T) {
 	setPublicIPEndpoints(t, []string{"http://127.0.0.1:1/"})
 
 	// platform 收编后 machineID 读取走 core/platform 装配，注入点移至 machineIDFn
-	saved := machineIDFn
-	machineIDFn = func() string { return "" }
-	t.Cleanup(func() { machineIDFn = saved })
+	saved := injectSwap(&machineIDFn, func() string { return "" })
+	t.Cleanup(func() { injectSwap(&machineIDFn, saved) })
 
 	a := NewAgent(Config{ServerURL: "ws://127.0.0.1:1", Bias: 3, Region: "r", Zone: "z"})
 	defer a.Stop()
@@ -83,9 +81,8 @@ func TestCovRegisterAutoFallbackBias(t *testing.T) {
 // TestCovLocalIPsError 覆盖 InterfaceAddrs 失败返回 nil 的分支
 // （interfaceAddrs 注入点，见 localip.go）
 func TestCovLocalIPsError(t *testing.T) {
-	saved := interfaceAddrs
-	interfaceAddrs = func() ([]net.Addr, error) { return nil, errors.New("boom") }
-	t.Cleanup(func() { interfaceAddrs = saved })
+	saved := injectSwap(&interfaceAddrs, func() ([]net.Addr, error) { return nil, errors.New("boom") })
+	t.Cleanup(func() { injectSwap(&interfaceAddrs, saved) })
 
 	if got := localIPs(); got != nil {
 		t.Errorf("localIPs() = %v, want nil on error", got)
@@ -191,20 +188,18 @@ func TestStartedAtOrNowZeroValue(t *testing.T) {
 // servicesRefreshLoop 双分支：注入 5ms 间隔让 ticker 分支确定触发
 // （detectServicesFn 即时桩 + 信号通道），取消上下文覆盖退出分支
 func TestServicesRefreshLoopTickAndDone(t *testing.T) {
-	savedInterval := servicesRefreshInterval
-	servicesRefreshInterval = 5 * time.Millisecond
-	t.Cleanup(func() { servicesRefreshInterval = savedInterval })
+	savedInterval := injectSwap(&servicesRefreshInterval, 5*time.Millisecond)
+	t.Cleanup(func() { injectSwap(&servicesRefreshInterval, savedInterval) })
 
-	savedDetect := detectServicesFn
 	refreshed := make(chan struct{}, 4)
-	detectServicesFn = func() []protocol.RemoteServicePayload {
+	savedDetect := injectSwap(&detectServicesFn, func() []protocol.RemoteServicePayload {
 		select {
 		case refreshed <- struct{}{}:
 		default:
 		}
 		return nil
-	}
-	t.Cleanup(func() { detectServicesFn = savedDetect })
+	})
+	t.Cleanup(func() { injectSwap(&detectServicesFn, savedDetect) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

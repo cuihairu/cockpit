@@ -23,13 +23,13 @@ import (
 )
 
 // withGoos 临时替换包级平台快照 goos（默认 runtime.GOOS，见 agent.go
-// 注释），用 defer 恢复。同包测试串行执行且读方均为本 goroutine 同步
-// 调用的函数，无并发读取窗口。
+// 注释），恢复经 injectSwap。读方之一 registerStackProvider 跑在 reconnect
+// 后台 goroutine 上（并非仅本 goroutine 同步调用），锁保证注入/恢复与在途
+// 读不竞争（见 inject.go）。
 func withGoos(t *testing.T, v string) {
 	t.Helper()
-	old := goos
-	goos = v
-	t.Cleanup(func() { goos = old })
+	old := injectSwap(&goos, v)
+	t.Cleanup(func() { injectSwap(&goos, old) })
 }
 
 // ============ GOOS 分支（agent.go windows/darwin + providers.go stack）============
@@ -137,9 +137,8 @@ func TestCovRegisterConnClearedBeforeSnapshot(t *testing.T) {
 	// 时序窗口边上——网络稍慢 register 就还没走到 writeMu，测试必闪。注入
 	// 不可达本地地址（连接拒绝，微秒级失败）让 register 的前置耗时确定性地
 	// 落在窗口内（localip.go publicIPEndpoints 注入点，测试后恢复）
-	savedEndpoints := publicIPEndpoints
-	publicIPEndpoints = []string{"http://127.0.0.1:1/"}
-	defer func() { publicIPEndpoints = savedEndpoints }()
+	savedEndpoints := injectSwap(&publicIPEndpoints, []string{"http://127.0.0.1:1/"})
+	defer func() { injectSwap(&publicIPEndpoints, savedEndpoints) }()
 
 	conn := covDial(t, covWSURL(srv))
 	a.mu.Lock()

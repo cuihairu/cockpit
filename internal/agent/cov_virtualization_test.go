@@ -12,12 +12,12 @@ import (
 	"testing"
 )
 
-// covSetStr 测试期内替换字符串型包级变量，结束时恢复。
+// covSetStr 测试期内替换字符串型包级变量（注入点，读写经 injectSwap），
+// 结束时恢复。
 func covSetStr(t *testing.T, dst *string, val string) {
 	t.Helper()
-	old := *dst
-	*dst = val
-	t.Cleanup(func() { *dst = old })
+	old := injectSwap(dst, val)
+	t.Cleanup(func() { injectSwap(dst, old) })
 }
 
 // covWriteFile 在临时目录写文件并返回路径。
@@ -56,9 +56,8 @@ func covVirtResetPaths(t *testing.T) {
 func TestCovDetectVirtualizationImplGopsutilEmpty(t *testing.T) {
 	// gopsutil 返回空虚拟化类型 → 回退手动检测
 	covVirtResetPaths(t) // 手动探测数据源全部置空 → 结果确定
-	old := hostVirtualization
-	hostVirtualization = func() (string, string, error) { return "", "", nil }
-	t.Cleanup(func() { hostVirtualization = old })
+	old := injectSwap(&hostVirtualization, func() (string, string, error) { return "", "", nil })
+	t.Cleanup(func() { injectSwap(&hostVirtualization, old) })
 
 	info := detectVirtualizationImpl()
 	if info == nil {
@@ -70,9 +69,8 @@ func TestCovDetectVirtualizationImplGopsutilEmpty(t *testing.T) {
 }
 
 func TestCovDetectVirtualizationImplGopsutilError(t *testing.T) {
-	old := hostVirtualization
-	hostVirtualization = func() (string, string, error) { return "", "", os.ErrNotExist }
-	t.Cleanup(func() { hostVirtualization = old })
+	old := injectSwap(&hostVirtualization, func() (string, string, error) { return "", "", os.ErrNotExist })
+	t.Cleanup(func() { injectSwap(&hostVirtualization, old) })
 
 	if info := detectVirtualizationImpl(); info == nil {
 		t.Fatal("detectVirtualizationImpl() should never return nil")
@@ -183,11 +181,10 @@ func TestCovDetectVirtualizationManualXenHypervisor(t *testing.T) {
 
 func TestCovDetectVirtualizationManualSystemdVirt(t *testing.T) {
 	covVirtResetPaths(t)
-	old := runCommand
-	runCommand = func(name string, args ...string) (string, error) {
+	old := injectSwap(&runCommand, func(name string, args ...string) (string, error) {
 		return "kvm", nil
-	}
-	t.Cleanup(func() { runCommand = old })
+	})
+	t.Cleanup(func() { injectSwap(&runCommand, old) })
 
 	info := detectVirtualizationManual()
 	if info.Type != VirtTypeKVM || info.Role != RoleGuest {
