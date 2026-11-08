@@ -76,6 +76,7 @@
 - [x] execlog 执行留痕：协议面+审计归集+脱敏环+rpc 单点埋点（ed35cb6/126b84e）
 - [x] healthprobe 三语义+故障窗口判定上收（71bfb7c/73fd220）
 - [x] 巡检循环 ctx 可中断收口六条同构循环（bd3fef4+d152c85）
+- [x] agent 测试注入点数据竞争修复（CI main race 腿红）：injectMu 统一守卫 14 个注入 var（injectSwap 写/injectRead 读、锁外做 I/O），三处「无数据竞争」失实注释改写（3d607919；-race 全包+30× 压测+coverage_check 全绿，PR #108 十 checks 绿，合并后 main CI 四 workflow 绿）
 
 ### 远控
 
