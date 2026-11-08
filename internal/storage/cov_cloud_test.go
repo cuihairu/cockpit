@@ -80,3 +80,18 @@ func TestCovCloudInstanceErrorBranches(t *testing.T) {
 		t.Error("closed-db delete should fail")
 	}
 }
+
+// TestCovCloudOperationErrorBranches UpsertCloudOperation 入参校验分支
+// （account_id / kind / vendor_request_id 任一缺失即拒绝）。
+func TestCovCloudOperationErrorBranches(t *testing.T) {
+	db := testDB(t)
+	if err := db.UpsertCloudOperation(&CloudOperationInput{AccountID: "a1"}); err == nil {
+		t.Error("missing kind and vendor_request_id should be rejected")
+	}
+	if err := db.UpsertCloudOperation(&CloudOperationInput{Kind: "start", VendorRequestID: "r1"}); err == nil {
+		t.Error("missing account_id should be rejected")
+	}
+	if err := db.UpsertCloudOperation(&CloudOperationInput{AccountID: "a1", Kind: "start"}); err == nil {
+		t.Error("missing vendor_request_id should be rejected")
+	}
+}

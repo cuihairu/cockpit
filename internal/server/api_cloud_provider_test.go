@@ -162,7 +162,7 @@ func TestCloudLifecycleCreateBadBilling(t *testing.T) {
 	compute := &fakeCloudCompute{}
 	s, account := newCloudLifecycleServer(t, compute)
 	rec := callCloudLifecycleAPI(s, http.MethodPost, "/api/cloud/instances/"+account.ID+"/actions",
-		`{"action":"create","name":"web","spec":"s","image_id":"i","billing_mode":"bad"}`)
+		`{"action":"create","name":"web","spec":"s","image_id":"i","security_group_id":"sg-1","billing_mode":"bad"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad billing status = %d", rec.Code)
 	}
