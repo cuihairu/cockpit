@@ -93,10 +93,11 @@ var (
 // 完全一致。var 化是覆盖率最小手术：detectCapabilities 的 windows/darwin
 // 分支与 registerStackProvider 的非 linux/darwin 跳过分支由编译期 GOOS
 // 决定，在 Linux CI 上永远不可达；改为未导出包级 var 后同包测试可注入
-// 平台值覆盖这些分支。风险评估：变量仅在包初始化时赋值一次，运行期只有
-// 测试写入；读方 detectCapabilities / registerStackProvider 均由测试
-// goroutine 同步调用（agent 后台循环不读它），同包测试串行执行（无
-// t.Parallel），注入前后用 defer 恢复，无数据竞争。
+// 平台值覆盖这些分支。风险评估：运行期只有测试写入；读方 detectCapabilities
+// （Start）与 registerStackProvider（register——跑在 reconnect 后台
+// goroutine，并非仅测试 goroutine 同步调用），故读写经 injectRead/
+// injectSwap（见 inject.go；原"后台不读、无数据竞争"的评估已被 CI race
+// 实测证伪）。
 var goos = runtime.GOOS
 
 // machineIDFn 机器标识读取（core/platform 编译期装配后的间接层；包级
@@ -183,7 +184,7 @@ func NewAgent(cfg Config) *Agent {
 			Version:  cfg.Version,
 		},
 		register.Facts{
-			MachineID:      func() string { return machineIDFn() },
+			MachineID:      func() string { return injectRead(&machineIDFn)() },
 			PublicIP:       func() string { return publicIP() },
 			LocalIPs:       func() []string { return localIPs() },
 			Virtualization: func() interface{} { return DetectVirtualization() },
@@ -261,14 +262,14 @@ var detectServicesFn = func() []protocol.RemoteServicePayload {
 // refreshServices 重探测本机服务面并更新缓存。探测有秒级耗时（SSH 认证
 // 方式握手），故后台循环里跑，不阻塞心跳。
 func (a *Agent) refreshServices() {
-	services := detectServicesFn()
+	services := injectRead(&detectServicesFn)()
 	a.setServices(services)
 	log.Printf("Remote services refreshed: %d protocol(s) open", len(services))
 }
 
 // servicesRefreshLoop 定时重探测服务面
 func (a *Agent) servicesRefreshLoop() {
-	ticker := time.NewTicker(servicesRefreshInterval)
+	ticker := time.NewTicker(injectRead(&servicesRefreshInterval))
 	defer ticker.Stop()
 	for {
 		select {
@@ -537,7 +538,7 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 				"backend": "windows-scm",
 			},
 		})
-	case goos == "darwin":
+	case injectRead(&goos) == "darwin":
 		capabilities = append(capabilities, protocol.Capability{
 			Type:    "service",
 			Version: "2",
@@ -599,7 +600,7 @@ func (a *Agent) register() error {
 
 // heartbeatLoop 心跳循环（core/heartbeat：间隔在 Run 时读包级 var）
 func (a *Agent) heartbeatLoop() {
-	a.heartbeats.Run(heartbeatInterval)
+	a.heartbeats.Run(injectRead(&heartbeatInterval))
 }
 
 // livenessLoop 带外探活调度循环（OpenWrt 自举节点片B）：未配置目标清单时

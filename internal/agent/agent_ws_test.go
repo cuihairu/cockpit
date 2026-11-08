@@ -53,7 +53,7 @@ func TestDetectVirtualizationManual(t *testing.T) {
 }
 
 func TestRunCommandMissing(t *testing.T) {
-	out, err := runCommand("definitely-not-a-command-xyz")
+	out, err := injectRead(&runCommand)("definitely-not-a-command-xyz")
 	if err == nil {
 		t.Error("runCommand() should fail for a missing binary")
 	}
@@ -64,7 +64,7 @@ func TestRunCommandMissing(t *testing.T) {
 
 func TestRunCommandIsStubbed(t *testing.T) {
 	// runCommand is intentionally a stub that never executes anything
-	out, err := runCommand("echo", "hi")
+	out, err := injectRead(&runCommand)("echo", "hi")
 	if err == nil {
 		t.Error("stubbed runCommand() should return an error")
 	}

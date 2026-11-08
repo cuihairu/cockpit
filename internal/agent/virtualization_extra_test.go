@@ -62,7 +62,7 @@ func TestDetectContainerType(t *testing.T) {
 }
 
 func TestRunCommand(t *testing.T) {
-	result, err := runCommand("nonexistent-command")
+	result, err := injectRead(&runCommand)("nonexistent-command")
 	if err == nil {
 		t.Error("runCommand() should return error for nonexistent command")
 	}
