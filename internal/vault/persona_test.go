@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -166,6 +168,75 @@ func TestPersonaNewValidation(t *testing.T) {
 	}
 	if p.Name() != "persona" {
 		t.Fatalf("name: got %q", p.Name())
+	}
+}
+
+// TestPersonaUnixEndpointParsing 覆盖 unix:// 端点的接受/拒绝两支
+// （NewPersona 的 else 分支与错误返回；100% 块覆盖口径）。
+func TestPersonaUnixEndpointParsing(t *testing.T) {
+	p, err := NewPersona(map[string]string{
+		"endpoint": "unix:///run/user/1000/persona/connect.sock",
+		"token":    "pconn_x",
+	}, 0, nil)
+	if err != nil {
+		t.Fatalf("valid unix endpoint rejected: %v", err)
+	}
+	if p.socketPath != "/run/user/1000/persona/connect.sock" {
+		t.Fatalf("socketPath: got %q", p.socketPath)
+	}
+	if p.endpoint != "http://localhost" {
+		t.Fatalf("request base for unix endpoint: got %q want http://localhost", p.endpoint)
+	}
+
+	for _, bad := range []string{
+		"unix://",             // 缺路径
+		"unix://relative",     // 非绝对路径（Host 非空）
+		"ftp://example.com/x", // 非 unix scheme
+	} {
+		_, err := NewPersona(map[string]string{"endpoint": bad, "token": "pconn_x"}, 0, nil)
+		if err == nil || !strings.Contains(err.Error(), "unix:///path") {
+			t.Errorf("endpoint %q: want unix:///path guidance error, got %v", bad, err)
+		}
+	}
+}
+
+// TestPersonaUnixEndpointRoundTrip 端到端：假 Connect 服务端挂到真 unix
+// listener 上，provider 解析 unix:// 后经自定义 Dial 直连（persona 侧
+// `connect serve --unix-socket` 形态：0600 + accept 层属主 uid 校验）。
+// 仅在有 unix socket 的平台跑；Go 测试 CI 只跑 ubuntu（windows job 只 build）。
+func TestPersonaUnixEndpointRoundTrip(t *testing.T) {
+	f := newFakePersona(t)
+	sock := filepath.Join(t.TempDir(), "connect.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+	srv := &http.Server{Handler: f.srv.Config.Handler}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	p, err := NewPersona(map[string]string{
+		"endpoint": "unix://" + sock, // sock 为绝对路径 → unix:///abs/path
+		"token":    f.token,
+	}, time.Hour, nil)
+	if err != nil {
+		t.Fatalf("new provider over unix: %v", err)
+	}
+	if err := p.Unlock(""); err != nil {
+		t.Fatalf("unlock over unix socket: %v", err)
+	}
+	// 握手（health+items）确实打在 unix listener 上（httptest 那台没人调）
+	if got := f.reqs.Load(); got < 2 {
+		t.Fatalf("expected >=2 requests over the unix socket, got %d", got)
+	}
+	// data 是外部标签枚举：{"ApiKey":{字段}}（与真实 persona CredentialData 一致）
+	f.add("u1", "api", "api_key", map[string]any{"ApiKey": map[string]any{"api_key": "sk-via-unix"}})
+	e, err := p.Read("u1")
+	if err != nil {
+		t.Fatalf("read over unix socket: %v", err)
+	}
+	if e.Value != "sk-via-unix" {
+		t.Fatalf("value over unix socket: got %q", e.Value)
 	}
 }
 

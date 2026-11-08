@@ -5,7 +5,7 @@
 
 ## 1. persona-side interface shape (source of truth)
 
-persona's formal interface to external projects is the **HTTP Connect API** (`persona connect serve`, listening only on 127.0.0.1, token authentication). Five endpoints (`connect-server/src/lib.rs:90-96` `build_router`):
+persona's formal interface to external projects is the **HTTP Connect API** (`persona connect serve`: default loopback TCP on 127.0.0.1, or `--unix-socket` for a unix domain socket — file `0600` plus an accept-time owner-uid check; token authentication either way). Five endpoints (`connect-server/src/lib.rs:90-96` `build_router`):
 
 | Endpoint | Auth | Semantics |
 |------|------|------|

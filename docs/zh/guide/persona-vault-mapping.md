@@ -8,8 +8,9 @@
 
 ## 1. persona 侧接口形态（事实源）
 
-persona 对外部项目的正式接口是 **HTTP Connect API**（`persona connect serve`，
-只听 127.0.0.1，token 鉴权）。5 个端点（`connect-server/src/lib.rs:90-96`
+persona 对外部项目的正式接口是 **HTTP Connect API**（`persona connect serve`：默认
+loopback TCP 127.0.0.1，或 `--unix-socket` 走 unix domain socket——文件 0600 +
+accept 层属主 uid 校验；两种传输均 token 鉴权）。5 个端点（`connect-server/src/lib.rs:90-96`
 `build_router`）：
 
 | 端点 | 鉴权 | 语义 |
