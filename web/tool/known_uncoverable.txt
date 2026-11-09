@@ -178,24 +178,19 @@ pages/Workbench/index.tsx:159
 pages/Workbench/index.tsx:254
 pages/Workbench/index.tsx:255
 
-# services/api.ts - 标签/心跳新增 API 端点，拦截器主路径已测，新端点暂无专项测试
-# （cleanupAgents 插入使行号 +1 漂移：2026-10-03 校准；凭据保险箱 vault
-# 类型再 +1 漂移：2026-10-07 校准；stack git 端点 import/method 插入 +2 漂移：
-# 2026-10-12 校准；followStackTask 插入 +19 漂移：2026-10-12 校准；
-# 多云账号端点块插入 +2 漂移：2026-10-21 校准；oob redirect 类型导入 +4 漂移：
-# 2026-10-28 校准（import 区 4 行插入，全文件其后行号 +4）；
-# 2026-11-05 云实例端点块插入 +3 漂移（1446 段），import 类型 +3 漂移（337 段））
-services/api.ts:340
-services/api.ts:344
-services/api.ts:348
-services/api.ts:352
-services/api.ts:356
+# services/api/<domain>.ts - 标签/心跳新增 API 端点，拦截器主路径已测，新端点暂无专项测试
+# （2026-11-10 LAY-003 拆分：原 services/api.ts 条目随方法迁移到域文件）
+services/api/agent.ts:40
+services/api/agent.ts:46
+services/api/agent.ts:52
+services/api/agent.ts:58
+services/api/agent.ts:64
 # getFirewallStatus：防火墙观测新端点，页面经 mock 测，方法体与同族端点同批
-services/api.ts:1295
+services/api/firewall.ts:12
 # getStackGit / pullStackGit：stack git 端点，页面经 mock 测（GitBar.test），
 # 方法体与同族端点同批
-services/api.ts:511
-services/api.ts:516
+services/api/stack.ts:105
+services/api/stack.ts:111
 # getCloudAccounts / saveCloudAccount / deleteCloudAccount：多云账号端点，
 # 页面经 mock 测（CloudAccountsPage.test），方法体与同族端点同批
 
