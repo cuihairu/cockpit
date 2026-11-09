@@ -296,7 +296,7 @@
 ### 超大文件候选
 
 - [x] LAY-001 [P1] 拆分 docs/guide/concepts.md（245 行）——新增 glossary 后概念、状态、能力与差异说明混在单页，可按“运行态/声明源/安全”拆分。（docs/guide/concepts.md:1）〔证据：本 commit，EN 文档拆为四页：concepts 保留资源模型+术语表（glossary 锚点不变）、runtime（能力/Registry/远控）、inventory（声明源/同步语义/历史差异）、security（安全边界），EN sidebar 挂三入口；VitePress 构建绿 0 死链，dist 产物验收四页 h2 锚点与互链齐全〕
-- [ ] LAY-002 [P1] 拆分 web/src/types/index.ts（1712 行）——云、远控、备份、Workflow、设置等全部领域类型集中，页面局部修改会被迫触碰共享巨型文件。（web/src/types/index.ts:1）
+- [x] LAY-002 [P1] 拆分 web/src/types/index.ts（1712 行）——云、远控、备份、Workflow、设置等全部领域类型集中，页面局部修改会被迫触碰共享巨型文件。（web/src/types/index.ts:1）〔证据：本 commit，按设计域拆 27 文件（common/agent/resource/auth/stack/probe/logs/drift/recording/notification/backup/file/proxy/cron/service/health/overlay/disk/firewall/dns/ddns/acme/nas/domain-binding/cloud/audit/oob），index.ts 改纯桶导出 `export * from './xxx'`，165 导出与源码行级零内容差异、全部 100 处 `@/types` 消费面不动；TZ=UTC 全量 vitest 1188/1188 通过、行覆盖 98.37%、web 门禁 GATE_EXIT=0；tsc 3 处存量错（TagManageModal/Recordings 测试）经 HEAD worktree 对照证实非本次引入〕
 - [ ] LAY-003 [P1] 拆分 web/src/services/api.ts（1570 行）——单个 ApiService 汇聚全部 REST 资源与两种流式协议，领域 API 可按资源边界拆分。（web/src/services/api.ts:122）
 - [ ] LAY-004 [P1] 拆分 web/src/components/FileBrowser/index.tsx（1239 行）——远端浏览、操作、传输和 UI 布局同文件，组件接口与副作用耦合。（web/src/components/FileBrowser/index.tsx:1）
 - [ ] LAY-005 [P1] 拆分 scripts/acceptance/guac/probe/main.go（1171 行）——验收主流程、协议构造、会话断言和输出聚合集中，场景扩展会继续膨胀。（scripts/acceptance/guac/probe/main.go:1）
