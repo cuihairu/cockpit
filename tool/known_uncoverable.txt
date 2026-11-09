@@ -28,7 +28,7 @@
 
 # ---------- 1. 场景编排 main()（合计 3224 语句） ----------
 
-scripts/acceptance/guac/probe/main.go:539,1153	1. main() 场景编排（S1-S30 真机 guacd/sshd/VNC/容器栈 + .acceptance 证据）
+scripts/acceptance/guac/probe/main.go:119,733	1. main() 场景编排（S1-S30 真机 guacd/sshd/VNC/容器栈 + .acceptance 证据）
 scripts/acceptance/guac/cdp/main.go:402,713	1. main() 场景编排（C1-C7 真机 headless-shell Chrome 驱动 Web 三协议远控）
 scripts/acceptance/logs/probe/main.go:397,713	1. main() 场景编排（T0-T4 真机三 agent/systemd/docker 突发源）
 scripts/acceptance/services/probe/main.go:307,644	1. main() 场景编排（T0-T5 真机 systemd 动词面/unit 文件编辑/journal 跳转）
@@ -41,7 +41,7 @@ scripts/acceptance/notify/probe/main.go:270,399	1. main() 场景编排（N0-N4 �
 
 # ---------- 2. 真机命令默认闭包（14 语句） ----------
 
-scripts/acceptance/guac/probe/main.go:94,97	2. dockerExecCmd 默认闭包体（需真 docker exec；单测恒注入桩）
+scripts/acceptance/guac/probe/main.go:56,59	2. dockerExecCmd 默认闭包体（需真 docker exec；单测恒注入桩）
 scripts/acceptance/logs/probe/main.go:75,78	2. systemdRunCmd 默认闭包体（需真 sudo systemd-run）
 scripts/acceptance/logs/probe/main.go:79,82	2. journalCtlCmd 默认闭包体（需真 journalctl）
 scripts/acceptance/jobs/probe/main.go:66,68	2. pgrepCmd 默认闭包体（需真 pgrep；单测恒注入桩）
@@ -50,7 +50,7 @@ internal/agent/rpc/service_windows_scm.go:20,20	2. serviceWindowsMgr 默认闭�
 
 # ---------- 3. 死防御（2 语句） ----------
 
-scripts/acceptance/guac/probe/main.go:351,352	3. parseInstr len(Args)==0 防御（strings.Split 非空串恒 ≥1 段，不可达）
+scripts/acceptance/guac/probe/guac.go:203,204	3. parseInstr len(Args)==0 防御（strings.Split 非空串恒 ≥1 段，不可达）
 internal/server/api_guacamole.go:253,254	3. collectGuacRecording 稳定后复 Stat 失败防御（loop break 与复 Stat 之间无代码；仅外部并发 unlink 的微秒窗口可触发，单测不可确定性构造；复 Stat 取 info.Size() 供元数据，非冗余可删）
 internal/server/api_guacamole.go:523,529	3. relayAddr SplitHostPort 失败防御（恒为 listener.Addr().String() 的 host:port 形态，不可达）
 scripts/acceptance/agent-backup/probe/main.go:426,427	3. buildTree 回调 filepath.Rel 死防御（p 恒由同一 root 的 filepath.Walk 派生，POSIX 同根不可失败）
