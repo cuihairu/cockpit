@@ -35,7 +35,10 @@ export default withMermaid(defineConfig({
               items: [
                 { text: 'Introduction', link: '/guide/introduction' },
                 { text: 'Quick Start', link: '/guide/getting-started' },
-                { text: 'Core Concepts', link: '/guide/concepts' }
+                { text: 'Core Concepts', link: '/guide/concepts' },
+                { text: 'Runtime State', link: '/guide/runtime' },
+                { text: 'Inventory Source', link: '/guide/inventory' },
+                { text: 'Security', link: '/guide/security' }
               ]
             },
             {
