@@ -20,7 +20,7 @@
 
 | Fact | Evidence |
 | --- | --- |
-| Route registration (mux direct mount + `/api/` fallback switch) | `internal/server/server.go:165-310`, `internal/server/api.go:34-172` |
+| Route registration (mux direct mount + `/api/` fallback switch) | `internal/server/server.go:165-310`, `internal/server/api.go:28-166` |
 | Full capability set of 17 (detector 7 + code direct-report 10) | `internal/agent/detector/` (7 files), `internal/agent/agent.go:341-477` |
 | Permission points' single source of truth | `internal/storage/role.go:29-67` `resourceActions`, `internal/server/rbac.go:23-88` `resourceRules` |
 | Proxy data-plane dialing | `internal/proxy/handler.go:116` (`net.DialTimeout("tcp",…)`), `internal/proxy/ssh_session.go:125` (`ssh.Dial("tcp",…)`) |

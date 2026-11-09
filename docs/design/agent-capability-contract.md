@@ -36,7 +36,7 @@ status: design-settled (2026-10-30, 已代决 docs/review/2026-10-30-decisions.m
 | `internal/server/api_stacks.go:223/230/524` | `HasCapability("docker-api"|"docker")` 硬编码门控 |
 | `internal/server/api_overlay_cloud.go:209-232` | 从 capability metadata 提取 zerotier `nodeId/deviceId` |
 | `internal/server/server.go:540-561` | 注册时对齐 `storage.Capability`（Endpoint/Metadata 直映射） |
-| `internal/server/api.go:769-784` | REST 返回 capabilities 对象数组（web/mobile 读 `cap.type/cap.metadata`） |
+| `internal/server/api_agents.go:188-203` | REST 返回 capabilities 对象数组（web/mobile 读 `cap.type/cap.metadata`） |
 | `internal/cloud/provider.go:40` / registry | 云 provider 声明能力 + fail-closed 校验（能力契约的既有先例） |
 
 ## 3. 契约缺口

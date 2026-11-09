@@ -224,7 +224,7 @@ RDP/VNC/SSH 桌面协议由 guacd 终结，Agent 只做 TCP 转发——Agent �
 | Agent 会话注册表 | Agent session registry | 保存当前连接的 Agent 对象、能力快照、发送队列、心跳在线态和 pending RPC channel；不是持久 inventory。 | `internal/server/registry.go:11`, `internal/server/agent.go:15` |
 | 控制协议 | Control protocol | 定义 register、heartbeat、RPC、proxy 数据、probe/liveness 上报和执行留痕的 WebSocket 消息类型与编解码。 | `internal/protocol/message.go:8`, `internal/protocol/codec.go:19` |
 | Agent RPC 路由 | Agent RPC router | 解析 `<provider>.<action>`，选择 Provider，执行动作，按消息 ID 返回响应并记录真实执行。 | `internal/agent/rpc/router.go:70`, `internal/server/server.go:503` |
-| 控制 API | Control API | 认证 REST 调用方，并把请求转换为存储操作、Agent RPC、流式 ticket 或会话管理。 | `internal/server/api.go:16`, `internal/server/server.go:283` |
+| 控制 API | Control API | 认证 REST 调用方，并把请求转换为存储操作、Agent RPC、流式 ticket 或会话管理。 | `internal/server/api.go:10`, `internal/server/server.go:283` |
 | 远控会话 | Remote-control session | 跟踪由浏览器中转的终端/桌面活路径，并转换为 Agent 控制通道上的 `proxy_*` 帧。 | `internal/server/remote_session.go:43`, `internal/server/server.go:668` |
 | 远控票据 | Remote-control ticket | 把 JWT 认证的 REST 请求桥接到浏览器 WebSocket，5 分钟有效且单次使用。 | `internal/server/ticket.go:26`, `internal/server/ticket.go:41` |
 | 代理数据面 | Proxy data plane | 用 `proxy_new/proxy_data/proxy_close` 把监听器或浏览器 socket 桥接到 Agent 侧 TCP；按协议前缀路由伪流。 | `internal/proxy/mgr/manager.go:26`, `internal/server/server.go:668` |

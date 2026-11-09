@@ -83,7 +83,7 @@ Server 持有进程级 context、后台任务计数、中间件顺序、子系�
 
 #### L3 控制 API 与会话策略
 
-REST handler 把已认证请求转换成资源操作、Agent RPC 或流式会话控制。中央路由在 `internal/server/api.go:16`；公开与受保护路由在 `internal/server/server.go:354` 注册；JWT/RBAC/审计包装顺序在 `internal/server/server.go:283`；Web 菜单与路由声明在 `web/src/App.tsx:120`，渲染在 `web/src/App.tsx:533`。
+REST handler 把已认证请求转换成资源操作、Agent RPC 或流式会话控制。中央路由在 `internal/server/api.go:10`；公开与受保护路由在 `internal/server/server.go:354` 注册；JWT/RBAC/审计包装顺序在 `internal/server/server.go:283`；Web 菜单与路由声明在 `web/src/App.tsx:120`，渲染在 `web/src/App.tsx:533`。
 
 #### L4 编排与调度
 

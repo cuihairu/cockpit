@@ -83,7 +83,7 @@ The Server owns process-scoped context, background work accounting, route middle
 
 #### L3 Control API and Session Policy
 
-REST handlers translate authenticated requests into resource operations, Agent RPC calls, or streaming-session control. Central routing is `internal/server/api.go:16`; authenticated public and protected routes are registered at `internal/server/server.go:354`; JWT, RBAC, and audit wrappers compose at `internal/server/server.go:283`; Web routes and permission menus are declared at `web/src/App.tsx:120` and rendered at `web/src/App.tsx:533`.
+REST handlers translate authenticated requests into resource operations, Agent RPC calls, or streaming-session control. Central routing is `internal/server/api.go:10`; authenticated public and protected routes are registered at `internal/server/server.go:354`; JWT, RBAC, and audit wrappers compose at `internal/server/server.go:283`; Web routes and permission menus are declared at `web/src/App.tsx:120` and rendered at `web/src/App.tsx:533`.
 
 #### L4 Orchestration and Scheduling
 
