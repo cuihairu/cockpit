@@ -44,161 +44,21 @@ import { formatBytes } from '@/utils/format'
 import { usePerm } from '@/hooks/usePerm'
 import type { FileEntry, FileSearchResult } from '@/types'
 import { getApiErrorMessage } from '@/utils/apiError'
-
-const EDIT_MAX_BYTES = 1024 * 1024 // 编辑器只允许 ≤1MB 文本（与 server 校验一致）
-// 上传（file-manager-design.md M3 D15-D17）：≤10MB 单块快速路径；更大走分块
-// （单块 1MB = agent fileWriteChunkLimit 满额，首块 truncate 建文件续块 append）
-const UPLOAD_MAX_BYTES = 10 * 1024 * 1024
-const UPLOAD_CHUNK_MAX_BYTES = 2 * 1024 * 1024 * 1024
-const UPLOAD_CHUNK_BYTES = 1024 * 1024
-// 图片预览（file-manager-design.md M2 D14）：白名单扩展名 + 20MB 上限
-const PREVIEW_MAX_BYTES = 20 * 1024 * 1024
-const PREVIEW_CHUNK_BYTES = 1024 * 1024 // agent file.read 单块上限
-const IMAGE_MIME: Record<string, string> = {
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  bmp: 'image/bmp',
-  svg: 'image/svg+xml',
-  ico: 'image/x-icon',
-  avif: 'image/avif',
-}
-
-// 跨刷新断点续传（file-manager-design.md M5 D23-D25）：挂起上传登记在
-// localStorage（单浏览器语义，per-viewer 便利），续传游标仍以远端文件实际
-// size 为准（D16 探测同源）——服务端零新状态、零新端点
-interface PendingUpload {
-  agentId: string
-  dir: string
-  name: string
-  size: number
-  lastModified: number
-  uploaded: number
-  ts: number
-}
-const PENDING_UPLOADS_KEY = 'cockpit-pending-uploads'
-const PENDING_UPLOADS_MAX = 10 // FIFO 容量
-const PENDING_UPLOADS_TTL_MS = 7 * 24 * 3600 * 1000
-
-const readPendingUploads = (): PendingUpload[] => {
-  try {
-    const raw = localStorage.getItem(PENDING_UPLOADS_KEY)
-    if (!raw) return []
-    const now = Date.now()
-    return (JSON.parse(raw) as PendingUpload[]).filter((e) => now - e.ts < PENDING_UPLOADS_TTL_MS)
-  } catch {
-    return []
-  }
-}
-
-const writePendingUploads = (list: PendingUpload[]) => {
-  try {
-    localStorage.setItem(PENDING_UPLOADS_KEY, JSON.stringify(list.slice(-PENDING_UPLOADS_MAX)))
-  } catch {
-    // 隐私窗口/存储禁用：续传登记静默缺席，主上传流程不受影响
-  }
-}
-
-const persistPendingUpload = (e: PendingUpload) => {
-  const list = readPendingUploads().filter(
-    (x) => !(x.agentId === e.agentId && x.dir === e.dir && x.name === e.name),
-  )
-  list.push(e)
-  writePendingUploads(list)
-}
-
-const removePendingUpload = (agentId: string, dir: string, name: string) => {
-  writePendingUploads(
-    readPendingUploads().filter((x) => !(x.agentId === agentId && x.dir === dir && x.name === name)),
-  )
-}
-
-// Modal.confirm 的 Promise 封装（续传校验矩阵里语义模糊处交用户裁决）
-const confirmAsync = (title: string, content: string): Promise<boolean> =>
-  new Promise((resolve) => {
-    Modal.confirm({ title, content, onOk: () => resolve(true), onCancel: () => resolve(false) })
-  })
-
-const imageExt = (name: string): string | null => {
-  const idx = name.lastIndexOf('.')
-  if (idx < 0) return null
-  const ext = name.slice(idx + 1).toLowerCase()
-  return IMAGE_MIME[ext] ? ext : null
-}
-
-// 路径 → 面包屑段（绝对路径按 / 切分）
-const pathSegments = (p: string): Array<{ label: string; path: string }> => {
-  const segs = [{ label: '/', path: '/' }]
-  let acc = ''
-  for (const part of p.split('/').filter(Boolean)) {
-    acc += `/${part}`
-    segs.push({ label: part, path: acc })
-  }
-  return segs
-}
-
-const joinPath = (dir: string, name: string) =>
-  dir === '/' ? `/${name}` : `${dir}/${name}`
-
-// 命中行关键词高亮（大小写按搜索模式切分，纯展示不递归）
-const HighlightText = ({ text, query, caseSensitive }: { text: string; query: string; caseSensitive: boolean }) => {
-  if (!query) return <>{text}</>
-  const needle = caseSensitive ? query : query.toLowerCase()
-  const parts: React.ReactNode[] = []
-  let rest = text
-  let key = 0
-  while (rest) {
-    const h = caseSensitive ? rest : rest.toLowerCase()
-    const idx = h.indexOf(needle)
-    if (idx < 0) {
-      parts.push(rest)
-      break
-    }
-    if (idx > 0) parts.push(rest.slice(0, idx))
-    parts.push(
-      <mark key={key++} style={{ background: '#613400', color: '#ffd666', padding: '0 1px' }}>
-        {rest.slice(idx, idx + needle.length)}
-      </mark>,
-    )
-    rest = rest.slice(idx + needle.length)
-  }
-  return <>{parts}</>
-}
-
-const toBase64 = (bytes: Uint8Array): string => {
-  let bin = ''
-  const chunk = 0x8000
-  for (let i = 0; i < bytes.length; i += chunk) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + chunk))
-  }
-  return btoa(bin)
-}
-
-// 读完整文本文件（≤EDIT_MAX_BYTES），超出拒绝——编辑器场景不需要大文件
-const readFullText = async (agentId: string, path: string): Promise<string> => {
-  let offset = 0
-  let out = ''
-  for (;;) {
-    const chunk = await api.readFileChunk(agentId, path, offset, EDIT_MAX_BYTES)
-    if (chunk.size > EDIT_MAX_BYTES) {
-      throw new Error(`文件超过 ${formatBytes(EDIT_MAX_BYTES)}，不支持在线编辑，请下载后本地编辑`)
-    }
-    const bytes = Uint8Array.from(atob(chunk.data), (c) => c.charCodeAt(0))
-    out += new TextDecoder().decode(bytes)
-    if (chunk.eof) return out
-    offset = chunk.size
-  }
-}
-
-// 权限九宫格：三组（属主/属组/其他）× r/w/x 的位
-const PERM_GRID: Array<{ label: string; bits: [number, number, number] }> = [
-  { label: '属主', bits: [0o400, 0o200, 0o100] },
-  { label: '属组', bits: [0o040, 0o020, 0o010] },
-  { label: '其他', bits: [0o004, 0o002, 0o001] },
-]
-const PERM_HEADS = ['读', '写', '执行']
+import {
+  EDIT_MAX_BYTES,
+  IMAGE_MIME,
+  PERM_GRID,
+  PERM_HEADS,
+  PREVIEW_CHUNK_BYTES,
+  PREVIEW_MAX_BYTES,
+  UPLOAD_CHUNK_BYTES,
+  UPLOAD_CHUNK_MAX_BYTES,
+  UPLOAD_MAX_BYTES,
+} from './constants'
+import { persistPendingUpload, readPendingUploads, removePendingUpload } from './pendingUploads'
+import type { PendingUpload } from './pendingUploads'
+import { confirmAsync, imageExt, joinPath, pathSegments, readFullText, toBase64 } from './utils'
+import { HighlightText } from './HighlightText'
 
 // 远程文件浏览器：按 agent 作用域，浏览/编辑/上传/下载/重命名/删除/权限
 // （见 docs/guide/file-manager-design.md；全文件系统可见，安全靠双端路径校验）

@@ -69,7 +69,7 @@ pages/Docker/index.tsx:175 switch 语句行：各 case 分支计数正常，swit
 pages/Recordings/index.tsx:91 guac blob 加载失败 catch：错误文案断言已实证，promise catch 回调链漏计
 pages/Recordings/index.tsx:100 回放 Modal title 内联模板：标题断言已有
 components/MetricsChart/index.tsx:85 tooltip formatter：params 四向（name/seriesName/value 缺省）均已断言，echarts 内联回调漏计
-components/FileBrowser/index.tsx:534 该按钮仅特定目录态渲染：对应态不可达该渲染分支（既定判定，行为由其余态断言覆盖）
+components/FileBrowser/index.tsx:394 cancelUpload 半成品清理：取消进行中分块上传时删除截断文件（失败静默），测试经取消路径断言其余态，该清理调用分支未直接覆盖（2026-11-10 LAY-004 拆分行号 534→394）
 
 # ---- Services/HealthPanel（b1e2413 健康探针面板，2026-09-29 收口）----
 # 两组形态，均经 HealthPanel.test.tsx 单文件 isolate 口径 lcov 实证（单跑
