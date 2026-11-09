@@ -36,7 +36,7 @@ scripts/acceptance/traefik/probe/main.go:362,802	1. main() 场景编排（T1-T10
 scripts/acceptance/jobs/probe/main.go:344,734	1. main() 场景编排（J0-J8 真机 REST/agent 异步契约执行/审计/权限面 + .acceptance 证据）
 scripts/acceptance/workflows/probe/main.go:480,1013	1. main() 场景编排（W0-W11 真机两步链/失败停/重试/取消击杀/ghost/RBAC/审计/双台扇出/变量传递 + .acceptance 证据）
 scripts/acceptance/server-backup/probe/main.go:315,606	1. main() 场景编排（B0-B9 真机双实例/定时 tick 等待/sqlite3 产物抽查 + .acceptance 证据）
-scripts/acceptance/agent-backup/probe/main.go:662,1157	1. main() 场景编排（K0-K11 真机 server/agent 打包恢复/分块下载/调度 tick 停机重启/webhook 实收 + .acceptance 证据）
+scripts/acceptance/agent-backup/probe/main.go:64,559	1. main() 场景编排（K0-K11 真机 server/agent 打包恢复/分块下载/调度 tick 停机重启/webhook 实收 + .acceptance 证据）
 scripts/acceptance/notify/probe/main.go:270,399	1. main() 场景编排（N0-N4 真机 server/webhook 接收器实收/审计面 + .acceptance 证据）
 
 # ---------- 2. 真机命令默认闭包（14 语句） ----------
@@ -53,12 +53,12 @@ internal/agent/rpc/service_windows_scm.go:20,20	2. serviceWindowsMgr 默认闭�
 scripts/acceptance/guac/probe/guac.go:203,204	3. parseInstr len(Args)==0 防御（strings.Split 非空串恒 ≥1 段，不可达）
 internal/server/api_guacamole.go:253,254	3. collectGuacRecording 稳定后复 Stat 失败防御（loop break 与复 Stat 之间无代码；仅外部并发 unlink 的微秒窗口可触发，单测不可确定性构造；复 Stat 取 info.Size() 供元数据，非冗余可删）
 internal/server/api_guacamole.go:523,529	3. relayAddr SplitHostPort 失败防御（恒为 listener.Addr().String() 的 host:port 形态，不可达）
-scripts/acceptance/agent-backup/probe/main.go:426,427	3. buildTree 回调 filepath.Rel 死防御（p 恒由同一 root 的 filepath.Walk 派生，POSIX 同根不可失败）
-scripts/acceptance/agent-backup/probe/main.go:553,554	3. writeEvilTar WriteHeader 失败分支（tar.Writer→gzip→os.File 纯本地写链，仅磁盘满/fd 级故障可触发，无注入点）
-scripts/acceptance/agent-backup/probe/main.go:560,562	3. writeEvilTar 越界条目写失败清理路径（同上磁盘级错误不可构造）
-scripts/acceptance/agent-backup/probe/main.go:565,567	3. writeEvilTar 正常条目写失败清理路径（同上）
-scripts/acceptance/agent-backup/probe/main.go:569,571	3. writeEvilTar tw.Close 失败清理路径（同上）
-scripts/acceptance/agent-backup/probe/main.go:573,575	3. writeEvilTar gz.Close 失败清理路径（同上）
+scripts/acceptance/agent-backup/probe/archive.go:52,53	3. buildTree 回调 filepath.Rel 死防御（p 恒由同一 root 的 filepath.Walk 派生，POSIX 同根不可失败）
+scripts/acceptance/agent-backup/probe/archive.go:179,180	3. writeEvilTar WriteHeader 失败分支（tar.Writer→gzip→os.File 纯本地写链，仅磁盘满/fd 级故障可触发，无注入点）
+scripts/acceptance/agent-backup/probe/archive.go:186,188	3. writeEvilTar 越界条目写失败清理路径（同上磁盘级错误不可构造）
+scripts/acceptance/agent-backup/probe/archive.go:191,193	3. writeEvilTar 正常条目写失败清理路径（同上）
+scripts/acceptance/agent-backup/probe/archive.go:195,197	3. writeEvilTar tw.Close 失败清理路径（同上）
+scripts/acceptance/agent-backup/probe/archive.go:199,201	3. writeEvilTar gz.Close 失败清理路径（同上）
 
 # ---------- 4. 新增 Agent 服务面/启动时刻字段的测试回退路径（4 语句） ----------
 
