@@ -90,30 +90,30 @@ internal/server/api_jobs.go:458,458	3. intField `case int`（JSON 数字解码�
 
 # ---------- 7. Workflow 线性编排 M1（docs/guide/workflow-design.md）：死防御与测试惯例（44 语句） ----------
 
-internal/server/api_workflow.go:113,113	3. handleWorkflowsAPI 兜底 404（serveAPI 分发保证 path 为 /workflows 前缀，default 不可达）
-internal/server/api_workflow.go:439,441	3. update ActiveWorkflowRun 检查失败 500（GetWorkflow 先行成功，SQLite 同进程 SELECT 不可致错）
-internal/server/api_workflow.go:452,454	3. UpdateWorkflow 失败 500（读链先行成功，单行主键更新不可构造失败）
-internal/server/api_workflow.go:468,470	3. delete ActiveWorkflowRun 检查失败 500（同 331,333 根因）
-internal/server/api_workflow.go:475,477	3. DeleteWorkflow 失败 500（GetWorkflow/Active 先行成功，主键删除无现实失败面）
-internal/server/api_workflow.go:492,494	3. run ActiveWorkflowRun 检查失败 500（GetWorkflow 先行成功）
-internal/server/api_workflow.go:545,550	3. CreateWorkflowRun 失败 500（前置读链全成功，INSERT 不可构造失败）
-internal/server/api_workflow.go:593,598	3. advance 循环重载 run 失败防御（后台编排 goroutine 中途 db 失败，run 创建即在本循环前成功；构造需注入竞态，SQLite 同进程无现实失败面）
-internal/server/api_workflow.go:632,638	3. C9 守卫重载 run 失败防御（goroutine 中途，同 457,459 根因）
-internal/server/api_workflow.go:707,708	3. 步骤 Job 创建失败降级 continue（goroutine 中途 INSERT 失败，同 457,459 根因）
-internal/server/api_workflow.go:736,737	3. C7 守卫 MarkJobCancelledOutput 失败仅降级 log（goroutine 中途，同 jobs 246,247 根因）
-internal/server/api_workflow.go:801,803	3. recordStepResult 重载 run 失败防御（goroutine 中途，同 457,459 根因）
-internal/server/api_workflow.go:830,832	3. recordStepSkipped 重载 run 失败防御（goroutine 中途，同 recordStepResult 794,796 根因）
-internal/server/api_workflow.go:936,938	3. finishWorkflowRun 重载 run 失败防御（goroutine 中途，同 457,459 根因）
-internal/server/api_workflow.go:962,964	3. FinishWorkflowRun 终态条件写失败防御（goroutine 中途 UPDATE，同 457,459 根因）
-internal/server/api_workflow.go:978,980	3. runs 台账 ListWorkflowRuns 失败 500（GetWorkflow 先行成功）
-internal/server/api_workflow.go:1025,1027	3. run cancel 条件终态写失败 500（GetWorkflowRun 先行成功，主键更新无现实失败面）
-internal/server/api_workflow.go:1029,1031	3. run cancel 条件写 0 行 409（取消与步骤自然终态竞态，先查 running 后 UPDATE 的微秒窗口不可确定性构造；语义同 C6「job already finished」）
-internal/server/api_workflow.go:1054,1056	3. cancelRunJobsStatus 台账查询失败防御（GetWorkflowRun 先行成功，SELECT 不可致错）
-internal/server/api_workflow.go:1062,1063	3. C8 pending 条件取消失败仅降级 log（ListJobsFiltered 先行成功，主键 UPDATE 无现实失败面；同 994,995 口径）
-internal/server/api_workflow.go:1072,1073	3. cancelRunJobsStatus 击杀 RPC 失败 continue（目标 agent 在取消时刻已离线——dispatch 后离线不可稳定构造；C8 最佳努力仅记日志）
-internal/server/api_workflow.go:1076,1077	3. cancelRunJobs 条件 UPDATE 失败仅降级 log（CallAgent 先行成功，主键 UPDATE 无现实失败面）
-internal/server/api_workflow.go:1084,1085	3. actorName nil 分支（调用面恒传非 nil *http.Request；后台编排走 finishWorkflowRun 的 actor 字符串参数，不经此分支）
-internal/server/api_workflow.go:1087,1088	4. actorName 带登录态分支（handler 单测无 auth middleware；真名分支由登录流程整链覆盖，同 jobs 196,197 口径）
+internal/server/api_workflow.go:110,110	3. handleWorkflowsAPI 兜底 404（serveAPI 分发保证 path 为 /workflows 前缀，default 不可达）
+internal/server/api_workflow.go:436,438	3. update ActiveWorkflowRun 检查失败 500（GetWorkflow 先行成功，SQLite 同进程 SELECT 不可致错）
+internal/server/api_workflow.go:449,451	3. UpdateWorkflow 失败 500（读链先行成功，单行主键更新不可构造失败）
+internal/server/api_workflow.go:465,467	3. delete ActiveWorkflowRun 检查失败 500（同 update 436 根因）
+internal/server/api_workflow.go:472,474	3. DeleteWorkflow 失败 500（GetWorkflow/Active 先行成功，主键删除无现实失败面）
+internal/server/workflow_engine.go:26,28	3. run ActiveWorkflowRun 检查失败 500（GetWorkflow 先行成功）
+internal/server/workflow_engine.go:79,84	3. CreateWorkflowRun 失败 500（前置读链全成功，INSERT 不可构造失败）
+internal/server/workflow_engine.go:127,132	3. advance 循环重载 run 失败防御（后台编排 goroutine 中途 db 失败，run 创建即在本循环前成功；构造需注入竞态，SQLite 同进程无现实失败面）
+internal/server/workflow_engine.go:166,172	3. C9 守卫重载 run 失败防御（goroutine 中途，同 127 根因）
+internal/server/workflow_engine.go:241,242	3. 步骤 Job 创建失败降级 continue（goroutine 中途 INSERT 失败，同 127 根因）
+internal/server/workflow_engine.go:270,271	3. C7 守卫 MarkJobCancelledOutput 失败仅降级 log（goroutine 中途，同 jobs 246,247 根因）
+internal/server/workflow_engine.go:335,337	3. recordStepResult 重载 run 失败防御（goroutine 中途，同 127 根因）
+internal/server/workflow_engine.go:364,366	3. recordStepSkipped 重载 run 失败防御（goroutine 中途，同 335 根因）
+internal/server/workflow_engine.go:470,472	3. finishWorkflowRun 重载 run 失败防御（goroutine 中途，同 127 根因）
+internal/server/workflow_engine.go:496,498	3. FinishWorkflowRun 终态条件写失败防御（goroutine 中途 UPDATE，同 127 根因）
+internal/server/workflow_runs_api.go:23,25	3. runs 台账 ListWorkflowRuns 失败 500（GetWorkflow 先行成功）
+internal/server/workflow_runs_api.go:70,72	3. run cancel 条件终态写失败 500（GetWorkflowRun 先行成功，主键更新无现实失败面）
+internal/server/workflow_runs_api.go:74,76	3. run cancel 条件写 0 行 409（取消与步骤自然终态竞态，先查 running 后 UPDATE 的微秒窗口不可确定性构造；语义同 C6「job already finished」）
+internal/server/workflow_runs_api.go:99,101	3. cancelRunJobsStatus 台账查询失败防御（GetWorkflowRun 先行成功，SELECT 不可致错）
+internal/server/workflow_runs_api.go:107,108	3. C8 pending 条件取消失败仅降级 log（ListJobsFiltered 先行成功，主键 UPDATE 无现实失败面；同 99 口径）
+internal/server/workflow_runs_api.go:117,118	3. cancelRunJobsStatus 击杀 RPC 失败 continue（目标 agent 在取消时刻已离线——dispatch 后离线不可稳定构造；C8 最佳努力仅记日志）
+internal/server/workflow_runs_api.go:121,122	3. cancelRunJobs 条件 UPDATE 失败仅降级 log（CallAgent 先行成功，主键 UPDATE 无现实失败面）
+internal/server/workflow_runs_api.go:129,130	3. actorName nil 分支（调用面恒传非 nil *http.Request；后台编排走 finishWorkflowRun 的 actor 字符串参数，不经此分支）
+internal/server/workflow_runs_api.go:132,133	4. actorName 带登录态分支（handler 单测无 auth middleware；真名分支由登录流程整链覆盖，同 jobs 196,197 口径）
 internal/server/probe_report.go:91,92	3. decodeProbeReport json.Marshal(payload) 失败防御（payload 来自 JSON 解码，值恒为 string/number/bool/nil/map/slice，契约上不可失败）
 internal/server/orphan_run.go:34,35	3. recoverOrphanRuns 单行 FailJob 失败仅降级 log（ListJobsFiltered 先行成功，主键条件 UPDATE 无现实失败面；同 api_workflow 980,981 口径）
 internal/server/orphan_run.go:48,49	3. recoverOrphanRuns 单行 FinishWorkflowRun 失败仅降级 log（RunningWorkflowRuns 先行成功，主键条件 UPDATE 无现实失败面；同 api_workflow 980,981 口径）

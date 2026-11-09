@@ -87,7 +87,7 @@ REST handlers translate authenticated requests into resource operations, Agent R
 
 #### L4 Orchestration and Scheduling
 
-Jobs and Workflows persist intent and step state before dispatch; schedulers and scanners reapply it over time. Job submission is `internal/server/api_jobs.go:63`, dispatch is `internal/server/api_jobs.go:401`, Workflow run creation is `internal/server/api_workflow.go:484`, and the step state machine is `internal/server/api_workflow.go:582`. The probe runner starts its periodic loop at `internal/probe/runner.go:185`; inventory hot reload starts at `internal/sync/watcher.go:57`.
+Jobs and Workflows persist intent and step state before dispatch; schedulers and scanners reapply it over time. Job submission is `internal/server/api_jobs.go:63`, dispatch is `internal/server/api_jobs.go:401`, Workflow run creation is `internal/server/workflow_engine.go:18`, and the step state machine is `internal/server/workflow_engine.go:114`. The probe runner starts its periodic loop at `internal/probe/runner.go:185`; inventory hot reload starts at `internal/sync/watcher.go:57`.
 
 #### L5 Persistence and Secret Custody
 
@@ -125,7 +125,7 @@ The Server serves the SPA and API from one process, while Web and mobile clients
 2. The WS contract is separate from handlers because registration, upstream reporting, and proxy forwarding share one connection generation and one serialized writer (`internal/agent/agent.go:355`; the write loop is provided by `internal/core/report/upstream.go`).
 3. Server composition is separate from REST because background loops and DB shutdown need one process context that outlives any request (`internal/server/server.go:203`; `internal/server/server.go:411`).
 4. Control APIs are separate from orchestration because request handlers create durable Jobs and return before Agent execution finishes (`internal/server/api_jobs.go:63`; `internal/server/api_jobs.go:401`).
-5. Workflow state is separate from Job state because an in-flight definition must be frozen while its steps create separate auditable Job attempts (`internal/server/api_workflow.go:426`; `internal/server/api_workflow.go:682`).
+5. Workflow state is separate from Job state because an in-flight definition must be frozen while its steps create separate auditable Job attempts (`internal/server/api_workflow.go:423`; `internal/server/workflow_engine.go:216`).
 6. Persistence and Vault are separate because ordinary query rows and unlock-gated encrypted secrets have different lifecycles and access rules (`internal/storage/storage.go:40`; `internal/vault/local.go:122`).
 7. Agent execution is provider-pluggable because capability detection must skip unavailable integrations without breaking the always-on heartbeat (`internal/agent/providers.go:18`; `internal/agent/agent.go:424`).
 8. Server integrations are separate from Agent providers because cloud/DNS/overlay resources use global credentials, while node execution is gated by local capabilities and environment (`internal/server/server.go:255`; `internal/agent/providers.go:18`).

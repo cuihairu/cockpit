@@ -228,7 +228,7 @@ RDP/VNC/SSH 桌面协议由 guacd 终结，Agent 只做 TCP 转发——Agent �
 | 远控会话 | Remote-control session | 跟踪由浏览器中转的终端/桌面活路径，并转换为 Agent 控制通道上的 `proxy_*` 帧。 | `internal/server/remote_session.go:43`, `internal/server/server.go:668` |
 | 远控票据 | Remote-control ticket | 把 JWT 认证的 REST 请求桥接到浏览器 WebSocket，5 分钟有效且单次使用。 | `internal/server/ticket.go:26`, `internal/server/ticket.go:41` |
 | 代理数据面 | Proxy data plane | 用 `proxy_new/proxy_data/proxy_close` 把监听器或浏览器 socket 桥接到 Agent 侧 TCP；按协议前缀路由伪流。 | `internal/proxy/mgr/manager.go:26`, `internal/server/server.go:668` |
-| 作业与编排 | Jobs and orchestration | 先持久化 Job/WorkflowRun，再异步生成可审计的 Agent 尝试、重试步骤、解析输出，并冻结活动定义。 | `internal/server/api_jobs.go:63`, `internal/server/api_workflow.go:484`, `internal/server/api_workflow.go:682` |
+| 作业与编排 | Jobs and orchestration | 先持久化 Job/WorkflowRun，再异步生成可审计的 Agent 尝试、重试步骤、解析输出，并冻结活动定义。 | `internal/server/api_jobs.go:63`, `internal/server/workflow_engine.go:18`, `internal/server/workflow_engine.go:216` |
 | 定时调度 | Scheduled execution | 用巡检循环或周期 Runner 重放已存意图，不保留请求 context。 | `internal/server/server.go:293`, `internal/probe/runner.go:185`, `internal/server/backup_loop.go:101` |
 | Inventory 声明源 | Inventory declaration source | 解析声明式 YAML，经 CLI 与热加载共用的 Syncer reconcile 到 SQLite。 | `internal/inventory/schema.go:1`, `internal/sync/watcher.go:57`, `internal/sync/watcher.go:129` |
 | 业务持久态 | Business persistence | 拥有 GORM 模型、自动迁移，以及资源、用户、作业、Workflow、指标和审计行的 SQLite CRUD。 | `internal/storage/storage.go:40`, `internal/storage/storage.go:102` |
