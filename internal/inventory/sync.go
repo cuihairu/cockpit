@@ -20,7 +20,7 @@ func NewSyncer(db *storage.DB) *Syncer {
 
 // locationOrUnknown 资源列地域落库语义（拍板 2026-10-08，todo Phase 2.2
 // region/zone 校验项）：为空允许——不拒绝同步，省略或空白统一标记
-// "unknown"（语义见 docs/guide/concepts.md「Inventory 文件」与 decision-log）。
+// "unknown"（语义见 docs/guide/inventory.md「Inventory 文件」与 decision-log）。
 func locationOrUnknown(v string) string {
 	if v = strings.TrimSpace(v); v != "" {
 		return v

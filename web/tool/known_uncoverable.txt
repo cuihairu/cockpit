@@ -69,7 +69,7 @@ pages/Docker/index.tsx:175 switch 语句行：各 case 分支计数正常，swit
 pages/Recordings/index.tsx:91 guac blob 加载失败 catch：错误文案断言已实证，promise catch 回调链漏计
 pages/Recordings/index.tsx:100 回放 Modal title 内联模板：标题断言已有
 components/MetricsChart/index.tsx:85 tooltip formatter：params 四向（name/seriesName/value 缺省）均已断言，echarts 内联回调漏计
-components/FileBrowser/index.tsx:534 该按钮仅特定目录态渲染：对应态不可达该渲染分支（既定判定，行为由其余态断言覆盖）
+components/FileBrowser/index.tsx:394 cancelUpload 半成品清理：取消进行中分块上传时删除截断文件（失败静默），测试经取消路径断言其余态，该清理调用分支未直接覆盖（2026-11-10 LAY-004 拆分行号 534→394）
 
 # ---- Services/HealthPanel（b1e2413 健康探针面板，2026-09-29 收口）----
 # 两组形态，均经 HealthPanel.test.tsx 单文件 isolate 口径 lcov 实证（单跑
@@ -178,24 +178,19 @@ pages/Workbench/index.tsx:159
 pages/Workbench/index.tsx:254
 pages/Workbench/index.tsx:255
 
-# services/api.ts - 标签/心跳新增 API 端点，拦截器主路径已测，新端点暂无专项测试
-# （cleanupAgents 插入使行号 +1 漂移：2026-10-03 校准；凭据保险箱 vault
-# 类型再 +1 漂移：2026-10-07 校准；stack git 端点 import/method 插入 +2 漂移：
-# 2026-10-12 校准；followStackTask 插入 +19 漂移：2026-10-12 校准；
-# 多云账号端点块插入 +2 漂移：2026-10-21 校准；oob redirect 类型导入 +4 漂移：
-# 2026-10-28 校准（import 区 4 行插入，全文件其后行号 +4）；
-# 2026-11-05 云实例端点块插入 +3 漂移（1446 段），import 类型 +3 漂移（337 段））
-services/api.ts:340
-services/api.ts:344
-services/api.ts:348
-services/api.ts:352
-services/api.ts:356
+# services/api/<domain>.ts - 标签/心跳新增 API 端点，拦截器主路径已测，新端点暂无专项测试
+# （2026-11-10 LAY-003 拆分：原 services/api.ts 条目随方法迁移到域文件）
+services/api/agent.ts:40
+services/api/agent.ts:46
+services/api/agent.ts:52
+services/api/agent.ts:58
+services/api/agent.ts:64
 # getFirewallStatus：防火墙观测新端点，页面经 mock 测，方法体与同族端点同批
-services/api.ts:1295
+services/api/firewall.ts:12
 # getStackGit / pullStackGit：stack git 端点，页面经 mock 测（GitBar.test），
 # 方法体与同族端点同批
-services/api.ts:511
-services/api.ts:516
+services/api/stack.ts:105
+services/api/stack.ts:111
 # getCloudAccounts / saveCloudAccount / deleteCloudAccount：多云账号端点，
 # 页面经 mock 测（CloudAccountsPage.test），方法体与同族端点同批
 

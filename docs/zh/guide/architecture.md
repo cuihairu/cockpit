@@ -83,11 +83,11 @@ Server 持有进程级 context、后台任务计数、中间件顺序、子系�
 
 #### L3 控制 API 与会话策略
 
-REST handler 把已认证请求转换成资源操作、Agent RPC 或流式会话控制。中央路由在 `internal/server/api.go:16`；公开与受保护路由在 `internal/server/server.go:354` 注册；JWT/RBAC/审计包装顺序在 `internal/server/server.go:283`；Web 菜单与路由声明在 `web/src/App.tsx:120`，渲染在 `web/src/App.tsx:533`。
+REST handler 把已认证请求转换成资源操作、Agent RPC 或流式会话控制。中央路由在 `internal/server/api.go:10`；公开与受保护路由在 `internal/server/server.go:354` 注册；JWT/RBAC/审计包装顺序在 `internal/server/server.go:283`；Web 菜单与路由声明在 `web/src/App.tsx:120`，渲染在 `web/src/App.tsx:533`。
 
 #### L4 编排与调度
 
-Jobs 和 Workflows 先持久化意图与步骤状态再派发；调度器和巡检按时间重放意图。Job 提交在 `internal/server/api_jobs.go:63`，派发在 `internal/server/api_jobs.go:401`；Workflow 创建在 `internal/server/api_workflow.go:484`，步骤状态机在 `internal/server/api_workflow.go:582`；探测循环在 `internal/probe/runner.go:185`，inventory 热加载在 `internal/sync/watcher.go:57`。
+Jobs 和 Workflows 先持久化意图与步骤状态再派发；调度器和巡检按时间重放意图。Job 提交在 `internal/server/api_jobs.go:63`，派发在 `internal/server/api_jobs.go:401`；Workflow 创建在 `internal/server/workflow_engine.go:18`，步骤状态机在 `internal/server/workflow_engine.go:114`；探测循环在 `internal/probe/runner.go:185`，inventory 热加载在 `internal/sync/watcher.go:57`。
 
 #### L5 持久化与秘密保管
 
@@ -125,7 +125,7 @@ Server 在同一进程交付 SPA 与 API；Web/mobile 只保留展示与会话�
 2. WS 契约独立于 handler，因为注册、上行上报和代理转发共用一个连接代数和串行写出器（`internal/agent/agent.go:355`；写出循环由 `internal/core/report/upstream.go` 提供）。
 3. Server 组合独立于 REST，因为后台循环和 DB 关停需要一个长于请求生命周期的进程 context（`internal/server/server.go:203`；`internal/server/server.go:411`）。
 4. 控制 API 独立于编排，因为请求 handler 先创建持久 Job 并返回，Agent 执行随后异步完成（`internal/server/api_jobs.go:63`；`internal/server/api_jobs.go:401`）。
-5. Workflow 状态独立于 Job 状态，因为在途定义必须冻结，而步骤要生成独立可审计的 Job 尝试（`internal/server/api_workflow.go:426`；`internal/server/api_workflow.go:682`）。
+5. Workflow 状态独立于 Job 状态，因为在途定义必须冻结，而步骤要生成独立可审计的 Job 尝试（`internal/server/api_workflow.go:423`；`internal/server/workflow_engine.go:216`）。
 6. 持久化与 Vault 分离，因为普通查询行和解锁门控的加密秘密有不同的生命周期与访问规则（`internal/storage/storage.go:40`；`internal/vault/local.go:122`）。
 7. Agent 执行做成 Provider 可插拔，因为能力探测要跳过不可用集成，同时不破坏始终运行的心跳（`internal/agent/providers.go:18`；`internal/agent/agent.go:424`）。
 8. Server 集成独立于 Agent Provider，因为云/DNS/overlay 用全局凭据控制资源，而节点执行由本地能力和环境门控（`internal/server/server.go:255`；`internal/agent/providers.go:18`）。
