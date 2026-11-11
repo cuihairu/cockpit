@@ -1,11 +1,15 @@
 package server
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 
+	"github.com/cuihairu/cockpit/internal/audit"
+	"github.com/cuihairu/cockpit/internal/auth"
 	"github.com/cuihairu/cockpit/internal/protocol"
 )
 
@@ -458,5 +462,72 @@ func TestToStorageAgentLocationUnknown(t *testing.T) {
 	ws := toStorageAgent(agent)
 	if ws.Region != "unknown" || ws.Zone != "z1" {
 		t.Errorf("whitespace region = %q/%q, want unknown/z1", ws.Region, ws.Zone)
+	}
+}
+
+// ============ bodyLimitMiddleware（审核修复批 P1-3）============
+
+// TestBodyLimitMiddlewareCapsOversizedBody 回归：全 API 请求体原先无上限
+// （登录 io.ReadAll 全量进内存、其余 Decode 先解码后校验），未认证巨型
+// 请求体可 OOM。现 mux 前统一套 MaxBytesReader：超限读报错，限内照常。
+func TestBodyLimitMiddlewareCapsOversizedBody(t *testing.T) {
+	s := newTestServer()
+	var got []byte
+	readBody := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		got = b
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(s.bodyLimitMiddleware(readBody))
+	defer srv.Close()
+
+	// 超限（> apiBodyLimit 8MB）：handler 读 body 报错
+	over := make([]byte, 9<<20)
+	resp, err := http.Post(srv.URL, "application/octet-stream", bytes.NewReader(over))
+	if err != nil {
+		t.Fatalf("post oversized: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized body status = %d, want 413", resp.StatusCode)
+	}
+
+	// 限内（1MB 分块 base64 口径 1.4MB）：完整到达 handler
+	within := make([]byte, 1400*1024)
+	resp, err = http.Post(srv.URL, "application/octet-stream", bytes.NewReader(within))
+	if err != nil {
+		t.Fatalf("post within limit: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("within-limit body status = %d, want 200", resp.StatusCode)
+	}
+	if len(got) != len(within) {
+		t.Errorf("body length = %d, want %d", len(got), len(within))
+	}
+}
+
+// TestHandleLoginWithAuditOversizedBodyRejected 回归：登录接口 io.ReadAll
+// 原先无上限，未认证 OOM DoS 面。现 1MB 上限：超限 body 读失败 → 解析
+// 失败 → 登录不通过（绝不 200）。
+func TestHandleLoginWithAuditOversizedBodyRejected(t *testing.T) {
+	s := newTestServerWithDB(t)
+	s.audit = audit.NewLogger(s.db)
+	auth.InitDB(s.db)
+	s.db.InitAdminUser("admin", "password123")
+
+	big := bytes.Repeat([]byte("x"), 2<<20) // 2MB > 登录 1MB 上限
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(big))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	s.handleLoginWithAudit(rec, req)
+
+	if rec.Code == http.StatusOK {
+		t.Errorf("oversized login body status = 200, want non-200")
 	}
 }

@@ -40,6 +40,23 @@ func (r *responseWriter) Flush() {
 	}
 }
 
+// apiBodyLimit 全 API 请求体上限（审核修复批 P1-3）：handler 内解码前统一
+// 截断，防未认证（登录）与已认证面的巨型请求体 OOM。合法最大请求体 =
+// 1MB 文件分块 base64 JSON（≈1.4MB），8MB 留足余量；更紧的单接口上限
+// （unitFile 256KB / healthConfig 16KB / overlay 4KB）由各 handler 自己的
+// MaxBytesReader 收口。WS 升级不读 body，包装无影响（Hijack 后 header 无效）。
+const apiBodyLimit = 8 << 20
+
+// bodyLimitMiddleware 给所有 API 请求的 body 套 MaxBytesReader（mux 前最后一站）
+func (s *Server) bodyLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, apiBodyLimit)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // CORSMiddleware 统一处理 API 跨域响应和预检请求。
 func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

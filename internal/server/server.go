@@ -280,7 +280,8 @@ func (s *Server) Start() error {
 
 	// 预检请求必须先于认证处理，否则跨域 OPTIONS 会被 JWT 中间件拒绝。
 	// RBAC 在 Audit 内层：403 也进审计链（rbac-design.md 笔 2）
-	handler := s.CORSMiddleware(s.AuditMiddleware(s.RBACMiddleware(mux)))
+	// bodyLimit 在最内层（mux 前最后一站）：所有 handler 拿到的 body 已截断
+	handler := s.CORSMiddleware(s.AuditMiddleware(s.RBACMiddleware(s.bodyLimitMiddleware(mux))))
 
 	server := &http.Server{
 		Addr:    s.addr,
@@ -590,8 +591,9 @@ func (s *Server) handleLoginWithAudit(w http.ResponseWriter, r *http.Request) {
 	// 在消费 body 之前先读取用户名用于审计
 	var username string
 
-	// 读取 body 用于解析
-	body, err := io.ReadAll(r.Body)
+	// 读取 body 用于解析（1MB 上限：登录请求只有用户名口令，防未认证
+	// 巨型请求体；全 API 面 8MB 上限见 bodyLimitMiddleware）
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err == nil {
 		// 创建一个新的 reader 供后续使用
 		r.Body = io.NopCloser(bytes.NewBuffer(body))
