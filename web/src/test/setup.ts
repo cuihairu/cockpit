@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 import { afterAll, afterEach } from 'vitest'
-import { cleanup, configure } from '@testing-library/react'
+import { act, cleanup, configure } from '@testing-library/react'
 
 // 排干 React scheduler 残留任务：必须与 React 同一原语（setImmediate，
 // check 相位 FIFO）——setTimeout(0) 落在下一循环的 timers 相位，可能先于
@@ -111,14 +111,18 @@ afterEach(() => {
 })
 
 // antd message/notification 渲染挂在 body，避免跨用例残留
+// 排干包 act：scheduler 帧循环按时间预算 yield（shouldYieldToHost），慢机上
+// commit→passive 的 continuation 链会超过固定 8 跳，残留任务漏到 teardown 后
+// 触发 window.event ReferenceError（2026-11-11 CI 实证）。act 循环 flush 直到
+// 调度队列真正清空，深度不依赖固定跳数；setImmediate 排干兜非 React 任务。
 afterEach(async () => {
   cleanup()
   document.body.innerHTML = ''
-  await drainSchedulerDeep()
+  await act(drainSchedulerDeep)
 })
 
 // 文件收尾（环境 teardown 前最后一站）：per-test 排干之后到 teardown 之间
 // 仍可能有异步回调新排入调度，这里再兜一轮深排干
 afterAll(async () => {
-  await drainSchedulerDeep()
+  await act(drainSchedulerDeep)
 })
