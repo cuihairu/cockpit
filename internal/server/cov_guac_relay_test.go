@@ -274,3 +274,45 @@ func TestGuacRelayDeliverUnknown(t *testing.T) {
 		t.Fatalf("deliver to unknown conn should error")
 	}
 }
+
+// TestGuacRelayDeliverWriteTimeout 回归（审核修复批 P1-4）：guacd 停滞
+// （TCP 零窗口）时无 deadline 的 Write 卡死 server 的 agent readLoop——
+// 该 agent 全部入站帧（心跳回执、RPC 响应）队头阻塞。现写前设
+// guacRelayWriteTimeout：写失败 → removeConn 拆连，readLoop 不卡。
+func TestGuacRelayDeliverWriteTimeout(t *testing.T) {
+	orig := guacRelayWriteTimeout
+	guacRelayWriteTimeout = 200 * time.Millisecond
+	defer func() { guacRelayWriteTimeout = orig }()
+
+	relay, _, err := startGuacRelay("agent-1", "guac:sess-wt", "10.0.0.5:22", func(agentID string, msg *protocol.Message) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("startGuacRelay: %v", err)
+	}
+	defer relay.Close()
+
+	// 直接注入 net.Pipe 假 guacd 连接：同步无缓冲、对端不读 → Write 阻塞，
+	// 精确模拟零窗口（真 TCP 回环缓冲大，塞满不可靠）
+	pClient, pServer := net.Pipe()
+	defer pServer.Close()
+	relay.mu.Lock()
+	relay.conns["wt-conn"] = pClient
+	relay.mu.Unlock()
+
+	start := time.Now()
+	if err := guacRelayDeliver("guac:sess-wt", "wt-conn", []byte("x")); err == nil {
+		t.Fatal("deliver to stalled guacd should fail with deadline")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("guacRelayDeliver returned after %v, want ~guacRelayWriteTimeout", elapsed)
+	}
+
+	// 停滞连接被拆（写失败路径 removeConn）
+	relay.mu.Lock()
+	_, still := relay.conns["wt-conn"]
+	relay.mu.Unlock()
+	if still {
+		t.Error("stalled guacd conn not removed after write timeout")
+	}
+}

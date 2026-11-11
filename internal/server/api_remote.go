@@ -35,13 +35,21 @@ type TerminalSession struct {
 	done       chan struct{}
 }
 
+// terminalWriteTimeout 浏览器侧数据面写超时（审核修复批 P1-4）：浏览器
+// 停滞（TCP 零窗口）时 HandleTerminalData 的写跑在 agent readLoop
+// goroutine 上，无 deadline 会卡死该 agent 全部入站帧。包级变量仅为测试
+// 可注入，默认值即生产取值。
+var terminalWriteTimeout = 30 * time.Second
+
 // writeWS 线程安全写 WS JSON 帧。gorilla 并发写同一连接会 panic
 // （concurrent write to websocket connection）且 panic 在 agent readLoop
 // goroutine 上无 recover → 全进程退出。四个并发写者：keepalive ping、
 // HandleTerminalData、HandleTerminalClose、handleProxyError，全部收口到这里。
+// 写前设 deadline：浏览器停滞时写失败由各调用方走关闭路径，readLoop 不卡。
 func (session *TerminalSession) writeWS(v interface{}) error {
 	session.writeMu.Lock()
 	defer session.writeMu.Unlock()
+	_ = session.ClientWS.SetWriteDeadline(time.Now().Add(terminalWriteTimeout))
 	return session.ClientWS.WriteJSON(v)
 }
 

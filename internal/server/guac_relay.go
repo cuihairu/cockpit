@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cuihairu/cockpit/internal/protocol"
 )
@@ -242,6 +243,11 @@ func (r *guacRelay) removeConn(connID, reason string) {
 	_ = r.send(r.agentID, closeMsg)
 }
 
+// guacRelayWriteTimeout guacd 侧数据面写超时（审核修复批 P1-4）：guacd
+// 停滞（TCP 零窗口）时无 deadline 的 Write 卡死 server 的 agent readLoop，
+// 该 agent 全部入站帧队头阻塞。包级变量仅为测试可注入。
+var guacRelayWriteTimeout = 30 * time.Second
+
 // guacRelayDeliver agent → guacd 方向（server.handleProxyData 路由进）。
 func guacRelayDeliver(proxyID, connID string, data []byte) error {
 	r := guacRelayLookup(proxyID)
@@ -254,6 +260,8 @@ func guacRelayDeliver(proxyID, connID string, data []byte) error {
 	if !ok {
 		return fmt.Errorf("relay conn %s not found", connID)
 	}
+	// 写前设 deadline：guacd 停滞时写失败 → removeConn 拆连，readLoop 不卡
+	_ = conn.SetWriteDeadline(time.Now().Add(guacRelayWriteTimeout))
 	_, err := conn.Write(data)
 	if err != nil {
 		r.removeConn(connID, "write to guacd failed")

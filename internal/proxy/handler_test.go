@@ -556,3 +556,54 @@ func TestSendCloseRunning(t *testing.T) {
 
 	h.SendClose("p1", "c1", "test reason")
 }
+
+// TestHandleProxyDataWriteTimeout 回归（审核修复批 P1-4）：目标停滞（TCP
+// 零窗口）时无 deadline 的 Write 把 messageLoop 永久卡死——agent 停止读帧
+// 且不触发重连，心跳由独立 goroutine 仍发，server 侧表现为「在线但全部
+// RPC 超时」。现写前设 targetWriteTimeout：停滞目标写失败 → 拆连收尾。
+func TestHandleProxyDataWriteTimeout(t *testing.T) {
+	orig := targetWriteTimeout
+	targetWriteTimeout = 200 * time.Millisecond
+	defer func() { targetWriteTimeout = orig }()
+
+	h := NewHandler()
+
+	// net.Pipe 同步无缓冲：对端不读，Write 阻塞——精确模拟零窗口目标
+	conn1, conn2 := net.Pipe()
+	defer conn2.Close()
+
+	agentConn := &AgentTargetConn{
+		ID:      "stall-conn",
+		ProxyID: "proxy-1",
+		Target:  "localhost:9999",
+		Conn:    conn1,
+		Created: time.Now(),
+	}
+	h.mu.Lock()
+	h.conns["stall-conn"] = agentConn
+	h.mu.Unlock()
+
+	msg := &protocol.Message{
+		Payload: map[string]interface{}{
+			"connId": "stall-conn",
+			"data":   "hello",
+		},
+	}
+	start := time.Now()
+	err := h.HandleProxyData(msg)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("write to stalled target should fail with deadline")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("HandleProxyData returned after %v, want ~targetWriteTimeout", elapsed)
+	}
+
+	// 停滞目标被拆掉（写错误路径 removeConn）
+	h.mu.RLock()
+	_, still := h.conns["stall-conn"]
+	h.mu.RUnlock()
+	if still {
+		t.Error("stalled conn not removed after write timeout")
+	}
+}

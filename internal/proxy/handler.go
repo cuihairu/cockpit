@@ -49,6 +49,10 @@ type windowResizer interface {
 	WindowChange(rows, cols int) error
 }
 
+// targetWriteTimeout 数据面写目标的超时（审核修复批 P1-4）。包级变量仅为
+// 测试可注入，默认值即生产取值。
+var targetWriteTimeout = 30 * time.Second
+
 // NewHandler 创建 Agent 端代理处理器
 func NewHandler() *Handler {
 	return &Handler{
@@ -229,7 +233,14 @@ func (h *Handler) HandleProxyData(msg *protocol.Message) error {
 		return nil
 	}
 
-	// 写入数据到目标
+	// 写入数据到目标。写前设 deadline（审核修复批 P1-4）：目标停滞（TCP
+	// 零窗口）时无 deadline 的 Write 会把 messageLoop 永久卡死——agent
+	// 停止读帧且不触发重连，心跳由独立 goroutine 继续发，server 侧表现为
+	// 「在线但全部 RPC 超时」。每次写前重设覆盖上一轮残留值，无需回清；
+	// sshStream 等无 SetWriteDeadline 的目标保持原语义。
+	if d, ok := conn.Conn.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		_ = d.SetWriteDeadline(time.Now().Add(targetWriteTimeout))
+	}
 	if _, err := conn.Conn.Write(p.Data); err != nil {
 		log.Printf("Write error to target %s: %v", p.ConnID, err)
 		conn.Close()

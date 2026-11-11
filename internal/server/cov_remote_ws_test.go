@@ -758,3 +758,30 @@ func TestCovTerminalSSHForwardsCredentials(t *testing.T) {
 	<-tDone
 	<-tDone2
 }
+
+// TestTerminalWriteWSDeadline 回归（审核修复批 P1-4）：浏览器停滞（TCP
+// 零窗口）时 HandleTerminalData 的写跑在 agent readLoop goroutine 上，无
+// deadline 的 Write 卡死该 agent 全部入站帧。现 writeWS 写前设
+// terminalWriteTimeout：停滞浏览器写失败返回，调用方走各自关闭路径。
+func TestTerminalWriteWSDeadline(t *testing.T) {
+	orig := terminalWriteTimeout
+	terminalWriteTimeout = 200 * time.Millisecond
+	defer func() { terminalWriteTimeout = orig }()
+	s := covRemoteSetup(t)
+
+	// 升级后不读的 WS：net.Pipe 同步无缓冲，写必阻塞——精确模拟零窗口浏览器
+	wsConn, _ := covDirectWS(t, func(w http.ResponseWriter, r *http.Request) {
+		if c, err := s.upgrader.Upgrade(w, r, nil); err == nil {
+			t.Cleanup(func() { c.Close() })
+		}
+	}, "/api/remote/terminal", "", true)
+
+	sess := &TerminalSession{ID: "wt-sess", ClientWS: wsConn, ConnID: "wt-conn", done: make(chan struct{})}
+	start := time.Now()
+	if err := sess.writeWS(map[string]interface{}{"type": "data", "data": "x"}); err == nil {
+		t.Fatal("write to stalled browser should fail with deadline")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("writeWS returned after %v, want ~terminalWriteTimeout", elapsed)
+	}
+}
