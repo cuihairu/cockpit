@@ -776,7 +776,7 @@ func (s *Server) handleProxyError(agent *Agent, msg *protocol.Message) {
 		session, exists := terminalByConn[connID]
 		terminalSessionsMu.Unlock()
 		if exists {
-			session.ClientWS.WriteJSON(map[string]interface{}{
+			session.writeWS(map[string]interface{}{
 				"type":    "error",
 				"message": p.Error,
 			})

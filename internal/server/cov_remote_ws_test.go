@@ -12,6 +12,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -21,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -420,6 +422,115 @@ func TestCovTerminalAgentClose(t *testing.T) {
 	// 写与 TempDir 清理并发（CI 实测 RemoveAll「directory not empty」flake），
 	// 同 TestCovTerminalDataFlow：join handler 排干再返回
 	covWaitHandlerExit(t, "terminal handler after agent close", tDone)
+}
+
+func TestCovTerminalConcurrentWritesNoPanic(t *testing.T) {
+	// 回归（审核修复批 P0-1）：TerminalSession 的 ClientWS 有四个并发写者
+	// （keepalive ping / HandleTerminalData / HandleTerminalClose /
+	// handleProxyError），原先裸写 ClientWS——gorilla 并发写即 panic
+	// （concurrent write to websocket connection），且写者跑在 agent
+	// readLoop goroutine 上无 recover → 全进程退出。本用例多路并发写同一
+	// 会话：无互斥必 panic；收口到 session.writeMu 后写者序列化，客户端
+	// 收到全部帧且顺序一致。
+	defer covClearSessions()
+	s := covRemoteSetup(t)
+	agent := covRegisterBareAgent(t, s, "agent-conc")
+
+	conn, _, tDone := covDirectWSJoined(t, s.handleTerminalWebSocket, "/api/remote/terminal",
+		covTerminalTicket(t, s, "agent-conc"))
+	t.Cleanup(func() { conn.Close() })
+
+	var connect map[string]interface{}
+	covWSReadJSON(t, conn, &connect)
+	newMsg := covAgentRecv(t, agent, "proxy_new")
+	connID, _ := newMsg.Payload["connId"].(string)
+
+	const writers = 6
+	const per = 20
+	var wg sync.WaitGroup
+
+	// 模拟 agent readLoop：HandleTerminalData（数据下行）与 handleProxyError
+	// （错误帧）并发写同一 ClientWS
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < per; j++ {
+				if err := s.HandleTerminalData(connID, []byte("x")); err != nil {
+					t.Errorf("HandleTerminalData: %v", err)
+					return
+				}
+				s.handleProxyError(agent, protocol.NewMessage(protocol.MessageTypeProxyError, map[string]interface{}{
+					"proxyId": "terminal-" + connID, "error": "e",
+				}))
+			}
+		}()
+	}
+
+	// keepalive ping 也并发进来：与上面的数据帧抢写（生产常态）
+	pingCtx, cancelPing := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelPing()
+	go func() {
+		for pingCtx.Err() == nil {
+			session := findTerminalSession(connID)
+			if session != nil {
+				_ = session.writeWS(map[string]interface{}{"type": "ping"})
+			}
+			time.Sleep(3 * time.Millisecond)
+		}
+	}()
+
+	// net.Pipe 同步：写端阻塞到客户端消费。客户端持续读，收齐 writers*per 个
+	// data + writers*per 个 error 帧即证明无 panic、无丢帧（writeMu 序列化）。
+	wantData := writers * per
+	wantErr := writers * per
+	gotData, gotErr, gotPing := 0, 0, 0
+	for gotData < wantData || gotErr < wantErr {
+		var m map[string]interface{}
+		if err := conn.ReadJSON(&m); err != nil {
+			break
+		}
+		switch m["type"] {
+		case "data":
+			gotData++
+		case "error":
+			gotErr++
+		case "ping":
+			gotPing++
+		}
+		if pingCtx.Err() != nil && gotPing > 0 {
+			cancelPing()
+		}
+	}
+	<-time.After(50 * time.Millisecond)
+	cancelPing()
+	wg.Wait()
+
+	if gotData < wantData || gotErr < wantErr {
+		t.Fatalf("frames: data=%d/%d error=%d/%d ping=%d（并发写丢帧）", gotData, wantData, gotErr, wantErr, gotPing)
+	}
+
+	// 收齐并发帧后按 FullFlow 同路收尾：客户端异常关闭 → sendLoop 退出 →
+	// closeTerminalSession → done → keepalive 退出 → handler goroutine 返回
+	if err := conn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(3000, "cov-conc-done"), time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+
+	closeMsg := covAgentRecv(t, agent, "proxy_close")
+	if closeMsg.Type != protocol.MessageTypeProxyClose || closeMsg.Payload["terminal"] != true {
+		t.Fatalf("close forward = %+v", closeMsg.Payload)
+	}
+	covWaitGone(t, "terminal session cleanup after concurrency", func() bool { return !covTerminalSessionByConn(connID) })
+	covWaitHandlerExit(t, "terminal handler after concurrent writes", tDone)
+}
+
+// findTerminalSession 按 connID 取会话（测试辅助）
+func findTerminalSession(connID string) *TerminalSession {
+	terminalSessionsMu.Lock()
+	defer terminalSessionsMu.Unlock()
+	return terminalByConn[connID]
 }
 
 func TestCovTerminalWebSocketBadRequests(t *testing.T) {

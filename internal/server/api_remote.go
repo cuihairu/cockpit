@@ -31,7 +31,18 @@ type TerminalSession struct {
 	LastActive time.Time
 	recorder   *castRecorder // 输出流录制（recording-design.md；nil = 未开）
 	mu         sync.Mutex
+	writeMu    sync.Mutex // gorilla WS 单写者（与 GuacamoleSession 同款，见 writeWS）
 	done       chan struct{}
+}
+
+// writeWS 线程安全写 WS JSON 帧。gorilla 并发写同一连接会 panic
+// （concurrent write to websocket connection）且 panic 在 agent readLoop
+// goroutine 上无 recover → 全进程退出。四个并发写者：keepalive ping、
+// HandleTerminalData、HandleTerminalClose、handleProxyError，全部收口到这里。
+func (session *TerminalSession) writeWS(v interface{}) error {
+	session.writeMu.Lock()
+	defer session.writeMu.Unlock()
+	return session.ClientWS.WriteJSON(v)
 }
 
 var (
@@ -165,7 +176,7 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 	if err := agent.SendMessage(msg); err != nil {
 		log.Printf("Failed to send proxy start message: %v", err)
 		session.recorder.Close() // 已开的录制文件与元数据行照常收尾（其余出口都走这条）
-		conn.WriteJSON(map[string]interface{}{
+		session.writeWS(map[string]interface{}{
 			"type":    "error",
 			"message": "Failed to establish connection to agent",
 		})
@@ -180,7 +191,7 @@ func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request)
 	// proxy_new 已下发：会话建立（浏览器 ↔ agent 数据面就绪）
 	_ = s.remoteSessions.UpdateStatus(sessionID, RemoteSessionStatusConnected, "")
 
-	conn.WriteJSON(map[string]interface{}{
+	session.writeWS(map[string]interface{}{
 		"type":    "connect",
 		"message": "Connecting to " + target,
 	})
@@ -279,7 +290,7 @@ func (s *Server) terminalKeepaliveLoop(session *TerminalSession) {
 			s.closeTerminalSession(session)
 			return
 		case <-ticker.C:
-			if err := session.ClientWS.WriteJSON(map[string]interface{}{
+			if err := session.writeWS(map[string]interface{}{
 				"type": "ping",
 			}); err != nil {
 				s.closeTerminalSession(session)
@@ -350,7 +361,7 @@ func (s *Server) HandleTerminalData(connID string, data []byte) error {
 	// 录制输出流（agent → 浏览器方向的唯一出口）
 	session.recorder.WriteOutput(data)
 
-	return session.ClientWS.WriteJSON(map[string]interface{}{
+	return session.writeWS(map[string]interface{}{
 		"type": "data",
 		"data": string(data),
 	})
@@ -371,7 +382,7 @@ func (s *Server) HandleTerminalClose(connID string, reason string) {
 	}
 
 	session.recorder.Close() // agent 侧关闭路径也即时回填（不等 keepalive 兜底）
-	session.ClientWS.WriteJSON(map[string]interface{}{
+	session.writeWS(map[string]interface{}{
 		"type":    "close",
 		"message": reason,
 	})
