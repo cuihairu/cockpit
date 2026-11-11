@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"runtime"
 	"testing"
 	"time"
 
@@ -38,6 +39,7 @@ func TestAgentMessageLoopStaleGenerationExits(t *testing.T) {
 		a.messageLoop()
 		close(loopDone)
 	}()
+	t.Logf("DBGML-test loop started conn1=%p", conn1) // TMP-DEBUG
 
 	// 确认代 1 循环活着并处理消息。
 	codec := protocol.NewCodec()
@@ -48,6 +50,7 @@ func TestAgentMessageLoopStaleGenerationExits(t *testing.T) {
 		return len(a.outbound) > 0
 	})
 	<-a.outbound
+	t.Logf("DBGML-test pong consumed") // TMP-DEBUG
 
 	// 代 2：建立新连接 conn2，并模拟 reconnect 的 connect() 写回：递增
 	// 连接代数后把新连接挂到 a.conn。
@@ -64,15 +67,22 @@ func TestAgentMessageLoopStaleGenerationExits(t *testing.T) {
 	a.connected = true
 	a.connGen = 2
 	a.mu.Unlock()
+	t.Logf("DBGML-test swap2 done conn2=%p", conn2) // TMP-DEBUG
 
 	// 关闭旧连接：代 1 的 ReadMessage 返回错误，但代数已失配 → 应退出。
 	conn1.Close()
+	t.Logf("DBGML-test conn1 closed") // TMP-DEBUG
 
 	select {
 	case <-loopDone:
 	case <-time.After(3 * time.Second):
 		t.Fatal("stale messageLoop did not exit after connection generation change")
 	}
+	// sconn1 在 ping 写入后不再被引用，Go 活跃性分析判定其可回收：
+	// netFD finalizer 关 fd 会向 conn1 发 FIN，恰在 swap 前触发会让
+	// 陈旧循环读到 1006 EOF 并误走重连（CI 实测，见 894b8470 后的
+	// Agent Test 红腿）。KeepAlive 钉住到断言完成，杜绝 finalizer 抢跑。
+	runtime.KeepAlive(sconn1)
 
 	// 未误触发重连：reconnecting 未置位，且代数未被再次递增。
 	if a.reconnecting.Load() {
