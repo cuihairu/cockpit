@@ -302,6 +302,81 @@ func TestCovHandleWebSocketDBErrorRejected(t *testing.T) {
 	}
 }
 
+// ============ /ws 注册面防护（审核修复批 P1-2）============
+
+func TestCovHandleWebSocketOversizedFrameRejected(t *testing.T) {
+	// 回归：升级后原来直接 ReadMessage 无单帧上限，未认证客户端发巨型帧
+	// 全量进内存。现升级即 SetReadLimit(wsReadLimit)：超限帧使注册读失败
+	// 并关连接；限内大帧（1MB 文件分块 base64 ≈1.37MB）不受影响。
+	s := covNewServer(t)
+	covWSReady(s)
+	httpSrv := httptest.NewServer(http.HandlerFunc(s.handleWebSocket))
+	t.Cleanup(httpSrv.Close)
+
+	// 超限帧：5MB payload（> wsReadLimit 4MB）→ 服务端读失败关连接
+	conn := covDialWS(t, covWSStrip(httpSrv.URL)+"/ws", nil)
+	defer conn.Close()
+	big := make([]byte, 5<<20)
+	if err := conn.WriteMessage(websocket.BinaryMessage, big); err != nil {
+		t.Fatalf("write oversized frame: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Error("expected connection close after oversized frame, got message")
+	}
+
+	// 限内大帧（≈1.4MB，1MB 分块 base64 口径）注册照常成功
+	s2 := covNewServer(t)
+	covWSReady(s2)
+	httpSrv2 := httptest.NewServer(http.HandlerFunc(s2.handleWebSocket))
+	t.Cleanup(httpSrv2.Close)
+
+	conn2 := covDialWS(t, covWSStrip(httpSrv2.URL)+"/ws", nil)
+	defer conn2.Close()
+	reg := covRegisterPayload("agent-bigframe")
+	// 体积放在 metadata（自由 KV，不入鉴权路径；secret 放大会被 bcrypt
+	// 72 字节上限拒绝，与本用例无关）
+	reg["metadata"] = map[string]interface{}{"bulk": strings.Repeat("x", 1400*1024)}
+	covWSWriteJSON(t, conn2, protocol.NewMessage(protocol.MessageTypeRegister, reg))
+	var resp protocol.Message
+	if err := conn2.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn2.ReadJSON(&resp); err != nil {
+		t.Fatalf("register with ~1.4MB payload should pass: %v", err)
+	}
+	if resp.Type != protocol.MessageTypeRegister {
+		t.Fatalf("response type = %s, want register", resp.Type)
+	}
+}
+
+func TestCovHandleWebSocketRegisterTimeout(t *testing.T) {
+	// 回归：升级后原来无首帧时限，未认证客户端连上不发首帧可永久占住
+	// goroutine/连接（slowloris）。现升级即设 wsRegisterReadTimeout，
+	// 超时后服务端主动关连接（readLoop 侧注册读报错退出）。
+	orig := wsRegisterReadTimeout
+	wsRegisterReadTimeout = 300 * time.Millisecond
+	defer func() { wsRegisterReadTimeout = orig }()
+
+	s := covNewServer(t)
+	covWSReady(s)
+	httpSrv := httptest.NewServer(http.HandlerFunc(s.handleWebSocket))
+	t.Cleanup(httpSrv.Close)
+
+	conn := covDialWS(t, covWSStrip(httpSrv.URL)+"/ws", nil)
+	defer conn.Close()
+
+	// 不发任何帧：等首帧时限过后服务端关闭 → 客户端读到关闭错误
+	start := time.Now()
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Error("expected server to close silent connection after register timeout")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("server closed after %v, want ~wsRegisterReadTimeout", elapsed)
+	}
+}
+
 // ============ dispatcher.go ============
 
 func TestCovHandleMessageDispatch(t *testing.T) {

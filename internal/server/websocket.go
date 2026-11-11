@@ -25,6 +25,16 @@ type registrationRejection struct {
 // 覆盖哈希失败分支；bcrypt 对合法输入不失败，错误分支仅供测试覆盖）。
 var hashAgentSecretForRegistration = storage.HashAgentSecret
 
+// wsReadLimit 注册前后统一单帧上限：防未认证客户端发巨型帧撑爆内存。
+// 合法最大入站帧 = 1MB 文件/备份分块 base64（≈1.37MB）+ JSON 包装，
+// 4MB 留余量（api_files.go/api_backups.go 的「agent 上限 1MB」口径）。
+const wsReadLimit = 4 << 20
+
+// wsRegisterReadTimeout 首帧（注册帧）等待时限：防未认证客户端连上不发
+// 首帧永久占住 goroutine/连接（slowloris）。包级变量仅为测试可注入，
+// 默认值即生产取值。
+var wsRegisterReadTimeout = 30 * time.Second
+
 // agentRegistrationPolicy nil 安全的准入策略读取：测试直构 Server 无 cfg、
 // 历史配置文件无该段时按零值处理（默认拒绝，见 2026-10-18 审核表一#1）。
 func (s *Server) agentRegistrationPolicy() config.AgentRegistrationConfig {
@@ -74,6 +84,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 升级后立即设单帧上限与首帧时限（未认证面防巨型帧/慢连接占位）。
+	// 上限对连接终身生效：注册后 agent 合法帧均 ≤1.4MB，见 wsReadLimit。
+	conn.SetReadLimit(wsReadLimit)
+	_ = conn.SetReadDeadline(time.Now().Add(wsRegisterReadTimeout))
+
 	// 等待注册消息
 	msg, err := s.codec.ReadMessage(conn)
 	if err != nil {
@@ -109,6 +124,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		conn.Close()
 		return
 	}
+
+	// 注册通过：解除首帧时限，长连接靠心跳判活，不设常驻读限
+	_ = conn.SetReadDeadline(time.Time{})
 
 	log.Printf("Agent registered: %s at %s/%s", agent.ID, reg.Location.Region, reg.Location.Zone)
 

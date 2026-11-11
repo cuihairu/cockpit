@@ -194,6 +194,12 @@ func (s *Server) forwardFileRPC(w http.ResponseWriter, r *http.Request, agentID,
 		}
 		if req.Length != nil && *req.Length > 0 {
 			length = *req.Length
+			// 与 write 侧同口径的 1MB 上限（注释见下）：无预检时超大
+			// length 会让 agent 回包帧突破 /ws 单帧上限（wsReadLimit）
+			if length > 1024*1024 {
+				s.handleError(w, r, http.StatusBadRequest, "length too large (max 1MB)")
+				return
+			}
 		}
 		params["offset"] = float64(offset)
 		params["length"] = float64(length)

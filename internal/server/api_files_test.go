@@ -367,3 +367,37 @@ func TestFilesChmodChownValidatesForwardsAudits(t *testing.T) {
 		t.Fatalf("failed chmod must not audit: total=%d", total)
 	}
 }
+
+// TestFilesReadLengthCap 回归（审核修复批 P1-2/P1-3）：read length 原先无
+// 上限，超大 length 会让 agent 回包帧（base64 后 ≈1.37×）突破 /ws 单帧
+// 上限。现与 write 侧同口径 1MB 预检：超限 400 且不下发。
+func TestFilesReadLengthCap(t *testing.T) {
+	s := newBackupTestServer(t)
+	var gotParams map[string]interface{}
+	withFakeBackupAgent(t, s, "a1", func(method string, params map[string]interface{}) (interface{}, string) {
+		gotParams = params
+		return map[string]interface{}{"data": "", "size": 1, "eof": true}, ""
+	})
+
+	// 超限 length → 400 且不下发
+	rec := httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("read", "a1",
+		`{"path":"/tmp/a.txt","offset":0,"length":2097152}`), "a1/files/read")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized length code = %d, want 400, body: %s", rec.Code, rec.Body.String())
+	}
+	if gotParams != nil {
+		t.Fatal("should not dispatch on oversized length")
+	}
+
+	// 限内 length → 转发原值；缺省 → 256KB 分块
+	rec = httptest.NewRecorder()
+	s.handleAgentFilesAPI(rec, filesReq("read", "a1",
+		`{"path":"/tmp/a.txt","offset":10,"length":1024}`), "a1/files/read")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("within-limit length code = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if gotParams["length"] != float64(1024) || gotParams["offset"] != float64(10) {
+		t.Fatalf("forwarded params = %v", gotParams)
+	}
+}
