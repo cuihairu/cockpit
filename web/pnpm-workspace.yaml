@@ -10,3 +10,7 @@ overrides:
   '@babel/core': ^7.29.6
   follow-redirects@<1.16.1: 1.16.1
   '@vitest/mocker@<5.0.3': 5.0.3
+  # jsdom 31 的 parse5-parser-stream 8.1.0 声明 parse5 ^8.0.1 却调用 8.1 才有的
+  # tokenizer.flushCharacters（semver 兼容但 API 不兼容），jsdom 环境起不来、
+  # 102 个测试文件全红；8.1.1 修依赖为 parse5 ^8.1.1，强制走修复版
+  parse5-parser-stream: ^8.1.1

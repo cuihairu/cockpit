@@ -88,8 +88,10 @@ describe('AgentSidebar', () => {
       />,
     )
     const items = Array.from(container.querySelectorAll('.ant-list-item')) as HTMLElement[]
-    expect(items[1].style.background).not.toBe('transparent') // ag2 选中高亮
-    expect(items[0].style.background).toBe('transparent')
+    // jsdom 31（cssstyle v5）把 background: 'transparent' 序列化为 'none'，
+    // 断言改用高亮色本身判等：选中项 = 高亮色，未选项 ≠ 高亮色
+    expect(items[1].style.background).toBe('rgba(22, 93, 255, 0.06)') // ag2 选中高亮
+    expect(items[0].style.background).not.toBe('rgba(22, 93, 255, 0.06)') // ag1 未选不高亮
     fireEvent.click(items[0])
     expect(onSelect).toHaveBeenCalledWith('ag1')
   })
