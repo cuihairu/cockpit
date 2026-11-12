@@ -14,6 +14,8 @@
 
 > 2026-11-05 整编：一行一条需求，完成项只留一行证据；过程细节查 git log、docs/review/ 与各条目引用的验收清单小节。
 
+> 2026-11-12 续推核查（cockpit-next 单）：本区 26 条未勾项 100% 带显式阻塞标注，无一条可在仓内推进——真机/凭据类 16 条（生产 enrollment、提权 admin 会话、macOS/OpenWrt 设备、NAS、S3/B2、rclone 真远端、ACME、Cloudflare、ZT/T-S token、SMART 属性盘、DNS 账号、Android/iOS/触屏真机、persona 服务端）、用户裁决类 8 条（多云 P1 资源所有权、P1 高可用、agent 四件、安全两件、离线缓冲、支持机型矩阵、libvirt 写片选型、jenkins vault 引用立项）、搁置类 2 条（防火墙写操作 D-2026-10-07-3 否决、workflow 并行分支 W4/G3 压后）。本轮不改码、无 commit。
+
 ### 真机验收（等硬件/真实环境/凭据）
 
 - [ ] service-health 生产接入：docker VM agent 改 SERVER_URL 指生产后 enable〔阻塞=缺生产 enrollment 凭据/授权改 SERVER_URL 并 enable｜解锁=凭据到位后改 SERVER_URL 并 enable〕
