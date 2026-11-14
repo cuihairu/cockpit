@@ -67,6 +67,11 @@
 
 - [x] W8 残余竞态：重连按钮同帧双击可启动重叠 `_connect`（按钮要下一帧重建才消失，terminal_page.dart:169），旧代请求失败时 catch 无 generation 校验会误关新连接（mobile/lib/pages/terminal_page.dart:90）〔2026-11-05 文档审计证实可达；修法=catch 分支补代际校验〕〔证据：本 commit，mobile 全量 190 用例+analyze 0 问题；回归用例「重连同帧双击 → 旧代失败不误关新连接」实测无修复时失败（旧代失败误关新连接+置错误态）、有修复时绿〕
 
+### 文档站语言面（fleet-docs-audit-G2 2026-11-14）
+
+- [ ] [P2] 文档站双语语言切换：现状=VitePress 官方 locales（root en-US / zh zh-CN，docs/.vitepress/config.ts:15-18）+ 导航栏手动下拉，无 navigator.language 探测、无 rootLocale 重定向（theme/index.ts 仅 extend DefaultTheme 加 home-hero 插槽）；基线=手动切换+显式链接，自动识别为增强项〔待拍板=是否加 rootLocale 重定向（docs/.vitepress/config.ts）及其在 zh 孪生缺失页上的兜底策略〕
+- [ ] [P2] 补齐 13 个 EN 页的 zh 孪生（guide/inventory、runtime、security；design/agent-capability-contract、agent-secret-lifecycle、cloud-lifecycle-wiring、libvirt-write-slice、offline-buffer-design、p1-resource-ownership、password-reset-protection、resource-permission-matrix、task-recovery-design；根页 DESIGN.md）〔待拍板=按各页主题逐篇人工翻译，不接受凭空生成；明细见 docs/audit-doc-consistency.md「G2 Re-audit」G2-9〕
+
 ## 已完成
 
 ### 架构与 agent

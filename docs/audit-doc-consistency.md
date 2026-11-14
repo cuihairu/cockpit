@@ -277,3 +277,92 @@ anchor moved `api_guacamole.go:533`→`:540` after comment insertion (on-topic l
 dated 2026-11-02 increment left untouched as a snapshot).
 
 Three-bucket count for this round: **1 / 0 / 4** (ahead / behind / mismatch). P0: none.
+
+## G2 Re-audit (2026-11-14, fleet docs audit wave 3)
+
+Method per the spec: the living doc surface (guide/ + design/ + operations/ + research/
++ root pages + both READMEs, review/ and zh/archive excluded as dated snapshots) was
+mechanically swept for `file:line` anchors (754 path-qualified anchors checked against
+the working tree), then the drift window since 2026-10-20 was read against the code —
+the LAY-003 api-service split (6fba60ce), the LAY-001 concepts split into
+runtime/inventory/security (2026-11-09), the 2026-10-30 design-doc batch, and the
+nightly artifact matrix.
+
+| ID | Doc page | Claim | Source evidence | Category | Severity | Disposition |
+| --- | --- | --- | --- | --- | --- | --- |
+| G2-1 | guide/architecture.md:106 (+zh twin :106) | Web API gateway at `web/src/services/api.ts:122` | After the LAY-003 split the file is 92 lines; the gateway is the `ApiService` class at `web/src/services/api.ts:35`, domain methods in `web/src/services/api/` | Mismatch | P2 | Re-anchored to `:35` with the split noted (both locales) |
+| G2-2 | guide/architecture.md:132 (+zh twin :132) | `/api` authoritative-runtime anchor at `web/src/services/api.ts:126` | The cited code (401 handling) is now `web/src/services/api.ts:63` | Mismatch | P2 | Re-anchored to `:63` (both locales) |
+| G2-3 | guide/concepts.md:63 (+zh twin :244) | Evidence anchor `web/src/services/api.ts:122` | Same as G2-1; file is 92 lines | Mismatch | P2 | Re-anchored to `:35` (both locales) |
+| G2-4 | remote-desktop-guacamole-design.md:68 (+zh twin :148) | web 401 interception at `services/api.ts:138` + `refreshToken()` "interceptor at 138, refreshToken at 165" — reads as a web auto-refresh chain | The web interceptor (`web/src/services/api.ts:60-72`, 401 branch `:63`) clears the token and redirects to `/login`; it does not call refresh. `refreshToken()` is a plain endpoint method at `web/src/services/api/auth.ts:36` (`/auth/refresh`, route `internal/server/server.go:359`); only mobile auto-refreshes (`mobile/lib/api/client.dart:83-91` recursive guard, still accurate) | Mismatch | P1 | Rewritten to the actual split of behavior (web clears + redirects; refresh method location; mobile guard unchanged), both locales |
+| G2-5 | guide/architecture.md:125 (+zh twin :125) | Write loop at `internal/core/report/upstream.go` | The repo has no `internal/core`; the path is `core/report/upstream.go` (top-level core/) | Mismatch | P2 | Prefix fixed (both locales) |
+| G2-6 | guide/architecture.md:235 (+zh twin :235) | "`docs/archive` (formerly docs/superpowers)" | The archive lives at `docs/zh/archive` since the zh-locale move (92b863a5, 2026-10-24); the prose path `docs/archive` does not exist (the link itself was already `/zh/archive/README`, which resolves) | Mismatch | P2 | Prose path corrected (both locales) |
+| G2-7 | guide/acceptance-checklist.md:248,250 (+zh twins :243,245) | Evidence anchors `api.ts:1043` and `api.ts:1056/1063/1070` | Post-split the three service endpoints live at `web/src/services/api/service.ts:17` (list), `:38` (daemon-reload), `:46/:54` (unit file GET/PUT) | Mismatch | P2 | Anchors re-pointed to `service.ts:17` / `:38/46/54` (both locales; the dated evidence text itself is unchanged) |
+| G2-8 | guide/security.md:11 | TOTP secret "encrypted with `TOTP_ENCRYPTION_KEY`" | Key source is `COCKPIT_VAULT_KEY` first with `TOTP_ENCRYPTION_KEY` as fallback (`internal/vault/crypto.go:21-47`); also `config/cockpit.yaml:135` documents the same chain | Mismatch | P2 | Wording updated to the key-source chain |
+| G2-9 | docs/zh/ locale pairing | (locale completeness, not a doc-vs-code claim) | 13 built EN pages have no zh twin: guide/inventory, guide/runtime, guide/security (2026-11-09 concepts split, EN sidebar only), design/agent-capability-contract, agent-secret-lifecycle, cloud-lifecycle-wiring, libvirt-write-slice, offline-buffer-design, p1-resource-ownership, password-reset-protection, resource-permission-matrix, task-recovery-design (2026-10-30 batch), DESIGN.md (2026-10-31); zh visitors get no sidebar entry and a 404 on direct URL | Bilingual gap (outside the three buckets) | P2 | Registered, not machine-translated this round: the missing zh twins are a translation batch owed on their subject matter, fabricated translation would violate the source-as-truth rule |
+
+Verified consistent (sampled, not in the table): nightly artifact matrix vs
+getting-started supported matrix (linux amd64/arm64/armv7, darwin amd64/arm64, windows
+amd64/arm64 + ipk mipsel/mips/aarch64_generic/arm_cortex-a7/x86_64, setup exe + sha256,
+web tarball — `nightly.yml:490-505` vs README/getting-started/install.sh); README
+notification "four channels" vs `internal/notification/` (herald/ntfy/webhook/telegram);
+`/ws` route (`internal/server/middleware.go:93`); agent version output "Cockpit Agent
+the install date (e.g. `Cockpit Agent v20261001`) (`cmd/cockpit-agent/main.go:58-59` prints `Cockpit Agent v` + version; the version is injected as `-X main.version=$(date +%Y%m%d)` at
+`nightly.yml:185`); `enrollment_secret` config chain (config/cockpit.yaml:12-15,
+deployments/docker/config.yaml:5-8, README/install docs); body/frame-limit hardening
+commits (4244015e/cb001a56/58412250/c976d809) have no doc-facing capability claims yet —
+protocol.md limits wording unaffected; all 46 sidebar links resolve (checked
+mechanically); root index vs zh index hero/actions consistent.
+
+Anchor-sweep residue verified as historical record, kept as-is: `detector/network.go`
+(overlay-design D18 + M2 checklist record the deletion that was executed — the absence
+is the completed state); `internal/cli/agent.go` / `internal/proxy/manager.go`
+(openwrt-agent-design "Fix" section records the old→new move, targets exist at
+`internal/agent/startcmd.go` / `internal/proxy/mgr/manager.go`);
+`docs/design/agent-core-design.md` (croupier repo benchmark, named as such);
+`docs/EXTERNAL_INTEGRATION.md` (persona repo, text says "not in this repo").
+
+Language face (browser locale auto-switch): the site is VitePress with official
+`locales: { root: en-US, zh: zh-CN }` (`docs/.vitepress/config.ts:15-18`); the theme
+extends DefaultTheme with only a home-hero slot (`docs/.vitepress/theme/index.ts`) —
+no `navigator.language` probe, no rootLocale redirect anywhere in config or theme.
+Probe (fleet-url-contract): `/` 200 lang=en-US, `/zh/` 200 lang=zh-CN — locale routing
+works, switching is the navbar dropdown (manual). Conclusion: **no automatic
+language detection/switch; manual switch only** (baseline = manual switch + explicit
+links; auto-detection is an enhancement awaiting a scope decision).
+
+Three-bucket count for this round: **0 / 0 / 8** (doc-ahead / code-ahead / mismatch).
+P0: none. P1: 1 (G2-4). Plus 1 bilingual pairing gap (G2-9) outside the buckets.
+
+Pending (not doc-fixable this round): the 13 zh twins from G2-9; auto locale detection
+(todo entry added).
+
+## Round G2 (2026-11-14, fleet re-audit)
+
+> Baseline: main @ fd9ede90 working tree (clean). Trigger: the 2026-11-14 fleet
+> instruction to re-verify docs against code after the recent churn, plus the
+> browser-language auto-switch investigation.
+
+### Three-Bucket Count
+
+| Bucket | Count |
+| --- | --- |
+| Doc ahead of code | 0 |
+| Code ahead of doc | 1 |
+| Mismatch | 0 |
+
+### Audit Table
+
+| ID | Page | Claim | Source evidence | Category | Severity | Fix |
+| --- | --- | --- | --- | --- | --- | --- |
+| G2-1 | docs/guide/architecture.md Security Boundaries (en + zh twin) | No mention of the four transport-hardening guards landed 2026-11-14 | `internal/server/middleware.go:48` (8 MiB API body cap), `internal/server/websocket.go:31,36` (4 MiB WS frame cap + 30 s registration read deadline), `internal/server/api_remote.go:42` and `internal/proxy/handler.go:54` (30 s data-plane write deadlines), commit `4244015e` (terminal WS write serialization); commits `cb001a56`, `58412250`, `c976d809`, `4244015e` touched only code | Code ahead of doc | P1 | One bilingual bullet added to the Security Boundaries section naming each guard with file:line anchors |
+
+### Verified consistent (sampled, no change needed)
+
+- README four notification channels (Herald/ntfy/webhook/Telegram) against `internal/notification/channel_{herald,ntfy,webhook,telegram}.go` — still exactly four.
+- `guacamole-common-js` "1.5.0" against `web/package.json` (pinned, no caret).
+- Quick Start install paths: `install.sh` / `install.ps1` / `deployments/docker/docker-compose.yml` all exist; agent `-secret` flag real (`cmd/cockpit-agent`).
+- En/zh architecture page heading structure symmetric (8 h2 sections each); Security Boundaries bullet sets previously aligned (now re-aligned after the G2-1 addition).
+- Bilingual form: site locale routing (VitePress `locales` root=en-US, `/zh/`=zh-CN, config.mts:15-18) + paired README.md/README.zh.md. Live probe 2026-11-14: `/` = 200 en-US, `/zh/` = 200 zh-CN — contract holds.
+- No browser-language auto-switch: no `navigator.language`/`rootLocale` anywhere in `docs/.vitepress` sources — recorded as "no bilingual auto-switch; manual link only" (fleet-wide baseline; auto-detection is an enhancement pending a decision, registered fleet-side, not implemented here).
+
+Three-bucket count for this round: **0 / 1 / 0**. P0: none.
