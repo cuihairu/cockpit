@@ -103,7 +103,7 @@ Server 侧适配器把已存账号或 YAML 凭据转换成云、DNS、overlay �
 
 #### L8 接口交付与客户端状态
 
-Server 在同一进程交付 SPA 与 API；Web/mobile 只保留展示与会话本地状态。静态回退在 `internal/server/web.go:12`；Web API 网关在 `web/src/services/api.ts:122`；mobile 偏好与安全 token 边界在 `mobile/lib/state/settings.dart:10`；终端数据路径在 `web/src/components/TerminalModal/index.tsx:115` 重连。
+Server 在同一进程交付 SPA 与 API；Web/mobile 只保留展示与会话本地状态。静态回退在 `internal/server/web.go:12`；Web API 网关在 `web/src/services/api.ts:35`（`ApiService` 类；分域方法在 `web/src/services/api/`）；mobile 偏好与安全 token 边界在 `mobile/lib/state/settings.dart:10`；终端数据路径在 `web/src/components/TerminalModal/index.tsx:115` 重连。
 
 #### 状态与通道矩阵
 
@@ -122,14 +122,14 @@ Server 在同一进程交付 SPA 与 API；Web/mobile 只保留展示与会话�
 ### 拆分理由
 
 1. 引导与执行分离，使多个命令目标可以共享同一配置探测路径，而不会把服务生命周期嵌进参数解析（`cmd/cockpit/main.go:22`）。
-2. WS 契约独立于 handler，因为注册、上行上报和代理转发共用一个连接代数和串行写出器（`internal/agent/agent.go:355`；写出循环由 `internal/core/report/upstream.go` 提供）。
+2. WS 契约独立于 handler，因为注册、上行上报和代理转发共用一个连接代数和串行写出器（`internal/agent/agent.go:355`；写出循环由 `core/report/upstream.go` 提供）。
 3. Server 组合独立于 REST，因为后台循环和 DB 关停需要一个长于请求生命周期的进程 context（`internal/server/server.go:203`；`internal/server/server.go:411`）。
 4. 控制 API 独立于编排，因为请求 handler 先创建持久 Job 并返回，Agent 执行随后异步完成（`internal/server/api_jobs.go:63`；`internal/server/api_jobs.go:401`）。
 5. Workflow 状态独立于 Job 状态，因为在途定义必须冻结，而步骤要生成独立可审计的 Job 尝试（`internal/server/api_workflow.go:423`；`internal/server/workflow_engine.go:216`）。
 6. 持久化与 Vault 分离，因为普通查询行和解锁门控的加密秘密有不同的生命周期与访问规则（`internal/storage/storage.go:40`；`internal/vault/local.go:122`）。
 7. Agent 执行做成 Provider 可插拔，因为能力探测要跳过不可用集成，同时不破坏始终运行的心跳（`internal/agent/providers.go:18`；`internal/agent/agent.go:424`）。
 8. Server 集成独立于 Agent Provider，因为云/DNS/overlay 用全局凭据控制资源，而节点执行由本地能力和环境门控（`internal/server/server.go:255`；`internal/agent/providers.go:18`）。
-9. 接口交付独立于事实源状态，因为客户端可以本地缓存 token 与偏好，但 `/api` 仍是运行时权威路径（`web/src/services/api.ts:126`；`mobile/lib/state/settings.dart:10`）。
+9. 接口交付独立于事实源状态，因为客户端可以本地缓存 token 与偏好，但 `/api` 仍是运行时权威路径（`web/src/services/api.ts:63`；`mobile/lib/state/settings.dart:10`）。
 
 ## 控制流
 
@@ -225,6 +225,7 @@ Server 与 Agent 的消息统一为：
 - Web UI 静态目录由 `STATIC_DIR` 或 `server.static_dir` 指定；未设置时根路径只返回 API 运行提示。
 - Agent secret 是 Agent 认证边界。2026-10-18 起注册默认 fail-closed：未知 Agent 仅在携带 `server.agent_registration.enrollment_secret`（或开发环境显式 `allow_unknown`）时可注册，注册成功后其携带的 secret 即固化为该 Agent 的认证密钥；无 secret 的存量 Agent 重连默认拒绝，需显式 `allow_secretless`。已配置 secret 的 Agent 重连必须提供匹配密钥。
 - 远程连接 ticket 是内存态、5 分钟有效、单次使用；Server 重启后失效。
+- 传输面加固（2026-11-14 批）：所有 API 请求 body 经 `http.MaxBytesReader` 收口到 8 MiB（`internal/server/middleware.go:48`，超限即失败）；WebSocket 首次注册读取有 4 MiB 帧上限与 30 s 读超时（`internal/server/websocket.go:31,36`）；浏览器侧数据面写入在 terminal 会话 socket（`internal/server/api_remote.go:42`）与支持的代理目标（`internal/proxy/handler.go:54`）上都带 30 s 写超时；terminal WebSocket 写入按会话串行化，避免并发帧交错。
 
 ## 当前实现边界
 
@@ -232,4 +233,4 @@ Server 与 Agent 的消息统一为：
 - `internal/agent/rpc` 的 SystemProvider 始终注册；Docker/PVE/OpenWrt Provider 由 `Agent.setupProviders` 按检测到的 capability 和环境变量（如 `DOCKER_HOST`、`PVE_TOKEN_ID`、`OPENWRT_HOST` 等）条件注册，凭据缺失时仅记录日志跳过，不影响基础心跳。
 - `/api/remote/sessions` 是内存会话台账（pending/connected/closed/failed），已接线到 terminal / guacamole 活会话生命周期（D-2026-10-12-4）；不是完整连接配置持久化，重启后台账清空。
 - Web UI 中部分偏好配置保存在浏览器本地，不进入 Server 数据库；`/api/settings` 当前仅作为兼容入口，前端本地偏好以浏览器存储值为准。
-- `docs/archive`（原 `docs/superpowers`）保存 TOTP、通知模块等历史设计稿和实施计划，仅供追溯，不代表当前运行架构；详见 [`docs/archive/README.md`](/zh/archive/README)。
+- `docs/zh/archive`（原 `docs/superpowers`，2026-10-24 迁入 zh 语言目录）保存 TOTP、通知模块等历史设计稿和实施计划，仅供追溯，不代表当前运行架构；详见 [`docs/zh/archive/README.md`](/zh/archive/README)。

@@ -103,7 +103,7 @@ Server-side adapters turn stored accounts or YAML credentials into cloud, DNS, o
 
 #### L8 Interface Delivery and Client State
 
-The Server serves the SPA and API from one process, while Web and mobile clients keep only presentation/session-local state. Static fallback is `internal/server/web.go:12`; the Web API gateway is `web/src/services/api.ts:122`; mobile preferences and secure-token boundaries are `mobile/lib/state/settings.dart:10`; the terminal data path reconnects through `web/src/components/TerminalModal/index.tsx:115`.
+The Server serves the SPA and API from one process, while Web and mobile clients keep only presentation/session-local state. Static fallback is `internal/server/web.go:12`; the Web API gateway is `web/src/services/api.ts:35` (the `ApiService` class; per-domain methods live in `web/src/services/api/`); mobile preferences and secure-token boundaries are `mobile/lib/state/settings.dart:10`; the terminal data path reconnects through `web/src/components/TerminalModal/index.tsx:115`.
 
 #### State and Channel Matrix
 
@@ -122,14 +122,14 @@ The Server serves the SPA and API from one process, while Web and mobile clients
 ### Layering Rationale
 
 1. Bootstrap is separate from execution so multiple command targets can share one configuration probe path without embedding service lifecycles in argument parsing (`cmd/cockpit/main.go:22`).
-2. The WS contract is separate from handlers because registration, upstream reporting, and proxy forwarding share one connection generation and one serialized writer (`internal/agent/agent.go:355`; the write loop is provided by `internal/core/report/upstream.go`).
+2. The WS contract is separate from handlers because registration, upstream reporting, and proxy forwarding share one connection generation and one serialized writer (`internal/agent/agent.go:355`; the write loop is provided by `core/report/upstream.go`).
 3. Server composition is separate from REST because background loops and DB shutdown need one process context that outlives any request (`internal/server/server.go:203`; `internal/server/server.go:411`).
 4. Control APIs are separate from orchestration because request handlers create durable Jobs and return before Agent execution finishes (`internal/server/api_jobs.go:63`; `internal/server/api_jobs.go:401`).
 5. Workflow state is separate from Job state because an in-flight definition must be frozen while its steps create separate auditable Job attempts (`internal/server/api_workflow.go:423`; `internal/server/workflow_engine.go:216`).
 6. Persistence and Vault are separate because ordinary query rows and unlock-gated encrypted secrets have different lifecycles and access rules (`internal/storage/storage.go:40`; `internal/vault/local.go:122`).
 7. Agent execution is provider-pluggable because capability detection must skip unavailable integrations without breaking the always-on heartbeat (`internal/agent/providers.go:18`; `internal/agent/agent.go:424`).
 8. Server integrations are separate from Agent providers because cloud/DNS/overlay resources use global credentials, while node execution is gated by local capabilities and environment (`internal/server/server.go:255`; `internal/agent/providers.go:18`).
-9. Interface delivery is separate from source-of-truth state because clients may cache tokens and preferences locally, but `/api` remains the authoritative runtime path (`web/src/services/api.ts:126`; `mobile/lib/state/settings.dart:10`).
+9. Interface delivery is separate from source-of-truth state because clients may cache tokens and preferences locally, but `/api` remains the authoritative runtime path (`web/src/services/api.ts:63`; `mobile/lib/state/settings.dart:10`).
 
 ## Control Flow
 
@@ -225,6 +225,7 @@ Current message types:
 - The Web UI static directory is specified by `STATIC_DIR` or `server.static_dir`; when unset, the root path returns only an API runtime notice.
 - Since 2026-10-18, Agent registration is fail-closed by default: an unknown Agent must present `server.agent_registration.enrollment_secret` (or use explicit development-only `allow_unknown`); its presented secret is then stored as the per-Agent authentication key. Existing Agents without a secret are rejected by default and require explicit `allow_secretless`; Agents with a configured secret must present the matching key on reconnect.
 - Remote connection tickets are in-memory, 5-minute valid, single-use; they expire after a Server restart.
+- Transport hardening (2026-11-14 batch): every API request body is capped at 8 MiB via `http.MaxBytesReader` (`internal/server/middleware.go:48`, oversized requests fail); the first WebSocket registration read is capped at a 4 MiB frame limit with a 30 s read deadline (`internal/server/websocket.go:31,36`); browser-side data-plane writes carry a 30 s write deadline on both the terminal session socket (`internal/server/api_remote.go:42`) and proxy targets that support it (`internal/proxy/handler.go:54`); terminal WebSocket writes are serialized per session so concurrent frames cannot interleave.
 
 ## Current Implementation Boundaries
 
@@ -232,4 +233,4 @@ Current message types:
 - The SystemProvider in `internal/agent/rpc` is always registered; the Docker/PVE/OpenWrt Providers are conditionally registered by `Agent.setupProviders` based on detected capabilities and environment variables (such as `DOCKER_HOST`, `PVE_TOKEN_ID`, `OPENWRT_HOST`); when credentials are missing it only logs and skips, without affecting the base heartbeat.
 - `/api/remote/sessions` is an in-memory session ledger (pending/connected/closed/failed), wired into the terminal / guacamole live session lifecycle (D-2026-10-12-4); it is not full connection configuration persistence, and the ledger clears on restart.
 - Some preference settings in the Web UI are stored locally in the browser and do not enter the Server database; `/api/settings` currently serves only as a compatibility entry point, with frontend local preferences deferring to the browser-stored values.
-- `docs/archive` (formerly `docs/superpowers`) keeps historical design drafts and implementation plans for TOTP, the notification module, and others, for tracing only and not representing the current running architecture; see [`docs/archive/README.md`](/zh/archive/README).
+- `docs/zh/archive` (formerly `docs/superpowers`, moved under the zh locale on 2026-10-24) keeps historical design drafts and implementation plans for TOTP, the notification module, and others, for tracing only and not representing the current running architecture; see [`docs/zh/archive/README.md`](/zh/archive/README).

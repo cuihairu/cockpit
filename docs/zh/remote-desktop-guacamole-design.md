@@ -145,7 +145,7 @@ opcode 是否为空，不解析参数内容），**绝不转发 guacd**（guacd 
 
 401 递归刷新链路照搬现有实现，两侧都有先例：
 
-- web `services/api.ts:138` 的 401 拦截 + `refreshToken()`（`/auth/refresh`；拦截器现位于 138 行、refreshToken 165 行），
+- web `web/src/services/api.ts:63` 的 401 拦截（清 token 回登录页；`refreshToken()` 端点方法在 `web/src/services/api/auth.ts:36`，`/auth/refresh`），
   且 mobile `api/client.dart:83-91` 明确记录了**递归刷新防护**：
   `extra['skipRefresh'] == true` 的请求（即刷新请求自身）收到 401 不再触发
   刷新，直接交给 `onUnauthorized`——否则刷新失败会无限递归。

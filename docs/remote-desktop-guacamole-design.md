@@ -65,7 +65,7 @@ The query-form ticket does not enter audit/logs (WS paths are skipped by `AuditM
 
 The 401 recursive-refresh chain copies the existing implementation, with precedents on both sides:
 
-- web's 401 interception at `services/api.ts:138` + `refreshToken()` (`/auth/refresh`; the interceptor now sits at line 138, refreshToken at 165), and mobile's `api/client.dart:83-91` explicitly documents the **recursive-refresh guard**: requests with `extra['skipRefresh'] == true` (i.e. the refresh request itself) that receive a 401 do not trigger another refresh and go straight to `onUnauthorized` — otherwise a failed refresh would recurse infinitely.
+- web's 401 interception at `web/src/services/api.ts:63` (clears the token and redirects to `/login`; the `refreshToken()` endpoint method is `web/src/services/api/auth.ts:36`, `/auth/refresh`), and mobile's `api/client.dart:83-91` explicitly documents the **recursive-refresh guard**: requests with `extra['skipRefresh'] == true` (i.e. the refresh request itself) that receive a 401 do not trigger another refresh and go straight to `onUnauthorized` — otherwise a failed refresh would recurse infinitely.
 - The Guacamole tunnel's ticket application goes through the same `remoteClient` (which already has the Bearer interceptor), with identical 401 behavior; the WS handshake itself carries no JWT (the ticket is the credential), so the WS path needs no refresh, and on reconnect `createRemoteTicket` naturally runs through the 401 refresh once.
 
 The point of this "reuse" is **not inventing a second auth-failure semantics**: the behavior after a user's token expires (silent refresh → on failure, log out back to the login page) is the same across ordinary APIs, terminal, desktop, and the Guacamole tunnel.

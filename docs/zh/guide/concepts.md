@@ -241,5 +241,5 @@ RDP/VNC/SSH 桌面协议由 guacd 终结，Agent 只做 TCP 转发——Agent �
 | Overlay 集成 | Overlay integration | 读取或更新 ZeroTier/Tailscale 网络，并 reconcile 本地 overlay 身份。 | `internal/overlay/zerotier.go:1`, `internal/overlay/tailscale.go:1`, `internal/agent/providers.go:214` |
 | 通知扇出 | Notification fanout | 应用事件白名单，构建启用渠道，并短超时同步或异步投递。 | `internal/notification/service.go:33`, `internal/notification/service.go:68`, `internal/server/server.go:297` |
 | SPA 交付 | SPA delivery | 在拥有 `/api` 与 `/ws` 的同一 Server 进程交付带哈希静态资源，并回退到 `index.html`。 | `internal/server/web.go:12`, `internal/server/server.go:389` |
-| Web 客户端状态 | Web client state | 拥有路由、权限菜单、JWT、展示偏好和浏览器会话 socket；不是系统事实源。 | `web/src/App.tsx:120`, `web/src/App.tsx:583`, `web/src/services/api.ts:122` |
+| Web 客户端状态 | Web client state | 拥有路由、权限菜单、JWT、展示偏好和浏览器会话 socket；不是系统事实源。 | `web/src/App.tsx:120`, `web/src/App.tsx:583`, `web/src/services/api.ts:35` |
 | Mobile 客户端状态 | Mobile client state | 非敏感设置存偏好存储，auth token 存安全存储，仍使用同一 `/api` 运行面。 | `mobile/lib/state/settings.dart:10`, `mobile/lib/state/settings.dart:117`, `mobile/lib/api/client.dart:38` |
