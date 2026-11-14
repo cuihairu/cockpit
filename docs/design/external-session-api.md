@@ -41,7 +41,7 @@ That file is the **review record of landed implementation** (D1-D8 all carry rea
 }
 ```
 
-- `protocol` ∈ `ssh | rdp | vnc | telnet` (identical to the `handleRemoteSessionCreate` whitelist, `internal/server/api_remote.go:654-660`).
+- `protocol` ∈ `ssh | rdp | vnc | telnet` (identical to the `handleRemoteSessionCreate` whitelist, `internal/server/api_remote.go:673-679`).
 - **No `username`/`password`/`private_key`/`domain` fields** — credentials are named by `credential_ref` pointing at a vault entry (a local provider path or a persona entry UUID) and are injected server-side when the session is established (E7 boundary). memex never touches credentials.
 - `requested_by` is the memex-side end-user identifier, used only for audit attribution and never as the authentication principal (the principal is E3's caller token).
 
@@ -63,7 +63,7 @@ That file is the **review record of landed implementation** (D1-D8 all carry rea
 ```
 
 - `ticket` is the existing one-time ticket (5 minutes, in-memory, burn-after-use, `internal/server/ticket.go`; the `?ticket=` query is the current input to `handleGuacamoleWebSocket`, `internal/server/api_guacamole.go:308`).
-- `channel` selection per E6: `guacamole` (rdp/vnc/ssh) or `terminal` (`telnet` must take this path; when the memex client cannot speak the guacamole protocol, ssh can also downgrade to `terminal`, i.e. the same chain as D6 mobile — `wss://…/api/remote/terminal`, where the ticket is carried over the **WebSocket subprotocol** — `internal/server/api_remote.go:51-54` `protocols[0]` is the ticketID, which differs from the guacamole channel's `?ticket=` query).
+- `channel` selection per E6: `guacamole` (rdp/vnc/ssh) or `terminal` (`telnet` must take this path; when the memex client cannot speak the guacamole protocol, ssh can also downgrade to `terminal`, i.e. the same chain as D6 mobile — `wss://…/api/remote/terminal`, where the ticket is carried over the **WebSocket subprotocol** — `internal/server/api_remote.go:65-71` `protocols[0]` is the ticketID, which differs from the guacamole channel's `?ticket=` query).
 
 **Errors** (fail-closed, all reusing existing semantics):
 
@@ -71,7 +71,7 @@ That file is the **review record of landed implementation** (D1-D8 all carry rea
 |------|------|
 | 401 | caller token missing/wrong |
 | 400 | field validation failed / protocol not in the whitelist |
-| 403 | target not on the `remote_control` whitelist, or the egress policy denies it (`matchRemoteEgress`, `internal/server/api_remote.go:460`) |
+| 403 | target not on the `remote_control` whitelist, or the egress policy denies it (`matchRemoteEgress`, `internal/server/api_remote.go:479`) |
 | 404 | agent offline / no entry matching `credential_ref` / **caller config empty (the endpoint 404s by default, E3)** |
 | 503 | guacd unreachable (guacamole channel only) |
 
@@ -94,9 +94,9 @@ remote_control:
 
 ### E4 Lifecycle: query and terminate
 
-- `GET /api/external/remote/sessions` — returns only sessions started by **this caller** (the ledger is filtered by caller name; the ledger base is `RemoteSessionManager` (`internal/server/remote_session.go:43-48`), `internal/server/api_remote.go:596-604` is the full-view handler, the external entry adds filtering).
+- `GET /api/external/remote/sessions` — returns only sessions started by **this caller** (the ledger is filtered by caller name; the ledger base is `RemoteSessionManager` (`internal/server/remote_session.go:43-48`), `internal/server/api_remote.go:615-623` is the full-view handler, the external entry adds filtering).
 - `GET /api/external/remote/sessions/{id}` — single session status (pending/connected/closed/failed; ledger registration framing see batch nine D-2026-10-12-4).
-- `DELETE /api/external/remote/sessions/{id}` — terminate: on hitting a live session, call `terminateLiveSession` (`internal/server/api_remote.go:675`) first and then close out the ledger, same as the existing manual DELETE semantics. **It can only delete sessions it started itself**; someone else's session returns 404 (existence is not disclosed).
+- `DELETE /api/external/remote/sessions/{id}` — terminate: on hitting a live session, call `terminateLiveSession` (`internal/server/api_remote.go:694`) first and then close out the ledger, same as the existing manual DELETE semantics. **It can only delete sessions it started itself**; someone else's session returns 404 (existence is not disclosed).
 - The 5-minute one-time ticket is unchanged; a session is not terminated because memex disconnects (the connection belongs to the memex client, the session belongs to the ledger).
 
 ### E5 Conclusion on audit and recording coverage
@@ -105,10 +105,10 @@ External callers reuse the existing chain, so **coverage holds with zero new aud
 
 | Mechanism | Coverage | Evidence |
 |------|------|------|
-| Audit | `auditRemoteStart/End/Failure` identical across protocols; external sessions record `Username` as `memex:<requested_by>` (caller name prefix), credentials stay out of the details | `docs/remote-access-integration-design.md` D5; each failure path from `api_remote.go:423` |
-| Egress policy | `matchRemoteEgress` anchored on agent_id; external calls and human operations share one policy (403 fail-closed) | `api_remote.go:460-461` |
+| Audit | `auditRemoteStart/End/Failure` identical across protocols; external sessions record `Username` as `memex:<requested_by>` (caller name prefix), credentials stay out of the details | `docs/remote-access-integration-design.md` D5; each failure path from `api_remote.go:442` |
+| Egress policy | `matchRemoteEgress` anchored on agent_id; external calls and human operations share one policy (403 fail-closed) | `api_remote.go:479-480` |
 | Recording | guacamole channel → guacd `.guac` (`collectGuacRecording`); terminal channel → asciinema character stream | `docs/guide/recording-design.md` D1; `remote-access-integration-design.md` D5 |
-| Session ledger | Register/UpdateStatus/closed close out over the full chain (batch nine) | the existing POST creation from `internal/server/api_remote.go:642` |
+| Session ledger | Register/UpdateStatus/closed close out over the full chain (batch nine) | the existing POST creation from `internal/server/api_remote.go:661` |
 
 Gaps (to be filled at implementation time, already covered by this contract): ① the `memex:` audit attribution prefix must be written into the ledger at session creation (`RemoteSessionRequest` gains an `initiator` field); ② caller-level protocol/agent guardrails must run before egress in the E2 validation chain.
 
@@ -121,10 +121,10 @@ Gaps (to be filled at implementation time, already covered by this contract): �
 
 ### E7 Boundaries of what is not done
 
-1. **No credential delivery**: no field of this contract accepts or returns credentials; `credential_ref` only names an entry, and at runtime the server injects the ticket (`use_saved` semantics, `internal/server/api_remote.go:484` onward). The memex side never obtains a password/key.
+1. **No credential delivery**: no field of this contract accepts or returns credentials; `credential_ref` only names an entry, and at runtime the server injects the ticket (`use_saved` semantics, `internal/server/api_remote.go:503` onward). The memex side never obtains a password/key.
 2. **No authorization relationship storage**: who can use which machine with what permission is memex + persona's job; this repo only enforces its own two guardrails (the `remote_control` target whitelist/egress + E3 caller guardrails) and does not maintain memex's authorization matrix.
 3. No session proxying/multiplexing, no new protocols, and no memex-side UI embedding specification (the ticket is the embedding gate, and its 5-minute one-time nature is the security boundary).
 
 ## Implementation anchors (for later scheduling, all existing components)
 
-The `handleTicketCreate` request shape (`api_remote.go:399-411`), the egress check and vault injection order (`:460-500`: egress first, `use_saved` filled after), the session ledger (`:642-669`), the ticket (`internal/server/ticket.go`), the guacamole WS (`api_guacamole.go:306-308`), and the terminal WS (`api_remote.go:387`). New code is expected only in: the external route + caller auth middleware + `credential_ref` resolution + the ledger `initiator` field.
+The `handleTicketCreate` request shape (`api_remote.go:418-430`), the egress check and vault injection order (`:460-500`: egress first, `use_saved` filled after), the session ledger (`:642-669`), the ticket (`internal/server/ticket.go`), the guacamole WS (`api_guacamole.go:306-308`), and the terminal WS (`api_remote.go:406`). New code is expected only in: the external route + caller auth middleware + `credential_ref` resolution + the ledger `initiator` field.

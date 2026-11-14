@@ -26,7 +26,7 @@ server ← agent 双向转发），**录制挂在 server 侧的转发管道上**
                                                      + SQLite 元数据
 ```
 
-- `api_remote.go:341 HandleTerminalData`：agent → 浏览器的唯一出口，
+- `api_remote.go:360 HandleTerminalData`：agent → 浏览器的唯一出口，
   录制挂钩点；
 - `closeTerminalSession` / `HandleTerminalClose`：会话终态，finalize 回填
   时长与字节数。

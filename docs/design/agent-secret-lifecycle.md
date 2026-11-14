@@ -11,7 +11,7 @@ status: design-draft (2026-10-30, 已代决 docs/review/2026-10-30-decisions.md 
 
 ## 1. 现状盘点（已核实）
 
-- **准入**：`config/config.go:166-176` `AgentRegistrationConfig`（`enrollment_secret`、`allow_unknown`，默认 fail-closed）；`server/websocket.go:24-31` 注册时经 `hashAgentSecretForRegistration=storage.HashAgentSecret` 哈希落库、`agentRegistrationPolicy` 读准入策略。
+- **准入**：`config/config.go:166-176` `AgentRegistrationConfig`（`enrollment_secret`、`allow_unknown`，默认 fail-closed）；`server/websocket.go:26-33` 注册时经 `hashAgentSecretForRegistration=storage.HashAgentSecret` 哈希落库、`agentRegistrationPolicy` 读准入策略。
 - **secret 生命周期**：仅「注册签发＋哈希存储」；未见轮换/吊销逻辑（grep 无 revocation/rotate）。
 - **结论**：默认拒绝已落地；轮换/吊销未实现，属待立项设计。
 

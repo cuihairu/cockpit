@@ -75,7 +75,7 @@ CLI 解析命令、探测默认配置路径、把 flags 映射为类型化启动
 
 #### L1 传输与契约
 
-`/ws` 升级 Agent 连接，要求首帧 `register`，随后运行读写循环。`internal/server/websocket.go:70` 负责握手；`internal/protocol/message.go:8` 定义消息类型；`internal/protocol/codec.go:19` 负责 WebSocket JSON 编解码。`internal/agent/agent.go:355` 按 HTTP/1.1 和连接代数拨号，`internal/agent/agent.go:677` 分发下行控制帧。
+`/ws` 升级 Agent 连接，要求首帧 `register`，随后运行读写循环。`internal/server/websocket.go:80` 负责握手；`internal/protocol/message.go:8` 定义消息类型；`internal/protocol/codec.go:19` 负责 WebSocket JSON 编解码。`internal/agent/agent.go:355` 按 HTTP/1.1 和连接代数拨号，`internal/agent/agent.go:678` 分发下行控制帧。
 
 #### L2 Server 组合与运行期控制
 
@@ -83,7 +83,7 @@ Server 持有进程级 context、后台任务计数、中间件顺序、子系�
 
 #### L3 控制 API 与会话策略
 
-REST handler 把已认证请求转换成资源操作、Agent RPC 或流式会话控制。中央路由在 `internal/server/api.go:10`；公开与受保护路由在 `internal/server/server.go:354` 注册；JWT/RBAC/审计包装顺序在 `internal/server/server.go:283`；Web 菜单与路由声明在 `web/src/App.tsx:120`，渲染在 `web/src/App.tsx:533`。
+REST handler 把已认证请求转换成资源操作、Agent RPC 或流式会话控制。中央路由在 `internal/server/api.go:10`；公开与受保护路由在 `internal/server/server.go:319` 注册；JWT/RBAC/审计包装顺序在 `internal/server/server.go:283`；Web 菜单与路由声明在 `web/src/App.tsx:120`，渲染在 `web/src/App.tsx:533`。
 
 #### L4 编排与调度
 
@@ -127,7 +127,7 @@ Server 在同一进程交付 SPA 与 API；Web/mobile 只保留展示与会话�
 4. 控制 API 独立于编排，因为请求 handler 先创建持久 Job 并返回，Agent 执行随后异步完成（`internal/server/api_jobs.go:63`；`internal/server/api_jobs.go:401`）。
 5. Workflow 状态独立于 Job 状态，因为在途定义必须冻结，而步骤要生成独立可审计的 Job 尝试（`internal/server/api_workflow.go:423`；`internal/server/workflow_engine.go:216`）。
 6. 持久化与 Vault 分离，因为普通查询行和解锁门控的加密秘密有不同的生命周期与访问规则（`internal/storage/storage.go:40`；`internal/vault/local.go:122`）。
-7. Agent 执行做成 Provider 可插拔，因为能力探测要跳过不可用集成，同时不破坏始终运行的心跳（`internal/agent/providers.go:18`；`internal/agent/agent.go:424`）。
+7. Agent 执行做成 Provider 可插拔，因为能力探测要跳过不可用集成，同时不破坏始终运行的心跳（`internal/agent/providers.go:18`；`internal/agent/agent.go:425`）。
 8. Server 集成独立于 Agent Provider，因为云/DNS/overlay 用全局凭据控制资源，而节点执行由本地能力和环境门控（`internal/server/server.go:255`；`internal/agent/providers.go:18`）。
 9. 接口交付独立于事实源状态，因为客户端可以本地缓存 token 与偏好，但 `/api` 仍是运行时权威路径（`web/src/services/api.ts:63`；`mobile/lib/state/settings.dart:10`）。
 

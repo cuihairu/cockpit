@@ -23,7 +23,7 @@
 | Route registration (mux direct mount + `/api/` fallback switch) | `internal/server/server.go:165-310`, `internal/server/api.go:28-166` |
 | Full capability set of 17 (detector 7 + code direct-report 10) | `internal/agent/detector/` (7 files), `internal/agent/agent.go:341-477` |
 | Permission points' single source of truth | `internal/storage/role.go:29-67` `resourceActions`, `internal/server/rbac.go:23-88` `resourceRules` |
-| Proxy data-plane dialing | `internal/proxy/handler.go:116` (`net.DialTimeout("tcp",…)`), `internal/proxy/ssh_session.go:125` (`ssh.Dial("tcp",…)`) |
+| Proxy data-plane dialing | `internal/proxy/handler.go:146` (`net.DialTimeout("tcp",…)`), `internal/proxy/ssh_session.go:125` (`ssh.Dial("tcp",…)`) |
 | guacd recording archival | `internal/server/api_guacamole.go:209-250` `collectGuacRecording` |
 | GHCR tag field-verified (anonymous token + registry API) | Only `latest`/`main`/`sha-*` exist in practice; the mechanism is in `.github/workflows/docker.yml:67-82` (a `v*` semver has never been triggered) |
 
@@ -34,7 +34,7 @@
 | A1 | guide/concepts.md:141 (original) | capability table contains `network-monitor` | Deleted (overlay-design D18; zero matches repo-wide) | Doc ahead of code | **P0** | Delete the row; rewrite the table as "detector 7 + code direct-report 10" with a historical note |
 | A2 | guide/concepts.md:133-141 (original) | "current detectors include" lists only 5 | True full set is 17 (7 in detector/ + 10 direct-report at agent.go:341-477) | Code ahead of doc | P1 | Add `firewall` `overlay` `remote-services` + the 10 direct-reports (with each one's reporting condition, verified line by line) |
 | A3 | remote-desktop-guacamole-design.md:83 | The current-endpoint examples include `/api/remote/desktop` | Route deleted (grdp deletion surgery D-2026-10-07-1; the surviving ones are terminal/guacamole/tickets/sessions/vault) | Doc ahead of code | P1 | Change to `/api/remote/guacamole`; sync the pipeline description to "agent WS / guacd TCP" |
-| A4 | guide/protocol.md:146 | Proxy messages can reach "TCP/UDP targets" | Data plane dials TCP only (handler.go:116 and ssh_session.go:125 both hard-code `"tcp"`; `proxyType=udp` is only accepted by API validation/persistence, api_proxy.go:99) | Description mismatch | P1 | Change to "TCP targets" + note the status of the udp parameter |
+| A4 | guide/protocol.md:146 | Proxy messages can reach "TCP/UDP targets" | Data plane dials TCP only (handler.go:146 and ssh_session.go:125 both hard-code `"tcp"`; `proxyType=udp` is only accepted by API validation/persistence, api_proxy.go:99) | Description mismatch | P1 | Change to "TCP targets" + note the status of the udp parameter |
 | A5 | guide/getting-started.md:5 | "Go 1.26.3 or a compatible version" | `go.mod` says `go 1.27` | Description mismatch | P1 | Change to 1.27 |
 | A6 | guide/mobile-design.md:73 | Audit list endpoint `/api/audit` | Actually `/api/admin/audit/logs` (mobile/lib/api/endpoints.dart:76; api_audit.go routing) | Description mismatch | P1 | Change to the current endpoint |
 | A7 | guide/nas-design.md:65 | OMV provider "M2 queued" | Already implemented and wired (`internal/agent/rpc/nas_dsm.go:290` `case "omv"`) | Code ahead of doc | P1 | Change to "M2 completed" |
@@ -130,7 +130,7 @@ The remaining ~150 endpoint claims in protocol.md, the jobs-design.md decision t
 | D17 | design/agent-core-architecture.md:104 | main is 112 lines | 116 lines | Code ahead of doc | P2 | Fix the line count |
 | D18 | design/service-detect-agent.md:64 | The Window struct has no Semantics field | `core/healthprobe/window.go` contains a `Semantics` field | Code ahead of doc | P2 | Add the field |
 | D19 | design/service-detect-agent.md:77 | `cockpit-probe-agent status` subcommand | `-status-file` writes JSON (there is no `status` subcommand) | Description mismatch | P2 | Fix the flag semantics |
-| D20 | design/external-session-api.md:42 | Whitelist ref `api_remote.go:403` | `handleRemoteSessionCreate`'s whitelist is at `api_remote.go:654-660` | Description mismatch | P2 | Fix the line number |
+| D20 | design/external-session-api.md:42 | Whitelist ref `api_remote.go:422` | `handleRemoteSessionCreate`'s whitelist is at `api_remote.go:673-679` | Description mismatch | P2 | Fix the line number |
 | D21 | docs/agent-config.md:30 | `BIAS`/`COCKPIT_AGENT_OPTS` exist | Neither variable exists anywhere in the repo | Doc ahead of code | P2 | Delete the row |
 | D22 | docs/agent-config.md:30 | `SERVER_URL` has a default | Required, no code default | Description mismatch | P2 | Change to required |
 | D23 | docs/agent-config.md:30 | REGION/ZONE undocumented | The binary reads `COCKPIT_REGION`/`COCKPIT_ZONE` directly (`core/register/register.go:97-104`) | Code ahead of doc | P2 | Add the documentation |
@@ -259,7 +259,7 @@ source as truth.
 
 | ID | Doc page | Claim | Source evidence | Category | Severity | Disposition |
 | --- | --- | --- | --- | --- | --- | --- |
-| W2-1 | design/external-session-api.md:97 (+zh twin :117) | `RemoteSessionManager` ledger base located at `api_remote.go:596-604` | Type is defined at `internal/server/remote_session.go:43-48`; `api_remote.go:596-604` is the `handleRemoteSessions` handler | Mismatch | P2 | Cite `remote_session.go:43-48` for the type, keep `api_remote.go:596-604` as the handler anchor |
+| W2-1 | design/external-session-api.md:97 (+zh twin :117) | `RemoteSessionManager` ledger base located at `api_remote.go:615-623` | Type is defined at `internal/server/remote_session.go:43-48`; `api_remote.go:615-623` is the `handleRemoteSessions` handler | Mismatch | P2 | Cite `remote_session.go:43-48` for the type, keep `api_remote.go:615-623` as the handler anchor |
 | W2-2 | audit-doc-consistency.md:25 Ground-Truth Anchors (+zh twin :22) | `resourceActions` at `role.go:29-60` | Map now spans `internal/storage/role.go:29-67` (verified `^}` at :67); `rbac.go:23-88` is `resourceRules` | Mismatch | P2 | Anchor ranges corrected |
 | W2-3 | todo.md W8 review note (original :435) | Note cites `terminal_page.dart:66-69` / `:139` as evidence | Actual: connecting setState at `:50-53` (`:51`), reconnect button gate at `:169`; the cited lines contain neither | Mismatch | P1 | todo.md refs corrected to `:50-53` / `:169` (also closes open review finding "line refs unlocatable") |
 | W2-4 | todo.md W8 review note (original :435) | "the stale-catch scenario is unreachable in the real UI" | `_connect` is async and the button only disappears after the next-frame rebuild (`terminal_page.dart:169`); a same-frame double tap starts two overlapping `_connect` calls, and the catch branch (`:90-94`) closes `_channel` without a generation check — a stale request failing after a newer connect succeeded closes the new channel | Doc ahead of code | P1 | Review note corrected; residual race registered as an open todo requirement (code fix owed; this round is docs-only) |
@@ -298,6 +298,7 @@ nightly artifact matrix.
 | G2-6 | guide/architecture.md:235 (+zh twin :235) | "`docs/archive` (formerly docs/superpowers)" | The archive lives at `docs/zh/archive` since the zh-locale move (92b863a5, 2026-10-24); the prose path `docs/archive` does not exist (the link itself was already `/zh/archive/README`, which resolves) | Mismatch | P2 | Prose path corrected (both locales) |
 | G2-7 | guide/acceptance-checklist.md:248,250 (+zh twins :243,245) | Evidence anchors `api.ts:1043` and `api.ts:1056/1063/1070` | Post-split the three service endpoints live at `web/src/services/api/service.ts:17` (list), `:38` (daemon-reload), `:46/:54` (unit file GET/PUT) | Mismatch | P2 | Anchors re-pointed to `service.ts:17` / `:38/46/54` (both locales; the dated evidence text itself is unchanged) |
 | G2-8 | guide/security.md:11 | TOTP secret "encrypted with `TOTP_ENCRYPTION_KEY`" | Key source is `COCKPIT_VAULT_KEY` first with `TOTP_ENCRYPTION_KEY` as fallback (`internal/vault/crypto.go:21-47`); also `config/cockpit.yaml:135` documents the same chain | Mismatch | P2 | Wording updated to the key-source chain |
+| G2-10 | guide/architecture.md Security Boundaries (+zh twin :228) | No mention of the 2026-11-14 transport-hardening batch | `internal/server/middleware.go:48` (8 MiB API body cap via `MaxBytesReader`), `internal/server/websocket.go:31,36` (4 MiB WS frame cap + 30 s registration read deadline), `internal/server/api_remote.go:42` and `internal/proxy/handler.go:54` (30 s data-plane write deadlines), `4244015e` (per-session WS write serialization); commits `cb001a56`/`58412250`/`c976d809`/`4244015e` touched code only | Code ahead of doc | P1 | Security Boundaries bullet added bilingually naming each guard with file:line anchors (landed with the anchor-sync batch e3b7be96) |
 | G2-9 | docs/zh/ locale pairing | (locale completeness, not a doc-vs-code claim) | 13 built EN pages have no zh twin: guide/inventory, guide/runtime, guide/security (2026-11-09 concepts split, EN sidebar only), design/agent-capability-contract, agent-secret-lifecycle, cloud-lifecycle-wiring, libvirt-write-slice, offline-buffer-design, p1-resource-ownership, password-reset-protection, resource-permission-matrix, task-recovery-design (2026-10-30 batch), DESIGN.md (2026-10-31); zh visitors get no sidebar entry and a 404 on direct URL | Bilingual gap (outside the three buckets) | P2 | Registered, not machine-translated this round: the missing zh twins are a translation batch owed on their subject matter, fabricated translation would violate the source-as-truth rule |
 
 Verified consistent (sampled, not in the table): nightly artifact matrix vs
@@ -308,9 +309,14 @@ notification "four channels" vs `internal/notification/` (herald/ntfy/webhook/te
 `/ws` route (`internal/server/middleware.go:93`); agent version output "Cockpit Agent
 the install date (e.g. `Cockpit Agent v20261001`) (`cmd/cockpit-agent/main.go:58-59` prints `Cockpit Agent v` + version; the version is injected as `-X main.version=$(date +%Y%m%d)` at
 `nightly.yml:185`); `enrollment_secret` config chain (config/cockpit.yaml:12-15,
-deployments/docker/config.yaml:5-8, README/install docs); body/frame-limit hardening
-commits (4244015e/cb001a56/58412250/c976d809) have no doc-facing capability claims yet —
-protocol.md limits wording unaffected; all 46 sidebar links resolve (checked
+deployments/docker/config.yaml:5-8, README/install docs); `guacamole-common-js`
+"1.5.0" vs `web/package.json` (pinned, no caret); Quick Start install paths
+(`install.sh` / `install.ps1` / `deployments/docker/docker-compose.yml`) and the agent
+`-secret` flag (`cmd/cockpit-agent`); the four data-plane hardening commits
+(4244015e/cb001a56/58412250/c976d809) are surfaced by the G2-10 Security Boundaries
+bullet — protocol.md limits wording unaffected; en/zh architecture heading structure
+symmetric (8 h2 sections each; Security Boundaries bullet sets re-aligned after the
+G2-10 addition); all 46 sidebar links resolve (checked
 mechanically); root index vs zh index hero/actions consistent.
 
 Anchor-sweep residue verified as historical record, kept as-is: `detector/network.go`
@@ -330,39 +336,12 @@ works, switching is the navbar dropdown (manual). Conclusion: **no automatic
 language detection/switch; manual switch only** (baseline = manual switch + explicit
 links; auto-detection is an enhancement awaiting a scope decision).
 
-Three-bucket count for this round: **0 / 0 / 8** (doc-ahead / code-ahead / mismatch).
-P0: none. P1: 1 (G2-4). Plus 1 bilingual pairing gap (G2-9) outside the buckets.
+Three-bucket count for this round: **0 / 1 / 8** (doc-ahead / code-ahead / mismatch).
+P0: none. P1: 2 (G2-4, G2-10). Plus 1 bilingual pairing gap (G2-9) outside the buckets.
 
 Pending (not doc-fixable this round): the 13 zh twins from G2-9; auto locale detection
 (todo entry added).
 
-## Round G2 (2026-11-14, fleet re-audit)
-
-> Baseline: main @ fd9ede90 working tree (clean). Trigger: the 2026-11-14 fleet
-> instruction to re-verify docs against code after the recent churn, plus the
-> browser-language auto-switch investigation.
-
-### Three-Bucket Count
-
-| Bucket | Count |
-| --- | --- |
-| Doc ahead of code | 0 |
-| Code ahead of doc | 1 |
-| Mismatch | 0 |
-
-### Audit Table
-
-| ID | Page | Claim | Source evidence | Category | Severity | Fix |
-| --- | --- | --- | --- | --- | --- | --- |
-| G2-1 | docs/guide/architecture.md Security Boundaries (en + zh twin) | No mention of the four transport-hardening guards landed 2026-11-14 | `internal/server/middleware.go:48` (8 MiB API body cap), `internal/server/websocket.go:31,36` (4 MiB WS frame cap + 30 s registration read deadline), `internal/server/api_remote.go:42` and `internal/proxy/handler.go:54` (30 s data-plane write deadlines), commit `4244015e` (terminal WS write serialization); commits `cb001a56`, `58412250`, `c976d809`, `4244015e` touched only code | Code ahead of doc | P1 | One bilingual bullet added to the Security Boundaries section naming each guard with file:line anchors |
-
-### Verified consistent (sampled, no change needed)
-
-- README four notification channels (Herald/ntfy/webhook/Telegram) against `internal/notification/channel_{herald,ntfy,webhook,telegram}.go` — still exactly four.
-- `guacamole-common-js` "1.5.0" against `web/package.json` (pinned, no caret).
-- Quick Start install paths: `install.sh` / `install.ps1` / `deployments/docker/docker-compose.yml` all exist; agent `-secret` flag real (`cmd/cockpit-agent`).
-- En/zh architecture page heading structure symmetric (8 h2 sections each); Security Boundaries bullet sets previously aligned (now re-aligned after the G2-1 addition).
-- Bilingual form: site locale routing (VitePress `locales` root=en-US, `/zh/`=zh-CN, config.mts:15-18) + paired README.md/README.zh.md. Live probe 2026-11-14: `/` = 200 en-US, `/zh/` = 200 zh-CN — contract holds.
-- No browser-language auto-switch: no `navigator.language`/`rootLocale` anywhere in `docs/.vitepress` sources — recorded as "no bilingual auto-switch; manual link only" (fleet-wide baseline; auto-detection is an enhancement pending a decision, registered fleet-side, not implemented here).
-
-Three-bucket count for this round: **0 / 1 / 0**. P0: none.
+Merge note (2026-11-14): a parallel draft section ("Round G2", baseline fd9ede90) was
+folded into this round as G2-10 with its verified-consistent items appended above; the
+section itself removed to keep one G2 record per file.

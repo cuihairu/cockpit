@@ -75,7 +75,7 @@ The CLI parses commands, probes default configuration paths, maps flags to typed
 
 #### L1 Transport and Contract
 
-`/ws` upgrades an Agent connection, requires `register` as the first frame, then runs read and write loops. `internal/server/websocket.go:70` owns the handshake; `internal/protocol/message.go:8` owns message types; `internal/protocol/codec.go:19` owns JSON over WebSocket encoding. `internal/agent/agent.go:355` dials with HTTP/1.1 and a connection generation, while `internal/agent/agent.go:677` dispatches incoming control frames.
+`/ws` upgrades an Agent connection, requires `register` as the first frame, then runs read and write loops. `internal/server/websocket.go:80` owns the handshake; `internal/protocol/message.go:8` owns message types; `internal/protocol/codec.go:19` owns JSON over WebSocket encoding. `internal/agent/agent.go:355` dials with HTTP/1.1 and a connection generation, while `internal/agent/agent.go:678` dispatches incoming control frames.
 
 #### L2 Server Composition and Runtime Control
 
@@ -83,7 +83,7 @@ The Server owns process-scoped context, background work accounting, route middle
 
 #### L3 Control API and Session Policy
 
-REST handlers translate authenticated requests into resource operations, Agent RPC calls, or streaming-session control. Central routing is `internal/server/api.go:10`; authenticated public and protected routes are registered at `internal/server/server.go:354`; JWT, RBAC, and audit wrappers compose at `internal/server/server.go:283`; Web routes and permission menus are declared at `web/src/App.tsx:120` and rendered at `web/src/App.tsx:533`.
+REST handlers translate authenticated requests into resource operations, Agent RPC calls, or streaming-session control. Central routing is `internal/server/api.go:10`; authenticated public and protected routes are registered at `internal/server/server.go:319`; JWT, RBAC, and audit wrappers compose at `internal/server/server.go:283`; Web routes and permission menus are declared at `web/src/App.tsx:120` and rendered at `web/src/App.tsx:533`.
 
 #### L4 Orchestration and Scheduling
 
@@ -127,7 +127,7 @@ The Server serves the SPA and API from one process, while Web and mobile clients
 4. Control APIs are separate from orchestration because request handlers create durable Jobs and return before Agent execution finishes (`internal/server/api_jobs.go:63`; `internal/server/api_jobs.go:401`).
 5. Workflow state is separate from Job state because an in-flight definition must be frozen while its steps create separate auditable Job attempts (`internal/server/api_workflow.go:423`; `internal/server/workflow_engine.go:216`).
 6. Persistence and Vault are separate because ordinary query rows and unlock-gated encrypted secrets have different lifecycles and access rules (`internal/storage/storage.go:40`; `internal/vault/local.go:122`).
-7. Agent execution is provider-pluggable because capability detection must skip unavailable integrations without breaking the always-on heartbeat (`internal/agent/providers.go:18`; `internal/agent/agent.go:424`).
+7. Agent execution is provider-pluggable because capability detection must skip unavailable integrations without breaking the always-on heartbeat (`internal/agent/providers.go:18`; `internal/agent/agent.go:425`).
 8. Server integrations are separate from Agent providers because cloud/DNS/overlay resources use global credentials, while node execution is gated by local capabilities and environment (`internal/server/server.go:255`; `internal/agent/providers.go:18`).
 9. Interface delivery is separate from source-of-truth state because clients may cache tokens and preferences locally, but `/api` remains the authoritative runtime path (`web/src/services/api.ts:63`; `mobile/lib/state/settings.dart:10`).
 

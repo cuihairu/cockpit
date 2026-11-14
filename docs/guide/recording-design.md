@@ -27,7 +27,7 @@ browser ◀─data─── HandleTerminalData ◀── agent
                                                      + SQLite metadata
 ```
 
-- `api_remote.go:341 HandleTerminalData`: the single exit point from agent to browser, and the recording hook point;
+- `api_remote.go:360 HandleTerminalData`: the single exit point from agent to browser, and the recording hook point;
 - `closeTerminalSession` / `HandleTerminalClose`: the session terminal states, where finalize backfills the duration and byte count.
 
 ## Decisions

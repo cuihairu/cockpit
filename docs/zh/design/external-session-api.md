@@ -44,7 +44,7 @@
 ```
 
 - `protocol` ∈ `ssh | rdp | vnc | telnet`（与 `handleRemoteSessionCreate` 白名单一致，
-  `internal/server/api_remote.go:654-660`）。
+  `internal/server/api_remote.go:673-679`）。
 - **无 `username`/`password`/`private_key`/`domain` 字段**——凭据由
   `credential_ref` 命名 vault 条目（local provider path 或 persona 条目
   UUID），会话建立时由服务端注入（E7 边界）。memex 全程接触不到凭据。
@@ -74,7 +74,7 @@
 - `channel` 选择见 E6：`guacamole`（rdp/vnc/ssh）或 `terminal`
   （telnet 必走；memex 客户端说不了 guacamole 协议时 ssh 也可降级走
   `terminal`，即 D6 移动端同款链路 `wss://…/api/remote/terminal`，票据经
-  **WebSocket 子协议**携带——`internal/server/api_remote.go:51-54`
+  **WebSocket 子协议**携带——`internal/server/api_remote.go:65-71`
   `protocols[0]` 即 ticketID，与 guacamole 通道的 `?ticket=` query 不同）。
 
 **错误**（fail-closed，全部沿用既有语义）：
@@ -83,7 +83,7 @@
 |------|------|
 | 401 | caller token 缺失/错误 |
 | 400 | 字段校验失败 / 协议不在白名单 |
-| 403 | 目标不在 `remote_control` 白名单或 egress 策略拒绝（`matchRemoteEgress`，`internal/server/api_remote.go:460`） |
+| 403 | 目标不在 `remote_control` 白名单或 egress 策略拒绝（`matchRemoteEgress`，`internal/server/api_remote.go:479`） |
 | 404 | agent 离线 / `credential_ref` 无对应条目 / **caller 配置为空（端点整体 404 默认关，E3）** |
 | 503 | guacd 不可达（仅 guacamole 通道） |
 
@@ -114,11 +114,11 @@ remote_control:
 
 - `GET /api/external/remote/sessions` —— 只返回**本 caller** 发起的会话
   （台账按 caller 名过滤；台账底座 `RemoteSessionManager`，
-  `RemoteSessionManager`（`internal/server/remote_session.go:43-48`）为台账基座，`internal/server/api_remote.go:596-604` 为全量视图 handler，外部入口加过滤）。
+  `RemoteSessionManager`（`internal/server/remote_session.go:43-48`）为台账基座，`internal/server/api_remote.go:615-623` 为全量视图 handler，外部入口加过滤）。
 - `GET /api/external/remote/sessions/{id}` —— 单会话状态（pending/
   connected/closed/failed；台账登记口径见 续批九 D-2026-10-12-4）。
 - `DELETE /api/external/remote/sessions/{id}` —— 终止：命中活会话先
-  `terminateLiveSession`（`internal/server/api_remote.go:675`）后收口台账，
+  `terminateLiveSession`（`internal/server/api_remote.go:694`）后收口台账，
   同现有人工 DELETE 语义。**只能删自己发起的**，他方会话 404（不暴露存在性）。
 - 票据 5 分钟一次性不变；会话不因 memex 断连而终止（连接归 memex 客户端，
   会话归台账）。
@@ -129,10 +129,10 @@ remote_control:
 
 | 机制 | 覆盖 | 证据 |
 |------|------|------|
-| 审计 | `auditRemoteStart/End/Failure` 全协议同款；外部会话 `Username` 记 `memex:<requested_by>`（caller name 前缀），凭据不进详情 | `docs/remote-access-integration-design.md` D5；`api_remote.go:423` 起各失败路径 |
-| 出口策略 | `matchRemoteEgress` agent_id 锚定，外部调用与人操同一套（403 fail-closed） | `api_remote.go:460-461` |
+| 审计 | `auditRemoteStart/End/Failure` 全协议同款；外部会话 `Username` 记 `memex:<requested_by>`（caller name 前缀），凭据不进详情 | `docs/remote-access-integration-design.md` D5；`api_remote.go:442` 起各失败路径 |
+| 出口策略 | `matchRemoteEgress` agent_id 锚定，外部调用与人操同一套（403 fail-closed） | `api_remote.go:479-480` |
 | 录制 | guacamole 通道 → guacd `.guac`（`collectGuacRecording`）；terminal 通道 → asciinema 字符流 | `docs/guide/recording-design.md` D1；`remote-access-integration-design.md` D5 |
-| 会话台账 | Register/UpdateStatus/closed 全链路收口（续批九） | `internal/server/api_remote.go:642` 起既有 POST 创建 |
+| 会话台账 | Register/UpdateStatus/closed 全链路收口（续批九） | `internal/server/api_remote.go:661` 起既有 POST 创建 |
 
 缺口（实现时补，均已含在契约内）：①审计归属前缀 `memex:` 需在会话创建时
 写入台账（`RemoteSessionRequest` 加 `initiator` 字段）；②caller 级协议/
@@ -154,7 +154,7 @@ agent 护栏在 E2 校验链中先于 egress 执行。
 
 1. **不做凭据下发**：契约任何字段不接收、不返回凭据；`credential_ref`
    只命名条目，运行时由服务端注入票据（`use_saved` 同语义，
-   `internal/server/api_remote.go:484` 起）。memex 侧永远拿不到口令/私钥。
+   `internal/server/api_remote.go:503` 起）。memex 侧永远拿不到口令/私钥。
 2. **不做授权关系存储**：谁能用哪台、什么权限是 memex + persona 的职责；
    本仓只执行自己的两道护栏（`remote_control` 目标白名单/egress + E3
    caller 护栏），不维护 memex 的授权矩阵。
@@ -163,9 +163,9 @@ agent 护栏在 E2 校验链中先于 egress 执行。
 
 ## 实现锚点（供后续排期，全部为既有件）
 
-`handleTicketCreate` 请求形状（`api_remote.go:399-411`）、egress 校验与
+`handleTicketCreate` 请求形状（`api_remote.go:418-430`）、egress 校验与
 vault 注入顺序（`:460-500`：egress 先行、`use_saved` 后填）、会话台账
 （`:642-669`）、票据（`internal/server/ticket.go`）、guacamole WS
-（`api_guacamole.go:306-308`）、terminal WS（`api_remote.go:387`）。新代码
+（`api_guacamole.go:306-308`）、terminal WS（`api_remote.go:406`）。新代码
 预期只在：外部路由 + caller 鉴权中间件 + `credential_ref` 解析 +
 台账 `initiator` 字段。
