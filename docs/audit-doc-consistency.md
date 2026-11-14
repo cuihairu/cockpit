@@ -345,3 +345,40 @@ Pending (not doc-fixable this round): the 13 zh twins from G2-9; auto locale det
 Merge note (2026-11-14): a parallel draft section ("Round G2", baseline fd9ede90) was
 folded into this round as G2-10 with its verified-consistent items appended above; the
 section itself removed to keep one G2 record per file.
+
+## G2 Re-verification (independent re-check)
+
+Second-seat re-check of the G2 round above, evidence re-derived against the
+working tree:
+
+| ID | Re-checked claim | Source evidence re-derived | Verdict |
+| --- | --- | --- | --- |
+| G2-1/2/3 | `api.ts:35` gateway, `:63` 401 branch | `web/src/services/api.ts` = 92 lines; `:35` is `export class ApiService`, `:63` is `window.location.href = '/login'` inside the 401 branch | holds, fixes present in EN + zh (architecture.md:106, :132 both locales) |
+| G2-4 | web 401 clears + redirects, does not refresh | `web/src/services/api.ts:60-70` removes `token`/`username` and redirects, no refresh call; `refreshToken()` = `api/auth.ts:36` posting `/auth/refresh` (route `internal/server/server.go:359`) | holds |
+| G2-5 | `core/report/upstream.go`, no `internal/core` | path exists; `internal/core` absent | holds (architecture.md:125) |
+| G2-6 | archive at `docs/zh/archive`, `docs/archive` absent | both as stated | holds |
+| G2-7 | `service.ts:17/38/46/54` endpoints | all four lines re-read | holds (acceptance-checklist.md:248,:250) |
+| G2-8 | `COCKPIT_VAULT_KEY` with `TOTP_ENCRYPTION_KEY` fallback | `internal/vault/crypto.go:22-25` (`vaultKeyEnv`/`fallbackEnv`) | holds (security.md:11) |
+| G2-9 | locale pairing gap, no zh twins for the 13 EN pages | sidebar link sweep not re-run by this seat; prior finding kept as registered | kept, not re-litigated |
+| G2-10 | data-plane hardening bullets present bilingually | architecture.md Security Boundaries bullet set | holds |
+
+Artifacts and platform matrix re-derived independently: the nightly release-notes
+matrix (`nightly.yml:490-505`) matches the build matrix at `:64-76` (linux amd64 /
+windows amd64 / darwin arm64 tarballs), `:140-165` (agent linux amd64/arm64/arm +
+darwin amd64/arm64) and `:212-227` (ipk mipsel/mips/aarch64_generic/
+arm_cortex-a7_neon-vfpv4/x86_64); README install paths `install.sh`, `install.ps1`,
+`deployments/docker/docker-compose.yml` all resolve, and the Windows silent-install
+block matches the exe name the workflow uploads. Notification "four channels" holds
+against `internal/notification/` (herald/ntfy/webhook/telegram).
+
+### G2-11 (new, this re-check)
+
+| ID | Doc page | Claim | Source evidence | Category | Severity | Disposition |
+| --- | --- | --- | --- | --- | --- | --- |
+| G2-11 | README.md:91 (powershell block) | Leading space before `.\cockpit-agent-setup-nightly.exe /VERYSILENT ...` | The zh twin (`README.zh.md:94`) carries the same command without the stray leading space; a leading space inside a fenced block is a copy-paste artifact, not formatting | Mismatch | P2 | Stray leading space removed (EN page only; zh already correct) |
+
+Language face re-checked: `locales: { root: en-US, zh: zh-CN }` at
+`docs/.vitepress/config.ts:15-18`; a `navigator.language` / `rootLocale` /
+`localeDetect` sweep over `docs/.vitepress` (excluding node_modules/dist) returns no
+hits — no automatic detection, navbar dropdown only. Baseline holds; the P2 todo
+entry (`todo.md:72`) awaiting a scope decision is unchanged.

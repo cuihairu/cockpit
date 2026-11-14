@@ -88,7 +88,7 @@ on the Server, then pass the same value to each new Agent with `-secret` (keep i
 It installs to `%ProgramFiles%\Cockpit Agent`, creates Start menu and desktop shortcuts (with the agent icon), asks for the Server address and Agent enrollment secret in the wizard, offers an optional "Register Windows service with auto-start on boot" checkbox, and registers a standard uninstall entry in Control Panel. For silent installation:
 
 ```powershell
- .\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws /SECRET=%AGENT_ENROLLMENT_SECRET%
+.\cockpit-agent-setup-nightly.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SERVER=wss://cockpit.cuihairu.site/ws /SECRET=%AGENT_ENROLLMENT_SECRET%
 ```
 
 Service management: `cockpit-agent service install|uninstall|start|stop|status` (service name
