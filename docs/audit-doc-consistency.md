@@ -382,3 +382,74 @@ Language face re-checked: `locales: { root: en-US, zh: zh-CN }` at
 `localeDetect` sweep over `docs/.vitepress` (excluding node_modules/dist) returns no
 hits — no automatic detection, navbar dropdown only. Baseline holds; the P2 todo
 entry (`todo.md:72`) awaiting a scope decision is unchanged.
+
+## G2 Re-verification (fourth seat, 2026-11-15, 00:20 CST)
+
+Independent pass over the drift-prone surfaces the earlier seats did not cover: the
+acceptance-checklist web-page anchors (EN + zh twins), the two EN-only design pages
+from the 2026-10-30 batch, plus a fresh README/nightly-artifact/About re-derivation.
+Nothing in this round's findings was known to the three prior records.
+
+| ID | Doc page | Claim | Source evidence | Category | Severity | Disposition |
+| --- | --- | --- | --- | --- | --- | --- |
+| G2-12 | guide/acceptance-checklist.md:262,265 (+zh :259,262) | "(visible within the 15s poll)" and "15s polling `Jobs/index.tsx:51` (refetchInterval 15000)" | `refetchInterval: 5000` at `web/src/pages/Jobs/index.tsx:56` since `add46d14` (2026-10-09, async M1); the Jobs page was 15s at the time of the 2026-10-05 probe. Round 1's D47 corrected jobs-design.md:15 to 5s but never touched this mirror | Description mismatch | **P1** | Corrected to 5s in both locales (checklist title + evidence line) |
+| G2-13 | same block (:265-266 / zh :263) | "the terminal success toast echoes per STATUS_META (`:84`)" | True for the probe date: `0a475c03` carried `message.success(\`Job 已执行（${STATUS_META…}\`)\`)`. After async M1 the create response is pending, so the toast is the fixed 「已提交」 string at `web/src/pages/Jobs/index.tsx:94` | Description mismatch | P2 | Annotated as probe-date behavior with the current anchor (dated evidence text otherwise untouched) |
+| G2-14 | same file :250,252 (+zh :245,247) | Services page wiring `Services/index.tsx:381-386` (reload Popconfirm), `:320-494` (unit-file Modal), `:506-514` (Logs button/Drawer), `LogsPanel.tsx:124-126` | Real: Popconfirm `:396-405`, Modal `:492-528`, Logs button `:326-335` + Drawer `:530-541`, LogsPanel derivation `:124-127` | Description mismatch | P2 | Re-anchored (both locales) |
+| G2-15 | same file :283,290,312 + App.tsx refs (:267,291) (+zh :280,287-288,309) | `Jobs/index.tsx:65` (offline disabled), `:169` (entry PermGuard), `:159` (pending cancel), `App.tsx:211` (menu perm) | Real: `:70-71`, `:213`, `:163-176`, `App.tsx:232` | Description mismatch | P2 | Re-anchored (both locales) |
+| G2-16 | same file :319,330,343 (+zh :316,327,340-341) | `Workflows/index.tsx:538` (jobId View), `:496` (cancel visible only for running), `:307,315,334` (workflows:write), `App.tsx:222` (menu perm) | Real: `:579,609` with `openJob` defined `:270`; `:527-531`; PermGuard `:319,327,346,528`; `App.tsx:244` | Description mismatch | P2 | Re-anchored (both locales) |
+| G2-17 | design/password-reset-protection.md:14 | `server.go:354-356` registers the three reset routes; `ValidateResetCode:108` | Routes are `internal/server/server.go:361-363`; `ValidateResetCode` is `internal/auth/password_reset.go:107` | Description mismatch | P2 | Anchors corrected |
+| G2-18 | design/agent-secret-lifecycle.md:14 | `server/websocket.go:26-33` covers both the registration hash and `agentRegistrationPolicy` | `:26` is the hash injection point only (used at `:274`); the policy is `:40-45` (called at `:212`) | Description mismatch | P2 | Anchor split into the two real spans |
+
+Three-bucket count for this seat: **0 / 0 / 7** (doc-ahead / code-ahead / mismatch).
+P0: none. P1: 1 (G2-12). All seven are anchor drift in the same class the earlier rounds
+fixed in jobs-design.md but never swept out of the acceptance checklist — the checklist
+records real-machine evidence and cites the web page line it was observed at, so the
+Pages growth since `add46d14` (2026-10-09) and `5bd93daa` (2026-10-11 approvals) moved
+every cited line.
+
+Verified consistent (independently re-derived, not in the table): README + README.zh
+feature paragraph against `internal/notification/` (channel_herald/ntfy/telegram/
+webhook), the `/ws` pass-through at `internal/server/middleware.go:93`, the agent version
+line `cmd/cockpit-agent/main.go:59`, the start flags (server/id/secret/region/zone/labels/
+bias/ssh-keys, `cmd/cockpit-agent/main.go:75-90`), and the Windows service face
+(`service_windows.go:40-48` install/uninstall/start/stop/status, svcName `CockpitAgent`
+`:25`, log dir `%ProgramData%\CockpitAgent` `:313`) against README's
+`cockpit-agent service install|uninstall|start|stop|status`; `go.mod` 1.27.3 vs the CI
+`go-version: '1.27'` in all six workflows; `web/package.json` react 19.3.1 / antd 5.29.3 /
+guacamole-common-js 1.5.0 (pinned, no caret) against the README Foundations paragraph.
+
+Nightly artifact matrix re-derived against the live `nightly` release (2026-11-13):
+server tarballs linux-amd64/windows-amd64/darwin-arm64, agent tarballs linux amd64/arm64/
+arm + darwin amd64/arm64, agent zips windows amd64/arm64, `cockpit-agent-setup-nightly.exe`
+(+`.sha256`), five OpenWrt `.ipk` + five openwrt tarballs, and the web tarball — matches the
+release-notes matrix at `nightly.yml:490-505`, the getting-started supported matrix
+(getting-started.md:155, zh:154), and the install URL builders (`install.sh:164`
+`cockpit-agent-${TARGET}-nightly.tar.gz`, `install.ps1:66`
+`cockpit-agent-windows-$Arch-$ReleaseTag.zip`). Public face re-derived via `gh repo view`:
+description "Personal Hybrid Infrastructure Console" and the six topics match the README
+headline; `homepageUrl` `https://cuihairu.github.io/cockpit/` is the docs site base
+(`config.ts:12` `base: '/cockpit/'`), and all seven README doc links resolve.
+
+Anchor sweep residue: 332 path-qualified anchors in the living doc surface were checked for
+bounds; every out-of-bounds flag resolved to a relative-prefix shorthand (the referenced
+file exists once its real prefix is restored) or to a dated snapshot. Dead-link sweep found
+two hits, both in `docs/review/luna-review-2026-10-18.md:4217,12565` pointing at
+`../archive/README.md` (moved to `docs/zh/archive` per G2-6). review/ is excluded from the
+build by `srcExclude: ['review/**']` (`config.ts:9`) and is a frozen snapshot under the W2-5
+precedent, so both are kept rather than unlinked — they never appear on the published site.
+
+Language face re-checked (fourth seat): same config, `locales: { root: en-US, zh: zh-CN }`
+(`docs/.vitepress/config.ts:15-18`) with `base: '/cockpit/'`; the theme (`docs/.vitepress/
+theme/index.ts`) only extends DefaultTheme with a `home-hero-after` Screenshots slot, and a
+sweep of config + theme for `navigator.language(s)` / `location.replace` / `rootLocale` /
+`localeDetect` returns nothing. Live probe triple — `/`: HTTP 200, `<html lang="en-US">`;
+`/zh/`: HTTP 200, `<html lang="zh-CN">`. First-screen CJK count in the first 2000 bytes was
+0 for both, recorded as-is with the usual caveat that GitHub Pages head injection makes that
+count order-dependent; `<html lang>` is decisive and both locale routes serve the correct
+language. Verdict: **no bilingual auto-switch, manual navbar dropdown only**.
+
+Carried items, unchanged: G2-9's 13 missing zh twins; the auto-locale-detection decision.
+`todo.md:72` already carries a semantically identical P2 line for the language switch, so
+no duplicate was added. One pairing gap of its own: the third seat's re-verification section
+above exists only in this EN file — `docs/zh/审计-文档一致性.md` has no counterpart. This
+section is added to both files; the third seat's section was left as found.

@@ -242,9 +242,9 @@
 - [x] systemd：列表含未加载 unit；start/stop/restart/enable/disable 实测；mask 后隐藏启动并显解屏蔽、unmask 还原
   证据（2026-10-01）：探针 `scripts/acceptance/services/`（本机 :19993，root/cui 双 agent 对照，测试 unit `cockpit-acc-*` 专属）两轮 9/9 PASS——首轮：T1 列表 total=313>active=72，files-only 未加载项在列（`apport-coredump-hook@.service` 等模板/未加载类，`mergeServiceUnits` 分支）；T2 restart→active/running、enable→enabled；T3 非 root restart/enable 同一 unit 均 502 且体含 `systemctl` 原文（Access denied…interactive authentication）原样透传，对照组非 root 读列表 200（纯权限失败）；T4 stop→inactive、disable→disabled 收尾；验收逮到一处生产缺陷：`serveAPI` 分发器仅 `Contains "/services/"`（要求尾斜杠），裸 `GET /api/agents/{id}/services`（文档与 Web `web/src/services/api/service.ts:17` 调的列表端点）掉进 `handleAgentGet` 报 404，Web 服务页列表整体不可达（既有测试直调 handler 绕过分发器故未拦住），修为与 `/health`、`/domains` 行同款 `HasSuffix || Contains` + 分发器回归 `TestServiceListDispatcherRoutesBarePath`（反向验证无修复必 FAIL）；补验轮：ghost 未加载样本（装 `/etc` 永不 enable/start → `loadState` 空 + `activeState=inactive` + `unitFileState=disabled`，运行表/安装表双对照）、start/stop 往返、disable/enable 往返、mask→`masked`（masked 上 restart 502、is-masked 原文透传）→ unmask 还原 `enabled`（列表态同步，Web masked 行隐藏启动/显解屏蔽即由该字段驱动）、审计 `service_action` 落账断言（unit/agent 齐全）；teardown 删 unit 文件 + daemon-reload 可复跑（run-server 归一旧实例 DB，防 `/api/agents` 旧 agent 行污染注册计数）；证据 `probe.log`（两轮）+ `setup.log` + `services-list.json`
 - [x] systemd：daemon-reload 工具栏按钮；unit 文件查看/编辑（包管文件先复制 `/etc/systemd/system` 覆盖位再改，升级不丢）
-  证据（2026-10-01，R3 轮）：同探针扩展至 17/17 PASS——T4 unit 文件全链：GET 有效视图（`systemctl cat` 全文 + `fragmentPath=/usr/lib/systemd/system/...` 包管位）；PUT 改 Description → 包管文件先复制 `/etc/systemd/system` 覆盖位再写（PUT 响应 `path=/etc/...` + `/etc` 落盘 + 复读 `fragmentPath` 换位三证）+ 保存捆绑 daemon-reload（`systemctl show -p Description` 即时反映新值——不 reload 不可能，端到端铁证）；超 256KB+1 内容 413（server `MaxBytesReader` 与 agent 同限双端防御）；拒绝面：白名单外 unit 名（含 `:`）400、`{unit}/file/x` 多余段 404（写哪由 FragmentPath 决定、只收 unit 名，无路径参数即无穿越面）、windows 形名（`zzz-notaservice`）过 server 双后端并集白名单后 agent systemd 兜底拒且 502 透传 `invalid unit name ... expect *.service`（D9.4 设计内行为）；非 root PUT 502 + `permission denied` 原文透传（与 root 同操作 200 对照）；审计 `details.action=unitfile-save` 落账。daemon-reload 端点：`POST /agents/{id}/services/daemon-reload` 200 `{"reloaded":true}` + 审计落账；Web 接线在位——工具栏「重载配置」Popconfirm（`Services/index.tsx:381-386`）与「文件」Modal（`:320-494`）走 `web/src/services/api/service.ts:38/46/54` 同三端点。本轮无产品缺陷（首轮 c88a48a 已修 serveAPI 分发器 404）
+  证据（2026-10-01，R3 轮）：同探针扩展至 17/17 PASS——T4 unit 文件全链：GET 有效视图（`systemctl cat` 全文 + `fragmentPath=/usr/lib/systemd/system/...` 包管位）；PUT 改 Description → 包管文件先复制 `/etc/systemd/system` 覆盖位再写（PUT 响应 `path=/etc/...` + `/etc` 落盘 + 复读 `fragmentPath` 换位三证）+ 保存捆绑 daemon-reload（`systemctl show -p Description` 即时反映新值——不 reload 不可能，端到端铁证）；超 256KB+1 内容 413（server `MaxBytesReader` 与 agent 同限双端防御）；拒绝面：白名单外 unit 名（含 `:`）400、`{unit}/file/x` 多余段 404（写哪由 FragmentPath 决定、只收 unit 名，无路径参数即无穿越面）、windows 形名（`zzz-notaservice`）过 server 双后端并集白名单后 agent systemd 兜底拒且 502 透传 `invalid unit name ... expect *.service`（D9.4 设计内行为）；非 root PUT 502 + `permission denied` 原文透传（与 root 同操作 200 对照）；审计 `details.action=unitfile-save` 落账。daemon-reload 端点：`POST /agents/{id}/services/daemon-reload` 200 `{"reloaded":true}` + 审计落账；Web 接线在位——工具栏「重载配置」Popconfirm（`Services/index.tsx:396-405`）与「文件」Modal（`:492-528`）走 `web/src/services/api/service.ts:38/46/54` 同三端点。本轮无产品缺陷（首轮 c88a48a 已修 serveAPI 分发器 404）
 - [x] systemd：服务行「日志」跳转 journalctl 历史可查（含未加载 unit）
-  证据（2026-10-01，R3 轮）：T5（`cockpit-acc-jlog.service` 样本，装 `/usr/lib` 永不 enable）——PUT 换带唯一 marker 的 oneshot ExecStart（dogfood 覆盖位 + 捆绑 reload：start 执行的正是 PUT 后内容）→ start 产 journal 历史 → stop + daemon-reload 后成未加载安装项（三面证据：`systemctl list-units --all` 无、服务表 `loadState=""`+`unitFileState=disabled`、`/logs/sources` 不含）→ `POST /agents/{id}/logs/query {"type":"systemd","source":"cockpit-acc-jlog.service"}` 200 且 `lines` 含 marker（`journalctl -u` 不关心加载态）；Web 链路同款：服务行「日志」按钮开 Drawer 内嵌 LogsPanel（`Services/index.tsx:506-514`），`initialSource` 对 unit 名无条件优先派生不回落（`LogsPanel.tsx:124-126`，未加载服务不在 `logs.sources` 列表仍可查）；非 root daemon-reload 502 Access denied 透传（对照记录）
+  证据（2026-10-01，R3 轮）：T5（`cockpit-acc-jlog.service` 样本，装 `/usr/lib` 永不 enable）——PUT 换带唯一 marker 的 oneshot ExecStart（dogfood 覆盖位 + 捆绑 reload：start 执行的正是 PUT 后内容）→ start 产 journal 历史 → stop + daemon-reload 后成未加载安装项（三面证据：`systemctl list-units --all` 无、服务表 `loadState=""`+`unitFileState=disabled`、`/logs/sources` 不含）→ `POST /agents/{id}/logs/query {"type":"systemd","source":"cockpit-acc-jlog.service"}` 200 且 `lines` 含 marker（`journalctl -u` 不关心加载态）；Web 链路同款：服务行「日志」按钮开 Drawer 内嵌 LogsPanel（`Services/index.tsx:326-335` 按钮、`:530-541` Drawer），`initialSource` 对 unit 名无条件优先派生不回落（`LogsPanel.tsx:124-127`，未加载服务不在 `logs.sources` 列表仍可查）；非 root daemon-reload 502 Access denied 透传（对照记录）
 - [ ] Windows SCM：列表/启停/自启切换/restart 等待 30s 超时路径实测；无权限服务报错透传；reload 按钮确认隐藏
   仓内预备（2026-10-19，f4a8ae5 + 367fa27）：免提权探针 `scripts/acceptance/services/scm-probe/main.go`（`//go:build windows`，经 `WindowsServiceProvider` 生产链）——校验层 3 项（reload 被动词白名单拒 / 非法 unit 名被拒=路径穿越面 / 未知动词拒）+ 非提权会话的 SCM `Access is denied` 原文透传 T4；`mgr.Connect` 需 SC_MANAGER_ALL_ACCESS，故 list / 启停 / 自启 / restart 30s 超时面标 BLOCKED 待提权 agent 复验。Build windows 腿已加整模块编译门禁（该文件带 windows build tag，只编 cmd 两包会漏检）。
 - [ ] macOS launchd：列表/启停/自启切换；`kickstart` 失败回退 `bootstrap` 路径；无权限报错透传
@@ -256,12 +256,12 @@
 真机验收（2026-10-05，探针 `scripts/acceptance/jobs/` 五件套 9/9 PASS，证据
 `.acceptance/jobs/evidence/`：probe.log + create-J1..J5.json + audit-job_run.json）。
 
-- [x] 创建 Job（在线 agent，`uptime`）→ 弹窗回显 success、输出非空、退出码 0；台账新增一条（15s 轮询内可见）
+- [x] 创建 Job（在线 agent，`uptime`）→ 弹窗回显 success、输出非空、退出码 0；台账新增一条（5s 轮询内可见）
   证据：J1 `echo J1-OUTPUT-MARK && uptime` 82ms 返回 success/exitCode 0/输出 80B 含标记，
   actor/type/target/parameters 往返一致、startedAt/finishedAt 落定；台账 0→1 条且倒序首位
-  即该条、单条详情含同样输出。Web 接线在位：15s 轮询 `Jobs/index.tsx:51`
-  （refetchInterval 15000）、终态成功提示按 STATUS_META 回显（`:84`）、
-  菜单 perm `jobs:read`（`App.tsx:211`）
+  即该条、单条详情含同样输出。Web 接线在位：5s 轮询 `Jobs/index.tsx:56`
+  （refetchInterval 5000，异步 M1 改造后改为此值；本次 2026-10-05 探针时创建提示仍按 STATUS_META 回显终态，异步派发返回 pending 后现为 `Jobs/index.tsx:94` 的固定「已提交」文案）、
+  菜单 perm `jobs:read`（`App.tsx:232`）
 - [x] 非零退出（`exit 3`）→ failed、退出码 3、error 无输出回退
   证据：J2 `echo J2-BEFORE-OUT; exit 3` → status=failed、exitCode=3、exit 前输出仍带回
   （D4 业务字段）；error 实际为 `exit status 3`（agent trimExecErr 归一，设计「error
@@ -277,15 +277,15 @@
 - [x] 离线 agent：创建弹窗下拉禁用该机；直连 `POST /api/jobs` → 503，不落幽灵 Job 记录
   证据：J5 目标 `jobs-acc-ghost`（从未注册；与「曾在线后掉线」同一 registry.Get 分支，
   logs T4 同口径）→ 503 `agent offline`，台账 4→4 条不变、ghost 目标记录 0。Web 下拉
-  `Jobs/index.tsx:65` `disabled: a.status === 'offline'` 且标签标「（离线）」
+  `Jobs/index.tsx:70-71` `disabled: a.status === 'offline'` 且标签标「（离线）」
 - [x] 审计：CreateJob 与终态 `job_run`（resource=job、details 含 type/target/status/params）在审计日志页留痕
   证据：J7 `GET /api/admin/audit/logs?resource=job&action=job_run` 命中 J1-J4 每 Job
   恰一条（resource_id=Job ID、username=admin、details 含 type/target/status/params.command）；
   创建前的 503/400 校验失败不产审计，审计页按 resource=job 可查
 - [x] 权限：无 `jobs:write` 不见「执行命令」入口；无 `jobs:read` 进不了 Jobs 页
   证据：J8 viewer（jobs:read）GET 列表/详情 200、POST 403；自定义仅 `dns:read` 角色
-  GET/POST 全 403；web 入口 PermGuard `jobs:write`（`Jobs/index.tsx:169`）+ 菜单
-  `jobs:read`（`App.tsx:211`）。**验收逮到真缺陷**：`/api/jobs` 未登记 `resourceRules`
+  GET/POST 全 403；web 入口 PermGuard `jobs:write`（`Jobs/index.tsx:213`）+ 菜单
+  `jobs:read`（`App.tsx:232`）。**验收逮到真缺陷**：`/api/jobs` 未登记 `resourceRules`
   → RBAC governed=false 整体放行，viewer 也能执行（与 agent-tags 补规则前同类）；
   修为 `rbac.go` 补 `{"/api/jobs", "jobs", ""}` + 三角色矩阵 7 例（rbac_test.go）
 
@@ -306,14 +306,14 @@ running 取消 200+击杀 cancelled/终态再取消 409、W11 解析+定义留�
 
 - [x] 异步创建：`POST /api/jobs` 立即 201 返回 pending，台账轮询内见终态；pending 行「取消」可见可点（W1/W9）
   证据：W1 `uptime` → 201 status=pending（W1 契约，0d065a1 race fix 后确定性）→ 台账轮询
-  success/exit 0/输出标记/params 往返/起止落定；pending 行取消 Web 在位 `Jobs/index.tsx:159`
+  success/exit 0/输出标记/params 往返/起止落定；pending 行取消 Web 在位 `Jobs/index.tsx:163-176`
   （pending 行「取消」按钮 → `cancelJob`），running 取消被拒 409 `only pending`（W9）
   （M2c 翻新：running 取消改为 RPC 击杀 200 + `cancelled`——W9 已翻新并复核
   通过 200+击杀 cancelled+终态再取消 409）
 - [x] 成功链：两步 Workflow run 全步 success，run 台账每步 jobId 可点开看输出/退出码（W2）
   证据：W2 两步链（uptime → df -h）run success；步骤快照 success 落 run.steps；
   Job 台账 2 条 actor=workflow、`/api/jobs?workflow_run_id=` 命中；Web run 详情
-  jobId「查看」按钮复用台账 Job 视角（`Workflows/index.tsx:538` openJob）
+  jobId「查看」按钮复用台账 Job 视角（`Workflows/index.tsx:579,609`，`openJob` 定义于 `:270`）
 - [x] 失败停：中间步失败（非零退出）→ run failed、第三步不执行、断点在快照可读（W3）
   证据：W3 三步链第 2 步 `exit 3` → run failed；快照 [success/failed/pending] 断点可读；
   Job 台账恰 2 条（第三步无 Job，未派发）
@@ -324,7 +324,7 @@ running 取消 200+击杀 cancelled/终态再取消 409、W11 解析+定义留�
 - [x] 取消 run：在途步骤自然结束后 run cancelled、后续步骤不推进；再次取消 409（W5）
   证据：W5 sleep 12 在途 → cancel 200 → run cancelled+finishedAt；12s 后步骤 2 仍无
   Job（不推进）、台账 1 条；再次 cancel 409 `run is not running`；Web 取消按钮仅
-  running 可见（`Workflows/index.tsx:496`）
+  running 可见（`Workflows/index.tsx:527-531`）
   （M2c 翻新：在途步骤改为被 `job.cancel` 真击杀落 `cancelled`+stopReason=`run
   cancelled`，不再自然跑满——W5 已翻新待复核）
 - [x] 重入与冻结：同定义重复 run 409；active run 期间定义更新/删除 409（W6）
@@ -337,8 +337,8 @@ running 取消 200+击杀 cancelled/终态再取消 409、W11 解析+定义留�
   证据：W8 viewer（workflows:read）列表 200/run 详情 200、建/触发/取消全 403；仅
   `dns:read` 自定义角色全 403（rbac `{"/api/workflows","workflows",""}` 路由层）；
   审计 create/run/cancel 三动作留痕 resource=workflow；Web 入口 PermGuard
-  `workflows:write`（`Workflows/index.tsx:307,315,334`）+ 菜单 `workflows:read`
-  （`App.tsx:222`）
+  `workflows:write`（`Workflows/index.tsx:319,327,346,528`）+ 菜单 `workflows:read`
+  （`App.tsx:244`）
 - [x] 真机编排一轮：对真实 agent 跑一条「uptime → df -h」两步链并核对台账/审计/run 快照（W2）
   证据：本机实例（:20010）+ agent `workflows-acc-a1` 真机执行；run success、两步快照
   均含输出、Job 台账 2 条 actor=workflow、审计 workflow_run resource_id=run id；

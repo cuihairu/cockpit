@@ -11,8 +11,8 @@ status: design-draft (2026-10-30, 已代决 docs/review/2026-10-30-decisions.md 
 
 ## 1. 入口暴露与现有保护盘点（已核实，无需凭据）
 
-- **入口**：`server/server.go:354-356` 注册 `/api/auth/forgot-password`、`/api/auth/reset-password`、`/api/auth/verify-reset-code`，均在 `authService().Middleware` 之外（无 JWT——找回语义本身不需登录）。
-- **令牌/验证码**：`auth/password_reset.go` 内存 map 存储，30 分钟过期，6 位验证码，`ValidateResetCode:108` 直接字符串比对，**无失败次数限制、无冷却、无统一响应**。
+- **入口**：`server/server.go:361-363` 注册 `/api/auth/forgot-password`、`/api/auth/reset-password`、`/api/auth/verify-reset-code`，均在 `authService().Middleware` 之外（无 JWT——找回语义本身不需登录）。
+- **令牌/验证码**：`auth/password_reset.go` 内存 map 存储，30 分钟过期，6 位验证码，`ValidateResetCode:107` 直接字符串比对，**无失败次数限制、无冷却、无统一响应**。
 - **邮件链**：`config.EmailConfig/SMTPConfig`（`config.go:186-194`）、`SetEmailConfig` 全局，`net/smtp` 直发。
 - **现有保护**：登录限流已有 `loginAttemptLimiter`（`server/login_limiter.go`，进程内、IP+用户名桶），**仅覆盖登录**；forgot/reset/verify 三入口无独立限速。
 - **暴露面**：默认 `cfg.Server.Host="127.0.0.1"`（`config.go:379`）——默认不对外。**是否对公网开放/邮件可用**取决于部署配置，待用户确认（触发条件）。
