@@ -36,10 +36,18 @@ func covTestConfig() *config.Config {
 // t.TempDir 的 RemoveAll 清理不能与仍在写库/写文件的清扫竞态——
 // database/sql 的 Close 不终止在途事务，journal/recordings 子目录会在
 // 删除过程中出现，RemoveAll 报 "directory not empty"（CI 根因）。
+// Wait 前必须先照生产 Shutdown 置 bgClosed（server.go Shutdown 同款）：
+// gorilla upgrade 后连接被 hijack，httptest Server.Close 的 wg 不等待
+// ws handler，注册成功路径（websocket.go goBg→bgWG.Add(1)）可能落在
+// Wait 观察到零之后——Add-after-Wait 属 WaitGroup 误用，CI -race 报
+// 数据竞速（TestCovHandleWebSocketOversizedFrameRejected 根因）。
 func covCancelAndWait(t *testing.T, s *Server, cancel context.CancelFunc) {
 	t.Helper()
 	t.Cleanup(func() {
 		cancel()
+		s.bgMu.Lock()
+		s.bgClosed = true
+		s.bgMu.Unlock()
 		s.bgWG.Wait()
 		s.backupTrackWG.Wait()
 	})
