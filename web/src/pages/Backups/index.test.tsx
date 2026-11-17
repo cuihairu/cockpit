@@ -393,7 +393,7 @@ describe('Backups', () => {
     fireEvent.change(inputs[1], { target: { value: 'wrong-name' } })
     fireEvent.click(screen.getByRole('button', { name: /开始恢复/ }))
     expect(await screen.findByText('必须是 Agent 主机上的绝对路径')).toBeInTheDocument()
-    expect(screen.getByText('输入与备份文件名不一致')).toBeInTheDocument()
+    expect(await screen.findByText('输入与备份文件名不一致')).toBeInTheDocument()
     expect(apiMock.restoreBackup).not.toHaveBeenCalled()
     // 合法提交 → 下发 → 任务视图
     fireEvent.change(inputs[0], { target: { value: '/tmp/restore-etc' } })
@@ -514,8 +514,8 @@ describe('Backups', () => {
     await modalTitle('新建备份')
     fireEvent.click(modalOk())
     expect(await screen.findByText('请选择 Agent')).toBeInTheDocument()
-    expect(screen.getByText('请输入备份名')).toBeInTheDocument()
-    expect(screen.getByText('至少一个绝对路径')).toBeInTheDocument()
+    expect(await screen.findByText('请输入备份名')).toBeInTheDocument()
+    expect(await screen.findByText('至少一个绝对路径')).toBeInTheDocument()
     // 备份名 pattern
     const nameInput = screen.getByLabelText('备份名') as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: 'Bad Name!' } })
@@ -533,7 +533,7 @@ describe('Backups', () => {
     fireEvent.change(screen.getByLabelText('异地目标（可选）'), { target: { value: 'bad dest' } })
     fireEvent.click(modalOk())
     expect(await screen.findByText('必须是 Agent 主机上的绝对路径')).toBeInTheDocument()
-    expect(screen.getByText(/格式：rclone 远端名:路径/)).toBeInTheDocument()
+    expect(await screen.findByText(/格式：rclone 远端名:路径/)).toBeInTheDocument()
     expect(apiMock.createBackupConfig).not.toHaveBeenCalled()
   })
 

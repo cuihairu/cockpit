@@ -378,7 +378,7 @@ describe('DNS', () => {
     await waitFor(() => expect(document.querySelector('.ant-modal-title')?.textContent).toBe('新建 DNS 记录'))
     fireEvent.click(document.querySelector('.ant-modal .ant-btn-primary')!)
     expect(await screen.findByText('记录名不能为空')).toBeInTheDocument()
-    expect(screen.getByText('内容不能为空')).toBeInTheDocument()
+    expect(await screen.findByText('内容不能为空')).toBeInTheDocument()
     expect(apiMock.createDNSRecord).not.toHaveBeenCalled()
     // 填写 A 记录并开橙云
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: ' home ' } })

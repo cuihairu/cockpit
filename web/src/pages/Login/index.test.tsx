@@ -48,7 +48,7 @@ describe('Login', () => {
       fireEvent.click(screen.getByRole('button', { name: /登\s*录/ }))
     })
     expect(await screen.findByText('请输入用户名')).toBeInTheDocument()
-    expect(screen.getByText('请输入密码')).toBeInTheDocument()
+    expect(await screen.findByText('请输入密码')).toBeInTheDocument()
     expect(loginMock).not.toHaveBeenCalled()
   })
 
