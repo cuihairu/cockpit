@@ -414,6 +414,20 @@ func TestCovHandleRPCRequestQueueFull(t *testing.T) {
 	}
 	req := protocol.NewMessage(protocol.MessageTypeRPCRequest, map[string]any{"method": "no.such.method"})
 	a.handleRPCRequest(req) // RPC 错误响应也入队失败 → 仅记录日志
+
+	// 成功响应同样入队失败：rpc.Handle 成功 → sendMessage 失败 → 仅日志
+	a.rpc.RegisterProvider(&covSuccessProvider{})
+	reqOK := protocol.NewMessage(protocol.MessageTypeRPCRequest, map[string]any{"method": "covfake.status"})
+	reqOK.ID = "rpc-qf"
+	a.handleRPCRequest(reqOK)
+}
+
+// covSuccessProvider 恒定成功的假 Provider：覆盖「Handle 成功后响应入队失败」分支
+type covSuccessProvider struct{}
+
+func (covSuccessProvider) Type() string { return "covfake" }
+func (covSuccessProvider) Call(action string, params map[string]interface{}) (interface{}, error) {
+	return map[string]interface{}{"ok": true}, nil
 }
 
 // ============ detectCapabilities ============

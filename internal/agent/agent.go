@@ -34,6 +34,7 @@ type Agent struct {
 	rpc          *rpc.Handler
 	collector    *metrics.Collector // 系统信息采集器（core/metrics）
 	proxyHandler *proxy.Handler     // 代理处理器
+	sched        *Scheduler         // RPC 准入调度（P0 第二片：并发上限/优先级/准入超时）
 	outbound     chan *protocol.Message
 	upstream     *report.Upstream    // 统一上行（core/report：队列消费/放行门/串行写出）
 	registrar    *register.Registrar // 注册上线（core/register：ID 派生/报文/握手）
@@ -137,6 +138,12 @@ type Config struct {
 	LivenessPorts []int `json:"liveness_ports,omitempty"`
 	// LivenessIntervalSeconds 探活周期（秒），<=0 用 liveness.DefaultInterval
 	LivenessIntervalSeconds int `json:"liveness_interval_seconds,omitempty"`
+	// RPC 调度资源隔离（P0 第二片，见 docs/design/agent-scheduling-isolation.md）：
+	// 并发上限与准入等待预算（秒）。<=0 用默认（scheduler.go Default*）。
+	RPCMaxConcurrent         int `json:"rpc_max_concurrent,omitempty"`
+	RPCMaxHighConcurrent     int `json:"rpc_max_high_concurrent,omitempty"`
+	RPCAdmissionTimeoutS     int `json:"rpc_admission_timeout_s,omitempty"`
+	RPCHighAdmissionTimeoutS int `json:"rpc_high_admission_timeout_s,omitempty"`
 }
 
 // NewAgent 创建新 Agent
@@ -149,6 +156,9 @@ func NewAgent(cfg Config) *Agent {
 		rpc:          rpc.NewHandler(),
 		collector:    metrics.NewCollector(),
 		proxyHandler: proxy.NewHandler(),
+		sched: NewScheduler(cfg.RPCMaxConcurrent, cfg.RPCMaxHighConcurrent,
+			time.Duration(cfg.RPCAdmissionTimeoutS)*time.Second,
+			time.Duration(cfg.RPCHighAdmissionTimeoutS)*time.Second),
 		outbound:     make(chan *protocol.Message, 1024),
 		capabilities: []protocol.Capability{},
 		startedAt:    time.Now(),
@@ -726,17 +736,39 @@ func (a *Agent) handlePing(msg *protocol.Message) {
 func (a *Agent) handleRPCRequest(msg *protocol.Message) {
 	log.Printf("RPC request: %v", msg.Payload)
 
+	// 准入调度（P0 第二片，见 docs/design/agent-scheduling-isolation.md）：
+	// 并发上限 + 优先级车道 + 准入超时预算。准入失败＝该请求的业务错误
+	// （错误响应），不断连、不影响其他请求与后续 RPC。
+	method, _ := msg.Payload["method"].(string)
+	release, err := a.sched.Acquire(a.ctx, method)
+	if err != nil {
+		log.Printf("RPC admission rejected (%s): %v", method, err)
+		a.sendRPCError(msg, err)
+		return
+	}
+	defer release()
+
 	// 使用 RPC 处理器
 	resp, err := a.rpc.Handle(msg)
 	if err != nil {
 		log.Printf("RPC error: %v", err)
-		resp = protocol.NewMessage(protocol.MessageTypeRPCResponse, map[string]any{
-			"status": "error",
-			"error":  err.Error(),
-		})
-		resp.ID = msg.ID
+		a.sendRPCError(msg, err)
+		return
 	}
 
+	if err := a.sendMessage(resp); err != nil {
+		log.Printf("Send RPC response failed: %v", err)
+	}
+}
+
+// sendRPCError 发 RPC 层错误响应（status=error，关联请求 ID）。
+// RPC 层错误不是协议错误，发送失败仅记录日志（对端连接可能已关）。
+func (a *Agent) sendRPCError(msg *protocol.Message, rpcErr error) {
+	resp := protocol.NewMessage(protocol.MessageTypeRPCResponse, map[string]any{
+		"status": "error",
+		"error":  rpcErr.Error(),
+	})
+	resp.ID = msg.ID
 	if err := a.sendMessage(resp); err != nil {
 		log.Printf("Send RPC response failed: %v", err)
 	}
