@@ -51,6 +51,10 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	case path == "/approvals" || strings.HasPrefix(path, "/approvals/"):
 		// 审批门（见 api_approvals.go，workflow-design.md M2d）
 		s.handleApprovalsAPI(w, r, path)
+	case path == "/upgrade" || strings.HasPrefix(path, "/upgrade/"):
+		// Agent 升级与回滚：产物登记 + 升级意图状态（见 api_upgrade.go，
+		// agent-upgrade-rollback.md）
+		s.handleUpgradeAPI(w, r, path)
 	case path == "/inventory/consistency":
 		// CMDB 一致性（见 api_inventory.go，drift-design.md M6 D28/D30）
 		s.handleInventoryConsistency(w, r)
@@ -86,6 +90,12 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		// agent 标签 GET/PUT /agents/{id}/tags（见 api_tags.go）
 		if strings.HasSuffix(agentID, "/tags") {
 			s.handleAgentTagAssignAPI(w, r, agentID)
+			return
+		}
+		// 升级意图 POST /agents/{id}/upgrade（见 api_upgrade.go，
+		// agent-upgrade-rollback.md §3.2；非 bulk，仅单 agent）
+		if strings.HasSuffix(agentID, "/upgrade") {
+			s.handleAgentUpgrade(w, r, strings.TrimSuffix(agentID, "/upgrade"))
 			return
 		}
 		// 远程文件管理 /agents/{id}/files/...（见 api_files.go）

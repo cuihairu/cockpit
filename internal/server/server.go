@@ -311,6 +311,8 @@ func (s *Server) Start() error {
 	s.startBackupLoop()
 	// 启动 server 自身数据库备份循环（见 server-backup-design.md）
 	s.goBg(s.serverBackupLoop)
+	// 启动 agent 升级意图巡检（agent-upgrade-rollback.md §3.2 状态机推进）
+	s.goBg(s.upgradeReconcileLoop)
 
 	return server.ListenAndServe()
 }

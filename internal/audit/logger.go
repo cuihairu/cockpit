@@ -64,6 +64,10 @@ const (
 	// Job 人工重试（task-recovery-design §6.2）：新建 job（新 id，retried_from
 	// 溯源），记录 operator/原 id/新 id/reason
 	ActionJobRetry = "job_retry"
+	// Job 升级产物登记与升级意图（agent-upgrade-rollback §3.4）：产物登记
+	// 记 version/arch/os/sha256，意图记 agent/from/to/终态
+	ActionAgentArtifact = "agent_artifact"
+	ActionAgentUpgrade  = "agent_upgrade"
 	// Workflow 定义变更与运行（见 docs/guide/workflow-design.md）
 	ActionWorkflowCreate = "workflow_create"
 	ActionWorkflowUpdate = "workflow_update"
@@ -173,6 +177,12 @@ const ResourceAcmeCert = "acme_cert"
 const ResourceOverlayMember = "overlay_member"
 
 // ResourceOverlayNetwork 组网本机侧网络加入/离开资源类型（见 overlay-design.md M3 D29）
+
+// ResourceAgentArtifact agent 升级产物资源类型（agent-upgrade-rollback §3.4）
+const ResourceAgentArtifact = "agent_artifact"
+
+// ResourceAgentUpgrade agent 升级意图资源类型（agent-upgrade-rollback §3.4）
+const ResourceAgentUpgrade = "agent_upgrade"
 const ResourceOverlayNetwork = "overlay_network"
 
 // ResourceDomainBinding 服务域名绑定资源类型（见 domain-binding-design.md）

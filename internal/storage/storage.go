@@ -139,6 +139,8 @@ func (d *DB) migrate() error {
 		&Approval{},
 		&AgentTag{},
 		&AgentTagAssignment{},
+		&AgentArtifact{},
+		&AgentUpgrade{},
 	); err != nil {
 		return err
 	}

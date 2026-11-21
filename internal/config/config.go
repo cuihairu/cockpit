@@ -26,6 +26,7 @@ type Config struct {
 	Probe         *ProbeConfig         `yaml:"probe,omitempty"`
 	Stacks        *StacksConfig        `yaml:"stacks,omitempty"`
 	Jobs          *JobsConfig          `yaml:"jobs,omitempty"`
+	Upgrade       *UpgradeConfig       `yaml:"upgrade,omitempty"`
 }
 
 // JobsConfig 执行 Job 配置（task-recovery-design §6.3 执行窗口）。
@@ -33,6 +34,16 @@ type JobsConfig struct {
 	// Window 执行窗口（提交时点门控）：nil = 未配置 = 全天放行
 	// （向后兼容默认）。缺省不改变既有行为。
 	Window *JobWindowConfig `yaml:"window,omitempty"`
+}
+
+// UpgradeConfig agent 升级与回滚配置（agent-upgrade-rollback §3.3）。
+// 未配置 = 全部默认（窗口 120s、产物上界 256MB）。
+type UpgradeConfig struct {
+	// HealthWindowS 健康窗口秒数：升级后 agent 须在窗口内重注册并稳定在
+	// 目标版本才算 succeeded（≤0/缺省 = 120）
+	HealthWindowS int `yaml:"healthWindowS,omitempty"`
+	// MaxArtifactMB 升级产物大小上界 MB（≤0/缺省 = 256）
+	MaxArtifactMB int `yaml:"maxArtifactMB,omitempty"`
 }
 
 // JobWindowConfig 执行窗口（本地时区墙钟）：Start/End 为「HH:MM」，
