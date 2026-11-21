@@ -557,6 +557,7 @@ func toStorageAgent(agent *Agent) *storage.Agent {
 			Version:  cap.Version,
 			Endpoint: cap.Endpoint,
 			Metadata: cap.Metadata,
+			Access:   string(cap.Access),
 		}
 	}
 

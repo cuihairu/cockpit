@@ -151,6 +151,65 @@ func (a *Agent) GetCapability(capType string) *protocol.Capability {
 	return nil
 }
 
+// CanWrite 报告 agent 是否以可写权限暴露指定能力（P0 Agent 契约首片，
+// 2026-11-21，见 docs/design/agent-capability-contract.md §4.2）。
+//
+// fail-closed：能力存在且 Access == writable 才返回 true；Access 缺失
+// （旧 agent 未上报）一律视为 readonly → false，旧节点不被误判支持写动作。
+// 无该能力 → false。
+func (a *Agent) CanWrite(capType string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	for _, cap := range a.Capabilities {
+		if cap.Type == capType {
+			return cap.Access == protocol.CapabilityWritable
+		}
+	}
+	return false
+}
+
+// CapabilityVersion 返回指定能力上报的能力版本（无该能力或旧 agent 未报
+// 版本时返回空串）。
+func (a *Agent) CapabilityVersion(capType string) string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	for _, cap := range a.Capabilities {
+		if cap.Type == capType {
+			return cap.Version
+		}
+	}
+	return ""
+}
+
+// CapabilitySatisfies 能力门控（fail-closed），供动作分派按契约判定：
+//
+//  1. 能力必须存在（类型匹配）；
+//  2. requireWrite 时 Access 必须 == writable（缺失视为 readonly → 拒绝）；
+//  3. minVersion 非空时实际版本必须 >= minVersion（缺失或过低 → 拒绝）。
+//
+// requireWrite=false 且 minVersion 为空时等价于 HasCapability（只按类型判），
+// 故既有的只读门控（如 HasCapability 调用点）语义不变。
+func (a *Agent) CapabilitySatisfies(capType, minVersion string, requireWrite bool) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	for _, cap := range a.Capabilities {
+		if cap.Type != capType {
+			continue
+		}
+		if requireWrite && cap.Access != protocol.CapabilityWritable {
+			return false
+		}
+		if minVersion != "" && !protocol.VersionSatisfies(cap.Version, minVersion) {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
 // Heartbeat 更新心跳时间
 func (a *Agent) Heartbeat() {
 	a.mu.Lock()

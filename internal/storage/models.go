@@ -60,6 +60,10 @@ type Capability struct {
 	// 与 agent 上报的 metadata 语义不同、并存不互斥。
 	Endpoint string                 `json:"endpoint,omitempty"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	// Access 权限状态（readonly|writable，P0 Agent 契约首片 2026-11-21）：
+	// agent 上报的 protocol.Capability.Access 直映射。空串（旧数据/旧 agent）
+	// 消费侧按 readonly 处理（fail-closed）。
+	Access string `json:"access,omitempty"`
 	// Config inventory 声明的 capability 配置（inventory/sync.go）：落库时
 	// 序列化加密进 ConfigEnc（明文只在内存态，vault-design.md V6 第二波）
 	Config    map[string]interface{} `json:"config,omitempty"`

@@ -72,7 +72,10 @@ func TestCovScanLoopsDisabledInterval(t *testing.T) {
 			t.Fatalf("set interval: %v", err)
 		}
 		exited := covSpawnLoop(fn(s))
-		time.Sleep(120 * time.Millisecond)
+		// 400ms 裕量：30ms tick 下 ~13 轮调度余量，全量套件 CPU 争抢时
+		// 120ms 会让 goroutine 未被调度到（interval<=0 continue 分支漏盖，
+		// 2026-11-21 全量门禁实测）
+		time.Sleep(400 * time.Millisecond)
 		s.cancel()
 		covWaitExit(t, name, exited)
 	}

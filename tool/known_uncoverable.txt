@@ -127,10 +127,10 @@ internal/server/api_guacamole.go:480,485	3. SetReadDeadline 失败防御（同�
 # closed 标志才置位，单测关闭后拨号在 listener 即失败，不可确定性构造竞态窗口
 internal/server/guac_relay.go:174,177	3. relay 已关闭后拒绝新连接（S6 竞态守卫：Close 与 accept 并发窗口，单测不可确定性构造；关闭后拨号在 listener 层即失败）
 # agent 连接代数失配守卫（9f77bdda G1）：reconnect 已换代时陈旧代 messageLoop
-# 必须退出，单测只覆盖「读后换代」侧（g1_message_loop_test），首查代（645 行前）
-# 与读后二次查（670 行前）的失配窗口不可确定性构造
-internal/agent/agent.go:645,647	3. agent 连接代数失配首查守卫（G1 陈旧代退出；同批二次查 670,671，竞态窗口不可确定性构造）
-internal/agent/agent.go:670,671	3. agent 连接代数失配读后二次查守卫（G1；读期间 reconnect 换代窗口，同 645,647 口径）
+# 必须退出，单测只覆盖「读后换代」侧（g1_message_loop_test），首查代（654 行前）
+# 与读后二次查（678 行前）的失配窗口不可确定性构造
+internal/agent/agent.go:654,655	3. agent 连接代数失配首查守卫（G1 陈旧代退出；同批二次查 678,679，竞态窗口不可确定性构造）
+internal/agent/agent.go:678,679	3. agent 连接代数失配读后二次查守卫（G1；读期间 reconnect 换代窗口，同 654,655 口径）
 # storage CreateWorkflowRun 事务内 Count 失败防御（bcfb9d24 S4）：事务读同句柄
 # 先行 Create 前已成功，Count 无触发器注入面，进程内不可构造失败
 internal/storage/workflow.go:97,98	3. CreateWorkflowRun 事务内 Count 失败防御（S4；同事务读不可致错，构造需注入竞态）

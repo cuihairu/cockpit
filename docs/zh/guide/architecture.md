@@ -75,7 +75,7 @@ CLI 解析命令、探测默认配置路径、把 flags 映射为类型化启动
 
 #### L1 传输与契约
 
-`/ws` 升级 Agent 连接，要求首帧 `register`，随后运行读写循环。`internal/server/websocket.go:80` 负责握手；`internal/protocol/message.go:8` 定义消息类型；`internal/protocol/codec.go:19` 负责 WebSocket JSON 编解码。`internal/agent/agent.go:355` 按 HTTP/1.1 和连接代数拨号，`internal/agent/agent.go:678` 分发下行控制帧。
+`/ws` 升级 Agent 连接，要求首帧 `register`，随后运行读写循环。`internal/server/websocket.go:80` 负责握手；`internal/protocol/message.go:8` 定义消息类型；`internal/protocol/codec.go:19` 负责 WebSocket JSON 编解码。`internal/agent/agent.go:355` 按 HTTP/1.1 和连接代数拨号，`internal/agent/agent.go:686` 分发下行控制帧。
 
 #### L2 Server 组合与运行期控制
 

@@ -75,7 +75,7 @@ The CLI parses commands, probes default configuration paths, maps flags to typed
 
 #### L1 Transport and Contract
 
-`/ws` upgrades an Agent connection, requires `register` as the first frame, then runs read and write loops. `internal/server/websocket.go:80` owns the handshake; `internal/protocol/message.go:8` owns message types; `internal/protocol/codec.go:19` owns JSON over WebSocket encoding. `internal/agent/agent.go:355` dials with HTTP/1.1 and a connection generation, while `internal/agent/agent.go:678` dispatches incoming control frames.
+`/ws` upgrades an Agent connection, requires `register` as the first frame, then runs read and write loops. `internal/server/websocket.go:80` owns the handshake; `internal/protocol/message.go:8` owns message types; `internal/protocol/codec.go:19` owns JSON over WebSocket encoding. `internal/agent/agent.go:355` dials with HTTP/1.1 and a connection generation, while `internal/agent/agent.go:686` dispatches incoming control frames.
 
 #### L2 Server Composition and Runtime Control
 

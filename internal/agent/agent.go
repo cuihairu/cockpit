@@ -575,17 +575,24 @@ func (a *Agent) detectCapabilities() []protocol.Capability {
 	// virt-libvirt capability：本地 libvirt 只读面第一片。仅宣称 virsh
 	// 入口存在，不据此猜 daemon/driver；真实 hypervisor/LXC 探测由
 	// virt.capabilities RPC 在 daemon 连接上验证。
+	//
+	// 权限状态契约（P0 Agent 首片，2026-11-21）：本片只读 → Access=readonly
+	// （read_only metadata 保留向后兼容，权威字段是 Access）。libvirt 写片
+	// 上线时须把 virt-libvirt 移入写面并在此显式置 writable。
 	if rpc.LibvirtAvailable() {
 		capabilities = append(capabilities, protocol.Capability{
 			Type:    "virt-libvirt",
 			Version: "1",
+			Access:  protocol.CapabilityReadonly,
 			Metadata: map[string]interface{}{
 				"read_only": true,
 			},
 		})
 	}
 
-	return capabilities
+	// 权限状态契约收口：按能力类型补默认 Access（已有显式声明的条目保持
+	// 原值）；未分类/未知能力默认 readonly（fail-closed）。
+	return withCapabilityAccess(capabilities)
 }
 
 // register 注册到 Server（core/register：ID 派生/报文/握手；ID 与位置

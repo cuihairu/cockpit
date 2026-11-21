@@ -53,12 +53,29 @@ type Location struct {
 	Zone   string `json:"zone"`
 }
 
+// CapabilityAccess 能力权限状态（P0 Agent 契约首片，2026-11-21；
+// 见 docs/design/agent-capability-contract.md §4）。
+//
+// fail-closed 语义：字段缺失（空串，旧 agent 未上报）一律按 readonly 处理，
+// 写动作拒绝并记录——旧节点不被误判支持新动作（决策项 23）。
+type CapabilityAccess string
+
+const (
+	// CapabilityReadonly 只读：能力可查询/观察，禁止写动作。
+	CapabilityReadonly CapabilityAccess = "readonly"
+	// CapabilityWritable 可写：能力可执行有副作用的写动作。
+	CapabilityWritable CapabilityAccess = "writable"
+)
+
 // Capability 能力声明
 type Capability struct {
 	Type     string                 `json:"type"`
 	Endpoint string                 `json:"endpoint,omitempty"`
 	Version  string                 `json:"version,omitempty"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	// Access 权限状态（readonly|writable）。缺省（旧 agent 未上报）消费侧
+	// 按 readonly 处理（fail-closed），见 CapabilityAccess。
+	Access CapabilityAccess `json:"access,omitempty"`
 }
 
 // RemoteServicePayload 远控服务面上报项：agent 探测到的本机开放服务

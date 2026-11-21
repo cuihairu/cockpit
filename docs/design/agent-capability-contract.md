@@ -6,7 +6,9 @@ status: design-settled (2026-10-30, 已代决 docs/review/2026-10-30-decisions.m
 # Agent Capability 最小契约设计（P0 首片）
 
 > 依据：`docs/review/2026-10-30-decisions.md` 项 23（推荐批准四个有依赖独立小范围，首片＝Capability 契约）。
-> 状态：**设计定稿**。本片只落契约设计与盘点结论，不实现——按决策「这里是推荐新拍板，不表示本次授权了实现」，实现待用户拍板后单独立项。
+> 状态：**已实现（2026-11-21，用户开工令）**。2026-10-30 设计定稿时未授权实现；2026-11-21 用户点名 P0 Agent 四件开工，首片落地：
+> `protocol.Capability.Access`（readonly|writable 二值起步）＋ `internal/protocol/version.go`（semver-lite 比较）＋ server 门控（`CanWrite`/`CapabilityVersion`/`CapabilitySatisfies`，fail-closed）＋ agent 侧分类（`internal/agent/capability_access.go`，未知默认 readonly）＋ storage/REST 透传。
+> §6 两项待拍板按设计建议默认落地：Access 取 readonly|writable 二值；版本取 semver（semver-lite 比较，无 pre-release 优先级）。
 > 盘点结果：现有 capability 上报与消费位置见 §2；契约缺口见 §3。
 
 ## 1. 目标与边界
@@ -21,9 +23,9 @@ status: design-settled (2026-10-30, 已代决 docs/review/2026-10-30-decisions.m
 
 | 位置 | 内容 |
 |---|---|
-| `internal/protocol/message.go:56-63` | `protocol.Capability{Type, Endpoint, Version, Metadata}`——注册负载携带 |
-| `internal/protocol/message.go:84` | `RegisterPayload.Capabilities []Capability` |
-| `internal/agent/agent.go:572` | capability 上报 metadata `read_only=true`（libvirt 只读片例） |
+| `internal/protocol/message.go:71-79` | `protocol.Capability{Type, Endpoint, Version, Metadata, Access}`——注册负载携带 |
+| `internal/protocol/message.go:101` | `RegisterPayload.Capabilities []Capability` |
+| `internal/agent/agent.go:584-588` | capability 上报 metadata `read_only=true`（libvirt 只读片例；权威权限状态改为 `Access=readonly`） |
 | `internal/probeagent/upstream.go:247` | 探针 agent 注册 `[]protocol.Capability&#123;&#123;Type:"probe"&#125;&#125;` |
 | `internal/inventory/sync.go:105-111` | inventory 声明能力 → storage.Capability；`detectCapabilities` 从 config 键推断（`pve/docker/openwrt`） |
 | `internal/agent/providers.go:42-105` | rpc Provider 注册（system/backup/file/ssh/job/oob/pve/…），与 capability 检测联动 |
@@ -35,7 +37,7 @@ status: design-settled (2026-10-30, 已代决 docs/review/2026-10-30-decisions.m
 | `internal/server/agent.go:129` | `Agent.HasCapability(capType string)`——当前按类型字符串匹配 |
 | `internal/server/api_stacks.go:223/230/524` | `HasCapability("docker-api"|"docker")` 硬编码门控 |
 | `internal/server/api_overlay_cloud.go:209-232` | 从 capability metadata 提取 zerotier `nodeId/deviceId` |
-| `internal/server/server.go:540-561` | 注册时对齐 `storage.Capability`（Endpoint/Metadata 直映射） |
+| `internal/server/server.go:549-560` | 注册时对齐 `storage.Capability`（Endpoint/Metadata/Access 直映射） |
 | `internal/server/api_agents.go:188-203` | REST 返回 capabilities 对象数组（web/mobile 读 `cap.type/cap.metadata`） |
 | `internal/cloud/provider.go:40` / registry | 云 provider 声明能力 + fail-closed 校验（能力契约的既有先例） |
 
@@ -74,7 +76,7 @@ const (
 - **未知能力**：server 不因未识别类型而放行写动作；只读查询可放行。
 - **权限状态**：写动作要求 `Access == writable`；`Access` 缺失（旧 agent）视为 `readonly`，写动作拒绝并记录——旧节点不被误判支持新动作。
 - **版本**：动作带最低能力版本时，`Version` 缺失或低于要求 → 拒绝（兼容性不靠猜）。
-- **metadata vs config**：`Metadata`（agent 运行时上报）与 `Config`（inventory 声明）语义不同、并存不互斥（`storage/models.go:57-64` 已注明）；契约不合并二者，消费方按需读取。
+- **metadata vs config**：`Metadata`（agent 运行时上报）与 `Config`（inventory 声明）语义不同、并存不互斥（`storage/models.go:54-66` 已注明）；契约不合并二者，消费方按需读取。
 
 ### 4.3 迁移路径（不批量升级）
 
