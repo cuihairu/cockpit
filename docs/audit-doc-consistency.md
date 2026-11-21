@@ -453,3 +453,39 @@ Carried items, unchanged: G2-9's 13 missing zh twins; the auto-locale-detection 
 no duplicate was added. One pairing gap of its own: the third seat's re-verification section
 above exists only in this EN file — `docs/zh/审计-文档一致性.md` has no counterpart. This
 section is added to both files; the third seat's section was left as found.
+
+## G2-9 Adjudication (2026-11-21, zh twin batch)
+
+G2-9 listed 13 EN pages with no zh twin. A language check before translating (per the
+source-as-truth rule) found 9 of the 13 are not EN pages at all: the 2026-10-30 design
+batch — design/agent-capability-contract, agent-secret-lifecycle, cloud-lifecycle-wiring,
+libvirt-write-slice, offline-buffer-design, p1-resource-ownership,
+password-reset-protection, resource-permission-matrix, task-recovery-design — is authored
+in Chinese at the root locale (frontmatter and body; each page re-verified by content
+inspection this round). They are decision-anchored dated design records, and neither
+side's sidebar lists them (the `/design/` and `/zh/design/` groups hold two other pages
+each), so no sidebar asymmetry exists. Copying them into `/zh/` would double maintenance
+for zero reader benefit. **Disposition: G2-9 reclassified — 9 of 13 entries withdrawn as
+misclassified (the page already serves the zh visitor at its root URL); the remaining 4
+are genuinely EN and are now paired:**
+
+| EN page | zh twin (new) |
+| --- | --- |
+| guide/runtime.md | zh/guide/runtime.md |
+| guide/inventory.md | zh/guide/inventory.md |
+| guide/security.md | zh/guide/security.md |
+| DESIGN.md | zh/DESIGN.md (root filename kept — a non-ASCII zh filename would break the `/DESIGN` URL mirror) |
+
+zh/guide/concepts.md was restructured in the same batch to mirror the EN 2026-11-09
+concepts split: cross-page nav block + 资源模型 + the 24-row glossary (the moved
+sections now live in the three new pages above). The zh 入门 sidebar gained the three
+new entries in EN order (`docs/.vitepress/config.ts`). One stale row was corrected
+inside the translation: the old zh monolith said the TOTP key came from
+`TOTP_ENCRYPTION_KEY` only; the new security page states the `COCKPIT_VAULT_KEY` →
+`TOTP_ENCRYPTION_KEY` fallback chain (`internal/vault/crypto.go:21-47`), matching the
+G2-8 EN-side fix.
+
+G2-9 tally: 13 registered → 4 real gaps, all closed this batch; 9 withdrawn as
+misclassifications. Carried item unchanged: auto locale detection (`todo.md:72`,
+awaiting the user's rootLocale decision — the "fallback for missing zh twins" half of
+that question is now moot since every built page is paired).

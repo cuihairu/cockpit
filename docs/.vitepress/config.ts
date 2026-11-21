@@ -108,7 +108,10 @@ export default withMermaid(defineConfig({
               items: [
                 { text: '介绍', link: '/zh/guide/introduction' },
                 { text: '快速开始', link: '/zh/guide/getting-started' },
-                { text: '核心概念', link: '/zh/guide/concepts' }
+                { text: '核心概念', link: '/zh/guide/concepts' },
+                { text: '运行时状态', link: '/zh/guide/runtime' },
+                { text: 'Inventory 声明源', link: '/zh/guide/inventory' },
+                { text: '安全', link: '/zh/guide/security' }
               ]
             },
             {
