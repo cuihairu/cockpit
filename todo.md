@@ -50,7 +50,7 @@
 
 ### 竞品功能强化（未立项待拍板；全文+核验表见 docs/review/competitor-landscape-2026-10-20.md）
 
-- [ ] P0 Agent 侧四件：Capability 协议/调度资源隔离（限流·优先级·超时）/升级回滚/任务可靠性（重试·窗口·幂等）〔2026-11-21 用户点名开工（拍板解除）；首片 Capability 契约已落 af886dfd（protocol.Capability.Access=readonly|writable + internal/protocol/version.go semver-lite + server CanWrite/CapabilityVersion/CapabilitySatisfies fail-closed 门控 + internal/agent/capability_access.go 按写面分类 + storage/REST 透传，设计 docs/design/agent-capability-contract.md §4 已标实现）；剩余三片＝调度资源隔离/升级回滚/任务可靠性，缺各自定稿设计（并发上限·取消与超时预算、任务身份与重复执行·维护窗口、升级产物验证·健康检查·回退成功条件，见 decisions 项 23 立即执行动作），须先立设计再实现〕
+- [ ] P0 Agent 侧四件：Capability 协议/调度资源隔离（限流·优先级·超时）/升级回滚/任务可靠性（重试·窗口·幂等）〔2026-11-21 用户点名开工（拍板解除）；首片 Capability 契约已落 af886dfd（protocol.Capability.Access=readonly|writable + internal/protocol/version.go semver-lite + server CanWrite/CapabilityVersion/CapabilitySatisfies fail-closed 门控 + internal/agent/capability_access.go 按写面分类 + storage/REST 透传，设计 docs/design/agent-capability-contract.md §4 已标实现）；第二片 调度资源隔离已落 565fd369（internal/agent/scheduler.go 双车道有界准入：high=system/job.cancel/probe/单段、normal=其余，并发上限钳 [1,64]、准入超时预算，Config RPCMaxConcurrent/RPCMaxHighConcurrent/RPCAdmissionTimeoutS/RPCHighAdmissionTimeoutS 装配，handleRPCRequest 经 Scheduler 准入、失败回 error 响应不断连，设计 docs/design/agent-scheduling-isolation.md 已标实现）；剩余两片＝升级回滚/任务可靠性，各自定稿设计已立（任务可靠性 docs/design/task-recovery-design.md 定稿：任务身份已备/目标去重/人工重试审计/执行窗口/重启遗留孤儿清扫接线/租约·过期窗口口径=CallAgent 30s 上界+清扫，不建 agent 心跳协议；升级回滚待定稿），须先立设计再实现〕
 - [ ] P0 安全两件：短期凭据+资源级权限（依托既有 vault）/轻量运行模式〔阻塞=缺用户拍板（已落设计 docs/design/resource-permission-matrix.md）〕
 - [ ] P1 离线数据缓冲/远程协作（会话共享）/统一电源控制（WoL+PVE）/四套源码深读笔记〔阻塞=缺用户拍板（P0 后；已落设计 docs/design/offline-buffer-design.md）〕
 
