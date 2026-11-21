@@ -1,12 +1,12 @@
 ---
 title: 持久化任务恢复与重试设计（项 31）
-status: design-draft (2026-10-30, 已代决 docs/review/2026-10-30-decisions.md 项 31)
+status: design-settled (2026-11-21, 实现并入项 23 第三片；项 31 已代决)
 ---
 
 # 持久化任务恢复与重试设计（项 31）
 
 > 依据：决策项 31（保留重启后遗留任务标失败的保守行为；并入 23，先落任务身份/去重/人工重试审计，再对证明可重复的动作开放自动恢复）。
-> 状态：**设计稿**。实现并入项 23 主线；不自动重放所有 failed/pending 命令、不承诺任意脚本恰好执行一次（决策明确不做）。
+> 状态：**设计已定（2026-11-21）**，实现为项 23 第三片（幂等与执行窗口）。不自动重放所有 failed/pending 命令、不承诺任意脚本恰好执行一次（决策明确不做）。
 > 边界：不另开与 23 重复的重试引擎（决策明确不做）。
 
 ## 1. 任务类型分类（已核实）
@@ -41,3 +41,50 @@ status: design-draft (2026-10-30, 已代决 docs/review/2026-10-30-decisions.md 
 ## 5. 决策对照
 
 本设计落实项 31 的「对只读查询、幂等状态设置、任意脚本分类（§1）」「明确任务 ID、目标去重、租约/心跳和过期窗口（§2）」「设计派发前后及结果丢失时的恢复规则（§3）」；故障注入验收（§4）待实现后。保留重启遗留标失败的保守行为，不自动重放所有 failed/pending、不另开重复重试引擎。
+
+## 6. 现状盘点与实现定位（2026-11-21 核实）
+
+实现前核实现有执行流（`internal/server/api_jobs.go`）：`submitJob:65` 校验→建行
+`Status=pending`（`:88`，ID 由 `protocol.GenerateID`）→`goBg(dispatchJobAsync):100`；
+`dispatchJobAsync:279` 置 running→`dispatchJob:401` 经 `CallAgent` 下发
+`job.<type>`（params 带 `id`，`:413`）→C7 取消守卫终态回写（`:297`）。
+
+| 缺口 | 现状 | 本片处置 |
+|---|---|---|
+| 任务身份 | Job.ID 已存在并下发 agent（`params["id"]`，`:413`） | 已满足，不重做 |
+| 目标去重 | 无：重复提交同 type+target+params 会建两条都派发 | **实现**：提交时对「非终态同键」去重，409 返回既有 job |
+| 人工重试 | 无 API | **实现**：`POST /api/jobs/{id}/retry` 新建 job（新 ID + `retried_from` 链）+ 审计 |
+| 执行窗口 | 无：提交即派发 | **实现**：配置窗口门控，未配置=放行（向后兼容） |
+| 租约/心跳 | 无租约字段；但 `CallAgent` 有 `callAgentTimeout=30s`（`server.go:38`）上界 | **口径**：结果丢失已由 CallAgent 30s 有界等待上界；重启遗留由孤儿清扫兜底。不另建 agent 侧心跳协议（需改 Provider 接口 + 真机验收，超出本片，诚实延后） |
+| 过期窗口 | 无 | **口径**：running 超过「CallAgent 上界+宽限」即视为悬挂；本片不建冗余续期循环（与上两行同因） |
+| 派发后结果丢失 | CallAgent 30s 超时→job failed（保守） | 已满足（保守），不自动重放（决策 31） |
+| 重启遗留 | `FailJob` 已实现（`storage/job.go:89`）但**无处接线** | **实现**：server 启动时接线孤儿清扫（pending/running→failed"server restarted"） |
+| 自动重试 | 无 | 明确**不做**（决策 31：不自动重放所有 failed/pending） |
+
+### 6.1 去重键口径
+
+- 去重键 = `type + target + SHA-256(规范化 params JSON)`。规范化：`json.Marshal`
+  输出键序稳定（Go map 序列化按 key 排序），params 由调用方构造，直接 Marshal。
+- 只对**非终态**（pending/running）去重：终态 job 可再建（历史可查、可重试），
+  不误伤「完成后再跑一次同参数」的合法需求。
+- 冲突时 409，响应带既有 job id（调用方可直接查其状态，不重复提交）。
+
+### 6.2 人工重试口径
+
+- 仅 failed/cancelled 可重试（success/pending/running 拒绝 409）。
+- 重试=**新 job**（新 ID），复制 type/target/params，记 `retried_from` 原 job id；
+  不原地改原 job 状态（保留原始结果供审计）。
+- 审计事件带 operator、原 job id、新 job id、reason。任意脚本（`job.exec`）重试
+  亦仅人工显式触发，不自动（决策 31）。
+
+### 6.3 执行窗口口径
+
+- 配置：`jobs.window`（start/end 本地时间窗 + 可选星期），缺省未配置=全天放行
+  （向后兼容）。提交时判定，窗外→409/422 拒绝，不排队不自动补跑。
+- 窗口为提交时点门控（不是执行队列调度）：不重排既有任务。
+
+### 6.4 延后清单（诚实）
+
+- agent 侧心跳/租约协议（Provider 接口无 ctx、无续期通道，需协议+真机验收）。
+- 结果丢失后按类别自动重放（决策 31 明确不做）。
+- 故障注入验收脚本（§4，属实现后测试项）。
