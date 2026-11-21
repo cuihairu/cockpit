@@ -25,6 +25,22 @@ type Config struct {
 	Vault         *VaultConfig         `yaml:"vault,omitempty"`
 	Probe         *ProbeConfig         `yaml:"probe,omitempty"`
 	Stacks        *StacksConfig        `yaml:"stacks,omitempty"`
+	Jobs          *JobsConfig          `yaml:"jobs,omitempty"`
+}
+
+// JobsConfig 执行 Job 配置（task-recovery-design §6.3 执行窗口）。
+type JobsConfig struct {
+	// Window 执行窗口（提交时点门控）：nil = 未配置 = 全天放行
+	// （向后兼容默认）。缺省不改变既有行为。
+	Window *JobWindowConfig `yaml:"window,omitempty"`
+}
+
+// JobWindowConfig 执行窗口（本地时区墙钟）：Start/End 为「HH:MM」，
+// Days 为空 = 每日。提交在窗外即拒绝，不排队不补跑（不重排既有任务）。
+type JobWindowConfig struct {
+	Start string   `yaml:"start,omitempty"`
+	End   string   `yaml:"end,omitempty"`
+	Days  []string `yaml:"days,omitempty"`
 }
 
 // StacksConfig stacks 部署相关配置（stack-deploy-design.md P2 ②）。

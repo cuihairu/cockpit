@@ -1,6 +1,6 @@
 ---
 title: 持久化任务恢复与重试设计（项 31）
-status: design-settled (2026-11-21, 实现并入项 23 第三片；项 31 已代决)
+status: implemented (2026-11-21, §6.1 去重键/§6.2 人工重试/§6.3 执行窗口已落；§6.4 延后项照旧；项 31 已代决)
 ---
 
 # 持久化任务恢复与重试设计（项 31）
@@ -58,7 +58,7 @@ status: design-settled (2026-11-21, 实现并入项 23 第三片；项 31 已代
 | 租约/心跳 | 无租约字段；但 `CallAgent` 有 `callAgentTimeout=30s`（`server.go:38`）上界 | **口径**：结果丢失已由 CallAgent 30s 有界等待上界；重启遗留由孤儿清扫兜底。不另建 agent 侧心跳协议（需改 Provider 接口 + 真机验收，超出本片，诚实延后） |
 | 过期窗口 | 无 | **口径**：running 超过「CallAgent 上界+宽限」即视为悬挂；本片不建冗余续期循环（与上两行同因） |
 | 派发后结果丢失 | CallAgent 30s 超时→job failed（保守） | 已满足（保守），不自动重放（决策 31） |
-| 重启遗留 | `FailJob` 已实现（`storage/job.go:89`）但**无处接线** | **实现**：server 启动时接线孤儿清扫（pending/running→failed"server restarted"） |
+| 重启遗留 | **已满足**：`recoverOrphanRuns`（`server/orphan_run.go:22`）在 `server.go:309` 启动时接线，遗留 pending/running→failed"server restarted"（`FailJob` 条件 UPDATE） | 不重做（本片复核确认已接线，勿另建重复清扫） |
 | 自动重试 | 无 | 明确**不做**（决策 31：不自动重放所有 failed/pending） |
 
 ### 6.1 去重键口径

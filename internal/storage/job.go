@@ -1,7 +1,10 @@
 package storage
 
 import (
+	"errors"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // 执行 Job 模型（设计见 docs/guide/jobs-design.md）。
@@ -37,10 +40,15 @@ type Job struct {
 	Output     string `json:"output,omitempty"`
 	Error      string `json:"error,omitempty"`
 	// WorkflowRunID 所属 Workflow run（空 = 独立 Job）；workflow-design W5
-	WorkflowRunID string     `gorm:"index;default:''" json:"workflowRunId,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	StartedAt     *time.Time `json:"startedAt,omitempty"`
-	FinishedAt    *time.Time `json:"finishedAt,omitempty"`
+	WorkflowRunID string `gorm:"index;default:''" json:"workflowRunId,omitempty"`
+	// DedupKey 去重键（type+target+规范化 params 的哈希）；提交时用于
+	// 拦「同参数同目标的在途（非终态）重复提交」，见 task-recovery-design §6.1
+	DedupKey string `gorm:"index;default:''" json:"dedupKey,omitempty"`
+	// RetriedFrom 原 Job id（人工重试溯源链；空 = 原始创建）
+	RetriedFrom string     `gorm:"index;default:''" json:"retriedFrom,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	StartedAt   *time.Time `json:"startedAt,omitempty"`
+	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
 }
 
 // CreateJob 新建 Job（调用方负责填充 ID/Type/Target/Actor/Status）
@@ -67,6 +75,24 @@ func (d *DB) ListJobs(limit int) ([]Job, error) {
 		return nil, err
 	}
 	return jobs, nil
+}
+
+// GetActiveJobByDedupKey 找同键的在途（pending/running）Job——提交去重
+// 用（task-recovery-design §6.1）。终态 Job 不算在途：可再建同参数任务
+// （历史可查、可重试），不误伤「完成后再跑一次同参数」的合法需求。
+// 返回 nil, nil 表示无在途重复。
+func (d *DB) GetActiveJobByDedupKey(dedupKey string) (*Job, error) {
+	var job Job
+	err := d.db.Where("dedup_key = ? AND status IN ?",
+		dedupKey, []string{JobStatusPending, JobStatusRunning}).
+		Order("created_at desc").First(&job).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &job, nil
 }
 
 // UpdateJob 回写执行结果（状态/退出码/输出/错误/时间戳）

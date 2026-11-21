@@ -61,6 +61,9 @@ const (
 	ActionJobRun = "job_run"
 	// Job 取消（workflow-design W2/W3：pending 未派发可撤）
 	ActionJobCancel = "job_cancel"
+	// Job 人工重试（task-recovery-design §6.2）：新建 job（新 id，retried_from
+	// 溯源），记录 operator/原 id/新 id/reason
+	ActionJobRetry = "job_retry"
 	// Workflow 定义变更与运行（见 docs/guide/workflow-design.md）
 	ActionWorkflowCreate = "workflow_create"
 	ActionWorkflowUpdate = "workflow_update"

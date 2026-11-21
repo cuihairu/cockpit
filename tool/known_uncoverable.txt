@@ -79,14 +79,17 @@ cmd/cockpit-probe-agent/main.go:52,54	3. run() 内 probeagent.New(cfg) 失败防
 # cancel/dispatch 区 +49）；原 231,232（dispatchJobAsync UpdateJob(running)
 # 降级 log）现由 closed-db 传输面测试命中，删除登记。
 
-internal/server/api_jobs.go:245,246	4. 带登录态的用户分支（handler 单测无 auth middleware，Actor 恒 unknown；真名分支由登录流程整链覆盖）
-internal/server/api_jobs.go:300,301	3. C7 守卫 MarkJobCancelledOutput 失败仅降级 log（后台 goroutine 中途失败，单行主键 UPDATE 不可构造失败）
-internal/server/api_jobs.go:340,341	4. cancel 带登录态的用户分支（同 242,243 口径）
-internal/server/api_jobs.go:348,350	3. cancel 后重读 GetJob 失败 500（同 handler 入口 GetJob 先行成功，SELECT 不可致错）
-internal/server/api_jobs.go:363,364	3. cancelJob pending 条件 UPDATE 失败（GetJob 先行成功，主键 UPDATE 无现实失败面）
-internal/server/api_jobs.go:370,371	3. cancelJob pending 翻转后重读 GetJob 失败（首个 GetJob 先行成功，SELECT 不可致错）
-internal/server/api_jobs.go:380,381	3. cancelJob running 条件 UPDATE 失败（CallAgent 先行成功，主键 UPDATE 无现实失败面）
-internal/server/api_jobs.go:458,458	3. intField `case int`（JSON 数字解码恒 float64，int 直调进不来）
+# —— P0 Agent 第三片：job 可靠性（幂等/窗口/重试，2026-11-21） ——
+internal/server/api_jobs.go:99,100	4. submitJob 建行 CreateJob 失败 500（submitJobGuard 的 GetActiveJobByDedupKey 先行成功后才到建行，闭库时守卫先致错；单写面 CREATE 无独立可构造失败）
+internal/server/job_reliability.go:197,199	3. handleJobRetry 新建重试 job CreateJob 失败（GetJob 先行成功，单行主键 CREATE 无现实失败面；闭库时入口 GetJob 先致错）
+internal/server/api_jobs.go:264,265	4. 带登录态的用户分支（handler 单测无 auth middleware，Actor 恒 unknown；真名分支由登录流程整链覆盖）
+internal/server/api_jobs.go:319,320	3. C7 守卫 MarkJobCancelledOutput 失败仅降级 log（后台 goroutine 中途失败，单行主键 UPDATE 不可构造失败）
+internal/server/api_jobs.go:359,360	4. cancel 带登录态的用户分支（同 242,243 口径）
+internal/server/api_jobs.go:367,369	3. cancel 后重读 GetJob 失败 500（同 handler 入口 GetJob 先行成功，SELECT 不可致错）
+internal/server/api_jobs.go:382,383	3. cancelJob pending 条件 UPDATE 失败（GetJob 先行成功，主键 UPDATE 无现实失败面）
+internal/server/api_jobs.go:389,390	3. cancelJob pending 翻转后重读 GetJob 失败（首个 GetJob 先行成功，SELECT 不可致错）
+internal/server/api_jobs.go:399,400	3. cancelJob running 条件 UPDATE 失败（CallAgent 先行成功，主键 UPDATE 无现实失败面）
+internal/server/api_jobs.go:477,477	3. intField `case int`（JSON 数字解码恒 float64，int 直调进不来）
 
 # ---------- 7. Workflow 线性编排 M1（docs/guide/workflow-design.md）：死防御与测试惯例（44 语句） ----------
 
@@ -173,7 +176,7 @@ internal/server/api_stacks.go:242,243	3. CallAgent 传输层错误含 conflict�
 # 2026-10-13 撤销登记——agent 模块独立 100% 门禁不接受登记）
 
 # —— 2026-10-13 persona provider 接入（vault.providers 配置节） ——
-internal/config/config.go:312,313	1. strictVaultProviders 将已解析 yaml.Node 重新编码喂 KnownFields 解码器，节点来自合法 yaml 文档，Encode 不可能失败，防御分支
+internal/config/config.go:328,329	1. strictVaultProviders 将已解析 yaml.Node 重新编码喂 KnownFields 解码器，节点来自合法 yaml 文档，Encode 不可能失败，防御分支
 
 # —— 2026-10-20 OpenWrt 自举节点片B-2：带外探活调度与推送 ——
 internal/server/liveness.go:129,130	3. decodeLivenessReport json.Marshal(payload) 失败防御（payload 来自 JSON 解码，值恒为 string/number/bool/nil/map/slice，契约上不可失败；同 probe_report 91,92 口径）

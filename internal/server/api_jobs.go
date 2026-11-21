@@ -78,6 +78,12 @@ func (s *Server) submitJob(p *jobCreatePayload, actor string) (*jobView, *submit
 		return nil, &submitFail{http.StatusServiceUnavailable, "agent offline"}
 	}
 
+	// 可靠性守卫（task-recovery-design §6.1/§6.3）：执行窗口门控 + 在途同键
+	// 去重（重复提交同 type+target+params 只落一条）
+	if fail := s.submitJobGuard(p); fail != nil {
+		return nil, fail
+	}
+
 	paramsJSON, _ := json.Marshal(p.Parameters)
 	job := &storage.Job{
 		ID:         protocol.GenerateID(),
@@ -87,6 +93,7 @@ func (s *Server) submitJob(p *jobCreatePayload, actor string) (*jobView, *submit
 		Parameters: string(paramsJSON),
 		Status:     storage.JobStatusPending,
 		CreatedAt:  time.Now(),
+		DedupKey:   jobDedupKey(p.Type, p.Target, p.Parameters),
 	}
 	if err := s.db.CreateJob(job); err != nil {
 		return nil, &submitFail{http.StatusInternalServerError, "failed to create job"}
@@ -121,6 +128,15 @@ func (s *Server) handleJobsAPI(w http.ResponseWriter, r *http.Request, path stri
 				return
 			}
 			s.handleJobCancel(w, r, id)
+			return
+		}
+		// POST /api/jobs/{id}/retry：人工重试（task-recovery-design §6.2）
+		if id, ok := strings.CutSuffix(rest, "/retry"); ok && id != "" {
+			if r.Method != http.MethodPost {
+				s.handleError(w, r, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			s.handleJobRetry(w, r, id)
 			return
 		}
 		if r.Method == http.MethodGet {
@@ -190,21 +206,24 @@ type jobView struct {
 	CreatedAt  time.Time              `json:"createdAt"`
 	StartedAt  *time.Time             `json:"startedAt,omitempty"`
 	FinishedAt *time.Time             `json:"finishedAt,omitempty"`
+	// RetriedFrom 原 Job id（人工重试溯源链；空 = 原始创建，task-recovery-design §6.2）
+	RetriedFrom string `json:"retriedFrom,omitempty"`
 }
 
 func toJobView(j *storage.Job) jobView {
 	v := jobView{
-		ID:         j.ID,
-		Type:       j.Type,
-		Target:     j.Target,
-		Actor:      j.Actor,
-		Status:     j.Status,
-		Output:     j.Output,
-		ExitCode:   j.ExitCode,
-		Error:      j.Error,
-		CreatedAt:  j.CreatedAt,
-		StartedAt:  j.StartedAt,
-		FinishedAt: j.FinishedAt,
+		ID:          j.ID,
+		Type:        j.Type,
+		Target:      j.Target,
+		Actor:       j.Actor,
+		Status:      j.Status,
+		Output:      j.Output,
+		ExitCode:    j.ExitCode,
+		Error:       j.Error,
+		CreatedAt:   j.CreatedAt,
+		StartedAt:   j.StartedAt,
+		FinishedAt:  j.FinishedAt,
+		RetriedFrom: j.RetriedFrom,
 	}
 	if j.Parameters != "" {
 		var m map[string]interface{}
