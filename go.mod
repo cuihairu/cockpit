@@ -8,7 +8,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/moby/moby/api v1.56.1
+	github.com/moby/moby/api v1.57.0
 	github.com/moby/moby/client v0.6.2
 	github.com/pquerna/otp v1.5.0
 	github.com/shirou/gopsutil/v3 v3.24.5
@@ -70,5 +70,4 @@ require (
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 	gopkg.in/ini.v1 v1.67.3 // indirect
-	pgregory.net/rapid v1.3.0 // indirect
 )
