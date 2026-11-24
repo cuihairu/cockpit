@@ -39,7 +39,10 @@ jobs:
         run: flutter pub get
 
       - name: Analyze
-        run: flutter analyze
+        # --no-fatal-infos：Flutter stable 升级后新增的 deprecation 提示
+        # （如 3.50 将 package:flutter/material.dart 标记 deprecated）不算
+        # 失败门槛，error 级问题仍 fatal（默认行为保留）
+        run: flutter analyze --no-fatal-infos
 
       - name: Test
         run: flutter test --coverage
