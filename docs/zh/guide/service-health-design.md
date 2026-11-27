@@ -146,6 +146,18 @@ agent 离线时 PUT 仍成功（配置已落库，注册上线时补推）——
 7. **cron 看门狗退役**：保留兜底 1–2 周，比对期间审计中 cockpit 版自愈
    成功率，确认稳定后移除 cron 条目。
 
+### 2026-11-27：docker VM 生产切换（第 1–4 步真机完成）
+
+docker VM（192.168.5.5）agent 的 `SERVER_URL` 从已停用的 dev 端点
+（`ws://192.168.5.188:9000/ws`）改为生产 `wss://cockpit.cuihairu.site/ws`，
+重新注册上线；随后经 server API（`POST /api/agents/agent-docker55/secret`，
+bcrypt 落库，`hasSecret=true`）正式下发该 agent 专属密钥并重连验证，再经
+`PUT /api/agents/agent-docker55/health` 下发 `cloudflared-ready` 探针与自愈
+白名单（`{"applied":1,"pushed":true}`，审计 `service_health_config`，操作者
+`admin`）。探针按 30s 周期运行，`status=ok`
+且 `lastCheck` 持续推进；`POST .../check` 返回 `{"status":"ok"}`。
+余下真机步骤（5/6）需 `kill -STOP` 注入故障——不对生产隧道执行。
+
 ## P6：判定层上收公共探针（三语义 + 故障窗口）
 
 M1–M3 的判定逻辑（防抖阈值、边沿、恢复）原在 `service_health.go` 引擎内

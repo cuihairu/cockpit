@@ -152,6 +152,19 @@ as a hint.
    self-healing success rate in the audit during the comparison period; remove the cron entry once
    stability is confirmed.
 
+### 2026-11-27: docker VM production cutover (steps 1–4 live)
+
+The docker VM (192.168.5.5) agent was repointed from the dead dev endpoint
+(`ws://192.168.5.188:9000/ws`) to production (`wss://cockpit.cuihairu.site/ws`),
+re-registered online. Its credential was then provisioned through the server API
+(`POST /api/agents/agent-docker55/secret`, bcrypt-stored, `hasSecret=true`) and a
+reconnect verified the per-agent secret check, and the `cloudflared-ready`
+probe + whitelist were pushed via `PUT /api/agents/agent-docker55/health`
+(`{"applied":1,"pushed":true}`, audit `service_health_config` by `admin`). The probe runs on the 30s cadence, reports
+`status=ok` with advancing `lastCheck`, and `POST .../check` returns
+`{"status":"ok"}`. The remaining live-hardware steps (5/6) still require the
+`kill -STOP` fault injection — deliberately not run against the production tunnel.
+
 ## P6: Hoisting the Decision Layer onto a Shared Probe (Three Semantics + Fault Windows)
 
 The M1–M3 decision logic (debounce threshold, edges, recovery) was self-contained inside the `service_health.go` engine.
