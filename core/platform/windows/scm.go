@@ -5,9 +5,11 @@
 package windows
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -103,7 +105,10 @@ func List() ([]Service, error) {
 
 // Action 执行 SCM 动作（unit 名/动词校验由调用方先行）。SCM 启停是异步请求，
 // start/stop 即发即返，状态收敛靠前端 30s 轮询；restart 等待停止完成再拉起。
-// start/stop 先查询做幂等（SCM 对已 Running/Stopped 会报错，systemd 则幂等）。
+// start/stop 先查询做幂等：Running/Stopped 终态与 StartPending/StopPending
+// 过渡态都视为已满足——SCM 对运行中实例再 start 报 already running、对
+// pending 中服务再发控制码报 cannot accept control messages（真机验收
+// checklist:253 实测抓到，systemd 侧两动词均幂等，语义对齐）。
 // reload 不支持由调用方拒绝（白名单无此动词）
 func Action(name, action string, timeout time.Duration) error {
 	m, err := mgr.Connect()
@@ -119,17 +124,27 @@ func Action(name, action string, timeout time.Duration) error {
 
 	switch action {
 	case "start":
-		if scmRunning(s) {
+		if scmRunning(s) || scmInState(s, svc.StartPending) {
 			return nil
 		}
 		if err := s.Start(); err != nil {
+			// 查询与受理间有竞窗：他方已发起启动时 SCM 报 already running
+			//（1056），语义等价「已在启动」——幂等返回
+			if errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
+				return nil
+			}
 			return fmt.Errorf("start %s: %w", name, err)
 		}
 	case "stop":
-		if scmStopped(s) {
+		if scmStopped(s) || scmInState(s, svc.StopPending) {
 			return nil
 		}
 		if _, err := s.Control(svc.Stop); err != nil {
+			// 同竞窗：服务停止流程进行中时 SCM 拒收控制码（1061），语义
+			// 等价「已在停止」——幂等返回，收敛靠前端轮询
+			if errors.Is(err, windows.ERROR_SERVICE_CANNOT_ACCEPT_CTRL) {
+				return nil
+			}
 			return fmt.Errorf("stop %s: %w", name, err)
 		}
 	case "restart":
@@ -161,13 +176,23 @@ func scmStopped(s *mgr.Service) bool {
 	return err == nil && st.State == svc.Stopped
 }
 
-// scmStopAndWait 发起停止并轮询至 Stopped（SCM 无原生 restart）
+// scmInState 服务处于指定状态（Query 失败按 false 走，让上游把 SCM 原错透传）
+func scmInState(s *mgr.Service, want svc.State) bool {
+	st, err := s.Query()
+	return err == nil && st.State == want
+}
+
+// scmStopAndWait 发起停止并轮询至 Stopped（SCM 无原生 restart）。已在
+// StopPending（上一停止请求未收敛）时不再重复发控制码——SCM 对 pending 中
+// 服务拒收控制码——只等 deadline
 func scmStopAndWait(s *mgr.Service, name string, timeout time.Duration) error {
 	if scmStopped(s) {
 		return nil
 	}
-	if _, err := s.Control(svc.Stop); err != nil {
-		return fmt.Errorf("stop %s: %w", name, err)
+	if !scmInState(s, svc.StopPending) {
+		if _, err := s.Control(svc.Stop); err != nil {
+			return fmt.Errorf("stop %s: %w", name, err)
+		}
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
