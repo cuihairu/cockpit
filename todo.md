@@ -18,8 +18,7 @@
 
 ### 真机验收（等硬件/真实环境/凭据）
 
-- [ ] service-health 生产接入：docker VM agent 改 SERVER_URL 指生产后 enable〔阻塞=缺生产 enrollment 凭据/授权改 SERVER_URL 并 enable｜解锁=凭据到位后改 SERVER_URL 并 enable〕
-  - 2026-11-06 复核：生产入口已可达（`wss://cockpit.cuihairu.site/ws` 实测 HTTP/1.1 升级 101 握手成功 + `/health` 200 `{"agents":1}`），原「缺生产 WS 地址」阻塞解除；但 docker VM 192.168.5.5 的 `/etc/default/cockpit-agent` 的 `SERVER_URL` 仍指向已停用 dev `ws://192.168.5.188:9000/ws`（agent `bad handshake`、重启计数 77297），未改生产入口前不勾；本地无生产 `AGENT_ENROLLMENT_SECRET`/admin 凭据，不擅自改生产 agent（真机验收不代测）。
+- [x] service-health 生产接入：docker VM agent 改 SERVER_URL 指生产后 enable〔2026-11-27 切流完成：SERVER_URL=prod wss、agent 上线（/health 1→2，NRestarts=0）、探针 cloudflared-ready + 白名单 PUT 下发 applied=1/pushed=true（审计 service_health_config by admin）、状态 ok 且 lastCheck 30s 递增、手动 check ok；故障注入 5/6 步不对生产隧道执行，留真机窗口；admin token 取自生产宿主 env、agent 凭据经 POST /api/agents/{id}/secret 正式下发（bcrypt 落库，hasSecret=true，重连验证过）〕
 - [x] Windows SCM 服务管理：连接层 list/启停/自启/restart 30s 超时路径提权实测（校验层 4 项已两台真机双证）〔2026-11-27 openclaw（Server 2022）提权 Administrator 会话 22/22 PASS（daaf02a1）；验收抓出并修复 scm.go pending 过渡态幂等缺陷（1056/1061 竞窗容忍）；reload 隐藏前端半 web 19/19；imac 离线单机证据，过程与证据 .acceptance/services/scm-evidence/〕
 - [ ] macOS launchd 服务管理：launchctl 执行层 list/启停/自启/kickstart 回退（校验层探针已备，checklist:251）〔三台真机 openclaw/imac/.5 均为 Windows，无 macOS 主机（macOS 项保持跳过）〕
 - [ ] NAS 真机 API：DSM 6/7、TrueNAS CORE/SCALE、OMV；mdadm 降级演练；ZFS/SMB/NFS 主机（checklist:223-227）〔阻塞=缺 NAS 设备与账号〕
