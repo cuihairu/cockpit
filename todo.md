@@ -16,6 +16,8 @@
 
 > 2026-11-12 续推核查（cockpit-next 单）：本区 26 条未勾项 100% 带显式阻塞标注，无一条可在仓内推进——真机/凭据类 16 条（生产 enrollment、提权 admin 会话、macOS/OpenWrt 设备、NAS、S3/B2、rclone 真远端、ACME、Cloudflare、ZT/T-S token、SMART 属性盘、DNS 账号、Android/iOS/触屏真机、persona 服务端）、用户裁决类 8 条（多云 P1 资源所有权、P1 高可用、agent 四件、安全两件、离线缓冲、支持机型矩阵、libvirt 写片选型、jenkins vault 引用立项）、搁置类 2 条（防火墙写操作 D-2026-10-07-3 否决、workflow 并行分支 W4/G3 压后）。本轮不改码、无 commit。
 
+> 2026-11-28 续推核查（COCKPIT-TASK 单）：本区 24 条未勾项复核仍 100% 带显式阻塞标注，无一条可在仓内推进——真机/凭据类 14 条（macOS 主机、NAS、S3/B2、rclone 真远端、ACME、Cloudflare token、ZT/TS token+第二主机、SMART 属性盘、DNS 账号、Android/iOS/触屏真机、OpenWrt 设备、persona 服务端）、用户拍板类 7 条（多云 P1、P2 调度、安全两件、离线缓冲、机型矩阵、libvirt 写片选型、文档站 rootLocale 重定向；复核发现 11 个 design「缺 zh 孪生」实为中文原稿落 EN 路径，zh 有效覆盖完整、重定向兜底风险小于条目原文）、搁置类 2 条、立项等待 1 条（jenkins vault 引用）。11-12 后清账：竞品 P0 agent 四件（af886dfd/565fd369/be20ec63/7834ad8a）、G2 zh 孪生（0fc3fe46）、service-health 生产接入（07aab39f）、Windows SCM 提权验收（daaf02a1）。本轮仓内面：摘除误入库陈旧覆盖产物 all.cov、清 known_uncoverable 陈旧登记一条（api_stack_webhook.go:90,92 已被 TestStackWebhookAgentFailure 真实覆盖，登记项 93→92）；门禁 go vet + go test -short 68 包 + coverage_check 全绿。
+
 ### 真机验收（等硬件/真实环境/凭据）
 
 - [x] service-health 生产接入：docker VM agent 改 SERVER_URL 指生产后 enable〔2026-11-27 切流完成：SERVER_URL=prod wss、agent 上线（/health 1→2，NRestarts=0）、探针 cloudflared-ready + 白名单 PUT 下发 applied=1/pushed=true（审计 service_health_config by admin）、状态 ok 且 lastCheck 30s 递增、手动 check ok；故障注入 5/6 步不对生产隧道执行，留真机窗口；admin token 取自生产宿主 env、agent 凭据经 POST /api/agents/{id}/secret 正式下发（bcrypt 落库，hasSecret=true，重连验证过）；07aab39f〕
