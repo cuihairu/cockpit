@@ -34,9 +34,12 @@
 *.a
 *.lib
 
+# Coverage and test artifacts
+*.cov
+*.out
+
 # Executables
 *.exe
-*.out
 *.app
 
 # Build directories
