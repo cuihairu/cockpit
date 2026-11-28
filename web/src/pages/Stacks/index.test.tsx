@@ -137,7 +137,8 @@ describe('Stacks', () => {
     // 空提交 → 三条必填
     fireEvent.click(document.querySelector('.ant-modal .ant-btn-primary')!)
     expect(await screen.findByText('请选择 Agent')).toBeInTheDocument()
-    expect(screen.getByText('请输入 Stack 名称')).toBeInTheDocument()
+    // antd 两条必填消息可分批挂载，同步断言在慢机上先于名称消息渲染执行即炸
+    expect(await screen.findByText('请输入 Stack 名称')).toBeInTheDocument()
     // 名称 pattern
     fireEvent.change(screen.getByLabelText('Stack 名称'), { target: { value: 'Bad Name!' } })
     fireEvent.click(document.querySelector('.ant-modal .ant-btn-primary')!)
